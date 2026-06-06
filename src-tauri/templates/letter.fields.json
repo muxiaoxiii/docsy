@@ -1,0 +1,145 @@
+{
+  "id": "tpl_letter_default",
+  "name": "律师事务所函",
+  "type": "letter",
+  "version": "1.0.0",
+  "builtin": true,
+  "description": "出厂内置的律师事务所函模板，按北京志霖标准格式",
+  "fields": [
+    {
+      "key": "court",
+      "label": "法院",
+      "type": "text",
+      "required": true,
+      "visibility": "value_only",
+      "dict_source": "courts",
+      "remember_history": true,
+      "placeholder": "例如：北京知识产权法院"
+    },
+    {
+      "key": "plaintiffs",
+      "label": "原告",
+      "type": "party",
+      "required": true,
+      "visibility": "full",
+      "multiple": true,
+      "min": 1,
+      "separator": "、",
+      "separator_drop_underline": true,
+      "dict_source": "parties",
+      "remember_history": true,
+      "default_role": "原告"
+    },
+    {
+      "key": "defendants",
+      "label": "被告",
+      "type": "party",
+      "required": true,
+      "visibility": "full",
+      "multiple": true,
+      "min": 1,
+      "separator": "、",
+      "separator_drop_underline": true,
+      "dict_source": "parties",
+      "remember_history": true,
+      "default_role": "被告"
+    },
+    {
+      "key": "third_parties",
+      "label": "第三人",
+      "type": "party",
+      "required": false,
+      "visibility": "auto",
+      "multiple": true,
+      "min": 0,
+      "separator": "、",
+      "separator_drop_underline": true,
+      "dict_source": "parties",
+      "hideable": true,
+      "remember_history": true,
+      "default_role": "第三人"
+    },
+    {
+      "key": "cause",
+      "label": "案由",
+      "type": "select",
+      "required": true,
+      "visibility": "value_only",
+      "dict_source": "causes",
+      "remember_history": true
+    },
+    {
+      "key": "case_no",
+      "label": "案号",
+      "type": "text",
+      "required": false,
+      "visibility": "auto",
+      "hideable": true,
+      "placeholder": "例如：（2026）京73行初6547号"
+    },
+    {
+      "key": "client_name",
+      "label": "委托人名称",
+      "type": "reference",
+      "required": true,
+      "visibility": "value_only",
+      "references_name": ["plaintiffs", "defendants", "third_parties"],
+      "allow_manual": true,
+      "validate_appears_before": ["plaintiffs", "defendants", "third_parties"]
+    },
+    {
+      "key": "client_role",
+      "label": "委托人身份",
+      "type": "reference",
+      "required": true,
+      "visibility": "value_only",
+      "references_role": ["plaintiffs", "defendants", "third_parties"],
+      "infer_from_party": "client_name",
+      "allow_manual": true
+    },
+    {
+      "key": "lawyers",
+      "label": "代理律师",
+      "type": "party",
+      "required": true,
+      "visibility": "value_only",
+      "multiple": true,
+      "min": 1,
+      "separator": "、",
+      "separator_drop_underline": true,
+      "value_suffix": "律师",
+      "dict_source": "lawyers",
+      "remember_history": true,
+      "default_role": "代理律师"
+    },
+    {
+      "key": "stage",
+      "label": "阶段",
+      "type": "select",
+      "required": true,
+      "visibility": "value_only",
+      "default": "一审阶段",
+      "dict_source": "stages"
+    },
+    {
+      "key": "firm_name",
+      "label": "律所",
+      "type": "text",
+      "required": true,
+      "visibility": "value_only",
+      "default": "北京志霖律师事务所",
+      "dict_source": "firms",
+      "remember_history": true
+    },
+    {
+      "key": "date",
+      "label": "日期",
+      "type": "date",
+      "required": false,
+      "visibility": "value_only",
+      "default_today": true,
+      "format": "YYYY 年 MM 月 DD 日",
+      "allow_blank_day": true
+    }
+  ]
+}
