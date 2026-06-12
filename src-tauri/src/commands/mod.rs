@@ -1,3 +1,4 @@
+pub mod bundle;
 pub mod doc_gen;
 pub mod dictionary;
 pub mod image_paddler;
@@ -11,6 +12,9 @@ pub mod video;
 
 pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
     tauri::generate_handler![
+        // bundle
+        bundle::export_bundle,
+        bundle::import_bundle,
         // doc_gen
         doc_gen::generate_document,
         doc_gen::preview_document,

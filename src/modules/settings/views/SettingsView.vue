@@ -64,6 +64,25 @@
         <el-button size="small" @click="openLogFile">打开当前日志</el-button>
       </div>
     </el-card>
+
+    <!-- Config Import/Export -->
+    <el-card class="settings-section" shadow="never">
+      <template #header>
+        <span>配置导入导出</span>
+      </template>
+      <p class="section-desc">导出配置为 .docsybundle 文件，可在其他电脑导入</p>
+      <div class="bundle-actions">
+        <el-button type="primary" @click="handleExport">导出配置</el-button>
+        <el-button @click="handleImport">导入配置</el-button>
+      </div>
+      <el-checkbox-group v-model="exportOptions" class="export-options">
+        <el-checkbox label="templates">模板</el-checkbox>
+        <el-checkbox label="dictionaries">字典</el-checkbox>
+        <el-checkbox label="parties">当事人主档</el-checkbox>
+        <el-checkbox label="field_history">字段历史</el-checkbox>
+        <el-checkbox label="settings">应用设置</el-checkbox>
+      </el-checkbox-group>
+    </el-card>
   </div>
 </template>
 
@@ -90,6 +109,38 @@ const diagnostic = ref({
   qpdf: null,
   ffmpeg: null,
 })
+
+const exportOptions = ref(['templates', 'dictionaries', 'parties'])
+
+async function handleExport() {
+  const { save } = await import('@tauri-apps/plugin-dialog')
+  const path = await save({
+    filters: [{ name: 'Docsy Bundle', extensions: ['docsybundle'] }],
+    defaultPath: `Docsy-Bundle-${new Date().toISOString().slice(0, 10)}.docsybundle`,
+  })
+  if (!path) return
+  const options = {}
+  for (const opt of exportOptions.value) options[opt] = true
+  const res = await tauriCallSafe('export_bundle', { path, options })
+  if (res.ok) {
+    console.log('Exported:', res.data)
+  }
+}
+
+async function handleImport() {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({
+    filters: [{ name: 'Docsy Bundle', extensions: ['docsybundle'] }],
+  })
+  if (!selected) return
+  const res = await tauriCallSafe('import_bundle', {
+    path: selected,
+    options: { templates: true, dictionaries: true, parties: true },
+  })
+  if (res.ok) {
+    console.log('Imported:', res.data)
+  }
+}
 
 async function loadSettings() {
   const result = await tauriCallSafe('get_app_settings')
@@ -208,6 +259,24 @@ onMounted(() => {
 .diag-actions {
   margin-top: 12px;
   display: flex;
+  gap: 8px;
+}
+
+.section-desc {
+  font-size: 13px;
+  color: #909399;
+  margin: 0 0 12px;
+}
+
+.bundle-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.export-options {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 </style>

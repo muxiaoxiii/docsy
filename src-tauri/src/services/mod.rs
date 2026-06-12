@@ -1,3 +1,4 @@
+pub mod bundle;
 pub mod doc_gen;
 pub mod dictionary;
 pub mod export;

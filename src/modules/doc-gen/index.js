@@ -14,6 +14,12 @@ export default {
       meta: { title: '文档生成', moduleId: 'doc-gen' },
     },
     {
+      path: '/doc-gen/batch',
+      name: 'doc-gen-batch',
+      component: () => import('./views/GenBatchView.vue'),
+      meta: { title: '批量生成', moduleId: 'doc-gen' },
+    },
+    {
       path: '/doc-gen/records',
       name: 'doc-gen-records',
       component: () => import('./views/GenRecordsView.vue'),
@@ -23,6 +29,7 @@ export default {
 
   menuItems: [
     { label: '文档生成', route: 'doc-gen-form', icon: 'Document' },
+    { label: '批量生成', route: 'doc-gen-batch', icon: 'DocumentCopy' },
     { label: '记录中心', route: 'doc-gen-records', icon: 'Clock' },
   ],
 
