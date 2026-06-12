@@ -11,10 +11,15 @@
 ### 新增
 - 统一模块注册系统（前端 `moduleRegistry.js` + 后端 `ModuleDescriptor`）
 - vue-router 替代手动 shallowRef 路由
-- Pinia 状态管理
-- 外部工具统一抽象层（`ExternalTool` trait）
+- Pinia 状态管理（app / dictionary / template stores）
+- 外部工具统一抽象层（`ExternalTool` trait）：qpdf, ffmpeg, libreoffice
 - Tauri 命令自动收集机制（`commands/mod.rs`）
 - 前端 `tauriBridge.js` 统一调用封装
+- 8 个功能模块注册入口（home, doc-gen, template-editor, template-mgmt, pdf-tools, image-paddler, video-extract, settings）
+- SQLite 数据库 schema（global_dictionaries, template_dictionaries, field_history, parties, generation_records, template_meta）
+- 字典三层叠加查询引擎（global → template → history）
+- docx 引擎骨架（model.rs 用 quick-xml 解析, render.rs 占位符替换）
+- 外部工具检测/安装统一接口
 
 ### 架构
 - 目录结构：`src/modules/` 自包含模块（每个模块含 index.js / views / components / composables）
@@ -24,5 +29,5 @@
 
 ### 技术栈
 - Tauri 2 + Vue 3 + Element Plus + Pinia + vue-router
-- Rust: zip + quick-xml + rusqlite + printpdf + serde
+- Rust: zip + quick-xml + rusqlite + printpdf + serde + regex + mammoth + base64
 - 测试: Vitest (前端) + cargo test (后端)
