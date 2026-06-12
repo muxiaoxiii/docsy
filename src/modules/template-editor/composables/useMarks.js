@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { tauriCall } from '../../../core/tauriBridge.js'
 
 let nextMarkId = 1
 
@@ -33,13 +34,42 @@ export function useMarks(session) {
 
     const existingField = session.value.fields.find((f) => f.key === fieldKey)
     if (!existingField) {
-      session.value.fields = [
-        ...session.value.fields,
-        { key: fieldKey, ...fieldConfig },
-      ]
+      const field = {
+        key: fieldKey,
+        required: false,
+        multiple: false,
+        remember_history: true,
+        ...fieldConfig,
+      }
+      session.value.fields = [...session.value.fields, field]
+    }
+
+    // Auto-record options to template dictionary
+    if (fieldConfig.options?.length) {
+      recordOptionsToDict(fieldKey, fieldConfig.options)
     }
 
     return mark
+  }
+
+  async function recordOptionsToDict(fieldKey, options) {
+    try {
+      const templateId = session.value?.template_id
+      if (!templateId) return
+      for (const opt of options) {
+        const value = typeof opt === 'string' ? opt : opt.name || opt.label || String(opt)
+        if (value) {
+          await tauriCall('record_field_usage', {
+            templateId,
+            fieldKey,
+            value,
+          })
+        }
+      }
+    } catch (e) {
+      // Non-critical, don't block the UI
+      console.warn('Failed to record options to dict:', e)
+    }
   }
 
   function updateMark(id, updates) {

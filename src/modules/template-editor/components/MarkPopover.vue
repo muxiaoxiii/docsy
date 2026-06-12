@@ -47,6 +47,11 @@
           <el-input v-model="form.default" placeholder="可选" />
         </el-form-item>
 
+        <el-form-item v-if="form.type === 'select' || form.type === 'multiselect' || form.type === 'party'" label="字典来源">
+          <el-input v-model="form.dict_source" placeholder="如：courts, parties" />
+          <span class="form-hint">关联全局字典名，自动获取候选值</span>
+        </el-form-item>
+
         <el-form-item v-if="form.type === 'select' || form.type === 'multiselect'" label="选项">
           <div class="options-list">
             <div
@@ -217,10 +222,11 @@ const form = reactive({
   required: false,
   default: '',
   options: [],
+  dict_source: '',
   references: [],
   infer_from: { source_field: '', mapping: {} },
   exclude: [],
-  remember_history: false,
+  remember_history: true,
   style: { underline: false, font: '', size: '' },
 })
 
@@ -281,6 +287,7 @@ watch(
           type: props.initialData.type || 'text',
           required: props.initialData.required || false,
           default: props.initialData.default || '',
+          dict_source: props.initialData.dict_source || '',
           options: [...(props.initialData.options || [])],
         })
         loadAdvanced(props.initialData)
@@ -335,6 +342,7 @@ async function handleConfirm() {
     type: form.type,
     required: form.required,
     default: form.default || undefined,
+    dict_source: form.dict_source || undefined,
     options: (form.type === 'select' || form.type === 'multiselect')
       ? form.options.filter(Boolean)
       : undefined,
@@ -461,5 +469,12 @@ function guessLabel(text) {
   color: #909399;
   font-size: 12px;
   flex-shrink: 0;
+}
+
+.form-hint {
+  display: block;
+  font-size: 11px;
+  color: #c0c4cc;
+  margin-top: 2px;
 }
 </style>
