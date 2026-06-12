@@ -2,6 +2,22 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.5.3] - 2026-06-12
+
+### 新增
+- 字典 Excel 导入导出：6 个 sheet（courts/causes/firms/lawyers/stages/parties）
+- 模板 .docsytpl 打包：save() → write_placeholders() → pack_docsytpl()
+- 前端 Vitest 测试：11 个测试通过（模块注册、标记重叠检测、键生成、文本范围）
+
+### 技术
+- rust_xlsxwriter 导出 Excel，calamine 导入 Excel
+- 模板占位符写入基于 quick-xml 事件处理
+- merge/overwrite 两种导入模式
+
+### 测试
+- Rust: 11 个测试通过
+- Frontend: 11 个测试通过（4 个测试文件）
+
 ## [0.5.2] - 2026-06-12
 
 ### 新增
