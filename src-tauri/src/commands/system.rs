@@ -7,32 +7,31 @@ pub fn open_path(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn write_frontend_log(level: String, target: String, message: String, context: Option<String>) {
-    match level.as_str() {
-        "error" => log::error!(target: &target, "{}{}", message, context.as_deref().unwrap_or("")),
-        "warn" => log::warn!(target: &target, "{}{}", message, context.as_deref().unwrap_or("")),
-        "info" => log::info!(target: &target, "{}{}", message, context.as_deref().unwrap_or("")),
-        _ => log::debug!(target: &target, "{}{}", message, context.as_deref().unwrap_or("")),
-    }
+    let ctx = context
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let _ = crate::app_log::write_frontend(crate::app_log::FrontendLogEntry {
+        level,
+        target,
+        message,
+        context: Some(ctx),
+    });
 }
 
 #[tauri::command]
 pub fn get_log_file_path() -> Result<String, String> {
-    crate::app_log::current_log_path()
-        .map(|p| p.display().to_string())
-        .ok_or_else(|| "日志路径不可用".to_string())
+    crate::app_log::log_file_path().map(|p| p.display().to_string())
 }
 
 #[tauri::command]
 pub fn open_log_file() -> Result<(), String> {
-    let path = crate::app_log::current_log_path()
-        .ok_or_else(|| "日志文件不存在".to_string())?;
+    let path = crate::app_log::log_file_path()?;
     open::that(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn open_log_dir() -> Result<(), String> {
-    let path = crate::app_log::log_dir()
-        .ok_or_else(|| "日志目录不存在".to_string())?;
+    let path = crate::app_log::log_dir()?;
     open::that(&path).map_err(|e| e.to_string())
 }
 
