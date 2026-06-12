@@ -3,6 +3,7 @@ mod commands;
 mod docx;
 mod external;
 mod ffmpeg;
+mod image_paddler;
 mod pdf;
 mod services;
 

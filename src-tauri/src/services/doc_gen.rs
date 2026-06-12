@@ -84,12 +84,15 @@ fn export_pdf(docx_path: &PathBuf) -> Result<PathBuf> {
     Ok(pdf_path)
 }
 
-pub fn placeholder_analyze(_folder: &str) -> Result<serde_json::Value> {
-    // TODO: implement image paddler analysis
-    anyhow::bail!("图片排版分析功能待实现")
+pub fn placeholder_analyze(folder: &str) -> Result<serde_json::Value> {
+    let result = crate::image_paddler::analyze(&crate::image_paddler::AnalyzeArgs {
+        folder: folder.to_string(),
+    })?;
+    Ok(serde_json::to_value(result)?)
 }
 
-pub fn placeholder_run(_args: &serde_json::Value) -> Result<serde_json::Value> {
-    // TODO: implement image paddler run
-    anyhow::bail!("图片排版生成功能待实现")
+pub fn placeholder_run(args: &serde_json::Value) -> Result<serde_json::Value> {
+    let run_args: crate::image_paddler::RunArgs = serde_json::from_value(args.clone())?;
+    let result = crate::image_paddler::run(&run_args)?;
+    Ok(serde_json::to_value(result)?)
 }

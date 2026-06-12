@@ -18,7 +18,9 @@
 - 8 个功能模块注册入口（home, doc-gen, template-editor, template-mgmt, pdf-tools, image-paddler, video-extract, settings）
 - SQLite 数据库 schema（global_dictionaries, template_dictionaries, field_history, parties, generation_records, template_meta）
 - 字典三层叠加查询引擎（global → template → history）
-- docx 引擎骨架（model.rs 用 quick-xml 解析, render.rs 占位符替换）
+- docx 引擎：quick-xml 模型解析 + 占位符渲染（支持 {{key}}, {{?key:text}}, {{*key}}, {{#row}}）
+- PDF 证据整理：文件夹扫描、自然排序、DOC/DOCX 转换、分组合并、身份重命名、页眉页脚叠加
+- PDF 页眉页脚：printpdf 文字层生成 + qpdf --overlay 合成、CJK 字体自动检测、{page}/{total} 占位符
 - 外部工具检测/安装统一接口
 
 ### 架构
