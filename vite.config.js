@@ -14,4 +14,8 @@ export default defineConfig({
     minify: "esbuild",
     sourcemap: false,
   },
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.js"],
+  },
 });

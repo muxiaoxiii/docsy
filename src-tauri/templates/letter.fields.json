@@ -83,9 +83,15 @@
       "type": "reference",
       "required": true,
       "visibility": "value_only",
+<<<<<<< ours
       "references_name": ["plaintiffs", "defendants", "third_parties"],
       "allow_manual": true,
       "validate_appears_before": ["plaintiffs", "defendants", "third_parties"]
+=======
+      "references": ["plaintiffs", "defendants", "third_parties"],
+      "exclude": ["lawyers", "court"],
+      "allow_manual": true
+>>>>>>> theirs
     },
     {
       "key": "client_role",
@@ -93,8 +99,19 @@
       "type": "reference",
       "required": true,
       "visibility": "value_only",
+<<<<<<< ours
       "references_role": ["plaintiffs", "defendants", "third_parties"],
       "infer_from_party": "client_name",
+=======
+      "infer_from": {
+        "source_field": "client_name",
+        "mapping": {
+          "plaintiffs": "原告",
+          "defendants": "被告",
+          "third_parties": "第三人"
+        }
+      },
+>>>>>>> theirs
       "allow_manual": true
     },
     {

@@ -4,3 +4,11 @@ src-tauri/target/
 .codex-pet-runs/
 .DS_Store
 *.log
+
+# 备份归档（任何位置的 zip，排除 node_modules 等已忽略目录）
+*.zip
+
+# SQLite 数据库（运行时生成）
+*.db
+*.db-journal
+*.db-wal
