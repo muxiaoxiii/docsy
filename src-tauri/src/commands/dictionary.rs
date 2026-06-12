@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct DictQuery {
@@ -7,21 +7,6 @@ pub struct DictQuery {
     pub field_key: Option<String>,
     pub search: Option<String>,
     pub limit: Option<usize>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DictEntry {
-    pub key: String,
-    pub label: String,
-    pub pinyin: Option<String>,
-    pub extra: Option<serde_json::Value>,
-    pub source: String,
-    pub frequency: u32,
-}
-
-#[tauri::command]
-pub fn query_dictionary(query: DictQuery) -> Result<Vec<DictEntry>, String> {
-    crate::services::dictionary::query(query).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,8 +18,26 @@ pub struct RecommendQuery {
 }
 
 #[tauri::command]
-pub fn recommend_values(query: RecommendQuery) -> Result<Vec<DictEntry>, String> {
-    crate::services::dictionary::recommend(query).map_err(|e| e.to_string())
+pub fn query_dictionary(query: DictQuery) -> Result<Vec<crate::services::dictionary::DictEntry>, String> {
+    let service_query = crate::services::dictionary::DictQuery {
+        dict_name: query.dict_name,
+        template_id: query.template_id,
+        field_key: query.field_key,
+        search: query.search,
+        limit: query.limit,
+    };
+    crate::services::dictionary::query(service_query).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn recommend_values(query: RecommendQuery) -> Result<Vec<crate::services::dictionary::DictEntry>, String> {
+    let service_query = crate::services::dictionary::RecommendQuery {
+        template_id: query.template_id,
+        field_key: query.field_key,
+        context: query.context,
+        search: query.search,
+    };
+    crate::services::dictionary::recommend(service_query).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -45,7 +48,7 @@ pub fn export_dictionary_xlsx(path: String) -> Result<String, String> {
 #[derive(Debug, Deserialize)]
 pub struct ImportDictArgs {
     pub path: String,
-    pub mode: String, // "merge" | "overwrite"
+    pub mode: String,
 }
 
 #[tauri::command]

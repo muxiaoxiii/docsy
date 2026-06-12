@@ -17,7 +17,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { tauriCall } from '../../core/tauriBridge.js'
+import { tauriCall } from '../../../core/tauriBridge.js'
 
 const settings = ref({
   history_max: 50,

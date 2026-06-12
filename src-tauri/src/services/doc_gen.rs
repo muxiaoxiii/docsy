@@ -1,9 +1,23 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use crate::external::ExternalTool;
 
-use crate::commands::doc_gen::{GenerateArgs, GenerateResult};
-use crate::commands::settings::AppSettings;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize)]
+pub struct GenerateArgs {
+    pub template_id: String,
+    pub values: serde_json::Value,
+    pub output_path: Option<String>,
+    pub export_pdf: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GenerateResult {
+    pub docx_path: String,
+    pub pdf_path: Option<String>,
+    pub warnings: Vec<String>,
+}
 
 pub fn generate(args: GenerateArgs) -> Result<GenerateResult> {
     let tpl = crate::services::template_store::resolve(&args.template_id)?;
@@ -22,7 +36,7 @@ pub fn generate(args: GenerateArgs) -> Result<GenerateResult> {
     std::fs::write(&output_path, &rendered)?;
 
     let pdf_path = if args.export_pdf {
-        Some(export_pdf(&output_path)?)
+        export_pdf(&output_path).ok().map(|p| p.display().to_string())
     } else {
         None
     };
@@ -37,12 +51,17 @@ pub fn generate(args: GenerateArgs) -> Result<GenerateResult> {
 pub fn preview(template_id: &str, _values: &serde_json::Value) -> Result<String> {
     let tpl = crate::services::template_store::resolve(template_id)?;
     let docx_bytes = std::fs::read(&tpl.docx_path)?;
-    let html = mammoth::convert_to_html(&docx_bytes).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let doc = crate::docx::model::parse(&docx_bytes)?;
+    // Convert to simple HTML for preview
+    let html: String = doc.paragraphs.iter().map(|p| {
+        let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+        format!("<p>{}</p>", text)
+    }).collect();
     Ok(html)
 }
 
 fn default_output_path(template_id: &str) -> PathBuf {
-    let settings = crate::services::history::get_settings().unwrap_or_default();
+    let _settings = crate::services::history::get_settings().unwrap_or_default();
     let base = dirs::document_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Docsy");

@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct SaveRecordArgs {
@@ -8,28 +8,24 @@ pub struct SaveRecordArgs {
     pub label: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct GenerationRecord {
-    pub id: String,
-    pub template_id: String,
-    pub timestamp: String,
-    pub values: serde_json::Value,
-    pub output_path: Option<String>,
-    pub label: String,
+#[tauri::command]
+pub fn save_generation_record(args: SaveRecordArgs) -> Result<crate::services::history::GenerationRecord, String> {
+    let service_args = crate::services::history::SaveRecordArgs {
+        template_id: args.template_id,
+        values: args.values,
+        output_path: args.output_path,
+        label: args.label,
+    };
+    crate::services::history::save_record(service_args).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn save_generation_record(args: SaveRecordArgs) -> Result<GenerationRecord, String> {
-    crate::services::history::save_record(args).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn list_generation_records(template_id: String) -> Result<Vec<GenerationRecord>, String> {
+pub fn list_generation_records(template_id: String) -> Result<Vec<crate::services::history::GenerationRecord>, String> {
     crate::services::history::list_records(&template_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn read_generation_record(template_id: String, record_id: String) -> Result<GenerationRecord, String> {
+pub fn read_generation_record(template_id: String, record_id: String) -> Result<crate::services::history::GenerationRecord, String> {
     crate::services::history::read_record(&template_id, &record_id).map_err(|e| e.to_string())
 }
 

@@ -1,13 +1,13 @@
-mod doc_gen;
-mod dictionary;
-mod image_paddler;
-mod pdf;
-mod record;
-mod settings;
-mod system;
-mod template;
-mod template_editor;
-mod video;
+pub mod doc_gen;
+pub mod dictionary;
+pub mod image_paddler;
+pub mod pdf;
+pub mod record;
+pub mod settings;
+pub mod system;
+pub mod template;
+pub mod template_editor;
+pub mod video;
 
 pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
     tauri::generate_handler![

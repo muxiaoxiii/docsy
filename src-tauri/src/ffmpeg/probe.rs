@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::external::ExternalTool;
 
 pub fn probe_video(path: &str) -> Result<serde_json::Value> {
     let ffmpeg = crate::external::FfmpegTool;

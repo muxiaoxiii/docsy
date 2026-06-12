@@ -29,7 +29,9 @@ pub struct RecommendQuery {
 }
 
 pub fn query(query: DictQuery) -> Result<Vec<DictEntry>> {
-    let db = crate::services::history::get_db()?;
+    let m = crate::services::history::get_db()?;
+    let guard = m.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+    let db = guard.as_ref().ok_or_else(|| anyhow::anyhow!("db not initialized"))?;
     let mut entries = Vec::new();
 
     // 1. global dictionaries
@@ -113,20 +115,22 @@ pub fn query(query: DictQuery) -> Result<Vec<DictEntry>> {
     Ok(entries)
 }
 
-pub fn recommend(query: RecommendQuery) -> Result<Vec<DictEntry>> {
+pub fn recommend(q: RecommendQuery) -> Result<Vec<DictEntry>> {
     // delegate to query with template + field context
     let dict_query = DictQuery {
-        dict_name: query.field_key.clone(),
-        template_id: Some(query.template_id),
-        field_key: Some(query.field_key),
-        search: query.search,
+        dict_name: q.field_key.clone(),
+        template_id: Some(q.template_id),
+        field_key: Some(q.field_key),
+        search: q.search,
         limit: Some(20),
     };
     query(dict_query)
 }
 
 pub fn record_usage(template_id: &str, field_key: &str, value: &serde_json::Value) -> Result<()> {
-    let db = crate::services::history::get_db()?;
+    let m = crate::services::history::get_db()?;
+    let guard = m.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+    let db = guard.as_ref().ok_or_else(|| anyhow::anyhow!("db not initialized"))?;
     let value_json = serde_json::to_string(value)?;
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 

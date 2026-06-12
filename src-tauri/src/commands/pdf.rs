@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use crate::external::ExternalTool;
 
 #[derive(Debug, Serialize)]
 pub struct QpdfStatus {
@@ -25,7 +26,11 @@ pub struct InspectResult {
 
 #[tauri::command]
 pub fn inspect_pdf(input: String) -> Result<InspectResult, String> {
-    crate::pdf::qpdf::inspect(&input).map_err(|e| e.to_string())
+    let result = crate::pdf::qpdf::inspect(&input).map_err(|e| e.to_string())?;
+    Ok(InspectResult {
+        encrypted: result.encrypted,
+        pages: result.pages,
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -35,7 +40,8 @@ pub struct UnlockResult {
 
 #[tauri::command]
 pub fn unlock_pdf(input: String) -> Result<UnlockResult, String> {
-    crate::pdf::qpdf::unlock(&std::path::PathBuf::from(&input)).map_err(|e| e.to_string())
+    let result = crate::pdf::qpdf::unlock(&std::path::PathBuf::from(&input)).map_err(|e| e.to_string())?;
+    Ok(UnlockResult { output_path: result.output_path })
 }
 
 #[tauri::command]

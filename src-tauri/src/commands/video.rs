@@ -1,4 +1,5 @@
 use serde::Serialize;
+use crate::external::ExternalTool;
 
 #[derive(Debug, Serialize)]
 pub struct FfmpegStatus {

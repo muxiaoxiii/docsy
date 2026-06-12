@@ -26,7 +26,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { tauriCall } from '../../core/tauriBridge.js'
+import { tauriCall } from '../../../core/tauriBridge.js'
 
 const activeTab = ref('unlock')
 

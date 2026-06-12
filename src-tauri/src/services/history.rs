@@ -29,19 +29,36 @@ pub struct GenerationRecord {
     pub label: String,
 }
 
-use std::sync::OnceLock;
-static DB: OnceLock<rusqlite::Connection> = OnceLock::new();
+#[derive(Debug, Deserialize)]
+pub struct SaveRecordArgs {
+    pub template_id: String,
+    pub values: serde_json::Value,
+    pub output_path: Option<String>,
+    pub label: Option<String>,
+}
 
-pub fn get_db() -> Result<&'static rusqlite::Connection> {
-    DB.get_or_try_init(|| {
-        let db_path = data_dir().join("docsy.db");
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+static DB: OnceLock<Mutex<Option<rusqlite::Connection>>> = OnceLock::new();
+
+pub fn get_db() -> Result<&'static Mutex<Option<rusqlite::Connection>>> {
+    let m = DB.get_or_init(|| Mutex::new(None));
+    {
+        let guard = m.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+        if guard.is_some() {
+            return Ok(m);
         }
-        let conn = rusqlite::Connection::open(&db_path)?;
-        init_schema(&conn)?;
-        Ok(conn)
-    })
+    }
+    // Initialize
+    let db_path = data_dir().join("docsy.db");
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let conn = rusqlite::Connection::open(&db_path)?;
+    init_schema(&conn)?;
+    let mut guard = m.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+    *guard = Some(conn);
+    Ok(m)
 }
 
 fn init_schema(conn: &rusqlite::Connection) -> Result<()> {
@@ -133,8 +150,10 @@ pub fn save_settings(settings: &AppSettings) -> Result<()> {
     Ok(())
 }
 
-pub fn save_record(args: crate::commands::record::SaveRecordArgs) -> Result<GenerationRecord> {
-    let db = get_db()?;
+pub fn save_record(args: SaveRecordArgs) -> Result<GenerationRecord> {
+    let m = get_db()?;
+    let guard = m.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+    let db = guard.as_ref().ok_or_else(|| anyhow::anyhow!("db not initialized"))?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
     let values_json = serde_json::to_string(&args.values)?;
@@ -157,7 +176,9 @@ pub fn save_record(args: crate::commands::record::SaveRecordArgs) -> Result<Gene
 }
 
 pub fn list_records(template_id: &str) -> Result<Vec<GenerationRecord>> {
-    let db = get_db()?;
+    let m = get_db()?;
+    let guard = m.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+    let db = guard.as_ref().ok_or_else(|| anyhow::anyhow!("db not initialized"))?;
     let mut stmt = db.prepare(
         "SELECT id, template_id, values_json, output_path, label, created_at
          FROM generation_records WHERE template_id = ?1 ORDER BY created_at DESC"
@@ -178,7 +199,9 @@ pub fn list_records(template_id: &str) -> Result<Vec<GenerationRecord>> {
 }
 
 pub fn read_record(template_id: &str, record_id: &str) -> Result<GenerationRecord> {
-    let db = get_db()?;
+    let m = get_db()?;
+    let guard = m.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+    let db = guard.as_ref().ok_or_else(|| anyhow::anyhow!("db not initialized"))?;
     db.query_row(
         "SELECT id, template_id, values_json, output_path, label, created_at
          FROM generation_records WHERE template_id = ?1 AND id = ?2",
@@ -197,7 +220,9 @@ pub fn read_record(template_id: &str, record_id: &str) -> Result<GenerationRecor
 }
 
 pub fn delete_record(template_id: &str, record_id: &str) -> Result<()> {
-    let db = get_db()?;
+    let m = get_db()?;
+    let guard = m.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+    let db = guard.as_ref().ok_or_else(|| anyhow::anyhow!("db not initialized"))?;
     db.execute(
         "DELETE FROM generation_records WHERE template_id = ?1 AND id = ?2",
         rusqlite::params![template_id, record_id],

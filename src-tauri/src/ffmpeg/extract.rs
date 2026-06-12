@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::external::ExternalTool;
 
 pub fn extract(args: &serde_json::Value) -> Result<serde_json::Value> {
     let ffmpeg = crate::external::FfmpegTool;

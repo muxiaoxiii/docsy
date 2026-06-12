@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct EditorSession {
@@ -70,7 +70,14 @@ pub fn save(session_json: &serde_json::Value) -> Result<String> {
 }
 
 fn extract_plain_text(docx_bytes: &[u8]) -> Result<String> {
-    let text = mammoth::extract_raw_text(docx_bytes).map_err(|e| anyhow::anyhow!("{}", e))?;
+    if docx_bytes.is_empty() {
+        return Ok(String::new());
+    }
+    let doc = crate::docx::model::parse(docx_bytes)?;
+    let text: String = doc.paragraphs.iter()
+        .map(|p| p.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
     Ok(text)
 }
 

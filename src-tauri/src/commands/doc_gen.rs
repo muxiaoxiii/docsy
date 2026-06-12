@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct GenerateArgs {
@@ -8,16 +8,15 @@ pub struct GenerateArgs {
     pub export_pdf: bool,
 }
 
-#[derive(Debug, Serialize)]
-pub struct GenerateResult {
-    pub docx_path: String,
-    pub pdf_path: Option<String>,
-    pub warnings: Vec<String>,
-}
-
 #[tauri::command]
-pub fn generate_document(args: GenerateArgs) -> Result<GenerateResult, String> {
-    crate::services::doc_gen::generate(args).map_err(|e| e.to_string())
+pub fn generate_document(args: GenerateArgs) -> Result<crate::services::doc_gen::GenerateResult, String> {
+    let service_args = crate::services::doc_gen::GenerateArgs {
+        template_id: args.template_id,
+        values: args.values,
+        output_path: args.output_path,
+        export_pdf: args.export_pdf,
+    };
+    crate::services::doc_gen::generate(service_args).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

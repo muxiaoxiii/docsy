@@ -1,19 +1,7 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize)]
-pub struct TemplateInfo {
-    pub id: String,
-    pub name: String,
-    pub icon: Option<String>,
-    pub builtin: bool,
-    pub pinned_to_tab: bool,
-    pub field_count: usize,
-    pub created_at: String,
-    pub updated_at: String,
-}
+use serde::Deserialize;
 
 #[tauri::command]
-pub fn list_templates() -> Result<Vec<TemplateInfo>, String> {
+pub fn list_templates() -> Result<Vec<crate::services::template_store::TemplateInfo>, String> {
     crate::services::template_store::list().map_err(|e| e.to_string())
 }
 
@@ -55,15 +43,8 @@ pub fn unpin_from_tab(template_id: String) -> Result<(), String> {
     crate::services::template_store::set_pinned(&template_id, false).map_err(|e| e.to_string())
 }
 
-#[derive(Debug, Serialize)]
-pub struct ArchiveInfo {
-    pub id: String,
-    pub timestamp: String,
-    pub label: String,
-}
-
 #[tauri::command]
-pub fn list_template_archives(template_id: String) -> Result<Vec<ArchiveInfo>, String> {
+pub fn list_template_archives(template_id: String) -> Result<Vec<crate::services::template_store::ArchiveInfo>, String> {
     crate::services::template_store::list_archives(&template_id).map_err(|e| e.to_string())
 }
 

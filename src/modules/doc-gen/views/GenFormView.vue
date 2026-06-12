@@ -69,7 +69,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { tauriCall } from '../../core/tauriBridge.js'
+import { tauriCall } from '../../../core/tauriBridge.js'
 
 const route = useRoute()
 const templateId = computed(() => route.params.templateId)

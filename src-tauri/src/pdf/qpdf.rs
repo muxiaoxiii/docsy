@@ -1,7 +1,17 @@
 use anyhow::Result;
 use std::path::Path;
+use crate::external::ExternalTool;
 
-pub fn inspect(path: &str) -> Result<crate::commands::pdf::InspectResult> {
+pub struct InspectResult {
+    pub encrypted: bool,
+    pub pages: Option<u32>,
+}
+
+pub struct UnlockResult {
+    pub output_path: String,
+}
+
+pub fn inspect(path: &str) -> Result<InspectResult> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let output = std::process::Command::new(&bin)
@@ -14,10 +24,10 @@ pub fn inspect(path: &str) -> Result<crate::commands::pdf::InspectResult> {
 
     let pages = page_count(path).ok();
 
-    Ok(crate::commands::pdf::InspectResult { encrypted, pages })
+    Ok(InspectResult { encrypted, pages })
 }
 
-pub fn unlock(input: &Path) -> Result<crate::commands::pdf::UnlockResult> {
+pub fn unlock(input: &Path) -> Result<UnlockResult> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
 
@@ -33,7 +43,7 @@ pub fn unlock(input: &Path) -> Result<crate::commands::pdf::UnlockResult> {
         anyhow::bail!("qpdf 解锁失败");
     }
 
-    Ok(crate::commands::pdf::UnlockResult {
+    Ok(UnlockResult {
         output_path: output_path.display().to_string(),
     })
 }

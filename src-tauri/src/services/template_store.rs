@@ -1,6 +1,25 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
+
+#[derive(Debug, Serialize, Clone)]
+pub struct TemplateInfo {
+    pub id: String,
+    pub name: String,
+    pub icon: Option<String>,
+    pub builtin: bool,
+    pub pinned_to_tab: bool,
+    pub field_count: usize,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ArchiveInfo {
+    pub id: String,
+    pub timestamp: String,
+    pub label: String,
+}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct ResolvedTemplate {
@@ -21,14 +40,14 @@ pub fn resolve(template_id: &str) -> Result<ResolvedTemplate> {
     load_builtin(template_id)
 }
 
-pub fn list() -> Result<Vec<crate::commands::template::TemplateInfo>> {
+pub fn list() -> Result<Vec<TemplateInfo>> {
     let mut templates = Vec::new();
 
     // builtins
     let builtin_ids = vec!["letter"];
     for id in builtin_ids {
         if let Ok(tpl) = load_builtin(id) {
-            templates.push(crate::commands::template::TemplateInfo {
+            templates.push(TemplateInfo {
                 id: tpl.id,
                 name: tpl.name,
                 icon: None,
@@ -49,7 +68,7 @@ pub fn list() -> Result<Vec<crate::commands::template::TemplateInfo>> {
             if entry.path().extension().and_then(|e| e.to_str()) == Some("docsytpl") {
                 let id = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
                 if let Ok(tpl) = load_docsytpl(&id, &entry.path()) {
-                    templates.push(crate::commands::template::TemplateInfo {
+                    templates.push(TemplateInfo {
                         id: tpl.id,
                         name: tpl.name,
                         icon: None,
@@ -103,7 +122,7 @@ pub fn set_pinned(_template_id: &str, _pinned: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn list_archives(_template_id: &str) -> Result<Vec<crate::commands::template::ArchiveInfo>> {
+pub fn list_archives(_template_id: &str) -> Result<Vec<ArchiveInfo>> {
     Ok(vec![])
 }
 

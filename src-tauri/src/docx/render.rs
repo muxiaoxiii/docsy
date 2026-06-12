@@ -25,19 +25,15 @@ pub fn render_document(template_bytes: &[u8], values: &serde_json::Value) -> Res
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
             let name = file.name().to_string();
-            let options = zip::write::SimpleFileOptions::default()
+            let options = zip::write::FileOptions::default()
                 .compression_method(file.compression());
 
             if name == "word/document.xml" {
                 out_zip.start_file(&name, options)?;
                 std::io::Write::write_all(&mut out_zip, xml.as_bytes())?;
             } else {
-                let mut buf = Vec::new();
-                std::io::Read::read_to_string(&mut file, &mut buf).ok();
-                // Re-read as bytes for binary files
-                let mut file2 = archive.by_index(i)?;
                 let mut bytes = Vec::new();
-                std::io::Read::read_to_end(&mut file2, &mut bytes)?;
+                std::io::Read::read_to_end(&mut file, &mut bytes)?;
                 out_zip.start_file(&name, options)?;
                 std::io::Write::write_all(&mut out_zip, &bytes)?;
             }
@@ -48,13 +44,13 @@ pub fn render_document(template_bytes: &[u8], values: &serde_json::Value) -> Res
     Ok(output)
 }
 
-fn process_row_repeats(xml: &str, values: &serde_json::Value) -> Result<String> {
+fn process_row_repeats(xml: &str, _values: &serde_json::Value) -> Result<String> {
     // Find {{*key}} patterns and duplicate table rows
     // TODO: implement with quick-xml
     Ok(xml.to_string())
 }
 
-fn process_runs(xml: &str, values: &serde_json::Value) -> Result<String> {
+fn process_runs(xml: &str, _values: &serde_json::Value) -> Result<String> {
     // Handle {{?key:text}} conditional prefixes and party field run splitting
     // TODO: implement with quick-xml
     Ok(xml.to_string())
