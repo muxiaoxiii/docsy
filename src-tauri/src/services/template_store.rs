@@ -69,33 +69,6 @@ pub fn list() -> Result<Vec<TemplateInfo>> {
 
     Ok(templates)
 }
-    }
-
-    // user templates
-    let user_dir = user_templates_dir();
-    if user_dir.exists() {
-        for entry in std::fs::read_dir(&user_dir)? {
-            let entry = entry?;
-            if entry.path().extension().and_then(|e| e.to_str()) == Some("docsytpl") {
-                let id = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-                if let Ok(tpl) = load_docsytpl(&id, &entry.path()) {
-                    templates.push(TemplateInfo {
-                        id: tpl.id,
-                        name: tpl.name,
-                        icon: None,
-                        builtin: false,
-                        pinned_to_tab: tpl.pinned_to_tab,
-                        field_count: 0,
-                        created_at: String::new(),
-                        updated_at: String::new(),
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(templates)
-}
 
 pub fn get_meta(template_id: &str) -> Result<serde_json::Value> {
     let tpl = resolve(template_id)?;
