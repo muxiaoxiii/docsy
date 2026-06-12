@@ -204,7 +204,7 @@ fn load_docsytpl(template_id: &str, path: &PathBuf) -> Result<ResolvedTemplate> 
     })
 }
 
-fn user_templates_dir() -> PathBuf {
+pub fn user_templates_dir() ->PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Docsy")
