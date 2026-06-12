@@ -28,6 +28,7 @@ pub struct ResolvedTemplate {
     pub docx_path: PathBuf,
     pub fields: serde_json::Value,
     pub dictionaries: Option<serde_json::Value>,
+    pub manifest: serde_json::Value,
     pub pinned_to_tab: bool,
     pub builtin: bool,
 }
@@ -37,27 +38,37 @@ pub fn resolve(template_id: &str) -> Result<ResolvedTemplate> {
     if user_tpl.exists() {
         return load_docsytpl(template_id, &user_tpl);
     }
-    load_builtin(template_id)
+    anyhow::bail!("模板 '{}' 不存在。请先在模板编辑器中创建。", template_id)
 }
 
 pub fn list() -> Result<Vec<TemplateInfo>> {
     let mut templates = Vec::new();
 
-    // builtins
-    let builtin_ids = vec!["letter"];
-    for id in builtin_ids {
-        if let Ok(tpl) = load_builtin(id) {
-            templates.push(TemplateInfo {
-                id: tpl.id,
-                name: tpl.name,
-                icon: None,
-                builtin: true,
-                pinned_to_tab: tpl.pinned_to_tab,
-                field_count: 0,
-                created_at: String::new(),
-                updated_at: String::new(),
-            });
+    // user templates from .docsytpl files
+    let user_dir = user_templates_dir();
+    if user_dir.exists() {
+        for entry in std::fs::read_dir(&user_dir)? {
+            let entry = entry?;
+            if entry.path().extension().and_then(|e| e.to_str()) == Some("docsytpl") {
+                let id = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                if let Ok(tpl) = load_docsytpl(&id, &entry.path()) {
+                    templates.push(TemplateInfo {
+                        id: tpl.id,
+                        name: tpl.name,
+                        icon: None,
+                        builtin: false,
+                        pinned_to_tab: tpl.pinned_to_tab,
+                        field_count: tpl.fields.get("fields").and_then(|f| f.as_array()).map(|a| a.len()).unwrap_or(0),
+                        created_at: tpl.manifest.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        updated_at: String::new(),
+                    });
+                }
+            }
         }
+    }
+
+    Ok(templates)
+}
     }
 
     // user templates
@@ -158,6 +169,7 @@ fn load_builtin(template_id: &str) -> Result<ResolvedTemplate> {
         docx_path,
         fields,
         dictionaries,
+        manifest: serde_json::json!({}),
         pinned_to_tab: true,
         builtin: true,
     })
@@ -199,6 +211,7 @@ fn load_docsytpl(template_id: &str, path: &PathBuf) -> Result<ResolvedTemplate> 
         docx_path: path.clone(),
         fields,
         dictionaries,
+        manifest,
         pinned_to_tab: false,
         builtin: false,
     })
