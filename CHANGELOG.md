@@ -8,11 +8,17 @@
 - 字典 Excel 导入导出：6 个 sheet（courts/causes/firms/lawyers/stages/parties）
 - 模板 .docsytpl 打包：save() → write_placeholders() → pack_docsytpl()
 - 前端 Vitest 测试：11 个测试通过（模块注册、标记重叠检测、键生成、文本范围）
+- 批量生成：Step wizard + Excel 导入 + 字段映射 + 批量生成 + 进度条
+- 配置导入导出：.docsybundle zip 包（模板/字典/当事人/设置）
+- 字典自动录入：标记字段时 options 自动写入 field_history
+- 高级字段设置：references/infer_from/exclude/dict_source/style
+- 共享组件迁移：FieldText/Date/Select/Party/Reference/List + DictEditor + InferRuleEditor
 
 ### 技术
 - rust_xlsxwriter 导出 Excel，calamine 导入 Excel
 - 模板占位符写入基于 quick-xml 事件处理
 - merge/overwrite 两种导入模式
+- .docsybundle: zip 容器 + manifest.json
 
 ### 测试
 - Rust: 11 个测试通过
