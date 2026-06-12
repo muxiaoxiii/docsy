@@ -33,7 +33,9 @@
             <el-option label="日期" value="date" />
             <el-option label="数字" value="number" />
             <el-option label="选择" value="select" />
+            <el-option label="多选" value="multiselect" />
             <el-option label="当事人" value="party" />
+            <el-option label="引用" value="reference" />
           </el-select>
         </el-form-item>
 
@@ -45,7 +47,7 @@
           <el-input v-model="form.default" placeholder="可选" />
         </el-form-item>
 
-        <el-form-item v-if="form.type === 'select'" label="选项">
+        <el-form-item v-if="form.type === 'select' || form.type === 'multiselect'" label="选项">
           <div class="options-list">
             <div
               v-for="(opt, idx) in form.options"
@@ -62,6 +64,117 @@
             </el-button>
           </div>
         </el-form-item>
+
+        <el-collapse v-model="activeAdvanced" class="advanced-collapse">
+          <el-collapse-item title="高级设置" name="advanced">
+            <el-form-item v-if="form.type === 'reference'" label="引用字段">
+              <el-select
+                v-model="form.references"
+                multiple
+                collapse-tags
+                collapse-tags-tooltip
+                placeholder="选择可引用的字段"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="k in otherFieldKeys"
+                  :key="k"
+                  :label="k"
+                  :value="k"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="推断来源">
+              <el-select
+                v-model="form.infer_from.source_field"
+                clearable
+                placeholder="选择触发推断的字段"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="k in otherFieldKeys"
+                  :key="k"
+                  :label="k"
+                  :value="k"
+                />
+              </el-select>
+            </el-form-item>
+
+            <template v-if="form.infer_from.source_field">
+              <el-form-item label="映射规则">
+                <div class="mapping-list">
+                  <div
+                    v-for="(entry, idx) in inferMappingEntries"
+                    :key="idx"
+                    class="mapping-row"
+                  >
+                    <el-input
+                      v-model="entry.source"
+                      size="small"
+                      placeholder="源值"
+                    />
+                    <span class="mapping-arrow">→</span>
+                    <el-input
+                      v-model="entry.target"
+                      size="small"
+                      placeholder="目标值"
+                    />
+                    <el-button
+                      text
+                      type="danger"
+                      size="small"
+                      @click="removeInferMapping(idx)"
+                    >
+                      &times;
+                    </el-button>
+                  </div>
+                  <el-button text size="small" @click="addInferMapping">
+                    + 添加映射
+                  </el-button>
+                </div>
+              </el-form-item>
+            </template>
+
+            <el-form-item label="排除字段">
+              <el-select
+                v-model="form.exclude"
+                multiple
+                collapse-tags
+                collapse-tags-tooltip
+                placeholder="排除这些字段的选项值"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="k in otherFieldKeys"
+                  :key="k"
+                  :label="k"
+                  :value="k"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="记住历史">
+              <el-switch v-model="form.remember_history" />
+            </el-form-item>
+
+            <template v-if="form.type === 'party'">
+              <el-divider content-position="left">样式设置</el-divider>
+
+              <el-form-item label="下划线">
+                <el-switch v-model="form.style.underline" />
+              </el-form-item>
+
+              <el-form-item label="字体">
+                <el-input v-model="form.style.font" placeholder="如：SimSun" />
+              </el-form-item>
+
+              <el-form-item label="字号">
+                <el-input v-model="form.style.size" placeholder="如：12pt" />
+              </el-form-item>
+            </template>
+          </el-collapse-item>
+        </el-collapse>
       </el-form>
 
       <div class="popover-actions">
@@ -96,6 +209,7 @@ const props = defineProps({
 const emit = defineEmits(['confirm', 'cancel', 'delete'])
 
 const formRef = ref(null)
+const activeAdvanced = ref([])
 const form = reactive({
   label: '',
   key: '',
@@ -103,9 +217,21 @@ const form = reactive({
   required: false,
   default: '',
   options: [],
+  references: [],
+  infer_from: { source_field: '', mapping: {} },
+  exclude: [],
+  remember_history: false,
+  style: { underline: false, font: '', size: '' },
 })
 
 const isEdit = computed(() => !!props.initialData)
+
+const otherFieldKeys = computed(() => {
+  const currentKey = form.key
+  return props.existingKeys.filter((k) => k !== currentKey)
+})
+
+const inferMappingEntries = ref([])
 
 const rules = {
   label: [{ required: true, message: '请输入标签', trigger: 'blur' }],
@@ -118,6 +244,31 @@ const popoverStyle = computed(() => {
     top: `${Math.max(10, pos.y)}px`,
   }
 })
+
+function resetAdvanced() {
+  form.references = []
+  form.infer_from = { source_field: '', mapping: {} }
+  form.exclude = []
+  form.remember_history = false
+  form.style = { underline: false, font: '', size: '' }
+  inferMappingEntries.value = []
+  activeAdvanced.value = []
+}
+
+function loadAdvanced(data) {
+  form.references = [...(data.references || [])]
+  form.infer_from = data.infer_from
+    ? { source_field: data.infer_from.source_field || '', mapping: { ...data.infer_from.mapping } }
+    : { source_field: '', mapping: {} }
+  form.exclude = [...(data.exclude || [])]
+  form.remember_history = data.remember_history || false
+  form.style = data.style
+    ? { underline: data.style.underline || false, font: data.style.font || '', size: data.style.size || '' }
+    : { underline: false, font: '', size: '' }
+  inferMappingEntries.value = Object.entries(form.infer_from.mapping).map(
+    ([source, target]) => ({ source, target }),
+  )
+}
 
 watch(
   () => props.visible,
@@ -132,6 +283,7 @@ watch(
           default: props.initialData.default || '',
           options: [...(props.initialData.options || [])],
         })
+        loadAdvanced(props.initialData)
       } else {
         form.label = guessLabel(props.selectedText)
         form.key = ''
@@ -139,10 +291,29 @@ watch(
         form.required = false
         form.default = ''
         form.options = []
+        resetAdvanced()
       }
     }
   },
 )
+
+function addInferMapping() {
+  inferMappingEntries.value.push({ source: '', target: '' })
+}
+
+function removeInferMapping(idx) {
+  inferMappingEntries.value.splice(idx, 1)
+}
+
+function buildInferMapping() {
+  const mapping = {}
+  for (const entry of inferMappingEntries.value) {
+    if (entry.source.trim()) {
+      mapping[entry.source.trim()] = entry.target
+    }
+  }
+  return mapping
+}
 
 async function handleConfirm() {
   try {
@@ -150,14 +321,32 @@ async function handleConfirm() {
   } catch {
     return
   }
+
+  const hasInfer = form.infer_from.source_field
+  const hasReferences = form.references.length > 0
+  const hasExclude = form.exclude.length > 0
+  const hasStyle = form.type === 'party' && (
+    form.style.underline || form.style.font || form.style.size
+  )
+
   const config = {
     label: form.label,
     key: form.key || undefined,
     type: form.type,
     required: form.required,
     default: form.default || undefined,
-    options: form.type === 'select' ? form.options.filter(Boolean) : undefined,
+    options: (form.type === 'select' || form.type === 'multiselect')
+      ? form.options.filter(Boolean)
+      : undefined,
+    references: hasReferences ? [...form.references] : undefined,
+    infer_from: hasInfer
+      ? { source_field: form.infer_from.source_field, mapping: buildInferMapping() }
+      : undefined,
+    exclude: hasExclude ? [...form.exclude] : undefined,
+    remember_history: form.remember_history || undefined,
+    style: hasStyle ? { ...form.style } : undefined,
   }
+
   emit('confirm', config)
 }
 
@@ -187,7 +376,9 @@ function guessLabel(text) {
 
 .mark-popover {
   position: absolute;
-  width: 340px;
+  width: 380px;
+  max-height: 80vh;
+  overflow-y: auto;
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
@@ -229,5 +420,46 @@ function guessLabel(text) {
   gap: 4px;
   margin-bottom: 4px;
   align-items: center;
+}
+
+.advanced-collapse {
+  margin-top: 8px;
+  border: none;
+}
+
+.advanced-collapse :deep(.el-collapse-item__header) {
+  font-size: 13px;
+  font-weight: 500;
+  color: #909399;
+  height: 36px;
+  line-height: 36px;
+  background: transparent;
+  border: none;
+}
+
+.advanced-collapse :deep(.el-collapse-item__wrap) {
+  border: none;
+  background: transparent;
+}
+
+.advanced-collapse :deep(.el-collapse-item__content) {
+  padding-bottom: 0;
+}
+
+.mapping-list {
+  width: 100%;
+}
+
+.mapping-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+  align-items: center;
+}
+
+.mapping-arrow {
+  color: #909399;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 </style>

@@ -11,107 +11,13 @@
                 :required="field.required"
                 v-show="!field.hidden"
               >
-                <!-- Text -->
-                <el-input
-                  v-if="field.type === 'text'"
+                <component
+                  :is="fieldComponent(field.type)"
                   v-model="formValues[field.key]"
-                  :placeholder="field.label"
-                  filterable
-                />
-
-                <!-- Textarea -->
-                <el-input
-                  v-else-if="field.type === 'textarea'"
-                  v-model="formValues[field.key]"
-                  type="textarea"
-                  :rows="3"
-                  :placeholder="field.label"
-                />
-
-                <!-- Date -->
-                <el-date-picker
-                  v-else-if="field.type === 'date'"
-                  v-model="formValues[field.key]"
-                  type="date"
-                  value-format="YYYY 年 M 月 D 日"
-                  placeholder="选择日期"
-                />
-
-                <!-- Select -->
-                <el-select
-                  v-else-if="field.type === 'select'"
-                  v-model="formValues[field.key]"
-                  filterable
-                  allow-create
-                  placeholder="请选择或输入"
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="opt in getFieldOptions(field)"
-                    :key="opt.value"
-                    :label="opt.label"
-                    :value="opt.value"
-                  />
-                </el-select>
-
-                <!-- Number -->
-                <el-input-number
-                  v-else-if="field.type === 'number'"
-                  v-model="formValues[field.key]"
-                  :min="0"
-                />
-
-                <!-- Party (multiple names) -->
-                <div v-else-if="field.type === 'party'" class="party-field">
-                  <div
-                    v-for="(item, idx) in formValues[field.key]"
-                    :key="idx"
-                    class="party-item"
-                  >
-                    <el-input
-                      v-model="formValues[field.key][idx]"
-                      :placeholder="`${field.label} ${idx + 1}`"
-                      style="flex: 1"
-                    />
-                    <el-button
-                      type="danger"
-                      text
-                      @click="removePartyItem(field.key, idx)"
-                    >
-                      删除
-                    </el-button>
-                  </div>
-                  <el-button
-                    type="primary"
-                    text
-                    @click="addPartyItem(field.key)"
-                  >
-                    + 添加{{ field.label }}
-                  </el-button>
-                </div>
-
-                <!-- Reference (pick from other fields) -->
-                <el-select
-                  v-else-if="field.type === 'reference'"
-                  v-model="formValues[field.key]"
-                  filterable
-                  allow-create
-                  placeholder="请选择或输入"
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="opt in getReferenceOptions(field)"
-                    :key="opt"
-                    :label="opt"
-                    :value="opt"
-                  />
-                </el-select>
-
-                <!-- Fallback: text input -->
-                <el-input
-                  v-else
-                  v-model="formValues[field.key]"
-                  :placeholder="field.label"
+                  :field="field"
+                  :options="getFieldOptions(field)"
+                  :all-values="formValues"
+                  :all-fields="fields"
                 />
               </el-form-item>
             </template>
@@ -141,10 +47,29 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, markRaw } from 'vue'
 import { useRoute } from 'vue-router'
 import { tauriCall } from '../../../core/tauriBridge.js'
-import { save as saveTemplate } from '../../template-editor/composables/useTemplateSave.js'
+import FieldText from '../../../components/FieldText.vue'
+import FieldDate from '../../../components/FieldDate.vue'
+import FieldSelect from '../../../components/FieldSelect.vue'
+import FieldParty from '../../../components/FieldParty.vue'
+import FieldReference from '../../../components/FieldReference.vue'
+import FieldList from '../../../components/FieldList.vue'
+
+const FIELD_COMPONENT_MAP = {
+  text: markRaw(FieldText),
+  textarea: markRaw(FieldText),
+  date: markRaw(FieldDate),
+  select: markRaw(FieldSelect),
+  party: markRaw(FieldParty),
+  reference: markRaw(FieldReference),
+  list: markRaw(FieldList),
+}
+
+function fieldComponent(type) {
+  return FIELD_COMPONENT_MAP[type] || FIELD_COMPONENT_MAP.text
+}
 
 const route = useRoute()
 const templateId = computed(() => route.params.templateId)
@@ -165,44 +90,73 @@ async function loadTemplate() {
     if (meta.dictionaries) {
       dictionaries.value = meta.dictionaries
     }
-    // Initialize form values
+
     const vals = {}
     for (const field of fields.value) {
       if (field.type === 'party') {
         vals[field.key] = field.multiple ? [''] : ''
+      } else if (field.type === 'list') {
+        vals[field.key] = ['']
       } else if (field.type === 'date' && field.default_today) {
-        vals[field.key] = new Date().toISOString().slice(0, 10)
+        vals[field.key] = formatToday()
       } else {
         vals[field.key] = field.default || ''
       }
     }
     formValues.value = vals
+
+    await loadDictionaryOptions()
   } catch (err) {
     console.error('Failed to load template:', err)
   }
 }
 
-function getFieldOptions(field) {
-  const opts = []
-  // From field options
-  if (field.options) {
-    for (const o of field.options) {
-      if (typeof o === 'string') {
-        opts.push({ label: o, value: o })
-      } else {
-        opts.push({ label: o.name || o.label || String(o), value: o.name || o.label || String(o) })
+async function loadDictionaryOptions() {
+  for (const field of fields.value) {
+    if (!field.dict_source) continue
+    try {
+      const entries = await tauriCall('query_dictionary', {
+        query: {
+          dict_name: field.dict_source,
+          template_id: templateId.value,
+          field_key: field.key,
+          limit: 50,
+        },
+      })
+      if (entries?.length) {
+        const labels = entries.map(e => e.label || e.key)
+        if (!dictionaries.value[field.dict_source]) {
+          dictionaries.value[field.dict_source] = labels
+        } else {
+          const existing = new Set(dictionaries.value[field.dict_source])
+          for (const l of labels) {
+            if (!existing.has(l)) dictionaries.value[field.dict_source].push(l)
+          }
+        }
       }
+    } catch (err) {
+      console.warn(`Failed to load dict for ${field.key}:`, err)
     }
   }
-  // From dictionary
+}
+
+function getFieldOptions(field) {
+  const opts = []
+
+  if (field.options) {
+    for (const o of field.options) {
+      const label = typeof o === 'string' ? o : o.name || o.label || String(o)
+      if (!opts.includes(label)) opts.push(label)
+    }
+  }
+
   if (field.dict_source && dictionaries.value[field.dict_source]) {
     for (const item of dictionaries.value[field.dict_source]) {
       const label = typeof item === 'string' ? item : item.name || item.label || String(item)
-      if (!opts.find(o => o.value === label)) {
-        opts.push({ label, value: label })
-      }
+      if (!opts.includes(label)) opts.push(label)
     }
   }
+
   return opts
 }
 
@@ -221,16 +175,9 @@ function getReferenceOptions(field) {
   return [...new Set(opts)]
 }
 
-function addPartyItem(key) {
-  if (Array.isArray(formValues.value[key])) {
-    formValues.value[key].push('')
-  }
-}
-
-function removePartyItem(key, idx) {
-  if (Array.isArray(formValues.value[key])) {
-    formValues.value[key].splice(idx, 1)
-  }
+function formatToday() {
+  const d = new Date()
+  return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`
 }
 
 async function handleGenerate() {
@@ -244,6 +191,7 @@ async function handleGenerate() {
         export_pdf: false,
       },
     })
+    await recordFieldValues()
     console.log('Generated:', result)
   } catch (err) {
     console.error('Generate failed:', err)
@@ -263,11 +211,33 @@ async function handleExportPdf() {
         export_pdf: true,
       },
     })
+    await recordFieldValues()
     console.log('Generated with PDF:', result)
   } catch (err) {
     console.error('Generate failed:', err)
   } finally {
     generating.value = false
+  }
+}
+
+async function recordFieldValues() {
+  for (const field of fields.value) {
+    const val = formValues.value[field.key]
+    if (!val) continue
+
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        if (item) {
+          await tauriCall('record_field_usage', {
+            args: { template_id: templateId.value, field_key: field.key, value: item },
+          }).catch(err => console.warn('record_field_usage failed:', err))
+        }
+      }
+    } else {
+      await tauriCall('record_field_usage', {
+        args: { template_id: templateId.value, field_key: field.key, value: val },
+      }).catch(err => console.warn('record_field_usage failed:', err))
+    }
   }
 }
 
@@ -283,8 +253,19 @@ function cleanValues(vals) {
   return cleaned
 }
 
-function loadLastInput() {
-  // TODO: load from history
+async function loadLastInput() {
+  if (!templateId.value) return
+  try {
+    const records = await tauriCall('list_generation_records', { template_id: templateId.value })
+    if (records?.length) {
+      const last = records[0]
+      if (last.values) {
+        formValues.value = { ...formValues.value, ...last.values }
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load last input:', err)
+  }
 }
 
 watch(templateId, loadTemplate, { immediate: true })
@@ -337,16 +318,5 @@ watch(templateId, loadTemplate, { immediate: true })
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid #ebeef5;
-}
-
-.party-field {
-  width: 100%;
-}
-
-.party-item {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-  align-items: center;
 }
 </style>

@@ -55,3 +55,16 @@ pub struct ImportDictArgs {
 pub fn import_dictionary_xlsx(args: ImportDictArgs) -> Result<serde_json::Value, String> {
     crate::services::export::import_dict_xlsx(&args.path, &args.mode).map_err(|e| e.to_string())
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RecordFieldUsageArgs {
+    pub template_id: String,
+    pub field_key: String,
+    pub value: serde_json::Value,
+}
+
+#[tauri::command]
+pub fn record_field_usage(args: RecordFieldUsageArgs) -> Result<(), String> {
+    crate::services::dictionary::record_usage(&args.template_id, &args.field_key, &args.value)
+        .map_err(|e| e.to_string())
+}

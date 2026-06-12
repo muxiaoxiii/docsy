@@ -33,6 +33,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         dictionary::recommend_values,
         dictionary::export_dictionary_xlsx,
         dictionary::import_dictionary_xlsx,
+        dictionary::record_field_usage,
         // pdf
         pdf::check_qpdf,
         pdf::inspect_pdf,
