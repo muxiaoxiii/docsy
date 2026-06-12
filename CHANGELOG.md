@@ -18,18 +18,12 @@
 - 8 个功能模块注册入口（home, doc-gen, template-editor, template-mgmt, pdf-tools, image-paddler, video-extract, settings）
 - SQLite 数据库 schema（global_dictionaries, template_dictionaries, field_history, parties, generation_records, template_meta）
 - 字典三层叠加查询引擎（global → template → history）
-- docx 引擎：quick-xml 模型解析 + 占位符渲染（支持 {{key}}, {{?key:text}}, {{*key}}, {{#row}}）
+- docx 引擎：quick-xml 模型解析 + 占位符渲染（支持 {{key}}, {{?key:text}}, {{*key}}, {{#row}}），7 个单元测试
 - PDF 证据整理：文件夹扫描、自然排序、DOC/DOCX 转换、分组合并、身份重命名、页眉页脚叠加
 - PDF 页眉页脚：printpdf 文字层生成 + qpdf --overlay 合成、CJK 字体自动检测、{page}/{total} 占位符
+- 图片排版：文件夹分析、维度检测、前缀分组、docx/pdf 输出、fit/fill/original 缩放，4 个单元测试
 - 外部工具检测/安装统一接口
 
-### 架构
-- 目录结构：`src/modules/` 自包含模块（每个模块含 index.js / views / components / composables）
-- 后端分层：`commands/`（薄壳）→ `services/`（业务逻辑）→ `docx/pdf/ffmpeg/external/`（底层）
-- 数据存储从 JSON 文件迁移到 SQLite (rusqlite)
-- docx XML 解析从 regex 迁移到 quick-xml event parser
-
-### 技术栈
-- Tauri 2 + Vue 3 + Element Plus + Pinia + vue-router
-- Rust: zip + quick-xml + rusqlite + printpdf + serde + regex + mammoth + base64
-- 测试: Vitest (前端) + cargo test (后端)
+### 测试
+- Rust: 11 个测试通过（docx render 7 + image paddler 4）
+- Frontend: vite build 通过
