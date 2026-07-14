@@ -18,6 +18,13 @@ impl ExternalTool for FfmpegTool {
                             path: Some(path.display().to_string()),
                             version: Some(version),
                             install_hint: String::new(),
+                            managed: is_managed_path(&path),
+                            source: if is_managed_path(&path) {
+                                "docsy"
+                            } else {
+                                "system"
+                            }
+                            .into(),
                         }
                     }
                     Err(_) => ToolStatus {
@@ -25,6 +32,8 @@ impl ExternalTool for FfmpegTool {
                         path: Some(path.display().to_string()),
                         version: None,
                         install_hint: "ffmpeg 存在但无法执行".into(),
+                        managed: is_managed_path(&path),
+                        source: "broken".into(),
                     },
                 }
             }
@@ -32,27 +41,20 @@ impl ExternalTool for FfmpegTool {
                 available: false,
                 path: None,
                 version: None,
-                install_hint: "brew install ffmpeg".into(),
+                install_hint: "可下载安装到 Docsy 工具目录".into(),
+                managed: false,
+                source: "missing".into(),
             },
         }
     }
 
     fn try_install(&self) -> Result<String> {
-        let status = std::process::Command::new("brew")
-            .args(["install", "ffmpeg"])
-            .status()?;
-        if status.success() {
-            Ok("ffmpeg 安装成功".into())
-        } else {
-            anyhow::bail!("brew install ffmpeg 失败")
-        }
+        super::managed::install_tool("ffmpeg")
     }
 
     fn binary_path(&self) -> Result<PathBuf> {
-        let data_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-        let app_ffmpeg = data_dir.join("Docsy").join("ffmpeg").join("ffmpeg");
-        if app_ffmpeg.exists() {
-            return Ok(app_ffmpeg);
+        if let Some(path) = super::managed::managed_binary_path("ffmpeg", binary_name("ffmpeg")) {
+            return Ok(path);
         }
 
         let known = vec!["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"];
@@ -63,15 +65,25 @@ impl ExternalTool for FfmpegTool {
             }
         }
 
-        if let Ok(output) = std::process::Command::new("which").arg("ffmpeg").output() {
-            if output.status.success() {
-                let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path_str.is_empty() {
-                    return Ok(PathBuf::from(path_str));
-                }
-            }
+        if let Some(path) = super::managed::find_on_path(binary_name("ffmpeg")) {
+            return Ok(path);
         }
 
         anyhow::bail!("ffmpeg 未找到")
     }
+}
+
+fn binary_name(name: &str) -> &'static str {
+    if cfg!(windows) {
+        match name {
+            "ffmpeg" => "ffmpeg.exe",
+            _ => "ffmpeg.exe",
+        }
+    } else {
+        "ffmpeg"
+    }
+}
+
+fn is_managed_path(path: &std::path::Path) -> bool {
+    path.starts_with(super::managed::tools_root())
 }

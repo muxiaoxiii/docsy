@@ -1,5 +1,6 @@
 pub mod ffmpeg;
 pub mod libreoffice;
+pub mod managed;
 pub mod poppler;
 pub mod qpdf;
 
@@ -11,6 +12,8 @@ pub struct ToolStatus {
     pub path: Option<String>,
     pub version: Option<String>,
     pub install_hint: String,
+    pub managed: bool,
+    pub source: String,
 }
 
 pub trait ExternalTool: Send + Sync {
@@ -35,6 +38,8 @@ pub fn check_by_name(name: &str) -> ToolStatus {
             path: None,
             version: None,
             install_hint: "未知工具".into(),
+            managed: false,
+            source: "unknown".into(),
         },
     }
 }

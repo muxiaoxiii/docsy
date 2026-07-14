@@ -23,6 +23,8 @@ anyhow = "1"
 zip = "0.6"
 regex = "1"
 dirs = "5"
+reqwest = { version = "0.12", features = ["blocking"] }
+sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 image = { version = "=0.25.5", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff"] }
 printpdf = { version = "0.9.1", features = ["images"] }

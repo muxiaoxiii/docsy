@@ -12,12 +12,16 @@ impl ExternalTool for LibreOfficeTool {
                 path: Some(path.display().to_string()),
                 version: None,
                 install_hint: String::new(),
+                managed: false,
+                source: "system".into(),
             },
             Err(_) => ToolStatus {
                 available: false,
                 path: None,
                 version: None,
                 install_hint: "安装 LibreOffice: https://www.libreoffice.org".into(),
+                managed: false,
+                source: "manual".into(),
             },
         }
     }

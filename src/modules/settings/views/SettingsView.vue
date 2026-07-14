@@ -5,20 +5,31 @@
     <!-- External Tools Status -->
     <el-card class="settings-section" shadow="never">
       <template #header>
-        <span>外部工具状态</span>
+        <div class="card-header">
+          <span>外部工具状态</span>
+          <el-button size="small" @click="openManagedToolsDir">打开 Docsy 工具目录</el-button>
+        </div>
       </template>
+      <p class="section-desc">
+        qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；LibreOffice 体积较大，保留外部安装和路径配置。
+      </p>
+      <div v-if="managedToolsDir" class="managed-dir">{{ managedToolsDir }}</div>
       <div class="tool-list">
         <div v-for="tool in tools" :key="tool.name" class="tool-item">
           <div class="tool-info">
-            <span class="tool-name">{{ tool.name }}</span>
+            <span class="tool-name">{{ tool.label }}</span>
             <el-tag v-if="tool.status.available" type="success" size="small">可用</el-tag>
             <el-tag v-else type="danger" size="small">未安装</el-tag>
+            <el-tag v-if="tool.status.available" size="small" :type="tool.status.managed ? 'primary' : 'info'">
+              {{ tool.status.managed ? 'Docsy 托管' : '系统工具' }}
+            </el-tag>
           </div>
           <div class="tool-detail" v-if="tool.status.available">
             <span class="tool-path">{{ tool.status.path }}</span>
             <span class="tool-version" v-if="tool.status.version">{{ tool.status.version }}</span>
           </div>
-          <div class="tool-actions" v-else>
+          <div class="tool-desc">{{ tool.description }}</div>
+          <div class="tool-actions" v-if="!tool.status.available">
             <span class="install-hint">{{ tool.status.install_hint }}</span>
             <el-button
               v-if="tool.autoInstall"
@@ -27,7 +38,14 @@
               @click="installTool(tool.name)"
               :loading="tool.installing"
             >
-              自动安装
+              下载安装到 Docsy
+            </el-button>
+            <el-button
+              v-else-if="tool.name === 'libreoffice'"
+              size="small"
+              @click="openLibreOfficeDownload"
+            >
+              打开官方下载页
             </el-button>
             <el-tag v-else size="small" type="info">需手动安装</el-tag>
           </div>
@@ -80,12 +98,41 @@ const settings = ref({
   menu_visibility: {},
   libreoffice_path: '',
 })
+const managedToolsDir = ref('')
 
 const tools = reactive([
-  { name: 'qpdf', status: { available: false, path: null, version: null, install_hint: '' }, installing: false, autoInstall: true },
-  { name: 'poppler', status: { available: false, path: null, version: null, install_hint: '' }, installing: false, autoInstall: true },
-  { name: 'ffmpeg', status: { available: false, path: null, version: null, install_hint: '' }, installing: false, autoInstall: true },
-  { name: 'libreoffice', status: { available: false, path: null, version: null, install_hint: '' }, installing: false, autoInstall: false },
+  {
+    name: 'qpdf',
+    label: 'qpdf',
+    description: 'PDF 合并、拆分、叠加和结构处理',
+    status: defaultToolStatus(),
+    installing: false,
+    autoInstall: true,
+  },
+  {
+    name: 'poppler',
+    label: 'Poppler',
+    description: 'PDF 预览渲染和页眉页脚文本检测',
+    status: defaultToolStatus(),
+    installing: false,
+    autoInstall: true,
+  },
+  {
+    name: 'ffmpeg',
+    label: 'FFmpeg',
+    description: '视频信息读取、抽帧和时间戳水印',
+    status: defaultToolStatus(),
+    installing: false,
+    autoInstall: true,
+  },
+  {
+    name: 'libreoffice',
+    label: 'LibreOffice',
+    description: 'DOC/DOCX 转 PDF；建议安装到系统后配置路径',
+    status: defaultToolStatus(),
+    installing: false,
+    autoInstall: false,
+  },
 ])
 
 const diagnostic = ref({
@@ -96,6 +143,17 @@ const diagnostic = ref({
   poppler: null,
   ffmpeg: null,
 })
+
+function defaultToolStatus() {
+  return {
+    available: false,
+    path: null,
+    version: null,
+    install_hint: '',
+    managed: false,
+    source: 'missing',
+  }
+}
 
 async function loadSettings() {
   const result = await tauriCallSafe('get_app_settings')
@@ -118,6 +176,13 @@ async function checkTools() {
   }
 }
 
+async function loadManagedToolsDir() {
+  const result = await tauriCallSafe('get_managed_tools_dir')
+  if (result.ok) {
+    managedToolsDir.value = result.data
+  }
+}
+
 async function loadDiagnostic() {
   const result = await tauriCallSafe('get_diagnostic_info')
   if (result.ok) {
@@ -132,6 +197,7 @@ async function installTool(name) {
   if (result.ok) {
     ElMessage.success(result.data || '安装完成')
     await checkTools()
+    await loadDiagnostic()
   } else {
     ElMessage.error(result.error || '安装失败')
   }
@@ -146,8 +212,23 @@ async function openLogFile() {
   await tauriCallSafe('open_log_file')
 }
 
+async function openManagedToolsDir() {
+  const result = await tauriCallSafe('open_managed_tools_dir')
+  if (!result.ok) {
+    ElMessage.error(result.error || '无法打开工具目录')
+  }
+}
+
+async function openLibreOfficeDownload() {
+  const result = await tauriCallSafe('open_path', { path: 'https://www.libreoffice.org/download/' })
+  if (!result.ok) {
+    ElMessage.error(result.error || '无法打开 LibreOffice 下载页')
+  }
+}
+
 onMounted(() => {
   loadSettings()
+  loadManagedToolsDir()
   checkTools()
   loadDiagnostic()
 })
@@ -167,6 +248,24 @@ onMounted(() => {
 
 .settings-section {
   margin-bottom: 20px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.managed-dir {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  color: #606266;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  font-size: 12px;
+  word-break: break-all;
 }
 
 .tool-list {
@@ -195,9 +294,17 @@ onMounted(() => {
 
 .tool-detail {
   display: flex;
+  flex-direction: column;
   gap: 12px;
   font-size: 12px;
   color: #909399;
+  word-break: break-all;
+}
+
+.tool-desc {
+  margin: 4px 0;
+  font-size: 12px;
+  color: #606266;
 }
 
 .tool-actions {

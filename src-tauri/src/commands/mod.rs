@@ -34,14 +34,14 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         video::probe_video,
         video::extract_frames,
         video::list_output_frames,
-        video::try_brew_install_ffmpeg,
-        video::try_brew_install_qpdf,
         // settings
         settings::get_app_settings,
         settings::set_app_settings,
         settings::get_module_registry,
         settings::check_external_tool,
         settings::install_external_tool,
+        settings::get_managed_tools_dir,
+        settings::open_managed_tools_dir,
         // system
         system::open_path,
         system::write_frontend_log,

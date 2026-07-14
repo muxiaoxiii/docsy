@@ -6,6 +6,10 @@ pub struct PopplerTool;
 
 impl PopplerTool {
     pub fn binary_path_for(name: &str) -> Result<PathBuf> {
+        if let Some(path) = super::managed::managed_binary_path("poppler", binary_name(name)) {
+            return Ok(path);
+        }
+
         let known = if cfg!(target_os = "macos") {
             vec![
                 format!("/opt/homebrew/bin/{name}"),
@@ -21,13 +25,8 @@ impl PopplerTool {
             }
         }
 
-        if let Ok(output) = std::process::Command::new("which").arg(name).output() {
-            if output.status.success() {
-                let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path_str.is_empty() {
-                    return Ok(PathBuf::from(path_str));
-                }
-            }
+        if let Some(path) = super::managed::find_on_path(binary_name(name)) {
+            return Ok(path);
         }
 
         anyhow::bail!("{name} 未找到")
@@ -54,29 +53,47 @@ impl ExternalTool for PopplerTool {
                     )),
                     version,
                     install_hint: String::new(),
+                    managed: is_managed_path(&pdftoppm) && is_managed_path(&pdftotext),
+                    source: if is_managed_path(&pdftoppm) && is_managed_path(&pdftotext) {
+                        "docsy"
+                    } else {
+                        "system"
+                    }
+                    .into(),
                 }
             }
             _ => ToolStatus {
                 available: false,
                 path: None,
                 version: None,
-                install_hint: "brew install poppler；Windows 请安装 Poppler 并加入 PATH".into(),
+                install_hint: "可下载安装到 Docsy 工具目录".into(),
+                managed: false,
+                source: "missing".into(),
             },
         }
     }
 
     fn try_install(&self) -> Result<String> {
-        let status = std::process::Command::new("brew")
-            .args(["install", "poppler"])
-            .status()?;
-        if status.success() {
-            Ok("poppler 安装成功".into())
-        } else {
-            anyhow::bail!("brew install poppler 失败")
-        }
+        super::managed::install_tool("poppler")
     }
 
     fn binary_path(&self) -> Result<PathBuf> {
         Self::binary_path_for("pdftoppm")
     }
+}
+
+fn binary_name(name: &str) -> &str {
+    if cfg!(windows) {
+        match name {
+            "pdftoppm" => "pdftoppm.exe",
+            "pdftotext" => "pdftotext.exe",
+            _ => name,
+        }
+    } else {
+        name
+    }
+}
+
+fn is_managed_path(path: &std::path::Path) -> bool {
+    path.starts_with(super::managed::tools_root())
 }

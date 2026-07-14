@@ -22,3 +22,13 @@ pub fn check_external_tool(tool_name: String) -> crate::external::ToolStatus {
 pub fn install_external_tool(tool_name: String) -> Result<String, String> {
     crate::external::install_by_name(&tool_name).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn get_managed_tools_dir() -> String {
+    crate::external::managed::tools_root().display().to_string()
+}
+
+#[tauri::command]
+pub fn open_managed_tools_dir() -> Result<(), String> {
+    crate::external::managed::open_tools_root().map_err(|e| e.to_string())
+}

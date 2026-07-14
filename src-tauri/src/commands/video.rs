@@ -35,17 +35,3 @@ pub fn extract_frames(args: serde_json::Value) -> Result<serde_json::Value, Stri
 pub fn list_output_frames(dir: String) -> Result<Vec<String>, String> {
     crate::ffmpeg::extract::list_output_frames(&dir).map_err(|e| e.to_string())
 }
-
-#[tauri::command]
-pub fn try_brew_install_ffmpeg() -> Result<String, String> {
-    crate::external::FfmpegTool
-        .try_install()
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn try_brew_install_qpdf() -> Result<String, String> {
-    crate::external::QpdfTool
-        .try_install()
-        .map_err(|e| e.to_string())
-}

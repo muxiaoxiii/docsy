@@ -26,9 +26,8 @@
 - Rust 1.80+
 - Node.js 20+ + npm
 - Tauri CLI v2：`cargo install tauri-cli --version "^2" --locked`
-- qpdf：`brew install qpdf`
-- ffmpeg：`brew install ffmpeg`
-- LibreOffice 可选，用于后续文档转换能力
+- qpdf / Poppler / FFmpeg：运行时可在“设置 -> 外部工具状态”中下载安装到 Docsy 工具目录；系统已安装时会优先复用
+- LibreOffice 可选，用于文档转换能力；因体积和安装器差异较大，保留系统安装和路径配置方式
 
 ## 本地启动
 

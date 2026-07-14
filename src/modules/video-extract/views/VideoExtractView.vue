@@ -22,7 +22,7 @@
             <el-icon><WarningFilled /></el-icon>
             <span>未找到 ffmpeg</span>
             <el-button size="small" type="primary" @click="installFfmpeg" :loading="installing">
-              安装 (brew)
+              下载安装到 Docsy
             </el-button>
           </div>
         </div>
@@ -243,7 +243,7 @@ async function checkFfmpeg() {
 
 async function installFfmpeg() {
   installing.value = true
-  const res = await tauriCallSafe('try_brew_install_ffmpeg')
+  const res = await tauriCallSafe('install_external_tool', { toolName: 'ffmpeg' })
   if (res.ok) {
     ElMessage.success(res.data)
     await checkFfmpeg()
