@@ -62,15 +62,48 @@
           </el-form-item>
 
           <el-form-item label="文件名">
-            <el-switch v-model="settings.show_filename" />
-          </el-form-item>
-
-          <el-form-item label="扩展名">
-            <el-switch v-model="settings.filename_without_ext" active-text="隐藏" inactive-text="保留" />
-          </el-form-item>
-
-          <el-form-item label="删文字">
-            <el-input v-model="settings.filename_remove_text" placeholder="从嵌入文件名中删除这些字" />
+            <div class="filename-panel">
+              <div class="filename-panel-row">
+                <el-switch v-model="settings.show_filename" active-text="显示" inactive-text="隐藏" />
+                <el-switch v-model="settings.filename_without_ext" active-text="隐藏扩展名" inactive-text="保留扩展名" />
+              </div>
+              <div class="filename-rules">
+                <div
+                  v-for="(rule, idx) in settings.filename_rules"
+                  :key="rule.id"
+                  class="filename-rule"
+                  :class="{ 'filename-rule-keep': rule.kind === 'keep' }"
+                >
+                  <el-select v-model="rule.kind" size="small" class="rule-kind">
+                    <el-option label="删除" value="remove" />
+                    <el-option label="替换" value="replace" />
+                    <el-option label="加前缀" value="prefix" />
+                    <el-option label="加后缀" value="suffix" />
+                    <el-option label="保留成分" value="keep" />
+                  </el-select>
+                  <template v-if="rule.kind === 'replace'">
+                    <el-input v-model="rule.value" size="small" placeholder="原文字" />
+                    <el-input v-model="rule.replacement" size="small" placeholder="替换为" />
+                  </template>
+                  <template v-else-if="rule.kind === 'keep'">
+                    <el-checkbox v-model="rule.keep_time" size="small">时间</el-checkbox>
+                    <el-checkbox v-model="rule.keep_number" size="small">编号</el-checkbox>
+                    <el-checkbox v-model="rule.keep_text" size="small">文本</el-checkbox>
+                    <el-input v-model="rule.replacement" size="small" placeholder="自定义名称" />
+                    <el-select v-model="rule.separator" size="small" class="separator-select">
+                      <el-option label="_" value="_" />
+                      <el-option label="-" value="-" />
+                      <el-option label="空格" value=" " />
+                    </el-select>
+                  </template>
+                  <template v-else>
+                    <el-input v-model="rule.value" size="small" :placeholder="rulePlaceholder(rule.kind)" />
+                  </template>
+                  <el-button size="small" text type="danger" @click="removeFilenameRule(idx)">-</el-button>
+                </div>
+              </div>
+              <el-button size="small" plain @click="addFilenameRule">+ 添加规则</el-button>
+            </div>
           </el-form-item>
 
           <el-form-item label="排列">
@@ -87,17 +120,20 @@
               <el-select v-model="settings.border_color" :disabled="!settings.border_enabled">
                 <el-option label="黑色" value="black" />
                 <el-option label="白色" value="white" />
+                <el-option label="深灰" value="dark_gray" />
+                <el-option label="浅灰" value="light_gray" />
+                <el-option label="红色" value="red" />
+                <el-option label="黄色" value="yellow" />
+                <el-option label="蓝色" value="blue" />
               </el-select>
             </div>
           </el-form-item>
 
           <el-form-item>
-            <el-button type="primary" @click="analyze" :loading="analyzing" :disabled="!folders.length">
-              分析
-            </el-button>
             <el-button type="success" @click="run" :loading="generating" :disabled="!analysis">
               生成文档
             </el-button>
+            <span v-if="analyzing" class="analyze-hint">正在分析...</span>
           </el-form-item>
         </el-form>
       </div>
@@ -153,10 +189,15 @@
                       'preview-cell-white-border': settings.border_enabled && settings.border_color === 'white',
                       'preview-cell-no-name': !settings.show_filename,
                     }"
+                    :style="previewCellStyle"
                   >
                     <template v-if="img">
-                      <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :style="previewImageStyle(img)" />
-                      <div v-if="settings.show_filename" class="preview-name">{{ fileName(img.path) }}</div>
+                      <div class="preview-image-area" :style="previewImageAreaStyle">
+                        <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :style="previewImageStyle(img)" />
+                      </div>
+                      <div v-if="settings.show_filename" class="preview-name" :style="previewNameStyle">
+                        <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{ line }}</span>
+                      </div>
                     </template>
                   </div>
                 </div>
@@ -206,7 +247,7 @@
             </div>
           </div>
         </template>
-        <el-empty v-else description="选择文件夹后点击分析" />
+        <el-empty v-else :description="analyzing ? '正在分析图片...' : '选择文件夹后自动分析'" />
       </div>
     </div>
   </div>
@@ -231,6 +272,7 @@ const imageZoom = ref(100)
 const imagePage = ref(1)
 const imagePageSize = ref(24)
 let unlistenDragDrop = null
+let analyzeTimer = null
 
 const settings = reactive({
   output_format: 'pdf',
@@ -244,6 +286,9 @@ const settings = reactive({
   show_filename: true,
   filename_without_ext: true,
   filename_remove_text: '',
+  filename_rules: [
+    createFilenameRule('remove'),
+  ],
   order_mode: 'z',
   border_enabled: false,
   border_color: 'black',
@@ -288,19 +333,40 @@ const thumbImageStyle = computed(() => ({
   width: `${thumbImageSize.value}px`,
   height: `${thumbImageSize.value}px`,
 }))
+const previewCellStyle = computed(() => {
+  if (!settings.border_enabled) return { borderColor: 'transparent' }
+  return {
+    borderColor: borderColorCss(settings.border_color),
+  }
+})
 const layoutMetrics = computed(() => {
   const page = resolvedOrientation.value === 'landscape'
     ? { width: 297, height: 210 }
     : { width: 210, height: 297 }
   const margin = Math.max(0, Number(settings.margin_mm) || 0)
   const usableWidth = Math.max(1, page.width - margin * 2)
-  const usableHeight = Math.max(1, page.height - margin * 2)
+  const docxTrailingGap = settings.output_format === 'docx' ? 2 : 0
+  const usableHeight = Math.max(1, page.height - margin * 2 - docxTrailingGap)
   const cellWidth = usableWidth / layoutGrid.value.cols
   const cellHeight = usableHeight / layoutGrid.value.rows
-  const filenameReserve = settings.show_filename ? 6 : 0
+  const filenameReserve = settings.show_filename ? 8.4 : 0
   return {
     cellWidth,
+    cellHeight,
+    filenameReserve,
     imageCellHeight: Math.max(1, cellHeight - filenameReserve),
+  }
+})
+const previewImageAreaStyle = computed(() => {
+  const metrics = layoutMetrics.value
+  return {
+    height: `${Math.min(100, metrics.imageCellHeight / metrics.cellHeight * 100)}%`,
+  }
+})
+const previewNameStyle = computed(() => {
+  const metrics = layoutMetrics.value
+  return {
+    height: `${Math.min(100, metrics.filenameReserve / metrics.cellHeight * 100)}%`,
   }
 })
 
@@ -309,8 +375,7 @@ async function selectFolder() {
   if (selected) {
     folders.value = Array.isArray(selected) ? selected : [selected]
     folder.value = folders.value[0] || ''
-    analysis.value = null
-    generatedResult.value = null
+    scheduleAnalyze()
   }
 }
 
@@ -336,6 +401,7 @@ async function run() {
       folder: folder.value,
       folders: folders.value,
       ...settings,
+      filename_remove_text: '',
       orientation: resolvedOrientation.value,
     },
   })
@@ -394,10 +460,91 @@ function fileName(path) {
   if (settings.filename_without_ext) {
     name = name.replace(/\.[^.]+$/, '')
   }
-  if (settings.filename_remove_text) {
-    name = name.split(settings.filename_remove_text).join('')
+  return applyFilenameRules(name)
+}
+
+function applyFilenameRules(name) {
+  let value = name
+  for (const rule of settings.filename_rules) {
+    if (rule.kind === 'remove' && rule.value) {
+      value = value.split(rule.value).join('')
+    } else if (rule.kind === 'replace' && rule.value) {
+      value = value.split(rule.value).join(rule.replacement || '')
+    } else if (rule.kind === 'prefix' && rule.value) {
+      value = `${rule.value}${value}`
+    } else if (rule.kind === 'suffix' && rule.value) {
+      value = `${value}${rule.value}`
+    } else if (rule.kind === 'keep') {
+      value = keepFilenameParts(value, rule)
+    }
   }
-  return name
+  return value.trim()
+}
+
+function keepFilenameParts(value, rule) {
+  const parts = []
+  if (rule.replacement?.trim()) parts.push(rule.replacement.trim())
+  if (rule.keep_time) parts.push(...extractTimeParts(value))
+  if (rule.keep_number) parts.push(...extractNumberPartsWithoutTimes(value))
+  if (rule.keep_text) parts.push(...extractTextParts(value))
+  const seen = []
+  for (const part of parts) {
+    if (part && !seen.includes(part)) seen.push(part)
+  }
+  return seen.join(rule.separator || '_')
+}
+
+function extractTimeParts(value) {
+  return value.match(/\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s/gi) || []
+}
+
+function extractNumberParts(value) {
+  return value.match(/\d+/g) || []
+}
+
+function extractNumberPartsWithoutTimes(value) {
+  return extractNumberParts(value.replace(/\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s/gi, ' '))
+}
+
+function extractTextParts(value) {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .filter(part => !/^\d+$/.test(part))
+}
+
+function fileNameLines(path) {
+  return wrapFilenameLines(fileName(path), layoutMetrics.value.cellWidth, 2)
+}
+
+function wrapFilenameLines(name, cellWidthMm, maxLines) {
+  const maxUnits = Math.max(6, Math.floor((cellWidthMm * 72 / 25.4) / (8 * 0.56)))
+  const lines = []
+  let current = ''
+  let units = 0
+  for (const ch of name) {
+    const u = ch.charCodeAt(0) < 128 ? 1 : 2
+    if (units + u > maxUnits && current) {
+      lines.push(current)
+      current = ''
+      units = 0
+      if (lines.length >= maxLines) break
+    }
+    current += ch
+    units += u
+  }
+  if (current && lines.length < maxLines) lines.push(current)
+  const used = lines.join('').length
+  if (used < name.length && lines.length) {
+    let last = lines[lines.length - 1]
+    while (nameUnits(last) + 1 > maxUnits && last.length) last = last.slice(0, -1)
+    lines[lines.length - 1] = `${last}…`
+  }
+  return lines.length ? lines : ['']
+}
+
+function nameUnits(value) {
+  return [...value].reduce((sum, ch) => sum + (ch.charCodeAt(0) < 128 ? 1 : 2), 0)
 }
 
 function previewImageStyle(img) {
@@ -412,9 +559,57 @@ function previewImageStyle(img) {
     width: `${Math.min(100, drawWidth / metrics.cellWidth * 100)}%`,
     height: `${Math.min(100, drawHeight / metrics.imageCellHeight * 100)}%`,
     maxWidth: '100%',
-    maxHeight: settings.show_filename ? 'calc(100% - 20px)' : '100%',
+    maxHeight: '100%',
     objectFit: 'contain',
   }
+}
+
+function borderColorCss(color) {
+  return {
+    white: '#ffffff',
+    dark_gray: '#4b5563',
+    light_gray: '#d1d5db',
+    red: '#dc2626',
+    yellow: '#d97706',
+    blue: '#2563eb',
+    black: '#000000',
+  }[color] || '#000000'
+}
+
+function createFilenameRule(kind = 'remove') {
+  return {
+    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    kind,
+    value: '',
+    replacement: '',
+    keep_number: true,
+    keep_time: true,
+    keep_text: false,
+    separator: '_',
+  }
+}
+
+function addFilenameRule() {
+  settings.filename_rules.push(createFilenameRule('remove'))
+}
+
+function removeFilenameRule(index) {
+  settings.filename_rules.splice(index, 1)
+}
+
+function rulePlaceholder(kind) {
+  if (kind === 'prefix') return '前缀文字'
+  if (kind === 'suffix') return '后缀文字'
+  return '要删除的文字'
+}
+
+function scheduleAnalyze() {
+  analysis.value = null
+  generatedResult.value = null
+  if (analyzeTimer) clearTimeout(analyzeTimer)
+  analyzeTimer = setTimeout(() => {
+    analyze()
+  }, 80)
 }
 
 async function preloadImages(paths) {
@@ -500,8 +695,7 @@ onMounted(async () => {
       if (paths.length) {
         folders.value = paths
         folder.value = paths[0]
-        analysis.value = null
-        generatedResult.value = null
+        scheduleAnalyze()
       }
     }
   })
@@ -509,6 +703,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (unlistenDragDrop) unlistenDragDrop()
+  if (analyzeTimer) clearTimeout(analyzeTimer)
 })
 
 function orientationLabel(value) {
@@ -574,6 +769,45 @@ function scaleModeLabel(value) {
 
 .inline-controls :deep(.el-input-number) {
   width: 82px;
+}
+
+.filename-panel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filename-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.filename-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filename-rule {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.filename-rule-keep {
+  grid-template-columns: 78px auto auto auto minmax(0, 1fr) 64px auto;
+}
+
+.rule-kind {
+  width: 78px;
+}
+
+.separator-select {
+  width: 64px;
 }
 
 .result-panel {
@@ -659,13 +893,13 @@ function scaleModeLabel(value) {
   width: 100%;
   height: 100%;
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 .preview-cell {
   min-width: 0;
   min-height: 0;
-  border: 1px dashed #dcdfe6;
+  border: 1px solid transparent;
   background: #fafafa;
   display: flex;
   flex-direction: column;
@@ -683,27 +917,37 @@ function scaleModeLabel(value) {
   box-shadow: inset 0 0 0 1px #dcdfe6;
 }
 
+.preview-image-area {
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
 .preview-cell img {
   display: block;
   object-fit: contain;
 }
 
-.preview-cell-no-name img,
 .preview-cell-no-name img {
   max-height: 100%;
 }
 
 .preview-name {
   width: 100%;
-  min-height: 20px;
-  line-height: 20px;
-  padding: 0 4px;
+  line-height: 14px;
+  padding: 2px 4px;
   color: #606266;
   font-size: 11px;
   text-align: center;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.preview-name span {
+  display: block;
 }
 
 .generated-result {
@@ -811,6 +1055,12 @@ function scaleModeLabel(value) {
 }
 
 .unit-label {
+  margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.analyze-hint {
   margin-left: 8px;
   color: #909399;
   font-size: 12px;

@@ -8,6 +8,10 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tif", 
 
 const A4_WIDTH_MM: f64 = 210.0;
 const A4_HEIGHT_MM: f64 = 297.0;
+const FILENAME_FONT_PT: f64 = 8.0;
+const FILENAME_MAX_LINES: usize = 2;
+const FILENAME_LINE_HEIGHT_MM: f64 = 4.2;
+const DOCX_TRAILING_GAP_MM: f64 = 2.0;
 
 #[derive(Debug, Deserialize)]
 pub struct AnalyzeArgs {
@@ -71,11 +75,31 @@ pub struct RunArgs {
     #[serde(default)]
     pub filename_remove_text: Option<String>,
     #[serde(default)]
+    pub filename_rules: Option<Vec<FilenameRule>>,
+    #[serde(default)]
     pub order_mode: Option<String>,
     #[serde(default)]
     pub border_enabled: Option<bool>,
     #[serde(default)]
     pub border_color: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct FilenameRule {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub replacement: String,
+    #[serde(default)]
+    pub keep_number: Option<bool>,
+    #[serde(default)]
+    pub keep_time: Option<bool>,
+    #[serde(default)]
+    pub keep_text: Option<bool>,
+    #[serde(default)]
+    pub separator: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -389,6 +413,7 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     let show_filename = args.show_filename.unwrap_or(true);
     let filename_without_ext = args.filename_without_ext.unwrap_or(false);
     let filename_remove_text = args.filename_remove_text.clone().unwrap_or_default();
+    let filename_rules = args.filename_rules.clone().unwrap_or_default();
     let order_mode = args.order_mode.as_deref().unwrap_or("z");
     let border_enabled = args.border_enabled.unwrap_or(false);
     let border_color = args.border_color.as_deref().unwrap_or("black");
@@ -406,9 +431,18 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
 
     let usable_w = page_w - margin_mm * 2.0;
     let usable_h = page_h - margin_mm * 2.0;
+    let layout_usable_h = if args.output_format == "docx" {
+        (usable_h - DOCX_TRAILING_GAP_MM).max(1.0)
+    } else {
+        usable_h
+    };
     let cell_w = usable_w / grid.cols as f64;
-    let cell_h = usable_h / grid.rows as f64;
-    let filename_reserve = if show_filename { 6.0 } else { 0.0 };
+    let cell_h = layout_usable_h / grid.rows as f64;
+    let filename_reserve = if show_filename {
+        FILENAME_LINE_HEIGHT_MM * FILENAME_MAX_LINES as f64
+    } else {
+        0.0
+    };
     let image_cell_h = cell_h - filename_reserve;
 
     let total_pages = images.len().div_ceil(per_page);
@@ -442,6 +476,7 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
             show_filename,
             filename_without_ext,
             &filename_remove_text,
+            &filename_rules,
             border_enabled,
             border_color,
             &args.scale_mode,
@@ -460,6 +495,7 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
             show_filename,
             filename_without_ext,
             &filename_remove_text,
+            &filename_rules,
             border_enabled,
             border_color,
             &args.scale_mode,
@@ -516,7 +552,12 @@ fn cell_order(grid: &LayoutGrid, order_mode: &str) -> Vec<usize> {
     order
 }
 
-fn display_filename(path: &str, without_ext: bool, remove_text: &str) -> String {
+fn display_filename(
+    path: &str,
+    without_ext: bool,
+    remove_text: &str,
+    rules: &[FilenameRule],
+) -> String {
     let path = Path::new(path);
     let mut name = if without_ext {
         path.file_stem()
@@ -529,7 +570,163 @@ fn display_filename(path: &str, without_ext: bool, remove_text: &str) -> String 
     if !remove_text.is_empty() {
         name = name.replace(remove_text, "");
     }
-    name
+    apply_filename_rules(&name, rules)
+}
+
+fn apply_filename_rules(input: &str, rules: &[FilenameRule]) -> String {
+    let mut value = input.to_string();
+    for rule in rules {
+        match rule.kind.as_str() {
+            "remove" => {
+                if !rule.value.is_empty() {
+                    value = value.replace(&rule.value, "");
+                }
+            }
+            "replace" => {
+                if !rule.value.is_empty() {
+                    value = value.replace(&rule.value, &rule.replacement);
+                }
+            }
+            "prefix" => {
+                if !rule.value.is_empty() {
+                    value = format!("{}{}", rule.value, value);
+                }
+            }
+            "suffix" => {
+                if !rule.value.is_empty() {
+                    value = format!("{}{}", value, rule.value);
+                }
+            }
+            "keep" => {
+                value = keep_filename_parts(&value, rule);
+            }
+            _ => {}
+        }
+    }
+    value.trim().to_string()
+}
+
+fn keep_filename_parts(input: &str, rule: &FilenameRule) -> String {
+    let separator = rule
+        .separator
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .unwrap_or("_");
+    let mut parts = Vec::new();
+    if !rule.replacement.trim().is_empty() {
+        parts.push(rule.replacement.trim().to_string());
+    }
+    if rule.keep_time.unwrap_or(false) {
+        parts.extend(extract_time_parts(input));
+    }
+    if rule.keep_number.unwrap_or(false) {
+        parts.extend(extract_number_parts_without_times(input));
+    }
+    if rule.keep_text.unwrap_or(false) {
+        parts.extend(extract_text_parts(input));
+    }
+    dedupe_parts(parts).join(separator)
+}
+
+fn extract_time_parts(input: &str) -> Vec<String> {
+    Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s")
+        .unwrap()
+        .find_iter(input)
+        .map(|m| m.as_str().to_string())
+        .collect()
+}
+
+fn extract_number_parts(input: &str) -> Vec<String> {
+    Regex::new(r"\d+")
+        .unwrap()
+        .find_iter(input)
+        .map(|m| m.as_str().to_string())
+        .collect()
+}
+
+fn extract_number_parts_without_times(input: &str) -> Vec<String> {
+    let time_re =
+        Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s").unwrap();
+    let cleaned = time_re.replace_all(input, " ");
+    extract_number_parts(&cleaned)
+}
+
+fn extract_text_parts(input: &str) -> Vec<String> {
+    input
+        .split(|ch: char| ch == '-' || ch == '_' || ch.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .filter(|part| !part.chars().all(|ch| ch.is_ascii_digit()))
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn dedupe_parts(parts: Vec<String>) -> Vec<String> {
+    let mut result = Vec::new();
+    for part in parts {
+        if !part.is_empty() && !result.contains(&part) {
+            result.push(part);
+        }
+    }
+    result
+}
+
+fn display_filename_lines(
+    path: &str,
+    without_ext: bool,
+    remove_text: &str,
+    rules: &[FilenameRule],
+    cell_w_mm: f64,
+) -> Vec<String> {
+    wrap_filename_lines(
+        &display_filename(path, without_ext, remove_text, rules),
+        cell_w_mm,
+        FILENAME_MAX_LINES,
+    )
+}
+
+fn wrap_filename_lines(name: &str, cell_w_mm: f64, max_lines: usize) -> Vec<String> {
+    let max_units = ((cell_w_mm * 72.0 / 25.4) / (FILENAME_FONT_PT * 0.56))
+        .floor()
+        .max(6.0) as usize;
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_units = 0usize;
+
+    for ch in name.chars() {
+        let units = if ch.is_ascii() { 1 } else { 2 };
+        if current_units + units > max_units && !current.is_empty() {
+            lines.push(current);
+            current = String::new();
+            current_units = 0;
+            if lines.len() >= max_lines {
+                break;
+            }
+        }
+        current.push(ch);
+        current_units += units;
+    }
+    if !current.is_empty() && lines.len() < max_lines {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    if name_units(name) > lines.iter().map(|line| name_units(line)).sum::<usize>() {
+        if let Some(last) = lines.last_mut() {
+            while name_units(last) + 1 > max_units && !last.is_empty() {
+                last.pop();
+            }
+            last.push('…');
+        }
+    }
+    lines
+}
+
+fn name_units(value: &str) -> usize {
+    value
+        .chars()
+        .map(|ch| if ch.is_ascii() { 1 } else { 2 })
+        .sum()
 }
 
 fn output_file_stem(images: &[ImageInfo]) -> String {
@@ -621,6 +818,7 @@ fn generate_pdf(
     show_filename: bool,
     filename_without_ext: bool,
     filename_remove_text: &str,
+    filename_rules: &[FilenameRule],
     border_enabled: bool,
     border_color: &str,
     scale_mode: &str,
@@ -704,27 +902,37 @@ fn generate_pdf(
             ops.push(Op::RestoreGraphicsState);
 
             if show_filename {
-                let name =
-                    display_filename(&img_info.path, filename_without_ext, filename_remove_text);
-                let text_x_pt = cell_x_mm * 72.0 / 25.4;
-                let text_y_pt = (cell_y_mm + 1.5) * 72.0 / 25.4;
+                let lines = display_filename_lines(
+                    &img_info.path,
+                    filename_without_ext,
+                    filename_remove_text,
+                    filename_rules,
+                    cell_w_mm,
+                );
                 ops.push(Op::StartTextSection);
                 ops.push(Op::SetFont {
                     font: PdfFontHandle::Builtin(font),
-                    size: Pt(8.0),
-                });
-                ops.push(Op::SetTextCursor {
-                    pos: Point {
-                        x: Pt(text_x_pt as f32),
-                        y: Pt(text_y_pt as f32),
-                    },
+                    size: Pt(FILENAME_FONT_PT as f32),
                 });
                 ops.push(Op::SetFillColor {
                     col: Color::Rgb(Rgb::new(0.2, 0.2, 0.2, None)),
                 });
-                ops.push(Op::ShowText {
-                    items: vec![TextItem::Text(name)],
-                });
+                for (line_idx, line) in lines.iter().enumerate() {
+                    let line_w_pt = name_units(line) as f64 * FILENAME_FONT_PT * 0.56;
+                    let text_x_pt =
+                        cell_x_mm * 72.0 / 25.4 + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
+                    let text_y_pt =
+                        (cell_y_mm + 1.4 + (lines.len() - line_idx - 1) as f64 * 3.6) * 72.0 / 25.4;
+                    ops.push(Op::SetTextCursor {
+                        pos: Point {
+                            x: Pt(text_x_pt as f32),
+                            y: Pt(text_y_pt as f32),
+                        },
+                    });
+                    ops.push(Op::ShowText {
+                        items: vec![TextItem::Text(line.clone())],
+                    });
+                }
                 ops.push(Op::EndTextSection);
             }
         }
@@ -744,10 +952,8 @@ fn generate_pdf(
 }
 
 fn pdf_border_color(color: &str) -> printpdf::Color {
-    match color {
-        "white" => printpdf::Color::Rgb(printpdf::Rgb::new(1.0, 1.0, 1.0, None)),
-        _ => printpdf::Color::Rgb(printpdf::Rgb::new(0.0, 0.0, 0.0, None)),
-    }
+    let (r, g, b) = border_rgb(color);
+    printpdf::Color::Rgb(printpdf::Rgb::new(r, g, b, None))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -764,14 +970,15 @@ fn generate_docx(
     show_filename: bool,
     filename_without_ext: bool,
     filename_remove_text: &str,
+    filename_rules: &[FilenameRule],
     border_enabled: bool,
     border_color: &str,
     scale_mode: &str,
     dpi: u32,
 ) -> Result<()> {
     use docx_rs::{
-        AlignmentType, BreakType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph,
-        Pic, Run, Table, TableAlignmentType, TableCell, TableCellBorder, TableCellBorderPosition,
+        AlignmentType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph, Pic, Run,
+        Table, TableAlignmentType, TableCell, TableCellBorder, TableCellBorderPosition,
         TableCellBorders, TableCellMargins, TableLayoutType, TableRow, VAlignType, WidthType,
     };
 
@@ -786,9 +993,10 @@ fn generate_docx(
         (page_w_twips as i32).saturating_sub(margin_l_twips + margin_r_twips) as usize;
     let usable_h_twips =
         (page_h_twips as i32).saturating_sub(margin_t_twips + margin_b_twips) as usize;
+    let docx_usable_h_twips =
+        usable_h_twips.saturating_sub(mm_to_twips(DOCX_TRAILING_GAP_MM).max(0) as usize);
     let cell_w_twips = (usable_w_twips / grid.cols).max(1);
-    let cell_h_twips = (usable_h_twips / grid.rows).max(1);
-    let total_pages = images.len().div_ceil(per_page);
+    let cell_h_twips = (docx_usable_h_twips / grid.rows).max(1);
     let page_orientation = if page_w_mm > page_h_mm {
         PageOrientationType::Landscape
     } else {
@@ -836,7 +1044,7 @@ fn generate_docx(
 
     let cell_w_pt = cell_w_mm * 72.0 / 25.4;
     let cell_h_pt = image_cell_h_mm * 72.0 / 25.4;
-    for (chunk_idx, chunk) in images.chunks(per_page).enumerate() {
+    for chunk in images.chunks(per_page) {
         let mut rows = Vec::with_capacity(grid.rows);
         for row_idx in 0..grid.rows {
             let mut cells = Vec::with_capacity(grid.cols);
@@ -868,17 +1076,21 @@ fn generate_docx(
                             .align(AlignmentType::Center)
                             .add_run(Run::new().add_image(pic)),
                     );
-                    let name = display_filename(
+                    let filename_lines = display_filename_lines(
                         &img_info.path,
                         filename_without_ext,
                         filename_remove_text,
+                        filename_rules,
+                        cell_w_mm,
                     );
                     if show_filename {
-                        cell = cell.add_paragraph(
-                            Paragraph::new()
-                                .align(AlignmentType::Center)
-                                .add_run(Run::new().size(16).add_text(name)),
-                        );
+                        for line in filename_lines {
+                            cell = cell.add_paragraph(
+                                Paragraph::new()
+                                    .align(AlignmentType::Center)
+                                    .add_run(Run::new().size(16).add_text(line)),
+                            );
+                        }
                     }
                 } else {
                     cell = cell.add_paragraph(Paragraph::new());
@@ -900,10 +1112,6 @@ fn generate_docx(
             .align(TableAlignmentType::Center)
             .margins(table_margins.clone());
         doc = doc.add_table(table);
-        if chunk_idx + 1 < total_pages {
-            doc =
-                doc.add_paragraph(Paragraph::new().add_run(Run::new().add_break(BreakType::Page)));
-        }
     }
 
     let file = std::fs::File::create(output_path)?;
@@ -914,7 +1122,24 @@ fn generate_docx(
 fn docx_border_color(color: &str) -> &'static str {
     match color {
         "white" => "FFFFFF",
+        "dark_gray" => "4B5563",
+        "light_gray" => "D1D5DB",
+        "red" => "DC2626",
+        "yellow" => "D97706",
+        "blue" => "2563EB",
         _ => "000000",
+    }
+}
+
+fn border_rgb(color: &str) -> (f32, f32, f32) {
+    match color {
+        "white" => (1.0, 1.0, 1.0),
+        "dark_gray" => (0.294, 0.333, 0.388),
+        "light_gray" => (0.82, 0.835, 0.859),
+        "red" => (0.863, 0.149, 0.149),
+        "yellow" => (0.851, 0.467, 0.024),
+        "blue" => (0.145, 0.388, 0.922),
+        _ => (0.0, 0.0, 0.0),
     }
 }
 
@@ -1059,9 +1284,10 @@ mod tests {
             show_filename: Some(true),
             filename_without_ext: Some(true),
             filename_remove_text: Some("_clip".into()),
+            filename_rules: None,
             order_mode: Some("z".into()),
             border_enabled: Some(true),
-            border_color: Some("black".into()),
+            border_color: Some("dark_gray".into()),
         };
 
         let first = run(&args).unwrap();
@@ -1094,6 +1320,8 @@ mod tests {
             .unwrap();
         assert!(document_xml.contains("<wp:docPr"));
         assert!(document_xml.contains("<w:tcBorders>"));
+        assert!(document_xml.contains("4B5563"));
+        assert!(!document_xml.contains("w:type=\"page\""));
         assert!(document_xml.contains(">evidence_frame_0001<"));
         assert!(document_xml.contains("<w:pgSz"));
         assert!(document_xml.contains("<w:pgMar"));
@@ -1110,5 +1338,31 @@ mod tests {
             compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "original", 300);
         assert!(fit_w > original_w);
         assert!(fit_h > original_h);
+    }
+
+    #[test]
+    fn filename_rules_keep_time_and_number_with_custom_name() {
+        let rules = vec![FilenameRule {
+            kind: "keep".into(),
+            value: String::new(),
+            replacement: "证据截图".into(),
+            keep_number: Some(true),
+            keep_time: Some(true),
+            keep_text: Some(false),
+            separator: Some("_".into()),
+        }];
+        let name = display_filename("/tmp/video_clip_00_01_23_frame_0042.png", true, "", &rules);
+        assert_eq!(name, "证据截图_00_01_23_0042");
+    }
+
+    #[test]
+    fn wraps_long_filename_to_two_lines_with_ellipsis() {
+        let lines = wrap_filename_lines(
+            "这是一个非常非常长的证据截图文件名_00_01_23_frame_0042",
+            35.0,
+            2,
+        );
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].ends_with('…'));
     }
 }
