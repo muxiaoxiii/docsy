@@ -24,6 +24,9 @@
             <el-button size="small" type="primary" @click="installFfmpeg" :loading="installing">
               下载安装到 Docsy
             </el-button>
+            <el-button size="small" @click="openFfmpegDownload">
+              下载页
+            </el-button>
           </div>
         </div>
 
@@ -251,6 +254,13 @@ async function installFfmpeg() {
     ElMessage.error('安装失败: ' + res.error)
   }
   installing.value = false
+}
+
+async function openFfmpegDownload() {
+  const res = await tauriCallSafe('open_path', { path: 'https://www.gyan.dev/ffmpeg/builds/' })
+  if (!res.ok) {
+    ElMessage.error('无法打开 FFmpeg 下载页: ' + res.error)
+  }
 }
 
 async function selectFile() {

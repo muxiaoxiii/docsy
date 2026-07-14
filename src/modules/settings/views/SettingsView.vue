@@ -11,7 +11,7 @@
         </div>
       </template>
       <p class="section-desc">
-        qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；LibreOffice 体积较大，保留外部安装和路径配置。
+        qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；DOC/DOCX 转 PDF 在 Windows 优先使用 Word，否则使用 LibreOffice。
       </p>
       <div v-if="managedToolsDir" class="managed-dir">{{ managedToolsDir }}</div>
       <div class="tool-list">
@@ -50,13 +50,11 @@
               本地 zip 安装
             </el-button>
             <el-button
-              v-else-if="tool.name === 'libreoffice'"
               size="small"
-              @click="openLibreOfficeDownload"
+              @click="openToolDownload(tool)"
             >
-              打开官方下载页
+              下载页
             </el-button>
-            <el-tag v-else size="small" type="info">需手动安装</el-tag>
           </div>
         </div>
       </div>
@@ -128,6 +126,7 @@ const tools = reactive([
     installing: false,
     installingLocal: false,
     autoInstall: true,
+    downloadUrl: 'https://github.com/qpdf/qpdf/releases',
   },
   {
     name: 'poppler',
@@ -138,6 +137,7 @@ const tools = reactive([
     installing: false,
     installingLocal: false,
     autoInstall: true,
+    downloadUrl: 'https://github.com/oschwartz10612/poppler-windows/releases',
   },
   {
     name: 'ffmpeg',
@@ -148,16 +148,18 @@ const tools = reactive([
     installing: false,
     installingLocal: false,
     autoInstall: true,
+    downloadUrl: 'https://www.gyan.dev/ffmpeg/builds/',
   },
   {
     name: 'libreoffice',
     label: 'LibreOffice',
-    description: 'DOC/DOCX 转 PDF；建议安装到系统后配置路径',
+    description: 'DOC/DOCX 转 PDF 的备用引擎；Windows 有 Word 时优先使用 Word',
     status: defaultToolStatus(),
     checking: false,
     installing: false,
     installingLocal: false,
     autoInstall: false,
+    downloadUrl: 'https://www.libreoffice.org/download/',
   },
 ])
 
@@ -290,10 +292,10 @@ async function openManagedToolsDir() {
   }
 }
 
-async function openLibreOfficeDownload() {
-  const result = await tauriCallSafe('open_path', { path: 'https://www.libreoffice.org/download/' })
+async function openToolDownload(tool) {
+  const result = await tauriCallSafe('open_path', { path: tool.downloadUrl })
   if (!result.ok) {
-    ElMessage.error(result.error || '无法打开 LibreOffice 下载页')
+    ElMessage.error(result.error || '无法打开下载页')
   }
 }
 

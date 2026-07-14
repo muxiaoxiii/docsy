@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -226,7 +226,6 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
     fs::create_dir_all(&evidence_dir)?;
 
     let qpdf_bin = crate::external::QpdfTool.binary_path()?;
-    let lo_bin = crate::external::LibreOfficeTool.binary_path()?;
 
     let mut results = Vec::new();
 
@@ -256,7 +255,7 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
                     pdf_paths.push(file_path.to_string());
                 }
                 "word" => {
-                    let converted = convert_doc_to_pdf(&lo_bin, file_path, &evidence_dir)?;
+                    let converted = convert_word_to_pdf(file_path, &evidence_dir)?;
                     pdf_paths.push(converted);
                 }
                 _ => {}
@@ -345,7 +344,74 @@ pub fn merge_all(args: &serde_json::Value) -> Result<String> {
     Ok(output_path_str)
 }
 
-fn convert_doc_to_pdf(lo_bin: &Path, doc_path: &str, output_dir: &Path) -> Result<String> {
+fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
+    if cfg!(windows) {
+        if let Ok(path) = convert_doc_to_pdf_with_word(doc_path, output_dir) {
+            return Ok(path);
+        }
+    }
+
+    let lo_bin = crate::external::LibreOfficeTool
+        .binary_path()
+        .context("未找到 Microsoft Word 或 LibreOffice，无法转换 DOC/DOCX")?;
+    convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, output_dir)
+}
+
+#[cfg(windows)]
+fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<String> {
+    let input = std::fs::canonicalize(doc_path)
+        .with_context(|| format!("读取 DOC/DOCX 文件失败: {doc_path}"))?;
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    let output = output_dir.join(format!("{stem}.pdf"));
+    let script = format!(
+        "$ErrorActionPreference='Stop';\
+         $word=$null;$doc=$null;\
+         try {{\
+           $word=New-Object -ComObject Word.Application;\
+           $word.Visible=$false;\
+           $doc=$word.Documents.Open('{input}', $false, $true);\
+           $doc.ExportAsFixedFormat('{output}', 17);\
+         }} finally {{\
+           if ($doc -ne $null) {{ $doc.Close([ref]$false) | Out-Null }};\
+           if ($word -ne $null) {{ $word.Quit() | Out-Null }};\
+         }}",
+        input = powershell_escape(&input.display().to_string()),
+        output = powershell_escape(&output.display().to_string()),
+    );
+
+    let mut child = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("启动 Microsoft Word 转换失败")?;
+
+    let status = wait_child_with_timeout(&mut child, std::time::Duration::from_secs(120))?;
+    if !status.success() || !output.exists() {
+        anyhow::bail!("Microsoft Word 转 PDF 失败: {doc_path}");
+    }
+    Ok(output.display().to_string())
+}
+
+#[cfg(not(windows))]
+fn convert_doc_to_pdf_with_word(_doc_path: &str, _output_dir: &Path) -> Result<String> {
+    anyhow::bail!("当前平台不支持 Microsoft Word 自动转换")
+}
+
+fn convert_doc_to_pdf_with_libreoffice(
+    lo_bin: &Path,
+    doc_path: &str,
+    output_dir: &Path,
+) -> Result<String> {
     let status = std::process::Command::new(lo_bin)
         .arg("--headless")
         .arg("--convert-to")
@@ -372,6 +438,30 @@ fn convert_doc_to_pdf(lo_bin: &Path, doc_path: &str, output_dir: &Path) -> Resul
     }
 
     Ok(pdf_path.display().to_string())
+}
+
+#[cfg(windows)]
+fn powershell_escape(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+#[cfg(windows)]
+fn wait_child_with_timeout(
+    child: &mut std::process::Child,
+    timeout: std::time::Duration,
+) -> Result<std::process::ExitStatus> {
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if start.elapsed() >= timeout {
+            child.kill().ok();
+            child.wait().ok();
+            anyhow::bail!("DOC/DOCX 转 PDF 超时");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Result<()> {
