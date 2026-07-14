@@ -1,79 +1,75 @@
 # Docsy
 
-轻量、高效的本地文档处理工具箱。Tauri 2 + Vue 3 + Rust。
+轻量的本地文档处理工具箱。当前版本已移除模板生成、内置模板、模板编辑、模板管理和字典推荐链路，后续模板模块从零重新设计。
 
-> 当前版本：v0.5.1 — 架构重构中
+## 当前保留模块
 
-## 功能模块
+| 模块 | 说明 |
+| --- | --- |
+| PDF 工具 | PDF 解锁、合并、拆分、证据整理、页眉页脚叠加 |
+| 图片排版 | 图片批量排版为 A4 文档 |
+| 视频抽帧 | 按时间或频率导出视频帧 |
+| 设置 | 外部工具检测、LibreOffice 路径、日志与诊断 |
 
-| 模块 | 说明 | 状态 |
-|------|------|------|
-| 文档生成 | 基于模板的 Word/PDF 文档生成 | 开发中 |
-| 模板编辑 | 可视化制作 .docsytpl 模板 | 开发中 |
-| 模板管理 | 模板 CRUD、字典、归档 | 开发中 |
-| PDF 工具 | 解锁、合并、拆分、证据整理 | 迁移中 |
-| 图片排版 | 图片批量排版为 A4 文档 | 迁移中 |
-| 视频抽帧 | 按时间/频率导出视频帧 | 迁移中 |
+## 已移除模块
+
+- 模板生成 / 文档生成表单
+- 内置所函模板
+- 模板制作 / 模板编辑器
+- 模板管理
+- 字典、字段历史、当事人主档
+- 模板配置包导入导出
+- 模板生成记录中心
 
 ## 开发依赖
 
 - Rust 1.80+
 - Node.js 20+ + npm
-- tauri-cli v2: `cargo install tauri-cli --version "^2" --locked`
-- qpdf (运行时): `brew install qpdf`
-- ffmpeg (可选): `brew install ffmpeg`
+- Tauri CLI v2：`cargo install tauri-cli --version "^2" --locked`
+- qpdf：`brew install qpdf`
+- ffmpeg：`brew install ffmpeg`
+- LibreOffice 可选，用于后续文档转换能力
 
 ## 本地启动
 
 ```bash
 npm install
-cargo tauri dev
+npm run tauri dev
 ```
 
-## 测试
+## 验证
 
 ```bash
-cd src-tauri && cargo test --quiet
 npm test
 npx vite build
+cd src-tauri && cargo test --quiet
 ```
 
 ## 目录结构
 
-```
+```text
 Docsy/
-├── src/                          # 前端 (Vue 3)
-│   ├── App.vue                   # 壳：布局 + router-view
-│   ├── router/                   # vue-router
-│   ├── core/                     # 模块注册中心 + tauriBridge
-│   ├── stores/                   # Pinia stores
-│   ├── modules/                  # 自包含功能模块
+├── src/
+│   ├── App.vue
+│   ├── core/
+│   ├── modules/
 │   │   ├── home/
-│   │   ├── doc-gen/              # 文档生成
-│   │   ├── template-editor/      # 模板编辑
-│   │   ├── template-mgmt/        # 模板管理
-│   │   ├── pdf-tools/            # PDF 工具
-│   │   ├── image-paddler/        # 图片排版
-│   │   ├── video-extract/        # 视频抽帧
-│   │   └── settings/             # 设置
-│   ├── components/               # 跨模块共享组件
-│   └── services/                 # 日志等服务
-├── src-tauri/                    # 后端 (Rust)
+│   │   ├── pdf-tools/
+│   │   ├── image-paddler/
+│   │   ├── video-extract/
+│   │   └── settings/
+│   ├── router/
+│   └── services/
+├── src-tauri/
 │   └── src/
-│       ├── lib.rs                # 入口
-│       ├── commands/             # Tauri 命令层（薄壳）
-│       ├── services/             # 业务逻辑层
-│       ├── docx/                 # docx 底层操作
-│       ├── pdf/                  # PDF 操作
-│       ├── ffmpeg/               # FFmpeg 集成
-│       └── external/             # 外部工具统一抽象
-├── Archived/                     # v0.4 及更早版本归档
-└── CHANGELOG.md
+│       ├── commands/
+│       ├── external/
+│       ├── ffmpeg/
+│       ├── pdf/
+│       └── services/
+└── docs/
 ```
 
-## 版本历史
+## 后续模板重写原则
 
-- **v0.5.1** (2026-06-12): 架构重构启动，模块注册系统，vue-router + Pinia
-- **v0.1.0**: 初始版本
-
-详见 [CHANGELOG.md](./CHANGELOG.md)
+新模板模块不要复用已删除的旧路径和旧命令名。重新设计时应先定义统一的数据模型和模块边界，再实现生成、编辑、管理三类体验。

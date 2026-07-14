@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::external::ExternalTool;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct FfmpegStatus {
@@ -17,7 +17,7 @@ pub fn check_ffmpeg() -> FfmpegStatus {
         available: status.available,
         path: status.path,
         version: status.version,
-        has_drawtext: false,
+        has_drawtext: crate::ffmpeg::detect::has_drawtext().unwrap_or(false),
     }
 }
 
@@ -32,11 +32,20 @@ pub fn extract_frames(args: serde_json::Value) -> Result<serde_json::Value, Stri
 }
 
 #[tauri::command]
+pub fn list_output_frames(dir: String) -> Result<Vec<String>, String> {
+    crate::ffmpeg::extract::list_output_frames(&dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn try_brew_install_ffmpeg() -> Result<String, String> {
-    crate::external::FfmpegTool.try_install().map_err(|e| e.to_string())
+    crate::external::FfmpegTool
+        .try_install()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn try_brew_install_qpdf() -> Result<String, String> {
-    crate::external::QpdfTool.try_install().map_err(|e| e.to_string())
+    crate::external::QpdfTool
+        .try_install()
+        .map_err(|e| e.to_string())
 }

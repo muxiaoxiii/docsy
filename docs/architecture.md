@@ -1,116 +1,66 @@
-# Docsy v0.5 架构文档
+# Docsy 当前架构
 
-> 版本：0.5.1 | 更新：2026-06-12
+更新时间：2026-06-23
 
-## 设计原则
+## 当前边界
 
-1. **模块自包含**：每个功能模块在 `src/modules/<name>/` 下自包含 index.js、views、components、composables
-2. **统一注册**：模块通过 `index.js` 声明路由、菜单、首页卡片、设置项，注册中心自动收集
-3. **分层架构**：后端 `commands/`（薄壳）→ `services/`（业务逻辑）→ 底层模块（docx/pdf/ffmpeg/external）
-4. **共享基础设施**：字典、外部工具、日志、设置全局共享，不各模块自建
-5. **Rust 优先**：核心逻辑用 Rust 实现，减少外部依赖，控制包体积
+模板生成、内置模板、模板编辑、模板管理、字典推荐和生成记录已从当前应用移除。当前应用只保留可独立运行的工具模块：
 
-## 模块注册系统
+- PDF 工具
+- 图片排版
+- 视频抽帧
+- 设置与诊断
 
-### 前端模块注册
+## 前端结构
 
-每个模块目录下的 `index.js` 导出标准接口：
+模块仍通过 `src/modules/<name>/index.js` 注册路由、菜单和首页卡片。
 
-```javascript
-export default {
-  id: 'doc-gen',
-  name: '文档生成',
-  icon: 'Document',
-  description: '基于模板生成 Word/PDF 文档',
-  category: 'document',
-  defaultVisible: true,
-  routes: [/* vue-router 路由定义 */],
-  menuItems: [/* 侧边栏菜单项 */],
-  homeCards: [/* 首页快捷卡片 */],
-  settings: null, // 模块级设置 schema
-};
+当前有效模块：
+
+```text
+src/modules/
+├── home/
+├── pdf-tools/
+├── image-paddler/
+├── video-extract/
+└── settings/
 ```
 
-注册中心 (`core/moduleRegistry.js`) 通过 `import.meta.glob` 自动收集所有模块。
+`src/core/moduleRegistry.js` 使用 `import.meta.glob` 自动收集模块。新增模块时，应保持自包含目录，不要把业务状态散落到全局。
 
-### 后端模块注册
+## PDF 证据处理设计
 
-```rust
-pub struct ModuleDescriptor {
-    pub id: String,
-    pub name: String,
-    pub icon: String,
-    pub description: String,
-    pub category: ModuleCategory,
-    pub default_visible: bool,
-    pub settings_schema: Option<serde_json::Value>,
-    pub sub_modules: Vec<SubModuleDescriptor>,
-}
-```
+PDF 工具中的证据 PDF 合并、拆分、页眉页脚处理、A4 规范化、批注删除和预览能力，统一以 `docs/pdf-evidence-processing-design.md` 为设计依据。
 
-## 字典系统
+后续实现应围绕“证据文件列表 + 页码范围 + 输出规则”的整体模型收敛，不应继续把页眉页脚插入、PDF 合并、拆分、页面规范化做成互相割裂的临时功能。
 
-三层叠加架构：
+## 后端结构
 
-```
-global_dictionaries (共享字典，跨模板)
-  ↓ 叠加
-template_dictionaries (模板级覆盖)
-  ↓ 叠加
-field_history (动态推荐，用过即记)
-```
+Tauri 命令集中注册在 `src-tauri/src/commands/mod.rs`。
 
-SQLite 表：
-- `global_dictionaries` — courts, causes, firms, lawyers, stages, parties
-- `template_dictionaries` — 模板私有覆盖
-- `field_history` — 每次生成后新值自动入库
-- `parties` — 当事人主档（跨模板共享）
+当前命令域：
 
-## 文档生成流程
+- `pdf`
+- `image_paddler`
+- `video`
+- `settings`
+- `system`
 
-```
-选择模板 → 加载 fields.json → 渲染表单 → 用户填写
-  ↓
-实时预览（mammoth HTML）
-  ↓
-invoke("generate_document") → Rust 加载 template.docx → 占位符替换 → 输出 .docx
-  ↓
-可选：docx → PDF（Word/WPS / LibreOffice / 仅docx）
-  ↓
-写入 generation_records + 更新 field_history
-```
+业务实现放在 `src-tauri/src/services/`、`src-tauri/src/pdf/`、`src-tauri/src/ffmpeg/`、`src-tauri/src/external/` 等目录。`services/history.rs` 现在只负责应用设置读写，不再维护模板生成历史。
 
-## 外部工具抽象
+## 已移除的旧边界
 
-所有外部 CLI 工具通过 `ExternalTool` trait 统一管理：
+以下内容不应被新代码继续引用：
 
-```rust
-pub trait ExternalTool: Send + Sync {
-    fn name(&self) -> &str;
-    fn check(&self) -> ToolStatus;
-    fn try_install(&self) -> Result<String>;
-    fn binary_path(&self) -> Result<PathBuf>;
-}
-```
+- `.docsytpl`
+- `doc-gen`
+- `template-editor`
+- `template-mgmt`
+- `list_templates`
+- `get_template_meta`
+- `generate_document`
+- `save_template`
+- `query_dictionary`
+- `generation_records`
 
-已实现：`QpdfTool`, `FfmpegTool`, `LibreOfficeTool`
-
-## 占位符语法
-
-| 语法 | 行为 |
-|------|------|
-| `{{key}}` | 简单文本替换 |
-| `{{?key:text}}` | 条件前缀：值非空输出 text |
-| `{{*key}}` | 行重复：表格行按列表长度克隆 |
-| `{{#row}}` | 行号自动编号 |
-
-## .docsytpl 模板包格式
-
-```
-my_template.docsytpl (zip)
-├── manifest.json        # id, name, type, version
-├── template.docx        # 含占位符的 Word 文件
-├── fields.json          # 字段定义
-├── dictionaries.json    # 模板字典（可选）
-└── builder_state.json   # 编辑器状态（可选）
-```
+后续模板模块要从新的设计文档开始，不应在现有工具模块中渐进复活旧逻辑。

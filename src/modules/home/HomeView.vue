@@ -1,9 +1,11 @@
 <template>
   <div class="home-view">
     <div class="hero">
-      <img src="../../assets/docsy-logo.png" alt="Docsy" class="hero-logo" />
-      <h1>欢迎使用 Docsy</h1>
-      <p class="subtitle">轻量、高效的本地文档处理工具箱 v{{ version }}</p>
+      <div class="hero-copy">
+        <h1>Docsy</h1>
+        <p class="subtitle">轻量、高效的本地文档处理工具箱 v{{ version }}</p>
+      </div>
+      <img src="../../assets/doclet-mascot-transparent.png" alt="Docsy" class="hero-mascot" />
     </div>
 
     <!-- Quick Access Cards -->
@@ -26,34 +28,6 @@
       </div>
     </div>
 
-    <!-- Recent Templates -->
-    <div class="section" v-if="recentTemplates.length">
-      <h3>最近模板</h3>
-      <div class="template-list">
-        <div
-          v-for="tpl in recentTemplates"
-          :key="tpl.id"
-          class="template-item"
-          @click="router.push({ name: 'doc-gen-form', params: { templateId: tpl.id } })"
-        >
-          <el-icon><Document /></el-icon>
-          <span class="tpl-name">{{ tpl.name }}</span>
-          <el-tag v-if="tpl.builtin" size="small" type="info">内置</el-tag>
-          <el-tag v-if="tpl.pinned_to_tab" size="small" type="success">已固定</el-tag>
-        </div>
-      </div>
-    </div>
-
-    <!-- Recent Records -->
-    <div class="section" v-if="recentRecords.length">
-      <h3>最近记录</h3>
-      <div class="record-list">
-        <div v-for="rec in recentRecords" :key="rec.id" class="record-item">
-          <span class="rec-label">{{ rec.label }}</span>
-          <span class="rec-time">{{ rec.timestamp }}</span>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -65,31 +39,9 @@ import { tauriCallSafe } from '../../core/tauriBridge.js'
 
 const router = useRouter()
 const homeCards = getHomeCards()
-const version = ref('0.5.2')
-const recentTemplates = ref([])
-const recentRecords = ref([])
+const version = ref('0.5.3')
 
 async function loadData() {
-  // Load templates
-  const tplResult = await tauriCallSafe('list_templates')
-  if (tplResult.ok) {
-    recentTemplates.value = tplResult.data.slice(0, 5)
-  }
-
-  // Load recent records across all templates
-  if (tplResult.ok && tplResult.data.length > 0) {
-    const allRecords = []
-    for (const tpl of tplResult.data.slice(0, 3)) {
-      const recResult = await tauriCallSafe('list_generation_records', { templateId: tpl.id })
-      if (recResult.ok) {
-        allRecords.push(...recResult.data.slice(0, 3))
-      }
-    }
-    allRecords.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-    recentRecords.value = allRecords.slice(0, 5)
-  }
-
-  // Load version from diagnostic
   const diag = await tauriCallSafe('get_diagnostic_info')
   if (diag.ok && diag.data.version) {
     version.value = diag.data.version
@@ -101,30 +53,41 @@ onMounted(loadData)
 
 <style scoped>
 .home-view {
-  max-width: 800px;
+  max-width: 920px;
   margin: 0 auto;
   padding: 30px 20px;
 }
 
 .hero {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 36px;
   margin-bottom: 32px;
+  min-height: 240px;
 }
 
-.hero-logo {
-  width: 56px;
-  height: 56px;
+.hero-copy {
+  min-width: 260px;
 }
 
 .hero h1 {
-  margin: 12px 0 6px;
+  margin: 0 0 8px;
   color: #303133;
-  font-size: 22px;
+  font-size: 34px;
+  line-height: 1.1;
 }
 
 .subtitle {
   color: #909399;
   font-size: 13px;
+  margin: 0;
+}
+
+.hero-mascot {
+  width: min(220px, 38vw);
+  max-height: 260px;
+  object-fit: contain;
 }
 
 .section {
@@ -170,52 +133,19 @@ onMounted(loadData)
   margin: 0;
 }
 
-.template-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+@media (max-width: 720px) {
+  .hero {
+    flex-direction: column-reverse;
+    gap: 16px;
+    text-align: center;
+  }
 
-.template-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
+  .hero-copy {
+    min-width: 0;
+  }
 
-.template-item:hover {
-  background: #f5f7fa;
-}
-
-.tpl-name {
-  flex: 1;
-  font-size: 13px;
-}
-
-.record-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.record-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 12px;
-  background: #f9f9f9;
-  border-radius: 4px;
-  font-size: 13px;
-}
-
-.rec-label {
-  color: #303133;
-}
-
-.rec-time {
-  color: #909399;
-  font-size: 12px;
+  .hero-mascot {
+    width: 180px;
+  }
 }
 </style>

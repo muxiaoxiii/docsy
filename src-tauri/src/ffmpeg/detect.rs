@@ -1,3 +1,4 @@
+use crate::external::ExternalTool;
 use anyhow::Result;
 
 pub fn list_system_fonts() -> Result<Vec<String>> {
@@ -27,4 +28,21 @@ pub fn list_system_fonts() -> Result<Vec<String>> {
     }
 
     Ok(fonts)
+}
+
+pub fn has_drawtext() -> Result<bool> {
+    let bin = crate::external::FfmpegTool.binary_path()?;
+    let output = std::process::Command::new(bin)
+        .arg("-hide_banner")
+        .arg("-filters")
+        .output()?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .any(|line| line.split_whitespace().any(|part| part == "drawtext")))
 }

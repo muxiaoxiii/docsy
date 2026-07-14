@@ -5,10 +5,6 @@ use std::path::PathBuf;
 pub struct LibreOfficeTool;
 
 impl ExternalTool for LibreOfficeTool {
-    fn name(&self) -> &str {
-        "libreoffice"
-    }
-
     fn check(&self) -> ToolStatus {
         match self.binary_path() {
             Ok(path) => ToolStatus {

@@ -5,16 +5,10 @@ use std::path::PathBuf;
 pub struct QpdfTool;
 
 impl ExternalTool for QpdfTool {
-    fn name(&self) -> &str {
-        "qpdf"
-    }
-
     fn check(&self) -> ToolStatus {
         match self.binary_path() {
             Ok(path) => {
-                let output = std::process::Command::new(&path)
-                    .arg("--version")
-                    .output();
+                let output = std::process::Command::new(&path).arg("--version").output();
                 match output {
                     Ok(out) => {
                         let version = String::from_utf8_lossy(&out.stderr);

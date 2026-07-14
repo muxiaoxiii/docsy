@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "dialog:default",
+    "fs:allow-read-file",
     "shell:default",
     {
       "identifier": "shell:allow-open",

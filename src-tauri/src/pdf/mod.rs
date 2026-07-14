@@ -1,3 +1,12 @@
+pub mod annotations;
+pub mod artifacts;
+pub mod detection;
 pub mod evidence;
+pub mod evidence_session;
+pub mod header_footer;
+pub mod normalize;
 pub mod overlay;
+pub mod page_info;
+pub mod preview;
 pub mod qpdf;
+pub mod split;

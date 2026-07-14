@@ -1,6 +1,6 @@
 [package]
 name = "docsy"
-version = "0.5.1"
+version = "0.5.3"
 description = "Docsy - 轻量文档处理工具箱"
 authors = ["only"]
 edition = "2021"
@@ -15,22 +15,18 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
-thiserror = "1"
 zip = "0.6"
-quick-xml = { version = "0.36", features = ["serialize"] }
 regex = "1"
 dirs = "5"
 chrono = { version = "0.4", features = ["serde"] }
-rust_xlsxwriter = "0.84"
-calamine = "0.30"
 image = { version = "=0.25.5", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff"] }
 printpdf = { version = "0.9.1", features = ["images"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
-uuid = { version = "1", features = ["v4"] }
+lopdf = { version = "0.39.0", default-features = false }
 base64 = "0.22"
 open = "5"
 log = "0.4"

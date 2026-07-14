@@ -4,7 +4,6 @@ import { tauriCall } from '../core/tauriBridge.js'
 
 export const useAppStore = defineStore('app', () => {
   const settings = ref({
-    history_max: 50,
     menu_visibility: {},
     libreoffice_path: '',
   })

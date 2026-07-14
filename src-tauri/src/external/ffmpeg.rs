@@ -5,16 +5,10 @@ use std::path::PathBuf;
 pub struct FfmpegTool;
 
 impl ExternalTool for FfmpegTool {
-    fn name(&self) -> &str {
-        "ffmpeg"
-    }
-
     fn check(&self) -> ToolStatus {
         match self.binary_path() {
             Ok(path) => {
-                let output = std::process::Command::new(&path)
-                    .arg("-version")
-                    .output();
+                let output = std::process::Command::new(&path).arg("-version").output();
                 match output {
                     Ok(out) => {
                         let version = String::from_utf8_lossy(&out.stdout);

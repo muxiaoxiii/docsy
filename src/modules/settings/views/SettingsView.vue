@@ -20,9 +20,16 @@
           </div>
           <div class="tool-actions" v-else>
             <span class="install-hint">{{ tool.status.install_hint }}</span>
-            <el-button size="small" type="primary" @click="installTool(tool.name)" :loading="tool.installing">
+            <el-button
+              v-if="tool.autoInstall"
+              size="small"
+              type="primary"
+              @click="installTool(tool.name)"
+              :loading="tool.installing"
+            >
               自动安装
             </el-button>
+            <el-tag v-else size="small" type="info">需手动安装</el-tag>
           </div>
         </div>
       </div>
@@ -34,10 +41,6 @@
         <span>应用设置</span>
       </template>
       <el-form label-width="120px">
-        <el-form-item label="历史上限">
-          <el-input-number v-model="settings.history_max" :min="10" :max="500" />
-          <span class="form-hint">每个模板最多保留的生成记录数</span>
-        </el-form-item>
         <el-form-item label="LibreOffice 路径">
           <el-input v-model="settings.libreoffice_path" placeholder="留空则自动检测" />
           <span class="form-hint">用于 DOC/DOCX 转 PDF</span>
@@ -57,6 +60,7 @@
         <el-descriptions-item label="版本">{{ diagnostic.version }}</el-descriptions-item>
         <el-descriptions-item label="系统">{{ diagnostic.os }} / {{ diagnostic.arch }}</el-descriptions-item>
         <el-descriptions-item label="qpdf">{{ diagnostic.qpdf?.version || '不可用' }}</el-descriptions-item>
+        <el-descriptions-item label="poppler">{{ diagnostic.poppler?.version || '不可用' }}</el-descriptions-item>
         <el-descriptions-item label="ffmpeg">{{ diagnostic.ffmpeg?.version || '不可用' }}</el-descriptions-item>
       </el-descriptions>
       <div class="diag-actions">
@@ -64,42 +68,24 @@
         <el-button size="small" @click="openLogFile">打开当前日志</el-button>
       </div>
     </el-card>
-
-    <!-- Config Import/Export -->
-    <el-card class="settings-section" shadow="never">
-      <template #header>
-        <span>配置导入导出</span>
-      </template>
-      <p class="section-desc">导出配置为 .docsybundle 文件，可在其他电脑导入</p>
-      <div class="bundle-actions">
-        <el-button type="primary" @click="handleExport">导出配置</el-button>
-        <el-button @click="handleImport">导入配置</el-button>
-      </div>
-      <el-checkbox-group v-model="exportOptions" class="export-options">
-        <el-checkbox label="templates">模板</el-checkbox>
-        <el-checkbox label="dictionaries">字典</el-checkbox>
-        <el-checkbox label="parties">当事人主档</el-checkbox>
-        <el-checkbox label="field_history">字段历史</el-checkbox>
-        <el-checkbox label="settings">应用设置</el-checkbox>
-      </el-checkbox-group>
-    </el-card>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { tauriCall, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { ElMessage } from 'element-plus'
 
 const settings = ref({
-  history_max: 50,
   menu_visibility: {},
   libreoffice_path: '',
 })
 
 const tools = reactive([
-  { name: 'qpdf', status: { available: false, path: null, version: null, install_hint: '' }, installing: false },
-  { name: 'ffmpeg', status: { available: false, path: null, version: null, install_hint: '' }, installing: false },
-  { name: 'libreoffice', status: { available: false, path: null, version: null, install_hint: '' }, installing: false },
+  { name: 'qpdf', status: { available: false, path: null, version: null, install_hint: '' }, installing: false, autoInstall: true },
+  { name: 'poppler', status: { available: false, path: null, version: null, install_hint: '' }, installing: false, autoInstall: true },
+  { name: 'ffmpeg', status: { available: false, path: null, version: null, install_hint: '' }, installing: false, autoInstall: true },
+  { name: 'libreoffice', status: { available: false, path: null, version: null, install_hint: '' }, installing: false, autoInstall: false },
 ])
 
 const diagnostic = ref({
@@ -107,40 +93,9 @@ const diagnostic = ref({
   os: '',
   arch: '',
   qpdf: null,
+  poppler: null,
   ffmpeg: null,
 })
-
-const exportOptions = ref(['templates', 'dictionaries', 'parties'])
-
-async function handleExport() {
-  const { save } = await import('@tauri-apps/plugin-dialog')
-  const path = await save({
-    filters: [{ name: 'Docsy Bundle', extensions: ['docsybundle'] }],
-    defaultPath: `Docsy-Bundle-${new Date().toISOString().slice(0, 10)}.docsybundle`,
-  })
-  if (!path) return
-  const options = {}
-  for (const opt of exportOptions.value) options[opt] = true
-  const res = await tauriCallSafe('export_bundle', { path, options })
-  if (res.ok) {
-    console.log('Exported:', res.data)
-  }
-}
-
-async function handleImport() {
-  const { open } = await import('@tauri-apps/plugin-dialog')
-  const selected = await open({
-    filters: [{ name: 'Docsy Bundle', extensions: ['docsybundle'] }],
-  })
-  if (!selected) return
-  const res = await tauriCallSafe('import_bundle', {
-    path: selected,
-    options: { templates: true, dictionaries: true, parties: true },
-  })
-  if (res.ok) {
-    console.log('Imported:', res.data)
-  }
-}
 
 async function loadSettings() {
   const result = await tauriCallSafe('get_app_settings')
@@ -150,7 +105,8 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
-  await tauriCallSafe('set_app_settings', { settings: settings.value })
+  const result = await tauriCallSafe('set_app_settings', { settings: settings.value })
+  result.ok ? ElMessage.success('设置已保存') : ElMessage.error(result.error || '保存设置失败')
 }
 
 async function checkTools() {
@@ -172,8 +128,13 @@ async function loadDiagnostic() {
 async function installTool(name) {
   const tool = tools.find(t => t.name === name)
   if (tool) tool.installing = true
-  await tauriCallSafe('install_external_tool', { toolName: name })
-  await checkTools()
+  const result = await tauriCallSafe('install_external_tool', { toolName: name })
+  if (result.ok) {
+    ElMessage.success(result.data || '安装完成')
+    await checkTools()
+  } else {
+    ElMessage.error(result.error || '安装失败')
+  }
   if (tool) tool.installing = false
 }
 

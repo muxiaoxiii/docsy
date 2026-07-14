@@ -267,10 +267,10 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
             continue;
         }
 
-        let group_output = evidence_dir.join(format!("{}.pdf", group_name));
+        let group_output = evidence_dir.join(format!("{}.pdf", safe_file_stem(group_name)));
         merge_pdfs_with_qpdf(&qpdf_bin, &pdf_paths, &group_output)?;
 
-        let page_count = qpdf_page_count(&qpdf_bin, &group_output.display().to_string());
+        let page_count = qpdf_page_count(&qpdf_bin, &group_output.display().to_string())?;
 
         results.push(serde_json::json!({
             "groupId": group_id,
@@ -396,19 +396,17 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
     Ok(())
 }
 
-fn qpdf_page_count(qpdf_bin: &Path, path: &str) -> u32 {
-    std::process::Command::new(qpdf_bin)
+fn qpdf_page_count(qpdf_bin: &Path, path: &str) -> Result<u32> {
+    let output = std::process::Command::new(qpdf_bin)
         .arg("--show-npages")
         .arg(path)
-        .output()
-        .ok()
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .trim()
-                .parse::<u32>()
-                .ok()
-        })
-        .unwrap_or(0)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("qpdf 读取页数失败 {}: {}", path, stderr.trim());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.trim().parse::<u32>()?)
 }
 
 fn apply_identity_rename(
@@ -446,7 +444,13 @@ fn apply_overlay_batch(
     let init_seq = config
         .header
         .as_ref()
-        .and_then(|h| if h.content == "sequence" { h.start_number } else { None })
+        .and_then(|h| {
+            if h.content == "sequence" {
+                h.start_number
+            } else {
+                None
+            }
+        })
         .unwrap_or(1);
 
     let mut result = Vec::new();
@@ -457,9 +461,15 @@ fn apply_overlay_batch(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("page");
-        let output = overlay_dir.join(format!("{}_overlay.pdf", stem));
+        let output = overlay_dir.join(format!("{}_overlay.pdf", safe_file_stem(stem)));
 
-        global_seq = apply_overlay_single(qpdf_bin, input, &output.display().to_string(), config, global_seq)?;
+        global_seq = apply_overlay_single(
+            qpdf_bin,
+            input,
+            &output.display().to_string(),
+            config,
+            global_seq,
+        )?;
         result.push(output.display().to_string());
     }
 
@@ -473,13 +483,9 @@ fn apply_overlay_single(
     config: &OverlayConfig,
     mut seq: u32,
 ) -> Result<u32> {
-    let page_count = qpdf_page_count(qpdf_bin, input);
-    if page_count == 0 {
-        fs::copy(input, output)?;
-        return Ok(seq);
-    }
+    let page_count = qpdf_page_count(qpdf_bin, input)?;
 
-    let dims = qpdf_all_page_dimensions(qpdf_bin, input);
+    let dims = qpdf_all_page_dimensions(input);
     let default_dim = (595.276, 841.89);
 
     let mut overlay_pages: Vec<printpdf::PdfPage> = Vec::new();
@@ -488,7 +494,9 @@ fn apply_overlay_single(
         let page_num = page_idx + 1;
         let (width_pt, height_pt) = dims.get(page_idx as usize).copied().unwrap_or(default_dim);
 
-        let overlay_ops = build_overlay_ops(config, input, page_num, page_count, seq, width_pt, height_pt);
+        let overlay_ops = build_overlay_ops(
+            config, input, page_num, page_count, seq, width_pt, height_pt,
+        );
 
         if !overlay_ops.is_empty() {
             use printpdf::*;
@@ -500,7 +508,10 @@ fn apply_overlay_single(
             overlay_pages.push(page);
         }
 
-        if matches!(config.header.as_ref().map(|h| h.content.as_str()), Some("sequence")) {
+        if matches!(
+            config.header.as_ref().map(|h| h.content.as_str()),
+            Some("sequence")
+        ) {
             seq += 1;
         }
     }
@@ -511,10 +522,10 @@ fn apply_overlay_single(
     }
 
     let overlay_bytes = create_overlay_pdf_multi(overlay_pages)?;
-    let temp_overlay = Path::new(output)
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("_overlay_temp.pdf");
+    let temp_overlay = unique_temp_pdf(
+        Path::new(output).parent().unwrap_or(Path::new(".")),
+        "_overlay_temp",
+    );
     fs::write(&temp_overlay, &overlay_bytes)?;
 
     let status = std::process::Command::new(qpdf_bin)
@@ -525,12 +536,13 @@ fn apply_overlay_single(
         .arg(output)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()?;
+        .status();
 
     let _ = fs::remove_file(&temp_overlay);
+    let status = status?;
 
     if !status.success() {
-        fs::copy(input, output)?;
+        anyhow::bail!("qpdf overlay 失败: {}", input);
     }
 
     Ok(seq)
@@ -549,14 +561,8 @@ fn build_overlay_ops(
 
     let mut ops: Vec<Op> = Vec::new();
 
-    let has_header = config
-        .header
-        .as_ref()
-        .map_or(false, |h| h.enabled);
-    let has_footer = config
-        .footer
-        .as_ref()
-        .map_or(false, |f| f.enabled);
+    let has_header = config.header.as_ref().is_some_and(|h| h.enabled);
+    let has_footer = config.footer.as_ref().is_some_and(|f| f.enabled);
 
     if !has_header && !has_footer {
         return ops;
@@ -588,10 +594,7 @@ fn build_overlay_ops(
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_string(),
-                "custom" => header
-                    .custom_text
-                    .clone()
-                    .unwrap_or_default(),
+                "custom" => header.custom_text.clone().unwrap_or_default(),
                 "sequence" => format!("{}", seq),
                 _ => String::new(),
             };
@@ -650,39 +653,59 @@ fn create_overlay_pdf_multi(pages: Vec<printpdf::PdfPage>) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn qpdf_all_page_dimensions(qpdf_bin: &Path, path: &str) -> Vec<(f64, f64)> {
-    let output = match std::process::Command::new(qpdf_bin)
-        .arg("--show-pages")
-        .arg("--json")
-        .arg(path)
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
-    };
-
-    let json: serde_json::Value = match serde_json::from_slice(&output.stdout) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-
-    let pages = match json["pages"].as_array() {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-
-    pages
-        .iter()
-        .filter_map(|page| {
-            let mb = page["mediaBox"].as_array()?;
-            if mb.len() < 4 {
-                return None;
-            }
-            let x1 = mb[0].as_f64()?;
-            let y1 = mb[1].as_f64()?;
-            let x2 = mb[2].as_f64()?;
-            let y2 = mb[3].as_f64()?;
-            Some((x2 - x1, y2 - y1))
+fn qpdf_all_page_dimensions(path: &str) -> Vec<(f64, f64)> {
+    super::page_info::get_page_infos(path)
+        .map(|pages| {
+            pages
+                .into_iter()
+                .map(|page| (page.width_pt as f64, page.height_pt as f64))
+                .collect()
         })
-        .collect()
+        .unwrap_or_default()
+}
+
+fn safe_file_stem(input: &str) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric()
+            || matches!(
+                ch,
+                '\u{4e00}'..='\u{9fff}' | '-' | '_' | ' ' | '(' | ')' | '[' | ']'
+            )
+        {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches(|c| matches!(c, ' ' | '.' | '_')).trim();
+    if trimmed.is_empty() {
+        "output".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn unique_temp_pdf(dir: &Path, stem: &str) -> PathBuf {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let pid = std::process::id();
+    dir.join(format!("{stem}_{pid}_{ts}.pdf"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_file_stem_blocks_path_segments() {
+        assert_eq!(safe_file_stem("../证据1/../../x"), "证据1_______x");
+    }
+
+    #[test]
+    fn safe_file_stem_keeps_common_chinese_names() {
+        assert_eq!(safe_file_stem("证据 1（聊天记录）"), "证据 1_聊天记录");
+    }
 }

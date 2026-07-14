@@ -1,6 +1,6 @@
+use crate::external::ExternalTool;
 use anyhow::Result;
 use std::path::Path;
-use crate::external::ExternalTool;
 
 pub struct InspectResult {
     pub encrypted: bool,
@@ -71,22 +71,33 @@ pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let input_path = Path::new(input);
-    let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    std::fs::create_dir_all(output_dir)?;
+    let stem = input_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
 
     let pages = page_count(input)?;
     let mut outputs = Vec::new();
 
     for i in 1..=pages {
         let output = Path::new(output_dir).join(format!("{}-{}.pdf", stem, i));
-        let status = std::process::Command::new(&bin)
-            .arg("--split-pages")
+        let command_output = std::process::Command::new(&bin)
+            .arg("--empty")
+            .arg("--pages")
             .arg(input)
+            .arg(i.to_string())
             .arg("--")
             .arg(&output)
-            .status()?;
-        if status.success() {
-            outputs.push(output.display().to_string());
+            .output()?;
+        if !command_output.status.success() {
+            let stderr = String::from_utf8_lossy(&command_output.stderr);
+            anyhow::bail!("qpdf 拆分第 {i} 页失败: {}", stderr.trim());
         }
+        if !output.exists() {
+            anyhow::bail!("qpdf 未生成第 {i} 页输出文件");
+        }
+        outputs.push(output.display().to_string());
     }
 
     Ok(outputs)
@@ -99,6 +110,10 @@ pub fn page_count(input: &str) -> Result<u32> {
         .arg("--show-npages")
         .arg(input)
         .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("qpdf 读取页数失败: {}", stderr.trim());
+    }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let count = stdout.trim().parse::<u32>()?;
@@ -107,7 +122,10 @@ pub fn page_count(input: &str) -> Result<u32> {
 
 fn unique_output_path(input: &Path, suffix: &str) -> std::path::PathBuf {
     let parent = input.parent().unwrap_or(Path::new("."));
-    let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
     let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("pdf");
 
     let mut path = parent.join(format!("{}{}.{}", stem, suffix, ext));

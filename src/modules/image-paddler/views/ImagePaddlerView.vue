@@ -22,17 +22,29 @@
           <el-form-item label="每页张数">
             <el-select v-model="settings.layout">
               <el-option label="1 张" value="1" />
-              <el-option label="2 张" value="2" />
+              <el-option label="2 张（左右）" value="1x2" />
+              <el-option label="2 张（上下）" value="2x1" />
+              <el-option label="3 张（左右）" value="1x3" />
               <el-option label="4 张" value="4" />
+              <el-option label="6 张" value="2x3" />
+              <el-option label="9 张" value="3x3" />
               <el-option label="自定义" value="custom" />
             </el-select>
+          </el-form-item>
+
+          <el-form-item v-if="settings.layout === 'custom'" label="行列">
+            <div class="inline-controls">
+              <el-input-number v-model="settings.custom_rows" :min="1" :max="8" />
+              <span>行</span>
+              <el-input-number v-model="settings.custom_cols" :min="1" :max="8" />
+              <span>列</span>
+            </div>
           </el-form-item>
 
           <el-form-item label="缩放模式">
             <el-select v-model="settings.scale_mode">
               <el-option label="适应页面" value="fit" />
-              <el-option label="填满裁切" value="fill" />
-              <el-option label="原始大小" value="original" />
+              <el-option label="不缩放" value="original" />
             </el-select>
           </el-form-item>
 
@@ -42,6 +54,14 @@
               <el-option label="竖向" value="portrait" />
               <el-option label="横向" value="landscape" />
             </el-select>
+          </el-form-item>
+
+          <el-form-item label="页边距">
+            <el-input-number v-model="settings.margin_mm" :min="5" :max="30" :step="1" />
+          </el-form-item>
+
+          <el-form-item label="文件名">
+            <el-switch v-model="settings.show_filename" />
           </el-form-item>
 
           <el-form-item>
@@ -58,13 +78,48 @@
       <!-- Analysis Result -->
       <div class="result-panel">
         <template v-if="analysis">
+          <div v-if="generatedResult" class="generated-result">
+            <div>
+              <strong>已生成</strong>
+              <div class="output-path">{{ generatedResult.output_path }}</div>
+            </div>
+            <el-button size="small" type="primary" @click="openGeneratedOutput">打开文件</el-button>
+          </div>
+
           <div class="analysis-summary">
             <el-descriptions :column="2" border size="small">
               <el-descriptions-item label="图片数量">{{ analysis.images.length }}</el-descriptions-item>
               <el-descriptions-item label="分组数">{{ analysis.groups.length }}</el-descriptions-item>
-              <el-descriptions-item label="推荐方向">{{ analysis.recommended.orientation }}</el-descriptions-item>
-              <el-descriptions-item label="推荐布局">{{ analysis.recommended.layout }}</el-descriptions-item>
+              <el-descriptions-item label="推荐方向">{{ orientationLabel(analysis.recommended.orientation) }}</el-descriptions-item>
+              <el-descriptions-item label="推荐布局">{{ layoutLabel(analysis.recommended.layout) }}</el-descriptions-item>
+              <el-descriptions-item label="推荐缩放">{{ scaleModeLabel(analysis.recommended.scale_mode) }}</el-descriptions-item>
+              <el-descriptions-item label="推荐边距">{{ analysis.recommended.margin_mm }} mm</el-descriptions-item>
+              <el-descriptions-item label="当前方向">{{ resolvedOrientationLabel }}</el-descriptions-item>
+              <el-descriptions-item label="当前布局">{{ layoutGrid.rows }} 行 × {{ layoutGrid.cols }} 列</el-descriptions-item>
             </el-descriptions>
+            <div class="recommendation-bar">
+              <span>{{ analysis.recommended.reason }}</span>
+              <el-button size="small" type="primary" @click="applyRecommendedSettings">应用推荐参数</el-button>
+            </div>
+          </div>
+
+          <div class="preview-section">
+            <div class="section-head">
+              <h4>第一页预览</h4>
+              <span>{{ previewImages.length }} / {{ layoutGrid.rows * layoutGrid.cols }} 张</span>
+            </div>
+            <div class="page-preview-shell">
+              <div class="page-preview" :class="resolvedOrientation" :style="previewPageStyle">
+                <div class="preview-grid" :style="previewGridStyle">
+                  <div v-for="(img, idx) in previewSlots" :key="idx" class="preview-cell">
+                    <template v-if="img">
+                      <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :class="settings.scale_mode" />
+                      <div class="preview-name">{{ fileName(img.path) }}</div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Groups -->
@@ -81,8 +136,8 @@
             <h4>图片列表 ({{ analysis.images.length }})</h4>
             <div class="image-grid">
               <div v-for="(img, idx) in analysis.images.slice(0, 50)" :key="idx" class="image-thumb">
-                <div class="thumb-placeholder">{{ idx + 1 }}</div>
-                <span class="thumb-name">{{ img.path.split('/').pop() }}</span>
+                <img :src="imageSrc(img.path)" :alt="fileName(img.path)" class="thumb-image" />
+                <span class="thumb-name">{{ fileName(img.path) }}</span>
                 <span class="thumb-size">{{ img.width }}×{{ img.height }}</span>
               </div>
               <div v-if="analysis.images.length > 50" class="more-images">
@@ -98,28 +153,57 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { computed, ref, reactive } from 'vue'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
+import { convertFileSrc } from '@tauri-apps/api/core'
+import { ElMessage } from 'element-plus'
 
 const folder = ref('')
 const analyzing = ref(false)
 const generating = ref(false)
 const analysis = ref(null)
+const generatedResult = ref(null)
 
 const settings = reactive({
-  output_format: 'docx',
-  layout: '4',
+  output_format: 'pdf',
+  layout: '2x1',
+  custom_rows: 2,
+  custom_cols: 2,
   scale_mode: 'fit',
   orientation: 'auto',
   dpi: 300,
+  margin_mm: 12,
+  show_filename: true,
 })
+
+const layoutGrid = computed(() => parseLayout(settings.layout, settings.custom_rows, settings.custom_cols))
+const resolvedOrientation = computed(() => {
+  if (settings.orientation !== 'auto') return settings.orientation
+  return analysis.value?.recommended?.orientation || 'portrait'
+})
+const resolvedOrientationLabel = computed(() => resolvedOrientation.value === 'landscape' ? '横向' : '竖向')
+const previewImages = computed(() => (analysis.value?.images || []).slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
+const previewSlots = computed(() => {
+  const slots = [...previewImages.value]
+  while (slots.length < layoutGrid.value.rows * layoutGrid.value.cols) slots.push(null)
+  return slots
+})
+const previewPageStyle = computed(() => ({
+  aspectRatio: resolvedOrientation.value === 'landscape' ? '297 / 210' : '210 / 297',
+  padding: `${Math.max(8, settings.margin_mm)}px`,
+}))
+const previewGridStyle = computed(() => ({
+  gridTemplateColumns: `repeat(${layoutGrid.value.cols}, minmax(0, 1fr))`,
+  gridTemplateRows: `repeat(${layoutGrid.value.rows}, minmax(0, 1fr))`,
+}))
 
 async function selectFolder() {
   const selected = await open({ directory: true })
   if (selected) {
     folder.value = selected
     analysis.value = null
+    generatedResult.value = null
   }
 }
 
@@ -129,6 +213,8 @@ async function analyze() {
   const result = await tauriCallSafe('analyze_image_paddler_folder', { folder: folder.value })
   if (result.ok) {
     analysis.value = result.data
+  } else {
+    ElMessage.error(result.error || '图片分析失败')
   }
   analyzing.value = false
 }
@@ -140,9 +226,91 @@ async function run() {
     args: {
       folder: folder.value,
       ...settings,
+      orientation: resolvedOrientation.value,
     },
   })
+  if (result.ok) {
+    generatedResult.value = result.data
+    ElMessage.success(`已生成 ${result.data.images} 张图片，${result.data.pages} 页`)
+  } else {
+    ElMessage.error(result.error || '生成失败')
+  }
   generating.value = false
+}
+
+async function openGeneratedOutput() {
+  if (!generatedResult.value?.output_path) return
+  const result = await tauriCallSafe('open_path', { path: generatedResult.value.output_path })
+  if (!result.ok) {
+    ElMessage.error(result.error || '无法打开生成文件')
+  }
+}
+
+function parseLayout(layout, customRows, customCols) {
+  if (layout === 'custom') {
+    return {
+      rows: clampNumber(customRows, 1, 8, 2),
+      cols: clampNumber(customCols, 1, 8, 2),
+    }
+  }
+  if (String(layout).includes('x')) {
+    const [rows, cols] = String(layout).split('x').map(Number)
+    return {
+      rows: clampNumber(rows, 1, 8, 2),
+      cols: clampNumber(cols, 1, 8, 2),
+    }
+  }
+  const count = clampNumber(Number(layout), 1, 64, 4)
+  if (count === 1) return { rows: 1, cols: 1 }
+  if (count === 2) return { rows: 2, cols: 1 }
+  if (count === 3) return { rows: 1, cols: 3 }
+  if (count === 4) return { rows: 2, cols: 2 }
+  const cols = Math.ceil(Math.sqrt(count))
+  return { rows: Math.ceil(count / cols), cols }
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(max, Math.max(min, Math.round(number)))
+}
+
+function imageSrc(path) {
+  return convertFileSrc(path)
+}
+
+function fileName(path) {
+  return String(path || '').split('/').pop() || path
+}
+
+function applyRecommendedSettings() {
+  const recommended = analysis.value?.recommended
+  if (!recommended) return
+  settings.orientation = recommended.orientation || 'auto'
+  settings.layout = recommended.layout || '2x1'
+  settings.scale_mode = recommended.scale_mode || 'fit'
+  settings.margin_mm = Number(recommended.margin_mm || 12)
+  settings.show_filename = recommended.show_filename !== false
+  ElMessage.success('已应用推荐参数')
+}
+
+function orientationLabel(value) {
+  if (value === 'landscape') return '横向'
+  if (value === 'portrait') return '竖向'
+  return '自动'
+}
+
+function layoutLabel(value) {
+  const grid = parseLayout(value, settings.custom_rows, settings.custom_cols)
+  if (value === '1') return '1 张'
+  if (value === '1x2') return '2 张（左右）'
+  if (value === '2x1') return '2 张（上下）'
+  return `${grid.rows} 行 × ${grid.cols} 列`
+}
+
+function scaleModeLabel(value) {
+  if (value === 'original') return '不缩放'
+  return '适应页面'
 }
 </script>
 
@@ -181,6 +349,16 @@ async function run() {
   margin-top: 4px;
 }
 
+.inline-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-controls :deep(.el-input-number) {
+  width: 82px;
+}
+
 .result-panel {
   flex: 1;
   overflow-y: auto;
@@ -188,6 +366,131 @@ async function run() {
 
 .analysis-summary {
   margin-bottom: 16px;
+}
+
+.recommendation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d9ecff;
+  background: #f4f9ff;
+  border-radius: 4px;
+  color: #606266;
+  font-size: 12px;
+}
+
+.preview-section {
+  margin-bottom: 18px;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.section-head h4 {
+  margin: 0;
+  font-size: 13px;
+  color: #303133;
+}
+
+.page-preview-shell {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+}
+
+.page-preview {
+  width: min(100%, 420px);
+  background: #fff;
+  border: 1px solid #dcdfe6;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.10);
+}
+
+.page-preview.landscape {
+  width: min(100%, 520px);
+}
+
+.preview-grid {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.preview-cell {
+  min-width: 0;
+  min-height: 0;
+  border: 1px dashed #dcdfe6;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.preview-cell img {
+  max-width: 100%;
+  max-height: calc(100% - 20px);
+}
+
+.preview-cell img.fit {
+  width: 100%;
+  height: calc(100% - 20px);
+  object-fit: contain;
+}
+
+.preview-cell img.original {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  transform: scale(0.55);
+}
+
+.preview-name {
+  width: 100%;
+  min-height: 20px;
+  line-height: 20px;
+  padding: 0 4px;
+  color: #606266;
+  font-size: 11px;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.generated-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #f5f7fa;
+  font-size: 13px;
+}
+
+.output-path {
+  margin-top: 4px;
+  color: #606266;
+  word-break: break-all;
+  font-size: 12px;
 }
 
 .groups-section {
@@ -225,17 +528,14 @@ async function run() {
   border-radius: 4px;
 }
 
-.thumb-placeholder {
-  width: 60px;
-  height: 60px;
+.thumb-image {
+  width: 72px;
+  height: 72px;
   margin: 0 auto 4px;
-  background: #e4e7ed;
   border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  color: #909399;
+  display: block;
+  object-fit: cover;
+  background: #e4e7ed;
 }
 
 .thumb-name {

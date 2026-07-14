@@ -1,22 +1,3 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AppSettings {
-    pub history_max: usize,
-    pub menu_visibility: std::collections::HashMap<String, bool>,
-    pub libreoffice_path: Option<String>,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            history_max: 50,
-            menu_visibility: std::collections::HashMap::new(),
-            libreoffice_path: None,
-        }
-    }
-}
-
 #[tauri::command]
 pub fn get_app_settings() -> Result<crate::services::history::AppSettings, String> {
     crate::services::history::get_settings().map_err(|e| e.to_string())

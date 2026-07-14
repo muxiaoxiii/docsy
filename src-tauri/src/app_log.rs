@@ -75,20 +75,12 @@ pub fn write_frontend(entry: FrontendLogEntry) -> Result<(), String> {
     write_result(&entry.level, &entry.target, &entry.message, entry.context)
 }
 
-pub fn debug(target: &str, message: &str, context: Value) {
-    write("debug", target, message, Some(context));
-}
-
 pub fn info(target: &str, message: &str, context: Value) {
     write("info", target, message, Some(context));
 }
 
 pub fn error(target: &str, message: &str, context: Value) {
     write("error", target, message, Some(context));
-}
-
-pub fn trace(target: &str, message: &str, context: Value) {
-    write("trace", target, message, Some(context));
 }
 
 pub fn list_log_files() -> Vec<PathBuf> {

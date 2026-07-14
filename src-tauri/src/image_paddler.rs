@@ -41,6 +41,10 @@ pub struct RecommendedSettings {
     pub orientation: String,
     pub layout: String,
     pub dpi: u32,
+    pub scale_mode: String,
+    pub margin_mm: f64,
+    pub show_filename: bool,
+    pub reason: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +55,10 @@ pub struct RunArgs {
     pub orientation: String,
     pub dpi: u32,
     pub scale_mode: String,
+    #[serde(default)]
+    pub custom_rows: Option<usize>,
+    #[serde(default)]
+    pub custom_cols: Option<usize>,
     #[serde(default)]
     pub margin_mm: Option<f64>,
     #[serde(default)]
@@ -69,12 +77,22 @@ struct LayoutGrid {
     cols: usize,
 }
 
-fn parse_layout(layout: &str, _image_count: usize) -> LayoutGrid {
+fn parse_layout(
+    layout: &str,
+    custom_rows: Option<usize>,
+    custom_cols: Option<usize>,
+) -> LayoutGrid {
+    if layout == "custom" {
+        return LayoutGrid {
+            rows: custom_rows.unwrap_or(2).clamp(1, 8),
+            cols: custom_cols.unwrap_or(2).clamp(1, 8),
+        };
+    }
     if layout.contains('x') {
         let parts: Vec<&str> = layout.split('x').collect();
         if parts.len() == 2 {
-            let rows = parts[0].parse::<usize>().unwrap_or(1);
-            let cols = parts[1].parse::<usize>().unwrap_or(1);
+            let rows = parts[0].parse::<usize>().unwrap_or(1).clamp(1, 8);
+            let cols = parts[1].parse::<usize>().unwrap_or(1).clamp(1, 8);
             return LayoutGrid { rows, cols };
         }
     }
@@ -84,9 +102,9 @@ fn parse_layout(layout: &str, _image_count: usize) -> LayoutGrid {
         "3" => LayoutGrid { rows: 1, cols: 3 },
         "4" => LayoutGrid { rows: 2, cols: 2 },
         _ => {
-            let n = layout.parse::<usize>().unwrap_or(4);
+            let n = layout.parse::<usize>().unwrap_or(4).clamp(1, 64);
             let cols = (n as f64).sqrt().ceil() as usize;
-            let rows = (n + cols - 1) / cols;
+            let rows = n.div_ceil(cols);
             LayoutGrid { rows, cols }
         }
     }
@@ -185,8 +203,12 @@ fn recommend_settings(images: &[ImageInfo]) -> RecommendedSettings {
     if images.is_empty() {
         return RecommendedSettings {
             orientation: "portrait".into(),
-            layout: "2x2".into(),
+            layout: "2x1".into(),
             dpi: 300,
+            scale_mode: "fit".into(),
+            margin_mm: 12.0,
+            show_filename: true,
+            reason: "未找到图片时使用保守的 A4 证据排版参数".into(),
         };
     }
 
@@ -197,26 +219,77 @@ fn recommend_settings(images: &[ImageInfo]) -> RecommendedSettings {
 
     let median_w = widths[widths.len() / 2] as f64;
     let median_h = heights[heights.len() / 2] as f64;
-
-    let orientation = if median_w > median_h * 1.2 {
-        "landscape"
+    let aspect = if median_h > 0.0 {
+        median_w / median_h
     } else {
-        "portrait"
+        1.0
+    };
+    let native_w_mm = median_w * 25.4 / 300.0;
+    let native_h_mm = median_h * 25.4 / 300.0;
+    let original_size_is_printable = native_w_mm >= 120.0 && native_h_mm >= 65.0;
+    let original_fits_two_up =
+        native_w_mm <= 186.0 && native_h_mm <= 126.0 && original_size_is_printable;
+    let scale_mode = if original_fits_two_up {
+        "original"
+    } else {
+        "fit"
     };
 
-    let avg_pixels = median_w * median_h;
-    let layout = if avg_pixels > 2_000_000.0 {
-        "1"
-    } else if avg_pixels > 500_000.0 {
-        "2x2"
+    let (orientation, layout, reason) = if images.len() == 1 {
+        let orientation = if aspect >= 1.15 {
+            "landscape"
+        } else {
+            "portrait"
+        };
+        (
+            orientation,
+            "1",
+            "只有 1 张图片，推荐一页一张，便于作为单独证据页打印",
+        )
+    } else if aspect >= 1.25 {
+        if median_w >= 1200.0 && median_h >= 650.0 {
+            (
+                "portrait",
+                "2x1",
+                "检测到横向视频截图，推荐 A4 竖页上下排 2 张，能保持接近整页宽度并节省页数",
+            )
+        } else {
+            (
+                "landscape",
+                "1",
+                "横向截图分辨率偏低，推荐横向 A4 一页一张以优先保证可读性",
+            )
+        }
+    } else if aspect <= 0.8 {
+        if median_w >= 650.0 && median_h >= 1200.0 {
+            (
+                "landscape",
+                "1x2",
+                "检测到竖向截图，推荐 A4 横页左右排 2 张，能保持较大的显示高度",
+            )
+        } else {
+            (
+                "portrait",
+                "1",
+                "竖向截图分辨率偏低，推荐竖向 A4 一页一张以优先保证可读性",
+            )
+        }
     } else {
-        "2x3"
+        (
+            "portrait",
+            "2x1",
+            "图片比例接近方形或普通截图，推荐 A4 竖页上下排 2 张，兼顾清晰度和页数",
+        )
     };
 
     RecommendedSettings {
         orientation: orientation.into(),
         layout: layout.into(),
         dpi: 300,
+        scale_mode: scale_mode.into(),
+        margin_mm: 12.0,
+        show_filename: true,
+        reason: reason.into(),
     }
 }
 
@@ -238,12 +311,17 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
         anyhow::bail!("未找到图片文件");
     }
 
-    let grid = parse_layout(&args.layout, images.len());
+    let grid = parse_layout(&args.layout, args.custom_rows, args.custom_cols);
     let per_page = grid.rows * grid.cols;
     let margin_mm = args.margin_mm.unwrap_or(15.0);
     let show_filename = args.show_filename.unwrap_or(true);
+    let resolved_orientation = if args.orientation == "auto" {
+        recommend_settings(&images).orientation
+    } else {
+        args.orientation.clone()
+    };
 
-    let (page_w, page_h) = if args.orientation == "landscape" {
+    let (page_w, page_h) = if resolved_orientation == "landscape" {
         (A4_HEIGHT_MM, A4_WIDTH_MM)
     } else {
         (A4_WIDTH_MM, A4_HEIGHT_MM)
@@ -256,11 +334,15 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     let filename_reserve = if show_filename { 6.0 } else { 0.0 };
     let image_cell_h = cell_h - filename_reserve;
 
-    let total_pages = (images.len() + per_page - 1) / per_page;
+    let total_pages = images.len().div_ceil(per_page);
 
     let output_dir = Path::new(&args.folder).join("_docsy_image_out");
     std::fs::create_dir_all(&output_dir)?;
-    let ext = if args.output_format == "pdf" { "pdf" } else { "docx" };
+    let ext = if args.output_format == "pdf" {
+        "pdf"
+    } else {
+        "docx"
+    };
     let output_path = output_dir.join(format!("image_paddler_output.{}", ext));
 
     match args.output_format.as_str() {
@@ -312,28 +394,27 @@ fn compute_placement(
     let native_w_pt = img_w as f64 * 72.0 / dpi as f64;
     let native_h_pt = img_h as f64 * 72.0 / dpi as f64;
 
-    let (draw_w, draw_h) = match scale_mode {
-        "original" => (native_w_pt, native_h_pt),
-        "fill" => {
-            let scale_x = cell_w_pt / native_w_pt;
-            let scale_y = cell_h_pt / native_h_pt;
-            let scale = scale_x.max(scale_y);
-            (native_w_pt * scale, native_h_pt * scale)
+    let scale = match scale_mode {
+        "original" => {
+            let fit_scale = (cell_w_pt / native_w_pt).min(cell_h_pt / native_h_pt);
+            fit_scale.min(1.0)
         }
         _ => {
             let scale_x = cell_w_pt / native_w_pt;
             let scale_y = cell_h_pt / native_h_pt;
-            let scale = scale_x.min(scale_y);
-            (native_w_pt * scale, native_h_pt * scale)
+            scale_x.min(scale_y)
         }
     };
 
-    let final_w = draw_w.min(cell_w_pt);
-    let final_h = draw_h.min(cell_h_pt);
-
-    (final_w, final_h, native_w_pt, native_h_pt)
+    (
+        native_w_pt * scale,
+        native_h_pt * scale,
+        native_w_pt,
+        native_h_pt,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_pdf(
     images: &[ImageInfo],
     output_path: &Path,
@@ -355,8 +436,7 @@ fn generate_pdf(
     let per_page = grid.rows * grid.cols;
     let font = BuiltinFont::Helvetica;
 
-    let mut page_idx = 0;
-    for chunk in images.chunks(per_page) {
+    for (page_idx, chunk) in images.chunks(per_page).enumerate() {
         let mut ops: Vec<Op> = Vec::new();
 
         for (i, img_info) in chunk.iter().enumerate() {
@@ -364,18 +444,26 @@ fn generate_pdf(
             let col = i % grid.cols;
 
             let cell_x_mm = margin_mm + col as f64 * cell_w_mm;
-            let cell_y_mm = page_h_mm - margin_mm - (row as f64 + 1.0) * (image_cell_h_mm + filename_reserve_mm);
+            let cell_y_mm = page_h_mm
+                - margin_mm
+                - (row as f64 + 1.0) * (image_cell_h_mm + filename_reserve_mm);
 
             let img = ::image::open(&img_info.path).map_err(|e| anyhow::anyhow!("{}", e))?;
-            let raw_image = RawImage::from_dynamic_image(img)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let raw_image =
+                RawImage::from_dynamic_image(img).map_err(|e| anyhow::anyhow!("{}", e))?;
             let xobj_id = doc.add_image(&raw_image);
 
             let cell_w_pt = cell_w_mm * 72.0 / 25.4;
             let cell_h_pt = image_cell_h_mm * 72.0 / 25.4;
 
-            let (draw_w_pt, draw_h_pt, _nw, _nh) =
-                compute_placement(img_info.width, img_info.height, cell_w_pt, cell_h_pt, scale_mode, dpi);
+            let (draw_w_pt, draw_h_pt, _nw, _nh) = compute_placement(
+                img_info.width,
+                img_info.height,
+                cell_w_pt,
+                cell_h_pt,
+                scale_mode,
+                dpi,
+            );
 
             let offset_x_pt = (cell_w_pt - draw_w_pt) / 2.0;
             let offset_y_pt = (cell_h_pt - draw_h_pt) / 2.0;
@@ -427,18 +515,13 @@ fn generate_pdf(
             }
         }
 
-        let page = PdfPage::new(
-            Mm(page_w_mm as f32),
-            Mm(page_h_mm as f32),
-            ops,
-        );
+        let page = PdfPage::new(Mm(page_w_mm as f32), Mm(page_h_mm as f32), ops);
 
         if page_idx == 0 {
             doc.with_pages(vec![page]);
         } else {
             doc.pages.push(page);
         }
-        page_idx += 1;
     }
 
     let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
@@ -446,6 +529,7 @@ fn generate_pdf(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_docx(
     images: &[ImageInfo],
     output_path: &Path,
@@ -462,25 +546,25 @@ fn generate_docx(
 ) -> Result<()> {
     let buf = std::io::Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(buf);
-    let options = zip::write::FileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored);
+    let options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
     let per_page = grid.rows * grid.cols;
-    let page_w_emu = (page_w_mm * 914400.0 / 25.4) as u64;
-    let page_h_emu = (page_h_mm * 914400.0 / 25.4) as u64;
-    let margin_l_emu = (margin_mm * 914400.0 / 25.4) as u64;
-    let margin_r_emu = margin_l_emu;
-    let margin_t_emu = margin_l_emu;
-    let margin_b_emu = margin_l_emu;
+    let page_w_twips = (page_w_mm * 1440.0 / 25.4) as u64;
+    let page_h_twips = (page_h_mm * 1440.0 / 25.4) as u64;
+    let margin_l_twips = (margin_mm * 1440.0 / 25.4) as u64;
+    let margin_r_twips = margin_l_twips;
+    let margin_t_twips = margin_l_twips;
+    let margin_b_twips = margin_l_twips;
 
-    let mut media_entries: Vec<(String, Vec<u8>, String)> = Vec::new();
+    let mut media_entries: Vec<(String, Vec<u8>, String, String)> = Vec::new();
     let mut image_idx = 0usize;
 
     let mut body_xml = String::new();
 
     for chunk in images.chunks(per_page) {
         let mut table_xml = String::new();
-        table_xml.push_str(&format!(
+        table_xml.push_str(
             "<w:tbl><w:tblPr>\
 <w:tblW w:w=\"0\" w:type=\"auto\"/>\
 <w:tblBorders><w:top w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
@@ -489,8 +573,8 @@ fn generate_docx(
 <w:right w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
 <w:insideH w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
 <w:insideV w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
-</w:tblBorders></w:tblPr>"
-        ));
+</w:tblBorders></w:tblPr>",
+        );
 
         for row_idx in 0..grid.rows {
             table_xml.push_str("<w:tr>");
@@ -502,8 +586,9 @@ fn generate_docx(
                     let ext = Path::new(&img_info.path)
                         .extension()
                         .and_then(|e| e.to_str())
-                        .unwrap_or("png");
-                    let content_type = match ext.to_lowercase().as_str() {
+                        .unwrap_or("png")
+                        .to_ascii_lowercase();
+                    let content_type = match ext.as_str() {
                         "jpg" | "jpeg" => "image/jpeg",
                         "png" => "image/png",
                         "webp" => "image/webp",
@@ -514,12 +599,23 @@ fn generate_docx(
 
                     image_idx += 1;
                     let media_name = format!("image{}.{}", image_idx, ext);
-                    media_entries.push((media_name.clone(), img_data, content_type.to_string()));
+                    media_entries.push((
+                        media_name.clone(),
+                        img_data,
+                        content_type.to_string(),
+                        ext.clone(),
+                    ));
 
                     let cell_w_pt = cell_w_mm * 72.0 / 25.4;
                     let cell_h_pt = image_cell_h_mm * 72.0 / 25.4;
-                    let (draw_w_pt, draw_h_pt, _, _) =
-                        compute_placement(img_info.width, img_info.height, cell_w_pt, cell_h_pt, scale_mode, dpi);
+                    let (draw_w_pt, draw_h_pt, _, _) = compute_placement(
+                        img_info.width,
+                        img_info.height,
+                        cell_w_pt,
+                        cell_h_pt,
+                        scale_mode,
+                        dpi,
+                    );
                     let draw_w_emu = (draw_w_pt * 914400.0 / 72.0) as u64;
                     let draw_h_emu = (draw_h_pt * 914400.0 / 72.0) as u64;
 
@@ -527,11 +623,9 @@ fn generate_docx(
                         .file_name()
                         .and_then(|s| s.to_str())
                         .unwrap_or("");
-                    let escaped_name = crate::docx::utils::xml_escape(name);
+                    let escaped_name = xml_escape(name);
 
-                    table_xml.push_str(&format!(
-                        "<w:tc><w:tcPr><w:tcW w:w=\"0\" w:type=\"auto\"/></w:tcPr>"
-                    ));
+                    table_xml.push_str("<w:tc><w:tcPr><w:tcW w:w=\"0\" w:type=\"auto\"/></w:tcPr>");
                     table_xml.push_str(&format!(
                         "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing>\
 <wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">\
@@ -544,10 +638,13 @@ fn generate_docx(
 <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{}\" cy=\"{}\"/></a:xfrm>\
 <a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\
 </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>",
-                        draw_w_emu, draw_h_emu,
-                        image_idx, escaped_name,
+                        draw_w_emu,
+                        draw_h_emu,
                         image_idx,
-                        draw_w_emu, draw_h_emu
+                        escaped_name,
+                        image_idx,
+                        draw_w_emu,
+                        draw_h_emu
                     ));
 
                     if show_filename {
@@ -559,7 +656,9 @@ fn generate_docx(
 
                     table_xml.push_str("</w:tc>");
                 } else {
-                    table_xml.push_str("<w:tc><w:tcPr><w:tcW w:w=\"0\" w:type=\"auto\"/></w:tcPr><w:p/></w:tc>");
+                    table_xml.push_str(
+                        "<w:tc><w:tcPr><w:tcW w:w=\"0\" w:type=\"auto\"/></w:tcPr><w:p/></w:tc>",
+                    );
                 }
             }
             table_xml.push_str("</w:tr>");
@@ -576,7 +675,7 @@ fn generate_docx(
 </Relationships>"#);
 
     let mut media_rels = String::new();
-    for (i, (media_name, _, _ct)) in media_entries.iter().enumerate() {
+    for (i, (media_name, _, _ct, _ext)) in media_entries.iter().enumerate() {
         media_rels.push_str(&format!(
             "<Relationship Id=\"rId{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/{}\"/>",
             i + 1, media_name
@@ -584,17 +683,19 @@ fn generate_docx(
     }
 
     let mut content_types_xml = String::new();
-    content_types_xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    content_types_xml.push_str(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-<Default Extension="xml" ContentType="application/xml"/>"#);
+<Default Extension="xml" ContentType="application/xml"/>"#,
+    );
     let mut seen_ext: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for (_, _, ct) in &media_entries {
-        let ext_part = ct.split('/').last().unwrap_or("png");
-        if seen_ext.insert(ext_part.to_string()) {
+    for (_, _, ct, ext) in &media_entries {
+        if seen_ext.insert(ext.clone()) {
             content_types_xml.push_str(&format!(
                 "<Default Extension=\"{}\" ContentType=\"{}\"/>",
-                ext_part, ct
+                xml_escape(ext),
+                ct
             ));
         }
     }
@@ -608,16 +709,20 @@ fn generate_docx(
             xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
 <w:body>
+{}
 <w:sectPr>
 <w:pgSz w:w=\"{}\" w:h=\"{}\"/>
 <w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/>
 </w:sectPr>
-{}
 </w:body>
 </w:document>"#,
-        page_w_emu, page_h_emu,
-        margin_t_emu, margin_r_emu, margin_b_emu, margin_l_emu,
-        body_xml
+        body_xml,
+        page_w_twips,
+        page_h_twips,
+        margin_t_twips,
+        margin_r_twips,
+        margin_b_twips,
+        margin_l_twips
     );
 
     let doc_rels_xml = format!(
@@ -640,8 +745,8 @@ fn generate_docx(
     zip.start_file("word/_rels/document.xml.rels", options)?;
     zip.write_all(doc_rels_xml.as_bytes())?;
 
-    for (media_name, data, _) in &media_entries {
-        zip.start_file(&format!("word/media/{}", media_name), options)?;
+    for (media_name, data, _, _) in &media_entries {
+        zip.start_file(format!("word/media/{}", media_name), options)?;
         zip.write_all(data)?;
     }
 
@@ -652,22 +757,94 @@ fn generate_docx(
     Ok(())
 }
 
+fn xml_escape(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_parse_layout_grid() {
-        let g = parse_layout("2x3", 6);
+        let g = parse_layout("2x3", None, None);
         assert_eq!(g.rows, 2);
         assert_eq!(g.cols, 3);
     }
 
     #[test]
     fn test_parse_layout_count() {
-        let g = parse_layout("4", 8);
+        let g = parse_layout("4", None, None);
         assert_eq!(g.rows, 2);
         assert_eq!(g.cols, 2);
+    }
+
+    #[test]
+    fn test_parse_custom_layout() {
+        let g = parse_layout("custom", Some(3), Some(2));
+        assert_eq!(g.rows, 3);
+        assert_eq!(g.cols, 2);
+    }
+
+    #[test]
+    fn recommends_stacked_pages_for_landscape_video_frames() {
+        let images = vec![
+            ImageInfo {
+                path: "frame_001.jpg".into(),
+                width: 1920,
+                height: 1080,
+                file_size: 1,
+            },
+            ImageInfo {
+                path: "frame_002.jpg".into(),
+                width: 1920,
+                height: 1080,
+                file_size: 1,
+            },
+        ];
+        let rec = recommend_settings(&images);
+        assert_eq!(rec.orientation, "portrait");
+        assert_eq!(rec.layout, "2x1");
+        assert_eq!(rec.scale_mode, "original");
+    }
+
+    #[test]
+    fn recommends_side_by_side_pages_for_portrait_frames() {
+        let images = vec![
+            ImageInfo {
+                path: "phone_001.jpg".into(),
+                width: 1080,
+                height: 1920,
+                file_size: 1,
+            },
+            ImageInfo {
+                path: "phone_002.jpg".into(),
+                width: 1080,
+                height: 1920,
+                file_size: 1,
+            },
+        ];
+        let rec = recommend_settings(&images);
+        assert_eq!(rec.orientation, "landscape");
+        assert_eq!(rec.layout, "1x2");
+    }
+
+    #[test]
+    fn recommends_single_page_for_single_image() {
+        let images = vec![ImageInfo {
+            path: "single.jpg".into(),
+            width: 1280,
+            height: 720,
+            file_size: 1,
+        }];
+        let rec = recommend_settings(&images);
+        assert_eq!(rec.orientation, "landscape");
+        assert_eq!(rec.layout, "1");
     }
 
     #[test]

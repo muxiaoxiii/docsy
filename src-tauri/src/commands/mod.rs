@@ -1,54 +1,30 @@
-pub mod bundle;
-pub mod doc_gen;
-pub mod dictionary;
 pub mod image_paddler;
 pub mod pdf;
-pub mod record;
 pub mod settings;
 pub mod system;
-pub mod template;
-pub mod template_editor;
 pub mod video;
 
 pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
     tauri::generate_handler![
-        // bundle
-        bundle::export_bundle,
-        bundle::import_bundle,
-        // doc_gen
-        doc_gen::generate_document,
-        doc_gen::preview_document,
-        // template
-        template::list_templates,
-        template::get_template_meta,
-        template::save_template_config,
-        template::delete_template,
-        template::rename_template,
-        template::pin_to_tab,
-        template::unpin_from_tab,
-        template::list_template_archives,
-        template::restore_template_archive,
-        // template_editor
-        template_editor::create_editor_session,
-        template_editor::load_editor_session,
-        template_editor::save_template,
-        // dictionary
-        dictionary::query_dictionary,
-        dictionary::recommend_values,
-        dictionary::export_dictionary_xlsx,
-        dictionary::import_dictionary_xlsx,
-        dictionary::record_field_usage,
         // pdf
         pdf::check_qpdf,
         pdf::inspect_pdf,
         pdf::unlock_pdf,
         pdf::merge_pdfs,
         pdf::split_pdf,
+        pdf::split_merged_evidence_pdf,
         pdf::scan_evidence_folder,
         pdf::build_evidence_group_pdfs,
         pdf::merge_evidence_pdfs,
         pdf::overlay_pdf_text,
         pdf::batch_overlay_pdf_text,
+        pdf::apply_evidence_pdf_rules,
+        pdf::preview_pdf_header_footer,
+        pdf::detect_pdf_header_footer,
+        pdf::inspect_merged_evidence_pdf,
+        pdf::delete_pdf_annotations,
+        pdf::delete_pdf_header_footer_artifacts,
+        pdf::render_pdf_preview,
         pdf::get_pdf_page_count,
         // image_paddler
         image_paddler::analyze_image_paddler_folder,
@@ -57,13 +33,9 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         video::check_ffmpeg,
         video::probe_video,
         video::extract_frames,
+        video::list_output_frames,
         video::try_brew_install_ffmpeg,
         video::try_brew_install_qpdf,
-        // record
-        record::save_generation_record,
-        record::list_generation_records,
-        record::read_generation_record,
-        record::delete_generation_record,
         // settings
         settings::get_app_settings,
         settings::set_app_settings,
