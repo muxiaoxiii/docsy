@@ -95,7 +95,7 @@
             </el-form-item>
 
             <el-form-item label="文件名前缀">
-              <el-input v-model="settings.filenamePrefix" placeholder="留空则使用 视频名_时间" />
+              <el-input v-model="settings.filenamePrefix" placeholder="留空则使用视频名，输出为 视频名_时间_frame_序号" />
             </el-form-item>
 
             <el-form-item label="抽帧模式">
@@ -180,28 +180,17 @@
           <p>正在抽帧...</p>
         </div>
 
-        <div v-else-if="resultImages.length > 0" class="results-grid">
-          <div
-            v-for="(img, idx) in resultImages"
-            :key="idx"
-            class="result-item"
-            @click="previewImage(img)"
-          >
-            <img :src="img.src" :alt="img.name" />
-            <div class="result-item-name">{{ img.name }}</div>
-          </div>
-        </div>
+        <ImagePreviewGrid
+          v-else-if="resultImages.length > 0"
+          class="results-preview"
+          :items="resultImages"
+          :name-resolver="frameName"
+          empty-description="暂无抽帧结果"
+        />
 
         <el-empty v-else description="选择视频并开始抽帧" :image-size="80" />
       </div>
     </div>
-
-    <!-- Image Preview Dialog -->
-    <el-dialog v-model="previewVisible" title="帧预览" width="80%" destroy-on-close>
-      <div class="preview-container">
-        <img v-if="previewSrc" :src="previewSrc" class="preview-img" />
-      </div>
-    </el-dialog>
   </div>
 </template>
 
@@ -218,6 +207,7 @@ import {
   UploadFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
 
 const ffmpegLoading = ref(true)
 const ffmpegStatus = reactive({ available: false, path: null, version: null, has_drawtext: false })
@@ -245,9 +235,6 @@ const settings = reactive({
 const extracting = ref(false)
 const extractResult = ref(null)
 const resultImages = ref([])
-
-const previewVisible = ref(false)
-const previewSrc = ref('')
 let unlistenDragDrop = null
 
 async function checkFfmpeg() {
@@ -362,7 +349,9 @@ async function extractFrames() {
     extractResult.value = res.data
     ElMessage.success(`抽帧完成，共 ${res.data.count} 帧`)
 
-    if (res.data.output_dir) {
+    if (Array.isArray(res.data.frames)) {
+      resultImages.value = res.data.frames.map(path => ({ path }))
+    } else if (res.data.output_dir) {
       await loadResultImages(res.data.output_dir)
     }
   } else {
@@ -373,23 +362,12 @@ async function extractFrames() {
 async function loadResultImages(dir) {
   const res = await tauriCallSafe('list_output_frames', { dir })
   if (res.ok && Array.isArray(res.data)) {
-    const items = await Promise.all(res.data.map(async (f) => ({
-      name: baseName(f),
-      src: await imageDataUrl(f),
-      path: f,
-    })))
-    resultImages.value = items
+    resultImages.value = res.data.map(path => ({ path }))
   }
 }
 
-function previewImage(img) {
-  previewSrc.value = img.src
-  previewVisible.value = true
-}
-
-async function imageDataUrl(path) {
-  const res = await tauriCallSafe('read_image_data_url', { path })
-  return res.ok ? res.data : ''
+function frameName(img) {
+  return baseName(img?.path || '')
 }
 
 function normalizeSelectedPath(value) {
@@ -497,42 +475,19 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.results-grid {
+.results-preview {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: 16px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
-  align-content: start;
-}
-
-.result-item {
-  border: 1px solid #e4e7ed;
-  border-radius: 6px;
   overflow: hidden;
-  cursor: pointer;
-  transition: box-shadow 0.2s;
 }
 
-.result-item:hover {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-}
-
-.result-item img {
-  width: 100%;
-  height: 120px;
-  object-fit: cover;
-  display: block;
-}
-
-.result-item-name {
-  padding: 6px 8px;
-  font-size: 11px;
-  color: #606266;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.results-preview :deep(.image-preview-scroll) {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 
 .section-block {
@@ -625,19 +580,6 @@ onBeforeUnmount(() => {
 
 .actions-block {
   padding-top: 8px;
-}
-
-.preview-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  max-height: 70vh;
-}
-
-.preview-img {
-  max-width: 100%;
-  max-height: 70vh;
-  object-fit: contain;
 }
 
 .path-picker {

@@ -218,33 +218,13 @@
           <div class="image-list">
             <div class="section-head">
               <h4>图片预览</h4>
-              <div class="preview-toolbar">
-                <span>{{ imagePageStart + 1 }}-{{ imagePageEnd }} / {{ orderedImages.length }}</span>
-                <el-select v-model="imagePageSize" size="small" class="page-size-select">
-                  <el-option label="24 张" :value="24" />
-                  <el-option label="48 张" :value="48" />
-                  <el-option label="96 张" :value="96" />
-                </el-select>
-                <el-button size="small" text @click="adjustImageZoom(-10)">-</el-button>
-                <el-slider v-model="imageZoom" :min="60" :max="180" :step="5" class="zoom-slider" />
-                <el-button size="small" text @click="adjustImageZoom(10)">+</el-button>
-                <span class="zoom-value">{{ imageZoom }}%</span>
-              </div>
             </div>
-            <div class="image-grid-scroll">
-              <div class="image-grid" :style="imageGridStyle">
-                <div v-for="(img, idx) in pagedImages" :key="img.path || idx" class="image-thumb" :style="imageThumbStyle">
-                  <img :src="imageSrc(img.path)" :alt="fileName(img.path)" class="thumb-image" :style="thumbImageStyle" />
-                  <span class="thumb-name">{{ fileName(img.path) }}</span>
-                  <span class="thumb-size">{{ img.width }}×{{ img.height }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="pager-row">
-              <el-button size="small" :disabled="imagePage <= 1" @click="imagePage -= 1">上一页</el-button>
-              <span>第 {{ imagePage }} / {{ imagePageCount }} 页</span>
-              <el-button size="small" :disabled="imagePage >= imagePageCount" @click="imagePage += 1">下一页</el-button>
-            </div>
+            <ImagePreviewGrid
+              :items="orderedImages"
+              :name-resolver="imageItemName"
+              :meta-resolver="imageItemMeta"
+              empty-description="暂无图片"
+            />
           </div>
         </template>
         <el-empty v-else :description="analyzing ? '正在分析图片...' : '选择文件夹后自动分析'" />
@@ -259,6 +239,7 @@ import { tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { ElMessage } from 'element-plus'
+import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
 
 const folder = ref('')
 const folders = ref([])
@@ -268,9 +249,6 @@ const analysis = ref(null)
 const generatedResult = ref(null)
 const previewSources = reactive({})
 const pageZoom = ref(100)
-const imageZoom = ref(100)
-const imagePage = ref(1)
-const imagePageSize = ref(24)
 let unlistenDragDrop = null
 let analyzeTimer = null
 
@@ -302,10 +280,6 @@ const resolvedOrientation = computed(() => {
 const resolvedOrientationLabel = computed(() => resolvedOrientation.value === 'landscape' ? '横向' : '竖向')
 const orderedImages = computed(() => reorderImages(analysis.value?.images || [], layoutGrid.value, settings.order_mode))
 const previewImages = computed(() => orderedImages.value.slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
-const imagePageCount = computed(() => Math.max(1, Math.ceil(orderedImages.value.length / imagePageSize.value)))
-const imagePageStart = computed(() => Math.min((imagePage.value - 1) * imagePageSize.value, orderedImages.value.length))
-const imagePageEnd = computed(() => Math.min(imagePageStart.value + imagePageSize.value, orderedImages.value.length))
-const pagedImages = computed(() => orderedImages.value.slice(imagePageStart.value, imagePageEnd.value))
 const previewSlots = computed(() => {
   const slots = [...previewImages.value]
   while (slots.length < layoutGrid.value.rows * layoutGrid.value.cols) slots.push(null)
@@ -320,18 +294,6 @@ const previewPageStyle = computed(() => ({
 const previewGridStyle = computed(() => ({
   gridTemplateColumns: `repeat(${layoutGrid.value.cols}, minmax(0, 1fr))`,
   gridTemplateRows: `repeat(${layoutGrid.value.rows}, minmax(0, 1fr))`,
-}))
-const thumbCardSize = computed(() => Math.round(112 * imageZoom.value / 100))
-const thumbImageSize = computed(() => Math.round(72 * imageZoom.value / 100))
-const imageGridStyle = computed(() => ({
-  gridTemplateColumns: `repeat(auto-fill, minmax(${thumbCardSize.value}px, 1fr))`,
-}))
-const imageThumbStyle = computed(() => ({
-  minHeight: `${thumbCardSize.value + 38}px`,
-}))
-const thumbImageStyle = computed(() => ({
-  width: `${thumbImageSize.value}px`,
-  height: `${thumbImageSize.value}px`,
 }))
 const previewCellStyle = computed(() => {
   if (!settings.border_enabled) return { borderColor: 'transparent' }
@@ -385,7 +347,6 @@ async function analyze() {
   const result = await tauriCallSafe('analyze_image_paddler_folder', { folder: folder.value, folders: folders.value })
   if (result.ok) {
     analysis.value = result.data
-    imagePage.value = 1
     await preloadVisibleImages()
   } else {
     ElMessage.error(result.error || '图片分析失败')
@@ -461,6 +422,14 @@ function fileName(path) {
     name = name.replace(/\.[^.]+$/, '')
   }
   return applyFilenameRules(name)
+}
+
+function imageItemName(img) {
+  return fileName(img?.path || '')
+}
+
+function imageItemMeta(img) {
+  return img?.width && img?.height ? `${img.width}×${img.height}` : ''
 }
 
 function applyFilenameRules(name) {
@@ -667,22 +636,13 @@ function adjustPageZoom(delta) {
   pageZoom.value = clampNumber(pageZoom.value + delta, 50, 180, 100)
 }
 
-function adjustImageZoom(delta) {
-  imageZoom.value = clampNumber(imageZoom.value + delta, 60, 180, 100)
-}
-
 async function preloadVisibleImages() {
-  const paths = [...previewImages.value, ...pagedImages.value].map(img => img.path)
+  const paths = previewImages.value.map(img => img.path)
   await preloadImages([...new Set(paths)])
 }
 
-watch([pagedImages, previewImages], () => {
+watch(previewImages, () => {
   preloadVisibleImages()
-})
-
-watch([imagePageSize, orderedImages], () => {
-  if (imagePage.value > imagePageCount.value) imagePage.value = imagePageCount.value
-  if (imagePage.value < 1) imagePage.value = 1
 })
 
 onMounted(async () => {
@@ -990,68 +950,6 @@ function scaleModeLabel(value) {
 .image-list h4 {
   margin: 0 0 8px;
   font-size: 13px;
-}
-
-.image-grid-scroll {
-  max-height: 46vh;
-  overflow: auto;
-  padding: 10px;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  background: #fafafa;
-}
-
-.image-grid {
-  display: grid;
-  gap: 8px;
-  align-items: start;
-}
-
-.image-thumb {
-  text-align: center;
-  padding: 8px;
-  background: #f5f7fa;
-  border-radius: 4px;
-}
-
-.thumb-image {
-  margin: 0 auto 4px;
-  border-radius: 4px;
-  display: block;
-  object-fit: cover;
-  background: #e4e7ed;
-}
-
-.thumb-name {
-  display: block;
-  font-size: 11px;
-  color: #606266;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thumb-size {
-  font-size: 10px;
-  color: #c0c4cc;
-}
-
-.more-images {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #909399;
-  font-size: 13px;
-}
-
-.pager-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 10px;
-  color: #606266;
-  font-size: 12px;
 }
 
 .unit-label {
