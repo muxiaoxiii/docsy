@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output};
 
 use crate::external::ExternalTool;
 
@@ -248,7 +247,7 @@ fn inspect_artifacts(input: &Path) -> Result<ArtifactSummary> {
         .arg("--object-streams=disable")
         .arg(input)
         .arg(&qdf);
-    let output = run_command_with_timeout(command, Duration::from_secs(90), "qpdf Artifact 检测")?;
+    let output = run_command_output(command, "qpdf Artifact 检测")?;
 
     if !output.status.success() {
         let _ = fs::remove_file(&qdf);
@@ -286,7 +285,7 @@ fn run_pdftotext_bbox(input: &Path, max_pages: u32) -> Result<String> {
         .arg(max_pages.max(1).to_string())
         .arg(input)
         .arg("-");
-    let output = run_command_with_timeout(command, Duration::from_secs(120), "pdftotext 检测")?;
+    let output = run_command_output(command, "pdftotext 检测")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("pdftotext 检测失败: {}", stderr.trim());
@@ -294,33 +293,10 @@ fn run_pdftotext_bbox(input: &Path, max_pages: u32) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn run_command_with_timeout(
-    mut command: Command,
-    timeout: Duration,
-    label: &str,
-) -> Result<Output> {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("启动 {label} 失败"))?;
-    let started = Instant::now();
-    loop {
-        if child
-            .try_wait()
-            .with_context(|| format!("等待 {label} 失败"))?
-            .is_some()
-        {
-            return child
-                .wait_with_output()
-                .with_context(|| format!("读取 {label} 输出失败"));
-        }
-        if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!("{label} 超时，请先减少自动识别页数或手动设置拆分页段");
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+fn run_command_output(mut command: Command, label: &str) -> Result<Output> {
+    command
+        .output()
+        .with_context(|| format!("执行 {label} 失败"))
 }
 
 fn parse_pdftotext_bbox(xml: &str) -> Result<Vec<WordBox>> {
