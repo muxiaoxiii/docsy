@@ -24,21 +24,28 @@ jobs:
             os: windows-latest
             command: npm run tauri:build:windows
             artifacts: |
-              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version: 24
 
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        run: npm ci
+        shell: bash
+        run: |
+          npm config set registry https://registry.npmjs.org/
+          npm config set audit false
+          npm config set fund false
+          for attempt in 1 2 3; do
+            npm ci && exit 0
+            sleep $((attempt * 10))
+          done
+          npm ci
 
       - name: Run frontend tests
         run: npm run test -- --run
