@@ -203,6 +203,7 @@
           </div>
           <div class="plan-actions">
             <el-button size="small" @click="addMergedImportRange">添加页段</el-button>
+            <el-button size="small" @click="selectMergedImportOutputDir">输出目录</el-button>
             <el-button size="small" @click="cancelMergedImportPlan">取消</el-button>
             <el-button size="small" type="primary" :loading="splittingMergedImport" @click="executeMergedImportPlan">
               确认拆入
@@ -452,6 +453,7 @@ import {
   createEvidenceFile,
   expandPlaceholders,
   pageRangeText,
+  parentDir,
   totalPages,
 } from '../composables/useEvidencePdfSession.js'
 import {
@@ -705,8 +707,7 @@ async function importMergedPdfAsEvidence() {
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   })
   if (!input) return
-  const outputDir = await open({ directory: true })
-  if (!outputDir) return
+  const outputDir = parentDir(input)
 
   importingMergedPdf.value = true
   try {
@@ -860,6 +861,18 @@ async function executeMergedImportPlan() {
     }
   } finally {
     splittingMergedImport.value = false
+  }
+}
+
+async function selectMergedImportOutputDir() {
+  if (!mergedImportPlan.value) return
+  const selected = await open({ directory: true })
+  if (!selected) return
+  const previousDefaultName = defaultMergedImportName(mergedImportPlan.value.outputDir, 0)
+  const first = mergedImportPlan.value.items?.[0]
+  mergedImportPlan.value.outputDir = selected
+  if (first && (!String(first.name || '').trim() || first.name === previousDefaultName || first.name === '文件1')) {
+    first.name = defaultMergedImportName(selected, 0)
   }
 }
 
