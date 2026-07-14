@@ -185,12 +185,12 @@ function ensurePdfFileName(name) {
 }
 
 export function fileName(path) {
-  return String(path || '').split('/').pop() || path
+  return String(path || '').split(/[\\/]/).pop() || path
 }
 
 export function parentDir(path) {
   const value = String(path || '')
-  const idx = value.lastIndexOf('/')
+  const idx = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\'))
   return idx >= 0 ? value.slice(0, idx) : '.'
 }
 

@@ -1,8 +1,37 @@
 <template>
   <div class="pdf-tools-view">
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
-      <el-tab-pane label="证据处理" name="evidence-workbench" lazy>
-        <EvidencePdfWorkbench />
+      <el-tab-pane label="证据处理" name="evidence" lazy>
+        <div class="evidence-shell">
+          <el-tabs v-model="evidenceTab" class="evidence-tabs">
+            <el-tab-pane label="证据合并" name="merge" lazy>
+              <EvidencePdfWorkbench workflow="merge" />
+            </el-tab-pane>
+            <el-tab-pane label="证据拆分" name="split" lazy>
+              <EvidencePdfWorkbench workflow="split" />
+            </el-tab-pane>
+            <el-tab-pane label="证据扫描" name="scan" lazy>
+              <div class="tab-content">
+                <h3>证据扫描</h3>
+                <p class="hint">扫描文件夹，按子文件夹自动分组合并 PDF</p>
+                <el-button type="primary" @click="selectEvidenceFolder">选择证据文件夹</el-button>
+                <div v-if="evidenceFolder" class="evidence-info">
+                  <p>文件夹: {{ evidenceFolder }}</p>
+                  <el-button @click="scanEvidence" :loading="scanning">扫描</el-button>
+                </div>
+                <div v-if="evidenceGroups.length" class="evidence-groups">
+                  <div v-for="group in evidenceGroups" :key="group.name" class="group-item">
+                    <h4>{{ group.name }} ({{ group.files.length }} 个文件)</h4>
+                    <div class="group-files">
+                      <span v-for="f in group.files" :key="f.path" class="group-file">{{ f.name }}</span>
+                    </div>
+                  </div>
+                  <el-button type="success" @click="buildEvidence" :loading="building">生成合并 PDF</el-button>
+                </div>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </div>
       </el-tab-pane>
 
       <el-tab-pane label="解锁" name="unlock" lazy>
@@ -25,7 +54,7 @@
       <el-tab-pane label="合并" name="merge" lazy>
         <div class="tab-content">
           <h3>PDF 合并</h3>
-          <p class="hint">将多个 PDF 合并为一个文件</p>
+          <p class="hint">将多个 PDF 简单合并为一个文件</p>
           <el-button @click="selectMergeFiles">添加 PDF 文件</el-button>
           <div class="merge-list" v-if="mergeFiles.length">
             <div v-for="(file, idx) in mergeFiles" :key="idx" class="file-item">
@@ -43,11 +72,10 @@
       <el-tab-pane label="拆分" name="split" lazy>
         <div class="tab-content split-workspace">
           <h3>PDF 拆分</h3>
-          <p class="hint">按页码范围将合并后的证据 PDF 拆回多个文件</p>
+          <p class="hint">按页码范围拆分 PDF</p>
           <div class="toolbar-row">
-            <el-button type="primary" @click="selectSplitFile">选择合并 PDF</el-button>
+            <el-button type="primary" @click="selectSplitFile">选择 PDF</el-button>
             <el-button :disabled="!splitFile" @click="selectSplitOutputDir">输出文件夹</el-button>
-            <el-button :disabled="!splitFile" @click="inspectMergedForSplit" :loading="inspectingMerged">按页眉生成页段</el-button>
             <el-button :disabled="!splitFile" @click="addSplitRange">添加页段</el-button>
           </div>
           <div v-if="splitFile" class="path-line">{{ splitFile }}</div>
@@ -55,12 +83,6 @@
 
           <div v-if="splitFile" class="split-main">
             <section class="split-list-panel">
-              <div class="split-options">
-                <el-checkbox v-model="splitCleanupHeader">拆分后删除页眉区域</el-checkbox>
-                <el-input-number v-model="splitCleanupHeaderHeightMm" :min="4" :max="60" size="small" :disabled="!splitCleanupHeader" />
-                <el-checkbox v-model="splitCleanupFooter">拆分后删除页码/页脚区域</el-checkbox>
-                <el-input-number v-model="splitCleanupFooterHeightMm" :min="4" :max="60" size="small" :disabled="!splitCleanupFooter" />
-              </div>
               <el-alert
                 v-if="splitWarnings.length"
                 type="warning"
@@ -152,28 +174,7 @@
             </section>
           </div>
           <div v-else class="split-empty">
-            <p>选择合并 PDF 后，可以翻页预览并设置每个拆分文件的起止页。</p>
-          </div>
-        </div>
-      </el-tab-pane>
-
-      <el-tab-pane label="证据扫描" name="evidence-scan" lazy>
-        <div class="tab-content">
-          <h3>证据扫描</h3>
-          <p class="hint">扫描文件夹，按子文件夹自动分组合并 PDF</p>
-          <el-button type="primary" @click="selectEvidenceFolder">选择证据文件夹</el-button>
-          <div v-if="evidenceFolder" class="evidence-info">
-            <p>文件夹: {{ evidenceFolder }}</p>
-            <el-button @click="scanEvidence" :loading="scanning">扫描</el-button>
-          </div>
-          <div v-if="evidenceGroups.length" class="evidence-groups">
-            <div v-for="group in evidenceGroups" :key="group.name" class="group-item">
-              <h4>{{ group.name }} ({{ group.files.length }} 个文件)</h4>
-              <div class="group-files">
-                <span v-for="f in group.files" :key="f.path" class="group-file">{{ f.name }}</span>
-              </div>
-            </div>
-            <el-button type="success" @click="buildEvidence" :loading="building">生成合并 PDF</el-button>
+            <p>选择 PDF 后，可以翻页预览并设置每个拆分文件的起止页。</p>
           </div>
         </div>
       </el-tab-pane>
@@ -190,7 +191,8 @@ import PdfJsPreview from '../components/PdfJsPreview.vue'
 import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 
-const activeTab = ref('evidence-workbench')
+const activeTab = ref('evidence')
+const evidenceTab = ref('merge')
 
 const unlockFiles = ref([])
 const unlocking = ref(false)
@@ -230,22 +232,19 @@ const splitOutputDir = ref('')
 const splitRanges = ref([])
 const selectedSplitRangeIndex = ref(0)
 const splittingMerged = ref(false)
-const inspectingMerged = ref(false)
-const splitCleanupHeader = ref(false)
-const splitCleanupFooter = ref(false)
-const splitCleanupHeaderHeightMm = ref(18)
-const splitCleanupFooterHeightMm = ref(18)
 const splitPreviewPage = ref(1)
 const splitTotalPages = ref(1)
-const splitInspectWarnings = ref([])
 const splitRunWarnings = ref([])
 const splitWarnings = computed(() => [
-  ...splitInspectWarnings.value,
   ...splitRangeWarnings(splitRanges.value, splitTotalPages.value),
   ...splitRunWarnings.value,
 ])
 const splitPreviewMaxPage = computed(() => Math.max(1, splitTotalPages.value || 1))
 const selectedSplitRange = computed(() => splitRanges.value[selectedSplitRangeIndex.value] || null)
+const evidenceFolder = ref('')
+const evidenceGroups = ref([])
+const scanning = ref(false)
+const building = ref(false)
 
 async function selectMergeFiles() {
   const selected = await open({
@@ -278,7 +277,6 @@ async function selectSplitFile() {
     splitFile.value = selected
     splitPreviewPage.value = 1
     splitTotalPages.value = 1
-    splitInspectWarnings.value = []
     splitRunWarnings.value = []
     const pageCount = await tauriCallSafe('get_pdf_page_count', { input: selected })
     if (pageCount.ok) {
@@ -359,35 +357,6 @@ function removeSplitRange(index) {
   selectedSplitRangeIndex.value = Math.min(selectedSplitRangeIndex.value, Math.max(0, splitRanges.value.length - 1))
 }
 
-async function inspectMergedForSplit() {
-  if (!splitFile.value || inspectingMerged.value) return
-  inspectingMerged.value = true
-  const result = await tauriCallSafe('inspect_merged_evidence_pdf', {
-    args: {
-      inputPath: splitFile.value,
-      maxPages: 2000,
-      headerZoneMm: 25,
-    },
-  })
-  if (result.ok) {
-    splitTotalPages.value = result.data.totalPages || splitTotalPages.value || 1
-    splitInspectWarnings.value = result.data.warnings || []
-    splitRunWarnings.value = []
-    splitRanges.value = (result.data.items || []).map((item, index) => ({
-      name: item.name || `文件${index + 1}`,
-      pageStart: item.pageStart,
-      pageEnd: item.pageEnd,
-    }))
-    selectedSplitRangeIndex.value = 0
-    splitRanges.value.length
-      ? ElMessage.success(`已生成 ${splitRanges.value.length} 个拆分页段`)
-      : ElMessage.warning('未识别到可用页眉，请手动添加页段')
-  } else {
-    ElMessage.error(result.error || '页眉分析失败')
-  }
-  inspectingMerged.value = false
-}
-
 async function doSplitMerged() {
   if (!splitFile.value || !splitOutputDir.value || !splitRanges.value.length) return
   const warnings = splitRangeWarnings(splitRanges.value, splitTotalPages.value)
@@ -402,10 +371,10 @@ async function doSplitMerged() {
       outputDir: splitOutputDir.value,
       items: splitRanges.value,
       cleanup: {
-        headerEnabled: splitCleanupHeader.value,
-        footerEnabled: splitCleanupFooter.value,
-        headerHeightMm: splitCleanupHeaderHeightMm.value,
-        footerHeightMm: splitCleanupFooterHeightMm.value,
+        headerEnabled: false,
+        footerEnabled: false,
+        headerHeightMm: 18,
+        footerHeightMm: 18,
       },
     },
   })
@@ -437,11 +406,6 @@ function splitRangeStatus(row) {
   return { type: 'success', text: '正常' }
 }
 
-const evidenceFolder = ref('')
-const evidenceGroups = ref([])
-const scanning = ref(false)
-const building = ref(false)
-
 async function selectEvidenceFolder() {
   const selected = await open({ directory: true })
   if (selected) evidenceFolder.value = selected
@@ -470,7 +434,7 @@ async function buildEvidence() {
 }
 
 function fileName(path) {
-  return path.split('/').pop() || path
+  return String(path || '').split(/[\\/]/).pop() || path
 }
 
 function stripPdf(name) {
@@ -490,6 +454,15 @@ function stripPdf(name) {
 .tab-content {
   padding: 16px;
   max-width: 680px;
+}
+
+.evidence-shell {
+  height: 100%;
+  min-width: 0;
+}
+
+.evidence-tabs {
+  height: 100%;
 }
 
 .split-workspace {

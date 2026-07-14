@@ -3,12 +3,12 @@
     <section class="hf-panel">
       <div class="section-head">
         <div>
-          <h3>PDF 页眉页脚</h3>
-          <p class="hint">清除、插入、编辑页眉页脚，并按合并后的总页数生成连续页码</p>
+          <h3>{{ workflowTitle }}</h3>
+          <p class="hint">{{ workflowHint }}</p>
         </div>
         <div class="section-actions">
-          <el-button :loading="importingMergedPdf" @click="importMergedPdfAsEvidence">从合并 PDF 拆入</el-button>
-          <el-button type="primary" @click="selectOverlayFiles">选择 PDF 文件</el-button>
+          <el-button v-if="workflowMode !== 'split'" type="primary" @click="selectOverlayFiles">导入单独证据 PDF</el-button>
+          <el-button v-if="workflowMode !== 'merge'" :loading="importingMergedPdf" @click="importMergedPdfAsEvidence">导入已合并证据 PDF</el-button>
         </div>
       </div>
 
@@ -42,7 +42,7 @@
       <div v-if="overlayFiles.length" class="preset-bar">
         <el-button size="small" @click="applyStandardEvidencePreset">常规证据包</el-button>
         <el-button size="small" @click="applyCleanupPreset">替换旧页眉页码</el-button>
-        <el-button size="small" @click="applySplitOnlyPreset">只生成单文件</el-button>
+        <el-button size="small" @click="applySplitOnlyPreset">仅输出单独证据文件</el-button>
       </div>
 
       <div class="rule-block">
@@ -98,7 +98,7 @@
             <el-select v-model="headerMode">
               <el-option label="不插入页眉" value="none" />
               <el-option label="文件名" value="filename" />
-              <el-option label="按表格名称" value="per_file" />
+              <el-option label="按证据列表名称" value="per_file" />
               <el-option label="自定义文本" value="custom" />
               <el-option label="序号（证据1）" value="seq" />
               <el-option label="中文序号（证据一）" value="seq_cn" />
@@ -159,7 +159,7 @@
             <label>输出模式</label>
             <el-select v-model="outputMode">
               <el-option label="单文件并合并" value="files_and_merge" />
-              <el-option label="只生成单文件" value="files_only" />
+              <el-option label="仅输出单独证据文件" value="files_only" />
               <el-option label="只生成合并 PDF" value="merge_only" />
             </el-select>
           </div>
@@ -198,8 +198,8 @@
       <div v-if="mergedImportPlan" class="merged-import-plan">
         <div class="plan-head">
           <div>
-            <div class="block-title">合并 PDF 拆入确认</div>
-            <p class="hint">先核对识别出的证据页段，确认后再拆成证据列表</p>
+            <div class="block-title">证据拆分确认</div>
+            <p class="hint">核对页段后拆成证据列表</p>
           </div>
           <div class="plan-actions">
             <el-button size="small" @click="addMergedImportRange">添加页段</el-button>
@@ -463,6 +463,25 @@ import {
 import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 
+const props = defineProps({
+  workflow: {
+    type: String,
+    default: 'all',
+  },
+})
+
+const workflowMode = computed(() => (['merge', 'split'].includes(props.workflow) ? props.workflow : 'all'))
+const workflowTitle = computed(() => {
+  if (workflowMode.value === 'merge') return '证据合并'
+  if (workflowMode.value === 'split') return '证据拆分'
+  return '证据处理'
+})
+const workflowHint = computed(() => {
+  if (workflowMode.value === 'merge') return '处理单独证据 PDF 的页眉、连续页码、A4、批注，并按需合并输出'
+  if (workflowMode.value === 'split') return '读取已合并证据 PDF 的页眉页码，核对页段后拆回证据列表'
+  return '按法律证据包流程处理页眉、页码、A4、批注、合并与反向拆分'
+})
+
 const overlayFiles = ref([])
 const overlayOutputDir = ref('')
 const checkingOverlayPages = ref(false)
@@ -531,7 +550,7 @@ const previewMaxPage = computed(() => {
   return selectedOverlayFile.value?.pages || 1
 })
 const previewHint = computed(() => mergedImportPlan.value
-  ? '正在预览合并 PDF 原文；点击页段可跳到起始页，也可以把当前页设为选中页段的起始页或结束页'
+  ? '合并 PDF 原文预览'
   : '当前预览基于实际 PDF 页面渲染，清除区域和新文字会叠加显示'
 )
 const showRulePreviewOverlays = computed(() => !mergedImportPlan.value)
@@ -713,7 +732,7 @@ async function importMergedPdfAsEvidence() {
     const items = (inspect.data.items || [])
       .filter((item) => Number(item.pageStart) > 0 && Number(item.pageEnd) >= Number(item.pageStart))
       .map((item, index) => ({
-        name: item.name || `文件${index + 1}`,
+        name: defaultMergedImportName(outputDir, index),
         pageStart: Number(item.pageStart),
         pageEnd: Number(item.pageEnd),
         source: item.source || 'unknown',
@@ -845,6 +864,13 @@ function normalizedMergedImportItems() {
     pageEnd: Number(item.pageEnd || 0),
     source: item.source || 'unknown',
   }))
+}
+
+function defaultMergedImportName(outputDir, index) {
+  if (index === 0) {
+    return stripPdf(fileName(outputDir)) || '文件1'
+  }
+  return `文件${index + 1}`
 }
 
 function selectMergedImportRange(row) {
