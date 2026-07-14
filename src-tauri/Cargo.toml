@@ -28,6 +28,7 @@ sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 image = { version = "=0.25.5", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff"] }
 printpdf = { version = "0.9.1", features = ["images"] }
+docx-rs = { version = "0.4.20", default-features = false }
 lopdf = { version = "0.39.0", default-features = false }
 base64 = "0.22"
 open = "5"

@@ -2,7 +2,6 @@ use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::Path;
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"];
@@ -770,84 +769,89 @@ fn generate_docx(
     scale_mode: &str,
     dpi: u32,
 ) -> Result<()> {
-    let buf = std::io::Cursor::new(Vec::new());
-    let mut zip = zip::ZipWriter::new(buf);
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    use docx_rs::{
+        AlignmentType, BreakType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph,
+        Pic, Run, Table, TableAlignmentType, TableCell, TableCellBorder, TableCellBorderPosition,
+        TableCellBorders, TableCellMargins, TableLayoutType, TableRow, VAlignType, WidthType,
+    };
 
     let per_page = grid.rows * grid.cols;
-    let page_w_twips = (page_w_mm * 1440.0 / 25.4) as u64;
-    let page_h_twips = (page_h_mm * 1440.0 / 25.4) as u64;
-    let margin_l_twips = (margin_mm * 1440.0 / 25.4) as u64;
+    let page_w_twips = mm_to_twips(page_w_mm) as u32;
+    let page_h_twips = mm_to_twips(page_h_mm) as u32;
+    let margin_l_twips = mm_to_twips(margin_mm);
     let margin_r_twips = margin_l_twips;
     let margin_t_twips = margin_l_twips;
     let margin_b_twips = margin_l_twips;
-    let usable_w_twips = page_w_twips.saturating_sub(margin_l_twips + margin_r_twips);
-    let usable_h_twips = page_h_twips.saturating_sub(margin_t_twips + margin_b_twips);
-    let cell_w_twips = (usable_w_twips / grid.cols as u64).max(1);
-    let cell_h_twips = (usable_h_twips / grid.rows as u64).max(1);
-
-    let mut media_entries: Vec<(String, Vec<u8>, String, String)> = Vec::new();
-    let mut image_idx = 0usize;
-
-    let mut body_xml = String::new();
-
+    let usable_w_twips =
+        (page_w_twips as i32).saturating_sub(margin_l_twips + margin_r_twips) as usize;
+    let usable_h_twips =
+        (page_h_twips as i32).saturating_sub(margin_t_twips + margin_b_twips) as usize;
+    let cell_w_twips = (usable_w_twips / grid.cols).max(1);
+    let cell_h_twips = (usable_h_twips / grid.rows).max(1);
     let total_pages = images.len().div_ceil(per_page);
+    let page_orientation = if page_w_mm > page_h_mm {
+        PageOrientationType::Landscape
+    } else {
+        PageOrientationType::Portrait
+    };
+    let page_margin = PageMargin {
+        top: margin_t_twips,
+        right: margin_r_twips,
+        bottom: margin_b_twips,
+        left: margin_l_twips,
+        header: 0,
+        footer: 0,
+        gutter: 0,
+    };
+    let table_margins = TableCellMargins::new().margin(0, 0, 0, 0);
+    let border_hex = docx_border_color(border_color);
+    let cell_borders = || {
+        TableCellBorders::with_empty()
+            .set(
+                TableCellBorder::new(TableCellBorderPosition::Top)
+                    .size(8)
+                    .color(border_hex),
+            )
+            .set(
+                TableCellBorder::new(TableCellBorderPosition::Left)
+                    .size(8)
+                    .color(border_hex),
+            )
+            .set(
+                TableCellBorder::new(TableCellBorderPosition::Bottom)
+                    .size(8)
+                    .color(border_hex),
+            )
+            .set(
+                TableCellBorder::new(TableCellBorderPosition::Right)
+                    .size(8)
+                    .color(border_hex),
+            )
+    };
 
+    let mut doc = Docx::new()
+        .page_size(page_w_twips, page_h_twips)
+        .page_orient(page_orientation)
+        .page_margin(page_margin);
+
+    let cell_w_pt = cell_w_mm * 72.0 / 25.4;
+    let cell_h_pt = image_cell_h_mm * 72.0 / 25.4;
     for (chunk_idx, chunk) in images.chunks(per_page).enumerate() {
-        let mut table_xml = String::new();
-        table_xml.push_str(
-            "<w:tbl><w:tblPr>\
-<w:tblW w:w=\"0\" w:type=\"auto\"/>\
-<w:tblLayout w:type=\"fixed\"/>\
-<w:tblBorders><w:top w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
-<w:left w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
-<w:bottom w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
-<w:right w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
-<w:insideH w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
-<w:insideV w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
-</w:tblBorders></w:tblPr><w:tblGrid>",
-        );
-        for _ in 0..grid.cols {
-            table_xml.push_str(&format!("<w:gridCol w:w=\"{}\"/>", cell_w_twips));
-        }
-        table_xml.push_str("</w:tblGrid>");
-
+        let mut rows = Vec::with_capacity(grid.rows);
         for row_idx in 0..grid.rows {
-            table_xml.push_str(&format!(
-                "<w:tr><w:trPr><w:trHeight w:val=\"{}\" w:hRule=\"atLeast\"/></w:trPr>",
-                cell_h_twips
-            ));
+            let mut cells = Vec::with_capacity(grid.cols);
             for col_idx in 0..grid.cols {
                 let idx = row_idx * grid.cols + col_idx;
-                if idx < chunk.len() {
-                    let img_info = &chunk[idx];
-                    let img_data = std::fs::read(&img_info.path)?;
-                    let ext = Path::new(&img_info.path)
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("png")
-                        .to_ascii_lowercase();
-                    let content_type = match ext.as_str() {
-                        "jpg" | "jpeg" => "image/jpeg",
-                        "png" => "image/png",
-                        "webp" => "image/webp",
-                        "bmp" => "image/bmp",
-                        "tif" | "tiff" => "image/tiff",
-                        _ => "image/png",
-                    };
+                let mut cell = TableCell::new()
+                    .width(cell_w_twips, WidthType::Dxa)
+                    .vertical_align(VAlignType::Center);
+                cell = if border_enabled {
+                    cell.set_borders(cell_borders())
+                } else {
+                    cell.clear_all_border()
+                };
 
-                    image_idx += 1;
-                    let media_name = format!("image{}.{}", image_idx, ext);
-                    media_entries.push((
-                        media_name.clone(),
-                        img_data,
-                        content_type.to_string(),
-                        ext.clone(),
-                    ));
-
-                    let cell_w_pt = cell_w_mm * 72.0 / 25.4;
-                    let cell_h_pt = image_cell_h_mm * 72.0 / 25.4;
+                if let Some(img_info) = chunk.get(idx) {
                     let (draw_w_pt, draw_h_pt, _, _) = compute_placement(
                         img_info.width,
                         img_info.height,
@@ -856,172 +860,54 @@ fn generate_docx(
                         scale_mode,
                         dpi,
                     );
-                    let draw_w_emu = (draw_w_pt * 914400.0 / 72.0) as u64;
-                    let draw_h_emu = (draw_h_pt * 914400.0 / 72.0) as u64;
-
+                    let (png_data, width_px, height_px) = image_as_png(&img_info.path)?;
+                    let pic = Pic::new_with_dimensions(png_data, width_px, height_px)
+                        .size(pt_to_emu(draw_w_pt), pt_to_emu(draw_h_pt));
+                    cell = cell.add_paragraph(
+                        Paragraph::new()
+                            .align(AlignmentType::Center)
+                            .add_run(Run::new().add_image(pic)),
+                    );
                     let name = display_filename(
                         &img_info.path,
                         filename_without_ext,
                         filename_remove_text,
                     );
-                    let escaped_name = xml_escape(&name);
-
-                    table_xml.push_str(&format!(
-                        "<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/><w:vAlign w:val=\"center\"/>",
-                        cell_w_twips
-                    ));
-                    if border_enabled {
-                        table_xml.push_str(&format!(
-                            "<w:tcBorders>\
-<w:top w:val=\"single\" w:sz=\"8\" w:space=\"0\" w:color=\"{}\"/>\
-<w:left w:val=\"single\" w:sz=\"8\" w:space=\"0\" w:color=\"{}\"/>\
-<w:bottom w:val=\"single\" w:sz=\"8\" w:space=\"0\" w:color=\"{}\"/>\
-<w:right w:val=\"single\" w:sz=\"8\" w:space=\"0\" w:color=\"{}\"/>\
-</w:tcBorders>",
-                            docx_border_color(border_color),
-                            docx_border_color(border_color),
-                            docx_border_color(border_color),
-                            docx_border_color(border_color)
-                        ));
-                    }
-                    table_xml.push_str("</w:tcPr>");
-                    table_xml.push_str(&format!(
-                        "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing>\
-<wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">\
-<wp:extent cx=\"{}\" cy=\"{}\"/>\
-<wp:docPr id=\"{}\" name=\"{}\"/>\
-<wp:cNvGraphicFramePr/>\
-<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\
-<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
-<pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
-<pic:nvPicPr><pic:cNvPr id=\"{}\" name=\"{}\"/><pic:cNvPicPr/></pic:nvPicPr>\
-<pic:blipFill><a:blip r:embed=\"rId{}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\
-<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{}\" cy=\"{}\"/></a:xfrm>\
-<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\
-</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>",
-                        draw_w_emu,
-                        draw_h_emu,
-                        image_idx,
-                        escaped_name,
-                        image_idx,
-                        escaped_name,
-                        image_idx,
-                        draw_w_emu,
-                        draw_h_emu
-                    ));
-
                     if show_filename {
-                        table_xml.push_str(&format!(
-                            "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:sz w:val=\"16\"/></w:rPr><w:t>{}</w:t></w:r></w:p>",
-                            escaped_name
-                        ));
+                        cell = cell.add_paragraph(
+                            Paragraph::new()
+                                .align(AlignmentType::Center)
+                                .add_run(Run::new().size(16).add_text(name)),
+                        );
                     }
-
-                    table_xml.push_str("</w:tc>");
                 } else {
-                    table_xml.push_str(&format!(
-                        "<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/></w:tcPr><w:p/></w:tc>",
-                        cell_w_twips
-                    ));
+                    cell = cell.add_paragraph(Paragraph::new());
                 }
+                cells.push(cell);
             }
-            table_xml.push_str("</w:tr>");
+            rows.push(
+                TableRow::new(cells)
+                    .row_height(cell_h_twips as f32)
+                    .height_rule(HeightRule::Exact)
+                    .cant_split(),
+            );
         }
 
-        table_xml.push_str("</w:tbl>");
-        body_xml.push_str(&table_xml);
+        let table = Table::without_borders(rows)
+            .set_grid(vec![cell_w_twips; grid.cols])
+            .width(usable_w_twips, WidthType::Dxa)
+            .layout(TableLayoutType::Fixed)
+            .align(TableAlignmentType::Center)
+            .margins(table_margins.clone());
+        doc = doc.add_table(table);
         if chunk_idx + 1 < total_pages {
-            body_xml.push_str("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
+            doc =
+                doc.add_paragraph(Paragraph::new().add_run(Run::new().add_break(BreakType::Page)));
         }
     }
 
-    let mut rels_xml = String::new();
-    rels_xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>"#);
-
-    let mut media_rels = String::new();
-    for (i, (media_name, _, _ct, _ext)) in media_entries.iter().enumerate() {
-        media_rels.push_str(&format!(
-            "<Relationship Id=\"rId{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/{}\"/>",
-            i + 1, media_name
-        ));
-    }
-
-    let mut content_types_xml = String::new();
-    content_types_xml.push_str(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-<Default Extension="xml" ContentType="application/xml"/>
-<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
-    );
-    let mut seen_ext: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for (_, _, ct, ext) in &media_entries {
-        if seen_ext.insert(ext.clone()) {
-            content_types_xml.push_str(&format!(
-                "<Default Extension=\"{}\" ContentType=\"{}\"/>",
-                xml_escape(ext),
-                ct
-            ));
-        }
-    }
-    content_types_xml.push_str("</Types>");
-
-    let document_xml = format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
-            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
-<w:body>
-{}
-<w:sectPr>
-<w:pgSz w:w="{}" w:h="{}"/>
-<w:pgMar w:top="{}" w:right="{}" w:bottom="{}" w:left="{}" w:header="0" w:footer="0" w:gutter="0"/>
-</w:sectPr>
-</w:body>
-</w:document>"#,
-        body_xml,
-        page_w_twips,
-        page_h_twips,
-        margin_t_twips,
-        margin_r_twips,
-        margin_b_twips,
-        margin_l_twips
-    );
-
-    let doc_rels_xml = format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-{}
-</Relationships>"#,
-        media_rels
-    );
-
-    zip.start_file("[Content_Types].xml", options)?;
-    zip.write_all(content_types_xml.as_bytes())?;
-
-    zip.start_file("_rels/.rels", options)?;
-    zip.write_all(rels_xml.as_bytes())?;
-
-    zip.start_file("word/document.xml", options)?;
-    zip.write_all(document_xml.as_bytes())?;
-
-    zip.start_file("word/_rels/document.xml.rels", options)?;
-    zip.write_all(doc_rels_xml.as_bytes())?;
-
-    for (media_name, data, _, _) in &media_entries {
-        zip.start_file(format!("word/media/{}", media_name), options)?;
-        zip.write_all(data)?;
-    }
-
-    let cursor = zip.finish()?;
-    let bytes = cursor.into_inner();
-    std::fs::write(output_path, &bytes)?;
-
+    let file = std::fs::File::create(output_path)?;
+    doc.build().pack(file)?;
     Ok(())
 }
 
@@ -1032,13 +918,21 @@ fn docx_border_color(color: &str) -> &'static str {
     }
 }
 
-fn xml_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+fn mm_to_twips(mm: f64) -> i32 {
+    (mm * 1440.0 / 25.4).round().max(0.0) as i32
+}
+
+fn pt_to_emu(pt: f64) -> u32 {
+    (pt * 914400.0 / 72.0).round().max(1.0) as u32
+}
+
+fn image_as_png(path: &str) -> Result<(Vec<u8>, u32, u32)> {
+    let img = ::image::open(path).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let width = img.width();
+    let height = img.height();
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut cursor, ::image::ImageFormat::Png)?;
+    Ok((cursor.into_inner(), width, height))
 }
 
 #[cfg(test)]
@@ -1184,8 +1078,13 @@ mod tests {
         let mut archive = zip::ZipArchive::new(file).unwrap();
         archive.by_name("[Content_Types].xml").unwrap();
         archive.by_name("_rels/.rels").unwrap();
+        archive.by_name("docProps/app.xml").unwrap();
+        archive.by_name("docProps/core.xml").unwrap();
         archive.by_name("word/_rels/document.xml.rels").unwrap();
-        archive.by_name("word/media/image1.png").unwrap();
+        archive.by_name("word/styles.xml").unwrap();
+        archive.by_name("word/settings.xml").unwrap();
+        archive.by_name("word/fontTable.xml").unwrap();
+        archive.by_name("word/media/rIdImage1.png").unwrap();
 
         let mut document_xml = String::new();
         archive
@@ -1196,7 +1095,20 @@ mod tests {
         assert!(document_xml.contains("<wp:docPr"));
         assert!(document_xml.contains("<w:tcBorders>"));
         assert!(document_xml.contains(">evidence_frame_0001<"));
+        assert!(document_xml.contains("<w:pgSz"));
+        assert!(document_xml.contains("<w:pgMar"));
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn placement_fit_and_original_have_distinct_print_sizes() {
+        let cell_w_pt = 180.0 * 72.0 / 25.4;
+        let cell_h_pt = 120.0 * 72.0 / 25.4;
+        let (fit_w, fit_h, _, _) = compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "fit", 300);
+        let (original_w, original_h, _, _) =
+            compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "original", 300);
+        assert!(fit_w > original_w);
+        assert!(fit_h > original_h);
     }
 }

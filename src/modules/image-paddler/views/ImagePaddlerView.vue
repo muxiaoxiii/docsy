@@ -155,7 +155,7 @@
                     }"
                   >
                     <template v-if="img">
-                      <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :class="settings.scale_mode" />
+                      <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :style="previewImageStyle(img)" />
                       <div v-if="settings.show_filename" class="preview-name">{{ fileName(img.path) }}</div>
                     </template>
                   </div>
@@ -288,6 +288,21 @@ const thumbImageStyle = computed(() => ({
   width: `${thumbImageSize.value}px`,
   height: `${thumbImageSize.value}px`,
 }))
+const layoutMetrics = computed(() => {
+  const page = resolvedOrientation.value === 'landscape'
+    ? { width: 297, height: 210 }
+    : { width: 210, height: 297 }
+  const margin = Math.max(0, Number(settings.margin_mm) || 0)
+  const usableWidth = Math.max(1, page.width - margin * 2)
+  const usableHeight = Math.max(1, page.height - margin * 2)
+  const cellWidth = usableWidth / layoutGrid.value.cols
+  const cellHeight = usableHeight / layoutGrid.value.rows
+  const filenameReserve = settings.show_filename ? 6 : 0
+  return {
+    cellWidth,
+    imageCellHeight: Math.max(1, cellHeight - filenameReserve),
+  }
+})
 
 async function selectFolder() {
   const selected = await open({ directory: true, multiple: true })
@@ -383,6 +398,23 @@ function fileName(path) {
     name = name.split(settings.filename_remove_text).join('')
   }
   return name
+}
+
+function previewImageStyle(img) {
+  const metrics = layoutMetrics.value
+  const nativeWidth = img.width * 25.4 / settings.dpi
+  const nativeHeight = img.height * 25.4 / settings.dpi
+  const fitScale = Math.min(metrics.cellWidth / nativeWidth, metrics.imageCellHeight / nativeHeight)
+  const scale = settings.scale_mode === 'original' ? Math.min(fitScale, 1) : fitScale
+  const drawWidth = nativeWidth * scale
+  const drawHeight = nativeHeight * scale
+  return {
+    width: `${Math.min(100, drawWidth / metrics.cellWidth * 100)}%`,
+    height: `${Math.min(100, drawHeight / metrics.imageCellHeight * 100)}%`,
+    maxWidth: '100%',
+    maxHeight: settings.show_filename ? 'calc(100% - 20px)' : '100%',
+    objectFit: 'contain',
+  }
 }
 
 async function preloadImages(paths) {
@@ -652,29 +684,13 @@ function scaleModeLabel(value) {
 }
 
 .preview-cell img {
-  max-width: 100%;
-  max-height: calc(100% - 20px);
-}
-
-.preview-cell img.fit {
-  width: 100%;
-  height: calc(100% - 20px);
+  display: block;
   object-fit: contain;
 }
 
 .preview-cell-no-name img,
-.preview-cell-no-name img.fit {
+.preview-cell-no-name img {
   max-height: 100%;
-  height: 100%;
-}
-
-.preview-cell img.original {
-  max-width: none;
-  max-height: none;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  transform: scale(0.55);
 }
 
 .preview-name {
