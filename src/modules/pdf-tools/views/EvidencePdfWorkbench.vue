@@ -20,7 +20,7 @@
         </div>
       </div>
 
-      <div v-if="overlayFiles.length" class="session-summary">
+      <div v-if="overlayFiles.length && !mergedImportPlan" class="session-summary">
         <div class="summary-item">
           <span>证据文件</span>
           <strong>{{ overlayFiles.length }}</strong>
@@ -39,13 +39,13 @@
         </div>
       </div>
 
-      <div v-if="overlayFiles.length" class="preset-bar">
+      <div v-if="overlayFiles.length && !mergedImportPlan" class="preset-bar">
         <el-button size="small" @click="applyStandardEvidencePreset">常规证据包</el-button>
         <el-button size="small" @click="applyCleanupPreset">替换旧页眉页码</el-button>
         <el-button size="small" @click="applySplitOnlyPreset">仅输出单独证据文件</el-button>
       </div>
 
-      <div class="rule-block">
+      <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title">页面处理</div>
         <div class="rule-grid">
           <div class="rule-item">
@@ -68,7 +68,7 @@
         </div>
       </div>
 
-      <div class="rule-block">
+      <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title">删除已有页眉页脚</div>
         <div class="rule-grid">
           <div class="rule-item">
@@ -90,7 +90,7 @@
         </div>
       </div>
 
-      <div class="rule-block">
+      <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title">插入新页眉页脚</div>
         <div class="rule-grid">
           <div class="rule-item">
@@ -152,7 +152,7 @@
         </div>
       </div>
 
-      <div class="rule-block">
+      <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title">输出</div>
         <div class="rule-grid">
           <div class="rule-item">
@@ -170,23 +170,23 @@
         </div>
       </div>
 
-      <div class="toolbar">
+      <div v-if="showProcessingControls" class="toolbar">
         <el-button :disabled="!overlayFiles.length" @click="selectOverlayOutputDir">输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="openPlannedOutputDir">打开输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages">刷新页数</el-button>
         <el-button :disabled="!overlayFiles.length" @click="detectAllHeaderFooter" :loading="detectingAllHeaderFooter">批量检测</el-button>
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
-          执行处理
+          {{ processButtonText }}
         </el-button>
       </div>
-      <div v-if="overlayOutputDir" class="path-text">{{ overlayOutputDir }}</div>
-      <div v-if="overlayFiles.length" class="output-plan">
+      <div v-if="showProcessingControls && overlayOutputDir" class="path-text">{{ overlayOutputDir }}</div>
+      <div v-if="showProcessingControls && overlayFiles.length" class="output-plan">
         <span>单文件输出：{{ plannedOutputDir }}</span>
         <span v-if="outputMode !== 'files_only'">合并输出：{{ plannedMergeOutputPath }}</span>
         <span v-if="outputMode === 'merge_only'">合并完成后会清理中间单文件副本</span>
       </div>
       <el-alert
-        v-if="processingNotes.length"
+        v-if="showProcessingControls && processingNotes.length"
         type="warning"
         :closable="false"
         show-icon
@@ -206,7 +206,7 @@
             <el-button size="small" @click="selectMergedImportOutputDir">输出目录</el-button>
             <el-button size="small" @click="cancelMergedImportPlan">取消</el-button>
             <el-button size="small" type="primary" :loading="splittingMergedImport" @click="executeMergedImportPlan">
-              确认拆入
+              确认拆分
             </el-button>
           </div>
         </div>
@@ -543,6 +543,8 @@ const detectionSummary = ref('')
 const detectionCandidates = ref([])
 const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
 
+applyWorkflowDefaults()
+
 const overlayRows = computed(() => {
   return assignPageRanges(overlayFiles.value)
 })
@@ -586,6 +588,13 @@ const processingNotes = computed(() => {
   }
   return notes
 })
+const showProcessingControls = computed(() =>
+  !mergedImportPlan.value &&
+  (workflowMode.value !== 'split' || overlayFiles.value.length > 0)
+)
+const processButtonText = computed(() =>
+  workflowMode.value === 'split' ? '执行拆分后处理' : '执行合并处理'
+)
 const canApplyOverlay = computed(() =>
   overlayFiles.value.length > 0 &&
   totalOverlayPages.value > 0 &&
@@ -689,6 +698,20 @@ onBeforeUnmount(() => {
   clearTruePreviewRefresh()
 })
 
+function applyWorkflowDefaults() {
+  if (workflowMode.value === 'split') {
+    headerMode.value = 'none'
+    footerEnabled.value = false
+    outputMode.value = 'files_only'
+    mergeFileName.value = 'split_evidence.pdf'
+    return
+  }
+  headerMode.value = 'filename'
+  footerEnabled.value = true
+  outputMode.value = 'files_and_merge'
+  mergeFileName.value = 'merged_evidence.pdf'
+}
+
 async function selectOverlayFiles() {
   const selected = await open({
     multiple: true,
@@ -765,7 +788,7 @@ async function importMergedPdfAsEvidence() {
     } else if (items.some(item => item.source === 'manual')) {
       ElMessage.warning('未识别到页眉页段，请手动调整拆分范围')
     } else {
-      ElMessage.success(`已识别 ${items.length} 个页段，请核对后确认拆入`)
+      ElMessage.success(`已识别 ${items.length} 个页段，请核对后确认拆分`)
     }
   } catch (err) {
     mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages, [
@@ -786,7 +809,7 @@ async function executeMergedImportPlan() {
   if (!mergedImportPlan.value || splittingMergedImport.value) return
   const items = normalizedMergedImportItems()
   if (!items.length) {
-    ElMessage.warning('没有可拆入的页段')
+    ElMessage.warning('没有可拆分的页段')
     return
   }
   const invalid = items.find((item) => !item.name || item.pageStart < 1 || item.pageEnd < item.pageStart)
@@ -801,8 +824,8 @@ async function executeMergedImportPlan() {
   }
   if (overlayFiles.value.length) {
     try {
-      await ElMessageBox.confirm('确认拆入后会替换当前证据列表。', '替换当前列表', {
-        confirmButtonText: '替换并拆入',
+      await ElMessageBox.confirm('确认拆分后会替换当前证据列表。', '替换当前列表', {
+        confirmButtonText: '替换并拆分',
         cancelButtonText: '取消',
         type: 'warning',
       })
@@ -840,7 +863,7 @@ async function executeMergedImportPlan() {
     overlayFiles.value = outputs.map((output) => {
       const sourceItem = itemByRange.get(sourceRangeKey(output)) || {}
       const pages = Math.max(0, Number(output.pageEnd || 0) - Number(output.pageStart || 0) + 1)
-      const needsReview = sourceItem.source === 'fallback' || hasSplitWarning(split.data.warnings || [], output)
+      const needsReview = sourceItem.source === 'fallback' || sourceItem.source === 'manual' || hasSplitWarning(split.data.warnings || [], output)
       return {
         ...createEvidenceFile(output.outputPath),
         header: output.name,
@@ -855,18 +878,18 @@ async function executeMergedImportPlan() {
     })
     overlayOutputDir.value = mergedImportPlan.value.outputDir
     selectedOverlayIndex.value = 0
-    headerMode.value = 'per_file'
+    applyWorkflowDefaults()
     mergedImportPlan.value = null
     refreshPreview()
 
     const failed = split.data.failed?.length || 0
     const warnings = split.data.warnings || []
     if (failed) {
-      ElMessage.warning(`已拆入 ${outputs.length} 个证据，失败 ${failed} 个`)
+      ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个`)
     } else if (warnings.length) {
-      ElMessage.warning(`已拆入 ${outputs.length} 个证据，需核对页段提示`)
+      ElMessage.warning(`已生成 ${outputs.length} 个证据，需核对页段提示`)
     } else {
-      ElMessage.success(`已拆入 ${outputs.length} 个证据`)
+      ElMessage.success(`已生成 ${outputs.length} 个证据`)
     }
   } finally {
     splittingMergedImport.value = false
