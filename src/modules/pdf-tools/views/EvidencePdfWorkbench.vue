@@ -739,7 +739,7 @@ async function importMergedPdfAsEvidence() {
     const items = detectedItems
       .filter((item) => Number(item.pageStart) > 0 && Number(item.pageEnd) >= Number(item.pageStart))
       .map((item, index) => ({
-        name: defaultMergedImportName(input, index),
+        name: String(item.name || '').trim() || defaultMergedImportName(input, index),
         pageStart: Number(item.pageStart),
         pageEnd: Number(item.pageEnd),
         source: item.source || 'unknown',
