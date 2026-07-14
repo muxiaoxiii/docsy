@@ -2,8 +2,9 @@ export default {
   id: 'pdf-tools',
   name: 'PDF 工具',
   icon: 'Files',
-  description: 'PDF 解锁、合并、拆分、证据整理',
+  description: 'PDF 解锁、合并、拆分',
   category: 'pdf',
+  order: 30,
   defaultVisible: true,
 
   routes: [
@@ -22,7 +23,7 @@ export default {
   homeCards: [
     {
       title: 'PDF 工具',
-      description: '解锁、合并、拆分、证据整理',
+      description: '解锁、合并、拆分',
       route: 'pdf-tools',
       icon: 'Files',
     },

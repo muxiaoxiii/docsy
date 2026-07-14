@@ -4,6 +4,7 @@ export default {
   icon: 'Picture',
   description: '图片批量排版为 A4 文档',
   category: 'media',
+  order: 40,
   defaultVisible: true,
 
   routes: [

@@ -60,6 +60,29 @@
       </div>
     </el-card>
 
+    <el-card class="settings-section" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>主菜单</span>
+          <el-button size="small" @click="resetMenuOrder">恢复默认顺序</el-button>
+        </div>
+      </template>
+      <div class="menu-order-list">
+        <div v-for="(item, index) in menuSettingsItems" :key="item.id" class="menu-order-item">
+          <el-checkbox
+            :model-value="isMenuVisible(item.id)"
+            @change="value => setMenuVisible(item.id, value)"
+          >
+            {{ item.name }}
+          </el-checkbox>
+          <div class="menu-order-actions">
+            <el-button size="small" :disabled="index === 0" @click="moveMenuItem(index, -1)">上移</el-button>
+            <el-button size="small" :disabled="index === menuSettingsItems.length - 1" @click="moveMenuItem(index, 1)">下移</el-button>
+          </div>
+        </div>
+      </div>
+    </el-card>
+
     <!-- App Settings -->
     <el-card class="settings-section" shadow="never">
       <template #header>
@@ -104,17 +127,23 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.js'
 import { ElMessage } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 
 const settings = ref({
   menu_visibility: {},
+  menu_order: [],
   libreoffice_path: '',
   tool_manifest_url: '',
 })
 const managedToolsDir = ref('')
+const menuModules = getMenuModules()
+const menuSettingsItems = computed(() => normalizedMenuOrder()
+  .map(id => menuModules.find(item => item.id === id))
+  .filter(Boolean))
 
 const tools = reactive([
   {
@@ -187,6 +216,8 @@ async function loadSettings() {
   const result = await tauriCallSafe('get_app_settings')
   if (result.ok) {
     settings.value = { ...settings.value, ...result.data }
+    settings.value.menu_visibility = settings.value.menu_visibility || {}
+    settings.value.menu_order = Array.isArray(settings.value.menu_order) ? settings.value.menu_order : []
     settings.value.libreoffice_path = settings.value.libreoffice_path || ''
     settings.value.tool_manifest_url = settings.value.tool_manifest_url || ''
   }
@@ -195,11 +226,52 @@ async function loadSettings() {
 async function saveSettings() {
   const payload = {
     ...settings.value,
+    menu_order: normalizedMenuOrder(),
     libreoffice_path: settings.value.libreoffice_path || null,
     tool_manifest_url: settings.value.tool_manifest_url || null,
   }
   const result = await tauriCallSafe('set_app_settings', { settings: payload })
-  result.ok ? ElMessage.success('设置已保存') : ElMessage.error(result.error || '保存设置失败')
+  if (result.ok) {
+    settings.value = { ...settings.value, ...payload }
+    window.dispatchEvent(new CustomEvent('docsy-settings-updated', { detail: payload }))
+    ElMessage.success('设置已保存')
+  } else {
+    ElMessage.error(result.error || '保存设置失败')
+  }
+}
+
+function normalizedMenuOrder() {
+  const knownIds = new Set(menuModules.map(item => item.id))
+  const current = Array.isArray(settings.value.menu_order) ? settings.value.menu_order : []
+  const ordered = current.filter(id => knownIds.has(id))
+  for (const id of defaultMenuOrder()) {
+    if (!ordered.includes(id)) ordered.push(id)
+  }
+  return ordered
+}
+
+function moveMenuItem(index, delta) {
+  const order = normalizedMenuOrder()
+  const target = index + delta
+  if (target < 0 || target >= order.length) return
+  const next = [...order]
+  ;[next[index], next[target]] = [next[target], next[index]]
+  settings.value.menu_order = next
+}
+
+function resetMenuOrder() {
+  settings.value.menu_order = defaultMenuOrder()
+}
+
+function isMenuVisible(id) {
+  return (settings.value.menu_visibility || {})[id] !== false
+}
+
+function setMenuVisible(id, value) {
+  settings.value.menu_visibility = {
+    ...(settings.value.menu_visibility || {}),
+    [id]: Boolean(value),
+  }
 }
 
 async function checkTools() {
@@ -384,6 +456,27 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.menu-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-order-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.menu-order-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .install-hint {

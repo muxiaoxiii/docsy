@@ -4,6 +4,7 @@ export default {
   icon: 'Setting',
   description: '应用设置',
   category: 'system',
+  order: 900,
   defaultVisible: true,
 
   routes: [
@@ -15,9 +16,7 @@ export default {
     },
   ],
 
-  menuItems: [
-    { label: '设置', route: 'settings', icon: 'Setting' },
-  ],
+  menuItems: [],
 
   homeCards: [],
   settings: null,

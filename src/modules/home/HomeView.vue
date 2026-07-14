@@ -32,23 +32,42 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { getHomeCards } from '../../core/moduleRegistry.js'
 import { tauriCallSafe } from '../../core/tauriBridge.js'
 
 const router = useRouter()
-const homeCards = getHomeCards()
+const settings = ref({
+  menu_visibility: {},
+  menu_order: [],
+})
+const homeCards = computed(() => getHomeCards(settings.value))
 const version = ref('0.5.3')
 
 async function loadData() {
+  const appSettings = await tauriCallSafe('get_app_settings')
+  if (appSettings.ok) {
+    settings.value = { ...settings.value, ...appSettings.data }
+  }
   const diag = await tauriCallSafe('get_diagnostic_info')
   if (diag.ok && diag.data.version) {
     version.value = diag.data.version
   }
 }
 
-onMounted(loadData)
+function applySettingsEvent(event) {
+  settings.value = { ...settings.value, ...(event.detail || {}) }
+}
+
+onMounted(() => {
+  loadData()
+  window.addEventListener('docsy-settings-updated', applySettingsEvent)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('docsy-settings-updated', applySettingsEvent)
+})
 </script>
 
 <style scoped>

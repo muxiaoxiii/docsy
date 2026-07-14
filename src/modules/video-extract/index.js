@@ -4,6 +4,7 @@ export default {
   icon: 'VideoCamera',
   description: '按时间或频率导出视频帧',
   category: 'media',
+  order: 50,
   defaultVisible: true,
 
   routes: [

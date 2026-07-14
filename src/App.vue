@@ -17,6 +17,18 @@
           </el-menu-item>
         </template>
       </el-menu>
+      <div class="sidebar-footer">
+        <el-tooltip content="设置" placement="right">
+          <el-button
+            class="settings-shortcut"
+            :class="{ active: route.name === 'settings' }"
+            circle
+            @click="router.push({ name: 'settings' })"
+          >
+            <el-icon><Setting /></el-icon>
+          </el-button>
+        </el-tooltip>
+      </div>
     </el-aside>
     <el-container>
       <el-header class="app-header">
@@ -30,25 +42,50 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getMenuItems } from './core/moduleRegistry.js'
+import { tauriCallSafe } from './core/tauriBridge.js'
 
 const router = useRouter()
 const route = useRoute()
 
-const menuItems = getMenuItems()
+const settings = ref({
+  menu_visibility: {},
+  menu_order: [],
+})
+const menuItems = computed(() => getMenuItems(settings.value))
 
 const activeMenu = computed(() => route.name || 'home')
 
 const currentPageTitle = computed(() => {
-  const item = menuItems.find(m => m.route === route.name)
-  return item?.label || 'Docsy'
+  const item = menuItems.value.find(m => m.route === route.name)
+  return item?.label || route.meta?.title || 'Docsy'
 })
 
 function onMenuSelect(index) {
   router.push({ name: index })
 }
+
+async function loadSettings() {
+  const result = await tauriCallSafe('get_app_settings')
+  if (result.ok) {
+    settings.value = { ...settings.value, ...result.data }
+  }
+}
+
+function applySettingsEvent(event) {
+  settings.value = { ...settings.value, ...(event.detail || {}) }
+}
+
+onMounted(() => {
+  loadSettings()
+  window.addEventListener('docsy-settings-updated', applySettingsEvent)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('docsy-settings-updated', applySettingsEvent)
+})
 </script>
 
 <style scoped>
@@ -57,9 +94,11 @@ function onMenuSelect(index) {
 }
 
 .app-aside {
+  display: flex;
+  flex-direction: column;
   background: #f5f7fa;
   border-right: 1px solid #e4e7ed;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .brand {
@@ -82,7 +121,22 @@ function onMenuSelect(index) {
 }
 
 .sidebar-menu {
+  flex: 1;
   border-right: none;
+  overflow-y: auto;
+}
+
+.sidebar-footer {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 16px;
+  border-top: 1px solid #e4e7ed;
+}
+
+.settings-shortcut.active {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
 }
 
 .app-header {

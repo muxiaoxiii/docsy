@@ -1,39 +1,6 @@
 <template>
   <div class="pdf-tools-view">
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
-      <el-tab-pane label="证据处理" name="evidence" lazy>
-        <div class="evidence-shell">
-          <el-tabs v-model="evidenceTab" class="evidence-tabs">
-            <el-tab-pane label="证据合并" name="merge" lazy>
-              <EvidencePdfWorkbench workflow="merge" />
-            </el-tab-pane>
-            <el-tab-pane label="证据拆分" name="split" lazy>
-              <EvidencePdfWorkbench workflow="split" />
-            </el-tab-pane>
-            <el-tab-pane label="证据扫描" name="scan" lazy>
-              <div class="tab-content">
-                <h3>证据扫描</h3>
-                <p class="hint">扫描文件夹，按子文件夹自动分组合并 PDF</p>
-                <el-button type="primary" @click="selectEvidenceFolder">选择证据文件夹</el-button>
-                <div v-if="evidenceFolder" class="evidence-info">
-                  <p>文件夹: {{ evidenceFolder }}</p>
-                  <el-button @click="scanEvidence" :loading="scanning">扫描</el-button>
-                </div>
-                <div v-if="evidenceGroups.length" class="evidence-groups">
-                  <div v-for="group in evidenceGroups" :key="group.name" class="group-item">
-                    <h4>{{ group.name }} ({{ group.files.length }} 个文件)</h4>
-                    <div class="group-files">
-                      <span v-for="f in group.files" :key="f.path" class="group-file">{{ f.name }}</span>
-                    </div>
-                  </div>
-                  <el-button type="success" @click="buildEvidence" :loading="building">生成合并 PDF</el-button>
-                </div>
-              </div>
-            </el-tab-pane>
-          </el-tabs>
-        </div>
-      </el-tab-pane>
-
       <el-tab-pane label="解锁" name="unlock" lazy>
         <div class="tab-content">
           <h3>PDF 解锁</h3>
@@ -186,13 +153,11 @@
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
-import EvidencePdfWorkbench from './EvidencePdfWorkbench.vue'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
 import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 
-const activeTab = ref('evidence')
-const evidenceTab = ref('merge')
+const activeTab = ref('unlock')
 
 const unlockFiles = ref([])
 const unlocking = ref(false)
@@ -241,10 +206,6 @@ const splitWarnings = computed(() => [
 ])
 const splitPreviewMaxPage = computed(() => Math.max(1, splitTotalPages.value || 1))
 const selectedSplitRange = computed(() => splitRanges.value[selectedSplitRangeIndex.value] || null)
-const evidenceFolder = ref('')
-const evidenceGroups = ref([])
-const scanning = ref(false)
-const building = ref(false)
 
 async function selectMergeFiles() {
   const selected = await open({
@@ -406,33 +367,6 @@ function splitRangeStatus(row) {
   return { type: 'success', text: '正常' }
 }
 
-async function selectEvidenceFolder() {
-  const selected = await open({ directory: true })
-  if (selected) evidenceFolder.value = selected
-}
-
-async function scanEvidence() {
-  if (!evidenceFolder.value) return
-  scanning.value = true
-  const result = await tauriCallSafe('scan_evidence_folder', { root: evidenceFolder.value })
-  if (result.ok) {
-    evidenceGroups.value = result.data.groups || []
-  } else {
-    ElMessage.error(result.error || '扫描失败')
-  }
-  scanning.value = false
-}
-
-async function buildEvidence() {
-  building.value = true
-  const result = await tauriCallSafe('build_evidence_group_pdfs', {
-    root: evidenceFolder.value,
-    groups: evidenceGroups.value,
-  })
-  result.ok ? ElMessage.success('证据 PDF 生成完成') : ElMessage.error(result.error || '证据 PDF 生成失败')
-  building.value = false
-}
-
 function fileName(path) {
   return String(path || '').split(/[\\/]/).pop() || path
 }
@@ -454,15 +388,6 @@ function stripPdf(name) {
 .tab-content {
   padding: 16px;
   max-width: 680px;
-}
-
-.evidence-shell {
-  height: 100%;
-  min-width: 0;
-}
-
-.evidence-tabs {
-  height: 100%;
 }
 
 .split-workspace {
@@ -591,39 +516,6 @@ h3 {
 .drag-handle {
   cursor: move;
   color: #c0c4cc;
-}
-
-.evidence-info {
-  margin-top: 12px;
-  font-size: 13px;
-  color: #606266;
-}
-
-.evidence-groups {
-  margin-top: 16px;
-}
-
-.group-item {
-  margin-bottom: 12px;
-  padding: 10px;
-  background: #f9f9f9;
-  border-radius: 4px;
-}
-
-.group-item h4 {
-  margin: 0 0 6px;
-  font-size: 13px;
-}
-
-.group-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.group-file {
-  font-size: 12px;
-  color: #909399;
 }
 
 @media (max-width: 1180px) {

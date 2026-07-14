@@ -5,7 +5,9 @@ import { tauriCall } from '../core/tauriBridge.js'
 export const useAppStore = defineStore('app', () => {
   const settings = ref({
     menu_visibility: {},
+    menu_order: [],
     libreoffice_path: '',
+    tool_manifest_url: '',
   })
 
   async function loadSettings() {
