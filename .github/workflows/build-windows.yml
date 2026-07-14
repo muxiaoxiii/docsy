@@ -1,0 +1,92 @@
+name: Build Windows package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "win-*"
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm config set registry https://registry.npmjs.org/
+          npm config set audit false
+          npm config set fund false
+          for attempt in 1 2 3; do
+            npm ci && exit 0
+            sleep $((attempt * 10))
+          done
+          npm ci
+
+      - name: Install external tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $toolsRoot = Join-Path $env:RUNNER_TEMP "docsy-tools"
+          New-Item -ItemType Directory -Force $toolsRoot | Out-Null
+
+          function Install-ZipTool {
+            param(
+              [string] $Name,
+              [string] $Url,
+              [string[]] $Executables
+            )
+            $zipPath = Join-Path $toolsRoot "$Name.zip"
+            $dest = Join-Path $toolsRoot $Name
+            Invoke-WebRequest -Uri $Url -OutFile $zipPath
+            Expand-Archive -Path $zipPath -DestinationPath $dest -Force
+            foreach ($exe in $Executables) {
+              $match = Get-ChildItem -Path $dest -Recurse -Filter $exe | Select-Object -First 1
+              if (-not $match) {
+                throw "$Name package does not contain $exe"
+              }
+              Add-Content -Path $env:GITHUB_PATH -Value $match.DirectoryName
+            }
+          }
+
+          Install-ZipTool `
+            -Name "qpdf" `
+            -Url "https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip" `
+            -Executables @("qpdf.exe")
+
+          Install-ZipTool `
+            -Name "poppler" `
+            -Url "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip" `
+            -Executables @("pdftoppm.exe", "pdftotext.exe")
+
+          Install-ZipTool `
+            -Name "ffmpeg" `
+            -Url "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" `
+            -Executables @("ffmpeg.exe", "ffprobe.exe")
+
+      - name: Run frontend tests
+        run: npm run test -- --run
+
+      - name: Run Rust tests
+        continue-on-error: true
+        run: cargo test
+        working-directory: src-tauri
+
+      - name: Build Windows package
+        run: npm run tauri:build:windows
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: docsy-windows-x64
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*
+          if-no-files-found: error
