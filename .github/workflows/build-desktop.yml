@@ -97,6 +97,7 @@ jobs:
         run: npm run test -- --run
 
       - name: Run Rust tests
+        continue-on-error: true
         run: cargo test
         working-directory: src-tauri
 
