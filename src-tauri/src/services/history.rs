@@ -3,9 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
 pub struct AppSettings {
     pub menu_visibility: std::collections::HashMap<String, bool>,
     pub libreoffice_path: Option<String>,
+    pub tool_manifest_url: Option<String>,
 }
 
 pub fn get_settings() -> Result<AppSettings> {

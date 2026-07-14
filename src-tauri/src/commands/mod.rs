@@ -40,6 +40,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         settings::get_module_registry,
         settings::check_external_tool,
         settings::install_external_tool,
+        settings::install_external_tool_from_package,
         settings::get_managed_tools_dir,
         settings::open_managed_tools_dir,
         // system

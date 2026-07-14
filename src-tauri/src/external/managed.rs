@@ -58,7 +58,29 @@ pub fn install_tool(name: &str) -> Result<String> {
     let package = load_package_spec(name, &platform)?;
     let bytes = download_package(&package.url)?;
     verify_sha256_if_present(&bytes, &package.sha256)?;
+    install_package_bytes(name, &platform, package, &bytes)
+}
 
+pub fn install_tool_from_package(name: &str, package_path: &str) -> Result<String> {
+    let platform = platform_key()?;
+    let path = PathBuf::from(package_path);
+    let bytes =
+        fs::read(&path).with_context(|| format!("读取本地工具包失败: {}", path.display()))?;
+    let package = ToolPackage {
+        version: "local".into(),
+        url: path.display().to_string(),
+        sha256: String::new(),
+        binaries: required_binaries(name)?,
+    };
+    install_package_bytes(name, &platform, package, &bytes)
+}
+
+fn install_package_bytes(
+    name: &str,
+    platform: &str,
+    package: ToolPackage,
+    bytes: &[u8],
+) -> Result<String> {
     let root = tools_root();
     fs::create_dir_all(&root).context("创建工具目录失败")?;
     let staging = root.join(format!("._install_{}_{}", name, unique_suffix()));
@@ -67,7 +89,7 @@ pub fn install_tool(name: &str) -> Result<String> {
     }
     fs::create_dir_all(&staging).context("创建临时工具目录失败")?;
 
-    if let Err(err) = extract_zip(&bytes, &staging) {
+    if let Err(err) = extract_zip(bytes, &staging) {
         fs::remove_dir_all(&staging).ok();
         return Err(err);
     }
@@ -95,7 +117,7 @@ pub fn install_tool(name: &str) -> Result<String> {
 
     let record = InstallRecord {
         name: name.to_string(),
-        platform,
+        platform: platform.to_string(),
         version: package.version.clone(),
         url: package.url,
         binaries: package.binaries,
@@ -111,6 +133,17 @@ fn load_package_spec(name: &str, platform: &str) -> Result<ToolPackage> {
         if !manifest_url.trim().is_empty() {
             if let Ok(package) = fetch_manifest_package(&manifest_url, name, platform) {
                 return Ok(package);
+            }
+        }
+    }
+
+    if let Ok(settings) = crate::services::history::get_settings() {
+        if let Some(manifest_url) = settings.tool_manifest_url {
+            let manifest_url = manifest_url.trim();
+            if !manifest_url.is_empty() {
+                if let Ok(package) = fetch_manifest_package(manifest_url, name, platform) {
+                    return Ok(package);
+                }
             }
         }
     }
@@ -141,12 +174,9 @@ fn embedded_package_spec(name: &str, platform: &str) -> Option<ToolPackage> {
     }
 
     let (version, binaries) = match name {
-        "qpdf" => ("12.2.0", vec![binary_name("qpdf")]),
-        "ffmpeg" => ("8.1", vec![binary_name("ffmpeg"), binary_name("ffprobe")]),
-        "poppler" => (
-            "25.12.0",
-            vec![binary_name("pdftoppm"), binary_name("pdftotext")],
-        ),
+        "qpdf" => ("12.2.0", required_binaries("qpdf").ok()?),
+        "ffmpeg" => ("8.1", required_binaries("ffmpeg").ok()?),
+        "poppler" => ("25.12.0", required_binaries("poppler").ok()?),
         _ => return None,
     };
     Some(ToolPackage {
@@ -189,10 +219,19 @@ fn download_package(url: &str) -> Result<Vec<u8>> {
     let status = response.status();
     if !status.is_success() {
         anyhow::bail!(
-            "下载失败: {url} 返回 {status}。如果这是 Docsy 托管工具，请先发布对应工具包。"
+            "下载失败: {url} 返回 {status}。可在设置中改用国内镜像清单，或从本地 zip 工具包安装。"
         );
     }
     Ok(response.bytes()?.to_vec())
+}
+
+fn required_binaries(name: &str) -> Result<Vec<String>> {
+    match name {
+        "qpdf" => Ok(vec![binary_name("qpdf")]),
+        "ffmpeg" => Ok(vec![binary_name("ffmpeg"), binary_name("ffprobe")]),
+        "poppler" => Ok(vec![binary_name("pdftoppm"), binary_name("pdftotext")]),
+        _ => anyhow::bail!("不支持安装工具 {name}"),
+    }
 }
 
 fn verify_sha256_if_present(bytes: &[u8], expected: &str) -> Result<()> {

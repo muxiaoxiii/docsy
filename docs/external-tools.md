@@ -39,6 +39,15 @@ https://github.com/muxiaoxiii/docsy/releases/download/toolchain-v1/tools-manifes
 DOCSY_TOOL_MANIFEST_URL
 ```
 
+普通用户可以在“设置 -> 应用设置 -> 工具清单地址”里填写镜像清单地址。国内网络环境建议把 `tools-manifest.json` 和对应 zip 工具包放到下面任意一种位置：
+
+- Gitee release 或仓库 raw 文件。
+- 阿里云 OSS、腾讯云 COS、七牛云等对象存储。
+- 公司内网 HTTP 文件服务器。
+- 能直接访问的静态文件服务。
+
+设置里的地址优先级低于环境变量，高于默认 GitHub 地址。
+
 清单格式：
 
 ```json
@@ -56,6 +65,8 @@ DOCSY_TOOL_MANIFEST_URL
 }
 ```
 
+清单里的 `url` 不需要指向 GitHub，可以指向任意可访问的 zip 下载地址。每个 zip 内部目录结构不限，Docsy 会递归查找需要的可执行文件。
+
 如果清单不可用，Windows x64 会回退到公开 zip 包：
 
 - qpdf: qpdf 官方 `msvc64.zip`
@@ -63,6 +74,18 @@ DOCSY_TOOL_MANIFEST_URL
 - Poppler: `oschwartz10612/poppler-windows` release zip
 
 macOS 没有同等稳定、轻量、覆盖 qpdf/Poppler 的官方静态 zip 组合，因此 macOS 自动安装依赖 Docsy 发布的 `toolchain-v1` 工具包。工具包发布前，系统已安装版本仍可被检测和复用。
+
+## 离线安装
+
+如果当前环境不能访问 GitHub 或任何外网，可以先通过其他网络下载工具 zip，再在设置页选择对应工具的“本地 zip 安装”。
+
+本地 zip 只要求包含对应可执行文件：
+
+- qpdf: `qpdf` 或 `qpdf.exe`
+- FFmpeg: `ffmpeg`/`ffmpeg.exe` 和 `ffprobe`/`ffprobe.exe`
+- Poppler: `pdftoppm`/`pdftoppm.exe` 和 `pdftotext`/`pdftotext.exe`
+
+Docsy 会解压到托管工具目录，并记录安装来源为本地路径。
 
 ## Windows 打包
 

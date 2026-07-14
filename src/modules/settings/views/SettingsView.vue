@@ -41,6 +41,14 @@
               下载安装到 Docsy
             </el-button>
             <el-button
+              v-if="tool.autoInstall"
+              size="small"
+              @click="installToolFromPackage(tool.name)"
+              :loading="tool.installingLocal"
+            >
+              本地 zip 安装
+            </el-button>
+            <el-button
               v-else-if="tool.name === 'libreoffice'"
               size="small"
               @click="openLibreOfficeDownload"
@@ -62,6 +70,13 @@
         <el-form-item label="LibreOffice 路径">
           <el-input v-model="settings.libreoffice_path" placeholder="留空则自动检测" />
           <span class="form-hint">用于 DOC/DOCX 转 PDF</span>
+        </el-form-item>
+        <el-form-item label="工具清单地址">
+          <el-input
+            v-model="settings.tool_manifest_url"
+            placeholder="留空使用默认清单；国内环境可填写 Gitee、对象存储或内网清单地址"
+          />
+          <span class="form-hint">用于 qpdf、Poppler、FFmpeg 在线安装</span>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="saveSettings">保存设置</el-button>
@@ -93,10 +108,12 @@
 import { ref, reactive, onMounted } from 'vue'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 import { ElMessage } from 'element-plus'
+import { open } from '@tauri-apps/plugin-dialog'
 
 const settings = ref({
   menu_visibility: {},
   libreoffice_path: '',
+  tool_manifest_url: '',
 })
 const managedToolsDir = ref('')
 
@@ -107,6 +124,7 @@ const tools = reactive([
     description: 'PDF 合并、拆分、叠加和结构处理',
     status: defaultToolStatus(),
     installing: false,
+    installingLocal: false,
     autoInstall: true,
   },
   {
@@ -115,6 +133,7 @@ const tools = reactive([
     description: 'PDF 预览渲染和页眉页脚文本检测',
     status: defaultToolStatus(),
     installing: false,
+    installingLocal: false,
     autoInstall: true,
   },
   {
@@ -123,6 +142,7 @@ const tools = reactive([
     description: '视频信息读取、抽帧和时间戳水印',
     status: defaultToolStatus(),
     installing: false,
+    installingLocal: false,
     autoInstall: true,
   },
   {
@@ -131,6 +151,7 @@ const tools = reactive([
     description: 'DOC/DOCX 转 PDF；建议安装到系统后配置路径',
     status: defaultToolStatus(),
     installing: false,
+    installingLocal: false,
     autoInstall: false,
   },
 ])
@@ -159,11 +180,18 @@ async function loadSettings() {
   const result = await tauriCallSafe('get_app_settings')
   if (result.ok) {
     settings.value = { ...settings.value, ...result.data }
+    settings.value.libreoffice_path = settings.value.libreoffice_path || ''
+    settings.value.tool_manifest_url = settings.value.tool_manifest_url || ''
   }
 }
 
 async function saveSettings() {
-  const result = await tauriCallSafe('set_app_settings', { settings: settings.value })
+  const payload = {
+    ...settings.value,
+    libreoffice_path: settings.value.libreoffice_path || null,
+    tool_manifest_url: settings.value.tool_manifest_url || null,
+  }
+  const result = await tauriCallSafe('set_app_settings', { settings: payload })
   result.ok ? ElMessage.success('设置已保存') : ElMessage.error(result.error || '保存设置失败')
 }
 
@@ -202,6 +230,29 @@ async function installTool(name) {
     ElMessage.error(result.error || '安装失败')
   }
   if (tool) tool.installing = false
+}
+
+async function installToolFromPackage(name) {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'ZIP 工具包', extensions: ['zip'] }],
+  })
+  if (!selected) return
+
+  const tool = tools.find(t => t.name === name)
+  if (tool) tool.installingLocal = true
+  const result = await tauriCallSafe('install_external_tool_from_package', {
+    toolName: name,
+    packagePath: selected,
+  })
+  if (result.ok) {
+    ElMessage.success(result.data || '安装完成')
+    await checkTools()
+    await loadDiagnostic()
+  } else {
+    ElMessage.error(result.error || '安装失败')
+  }
+  if (tool) tool.installingLocal = false
 }
 
 async function openLogDir() {
