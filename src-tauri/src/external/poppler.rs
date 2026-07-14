@@ -1,6 +1,7 @@
 use super::{ExternalTool, ToolStatus};
 use anyhow::Result;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub struct PopplerTool;
 
@@ -39,7 +40,10 @@ impl ExternalTool for PopplerTool {
         let pdftotext = Self::binary_path_for("pdftotext");
         match (pdftoppm, pdftotext) {
             (Ok(pdftoppm), Ok(pdftotext)) => {
-                let output = std::process::Command::new(&pdftoppm).arg("-v").output();
+                let mut command = std::process::Command::new(&pdftoppm);
+                command.arg("-v");
+                let output =
+                    super::command_output_with_timeout(&mut command, Duration::from_secs(2));
                 let version = output.ok().and_then(|out| {
                     let stderr = String::from_utf8_lossy(&out.stderr);
                     stderr.lines().next().map(ToString::to_string)

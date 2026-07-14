@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const DEFAULT_MANIFEST_URL: &str =
     "https://github.com/muxiaoxiii/docsy/releases/download/toolchain-v1/tools-manifest.json";
@@ -148,6 +149,12 @@ fn load_package_spec(name: &str, platform: &str) -> Result<ToolPackage> {
         }
     }
 
+    if let Some(package) = embedded_package_spec(name, platform) {
+        if platform == "windows-x86_64" {
+            return Ok(package);
+        }
+    }
+
     if let Ok(package) = fetch_manifest_package(DEFAULT_MANIFEST_URL, name, platform) {
         return Ok(package);
     }
@@ -215,7 +222,14 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
 }
 
 fn download_package(url: &str) -> Result<Vec<u8>> {
-    let response = reqwest::blocking::get(url).with_context(|| format!("下载失败: {url}"))?;
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .build()
+        .context("初始化下载客户端失败")?;
+    let response = client
+        .get(url)
+        .send()
+        .with_context(|| format!("下载失败: {url}"))?;
     let status = response.status();
     if !status.is_success() {
         anyhow::bail!(
@@ -348,10 +362,9 @@ fn hex_lower(bytes: &[u8]) -> String {
 
 pub fn find_on_path(binary: &str) -> Option<PathBuf> {
     let command = if cfg!(windows) { "where" } else { "which" };
-    let output = std::process::Command::new(command)
-        .arg(binary)
-        .output()
-        .ok()?;
+    let mut command = std::process::Command::new(command);
+    command.arg(binary);
+    let output = super::command_output_with_timeout(&mut command, Duration::from_secs(2)).ok()?;
     if !output.status.success() {
         return None;
     }

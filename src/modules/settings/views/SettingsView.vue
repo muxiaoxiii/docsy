@@ -18,7 +18,8 @@
         <div v-for="tool in tools" :key="tool.name" class="tool-item">
           <div class="tool-info">
             <span class="tool-name">{{ tool.label }}</span>
-            <el-tag v-if="tool.status.available" type="success" size="small">可用</el-tag>
+            <el-tag v-if="tool.checking" type="info" size="small">检测中</el-tag>
+            <el-tag v-else-if="tool.status.available" type="success" size="small">可用</el-tag>
             <el-tag v-else type="danger" size="small">未安装</el-tag>
             <el-tag v-if="tool.status.available" size="small" :type="tool.status.managed ? 'primary' : 'info'">
               {{ tool.status.managed ? 'Docsy 托管' : '系统工具' }}
@@ -123,6 +124,7 @@ const tools = reactive([
     label: 'qpdf',
     description: 'PDF 合并、拆分、叠加和结构处理',
     status: defaultToolStatus(),
+    checking: false,
     installing: false,
     installingLocal: false,
     autoInstall: true,
@@ -132,6 +134,7 @@ const tools = reactive([
     label: 'Poppler',
     description: 'PDF 预览渲染和页眉页脚文本检测',
     status: defaultToolStatus(),
+    checking: false,
     installing: false,
     installingLocal: false,
     autoInstall: true,
@@ -141,6 +144,7 @@ const tools = reactive([
     label: 'FFmpeg',
     description: '视频信息读取、抽帧和时间戳水印',
     status: defaultToolStatus(),
+    checking: false,
     installing: false,
     installingLocal: false,
     autoInstall: true,
@@ -150,6 +154,7 @@ const tools = reactive([
     label: 'LibreOffice',
     description: 'DOC/DOCX 转 PDF；建议安装到系统后配置路径',
     status: defaultToolStatus(),
+    checking: false,
     installing: false,
     installingLocal: false,
     autoInstall: false,
@@ -196,12 +201,15 @@ async function saveSettings() {
 }
 
 async function checkTools() {
-  for (const tool of tools) {
+  await Promise.all(tools.map(async (tool) => {
+    tool.checking = true
     const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
     if (result.ok) {
       tool.status = result.data
     }
-  }
+    tool.checking = false
+  }))
+  syncDiagnosticToolStatus()
 }
 
 async function loadManagedToolsDir() {
@@ -214,7 +222,19 @@ async function loadManagedToolsDir() {
 async function loadDiagnostic() {
   const result = await tauriCallSafe('get_diagnostic_info')
   if (result.ok) {
-    diagnostic.value = result.data
+    diagnostic.value = { ...diagnostic.value, ...result.data }
+  }
+}
+
+function syncDiagnosticToolStatus() {
+  for (const name of ['qpdf', 'poppler', 'ffmpeg']) {
+    const tool = tools.find(t => t.name === name)
+    if (tool) {
+      diagnostic.value[name] = {
+        available: tool.status.available,
+        version: tool.status.version,
+      }
+    }
   }
 }
 
@@ -280,8 +300,8 @@ async function openLibreOfficeDownload() {
 onMounted(() => {
   loadSettings()
   loadManagedToolsDir()
-  checkTools()
   loadDiagnostic()
+  checkTools()
 })
 </script>
 

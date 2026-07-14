@@ -1,6 +1,7 @@
 use super::{ExternalTool, ToolStatus};
 use anyhow::Result;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub struct FfmpegTool;
 
@@ -8,7 +9,10 @@ impl ExternalTool for FfmpegTool {
     fn check(&self) -> ToolStatus {
         match self.binary_path() {
             Ok(path) => {
-                let output = std::process::Command::new(&path).arg("-version").output();
+                let mut command = std::process::Command::new(&path);
+                command.arg("-version");
+                let output =
+                    super::command_output_with_timeout(&mut command, Duration::from_secs(2));
                 match output {
                     Ok(out) => {
                         let version = String::from_utf8_lossy(&out.stdout);

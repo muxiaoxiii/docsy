@@ -14,22 +14,31 @@ pub fn get_module_registry() -> Result<Vec<serde_json::Value>, String> {
 }
 
 #[tauri::command]
-pub fn check_external_tool(tool_name: String) -> crate::external::ToolStatus {
-    crate::external::check_by_name(&tool_name)
+pub async fn check_external_tool(tool_name: String) -> Result<crate::external::ToolStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::external::check_by_name(&tool_name))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn install_external_tool(tool_name: String) -> Result<String, String> {
-    crate::external::install_by_name(&tool_name).map_err(|e| e.to_string())
+pub async fn install_external_tool(tool_name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::external::install_by_name(&tool_name))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn install_external_tool_from_package(
+pub async fn install_external_tool_from_package(
     tool_name: String,
     package_path: String,
 ) -> Result<String, String> {
-    crate::external::managed::install_tool_from_package(&tool_name, &package_path)
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::external::managed::install_tool_from_package(&tool_name, &package_path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

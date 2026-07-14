@@ -1,6 +1,7 @@
 use super::{ExternalTool, ToolStatus};
 use anyhow::Result;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub struct LibreOfficeTool;
 
@@ -52,7 +53,17 @@ impl ExternalTool for LibreOfficeTool {
             }
         }
 
-        if let Ok(output) = std::process::Command::new("which").arg("soffice").output() {
+        let mut command = if cfg!(windows) {
+            let mut command = std::process::Command::new("where");
+            command.arg("soffice");
+            command
+        } else {
+            let mut command = std::process::Command::new("which");
+            command.arg("soffice");
+            command
+        };
+        if let Ok(output) = super::command_output_with_timeout(&mut command, Duration::from_secs(2))
+        {
             if output.status.success() {
                 let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !path_str.is_empty() {

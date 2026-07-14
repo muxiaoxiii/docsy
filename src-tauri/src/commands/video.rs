@@ -10,7 +10,13 @@ pub struct FfmpegStatus {
 }
 
 #[tauri::command]
-pub fn check_ffmpeg() -> FfmpegStatus {
+pub async fn check_ffmpeg() -> Result<FfmpegStatus, String> {
+    tauri::async_runtime::spawn_blocking(build_ffmpeg_status)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn build_ffmpeg_status() -> FfmpegStatus {
     let tool = crate::external::FfmpegTool;
     let status = tool.check();
     FfmpegStatus {

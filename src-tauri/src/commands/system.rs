@@ -1,5 +1,3 @@
-use crate::external::ExternalTool;
-
 #[tauri::command]
 pub fn open_path(path: String) -> Result<(), String> {
     open::that(&path).map_err(|e| e.to_string())
@@ -36,7 +34,13 @@ pub fn open_log_dir() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_diagnostic_info() -> Result<serde_json::Value, String> {
+pub async fn get_diagnostic_info() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(build_diagnostic_info)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn build_diagnostic_info() -> Result<serde_json::Value, String> {
     let mut info = serde_json::Map::new();
     info.insert(
         "version".into(),
@@ -49,24 +53,6 @@ pub fn get_diagnostic_info() -> Result<serde_json::Value, String> {
     info.insert(
         "arch".into(),
         serde_json::Value::String(std::env::consts::ARCH.into()),
-    );
-
-    let qpdf = crate::external::QpdfTool.check();
-    info.insert(
-        "qpdf".into(),
-        serde_json::json!({ "available": qpdf.available, "version": qpdf.version }),
-    );
-
-    let ffmpeg = crate::external::FfmpegTool.check();
-    info.insert(
-        "ffmpeg".into(),
-        serde_json::json!({ "available": ffmpeg.available, "version": ffmpeg.version }),
-    );
-
-    let poppler = crate::external::PopplerTool.check();
-    info.insert(
-        "poppler".into(),
-        serde_json::json!({ "available": poppler.available, "version": poppler.version }),
     );
 
     Ok(serde_json::Value::Object(info))
