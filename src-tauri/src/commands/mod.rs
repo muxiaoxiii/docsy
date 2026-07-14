@@ -47,6 +47,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         system::open_path,
         system::write_frontend_log,
         system::get_log_file_path,
+        system::read_image_data_url,
         system::open_log_file,
         system::open_log_dir,
         system::get_diagnostic_info,

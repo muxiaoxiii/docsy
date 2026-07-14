@@ -44,7 +44,7 @@
             <template v-if="videoPath">
               <div class="selected-file">
                 <el-icon><VideoCamera /></el-icon>
-                <span class="file-name">{{ videoPath.split('/').pop() }}</span>
+                <span class="file-name">{{ baseName(videoPath) }}</span>
                 <el-button text type="danger" size="small" @click.stop="clearVideo">清除</el-button>
               </div>
             </template>
@@ -86,6 +86,18 @@
         <div class="section-block">
           <div class="section-title">抽帧设置</div>
           <el-form label-width="90px" size="default">
+            <el-form-item label="输出目录">
+              <div class="path-picker">
+                <el-button @click="selectOutputDir">选择</el-button>
+                <el-button v-if="settings.outputDir" text type="danger" @click="settings.outputDir = ''">清除</el-button>
+              </div>
+              <div class="path-hint">{{ settings.outputDir || '默认保存到视频所在文件夹' }}</div>
+            </el-form-item>
+
+            <el-form-item label="文件名前缀">
+              <el-input v-model="settings.filenamePrefix" placeholder="留空则使用 视频名_时间" />
+            </el-form-item>
+
             <el-form-item label="抽帧模式">
               <el-radio-group v-model="settings.mode">
                 <el-radio value="fps">按频率</el-radio>
@@ -194,10 +206,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { tauriCall, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import {
   Loading,
   CircleCheckFilled,
@@ -216,6 +228,8 @@ const videoPath = ref('')
 const videoInfo = ref(null)
 
 const settings = reactive({
+  outputDir: '',
+  filenamePrefix: '',
   mode: 'fps',
   fps: 1.0,
   interval: 1.0,
@@ -234,6 +248,7 @@ const resultImages = ref([])
 
 const previewVisible = ref(false)
 const previewSrc = ref('')
+let unlistenDragDrop = null
 
 async function checkFfmpeg() {
   ffmpegLoading.value = true
@@ -271,16 +286,29 @@ async function selectFile() {
     ],
   })
   if (file) {
-    await loadVideo(file)
+    await loadVideo(normalizeSelectedPath(file))
+  }
+}
+
+async function selectOutputDir() {
+  const selected = await open({ directory: true })
+  if (selected) {
+    settings.outputDir = normalizeSelectedPath(selected)
   }
 }
 
 async function onDrop(e) {
   dragging.value = false
   const files = e.dataTransfer?.files
-  if (files?.length) {
-    await loadVideo(files[0].path || files[0].name)
+  if (files?.length && files[0].path) {
+    await loadVideo(files[0].path)
   }
+}
+
+async function handleDroppedPaths(paths) {
+  const first = Array.isArray(paths) ? paths[0] : null
+  if (!first) return
+  await loadVideo(first)
 }
 
 async function loadVideo(path) {
@@ -313,7 +341,8 @@ async function extractFrames() {
 
   const args = {
     input: videoPath.value,
-    output_dir: '',
+    output_dir: settings.outputDir,
+    filename_prefix: settings.filenamePrefix,
     fps: settings.mode === 'fps' ? settings.fps : 1.0 / settings.interval,
     format: settings.format,
     quality: settings.quality,
@@ -344,17 +373,31 @@ async function extractFrames() {
 async function loadResultImages(dir) {
   const res = await tauriCallSafe('list_output_frames', { dir })
   if (res.ok && Array.isArray(res.data)) {
-    resultImages.value = res.data.map((f) => ({
-      name: f.split('/').pop(),
-      src: convertFileSrc(f),
+    const items = await Promise.all(res.data.map(async (f) => ({
+      name: baseName(f),
+      src: await imageDataUrl(f),
       path: f,
-    }))
+    })))
+    resultImages.value = items
   }
 }
 
 function previewImage(img) {
   previewSrc.value = img.src
   previewVisible.value = true
+}
+
+async function imageDataUrl(path) {
+  const res = await tauriCallSafe('read_image_data_url', { path })
+  return res.ok ? res.data : ''
+}
+
+function normalizeSelectedPath(value) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function baseName(path) {
+  return String(path || '').split(/[\\/]/).pop() || path
 }
 
 function formatDuration(seconds) {
@@ -375,7 +418,25 @@ function formatSize(bytes) {
   return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
 }
 
-onMounted(checkFfmpeg)
+onMounted(async () => {
+  checkFfmpeg()
+  unlistenDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
+    if (event.payload.type === 'enter' || event.payload.type === 'over') {
+      dragging.value = true
+    } else if (event.payload.type === 'drop') {
+      dragging.value = false
+      await handleDroppedPaths(event.payload.paths)
+    } else {
+      dragging.value = false
+    }
+  })
+})
+
+onBeforeUnmount(() => {
+  if (unlistenDragDrop) {
+    unlistenDragDrop()
+  }
+})
 </script>
 
 <style scoped>
@@ -577,5 +638,19 @@ onMounted(checkFfmpeg)
   max-width: 100%;
   max-height: 70vh;
   object-fit: contain;
+}
+
+.path-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.path-hint {
+  width: 100%;
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
+  word-break: break-all;
 }
 </style>

@@ -13,6 +13,8 @@ const A4_HEIGHT_MM: f64 = 297.0;
 #[derive(Debug, Deserialize)]
 pub struct AnalyzeArgs {
     pub folder: String,
+    #[serde(default)]
+    pub folders: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -50,6 +52,8 @@ pub struct RecommendedSettings {
 #[derive(Debug, Deserialize)]
 pub struct RunArgs {
     pub folder: String,
+    #[serde(default)]
+    pub folders: Option<Vec<String>>,
     pub output_format: String,
     pub layout: String,
     pub orientation: String,
@@ -63,6 +67,16 @@ pub struct RunArgs {
     pub margin_mm: Option<f64>,
     #[serde(default)]
     pub show_filename: Option<bool>,
+    #[serde(default)]
+    pub filename_without_ext: Option<bool>,
+    #[serde(default)]
+    pub filename_remove_text: Option<String>,
+    #[serde(default)]
+    pub order_mode: Option<String>,
+    #[serde(default)]
+    pub border_enabled: Option<bool>,
+    #[serde(default)]
+    pub border_color: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -181,6 +195,65 @@ fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
     Ok(images)
 }
 
+fn folders_from_args(folder: &str, folders: &Option<Vec<String>>) -> Vec<String> {
+    let mut result: Vec<String> = folders
+        .as_ref()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| !item.trim().is_empty())
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    if result.is_empty() && !folder.trim().is_empty() {
+        result.push(folder.to_string());
+    }
+    result
+}
+
+fn scan_image_folders(folder: &str, folders: &Option<Vec<String>>) -> Result<Vec<ImageInfo>> {
+    let mut all = Vec::new();
+    for item in folders_from_args(folder, folders) {
+        let path = Path::new(&item);
+        if path.is_dir() {
+            all.extend(scan_images(&item)?);
+        } else if path.is_file() {
+            if let Some(img) = image_info_from_path(path)? {
+                all.push(img);
+            }
+        }
+    }
+    all.sort_by(|a, b| {
+        let ka = natural_sort_key(&a.path);
+        let kb = natural_sort_key(&b.path);
+        ka.cmp(&kb)
+    });
+    Ok(all)
+}
+
+fn image_info_from_path(path: &Path) -> Result<Option<ImageInfo>> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        return Ok(None);
+    }
+    let metadata = std::fs::metadata(path)?;
+    let img = match image::open(path) {
+        Ok(img) => img,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(ImageInfo {
+        path: path.display().to_string(),
+        width: img.width(),
+        height: img.height(),
+        file_size: metadata.len(),
+    }))
+}
+
 fn build_groups(images: &[ImageInfo]) -> Vec<ImageGroup> {
     let mut map: HashMap<String, usize> = HashMap::new();
     for img in images {
@@ -294,7 +367,7 @@ fn recommend_settings(images: &[ImageInfo]) -> RecommendedSettings {
 }
 
 pub fn analyze(args: &AnalyzeArgs) -> Result<AnalyzeResult> {
-    let images = scan_images(&args.folder)?;
+    let images = scan_image_folders(&args.folder, &args.folders)?;
     let groups = build_groups(&images);
     let recommended = recommend_settings(&images);
 
@@ -306,7 +379,7 @@ pub fn analyze(args: &AnalyzeArgs) -> Result<AnalyzeResult> {
 }
 
 pub fn run(args: &RunArgs) -> Result<RunResult> {
-    let images = scan_images(&args.folder)?;
+    let mut images = scan_image_folders(&args.folder, &args.folders)?;
     if images.is_empty() {
         anyhow::bail!("未找到图片文件");
     }
@@ -315,6 +388,11 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     let per_page = grid.rows * grid.cols;
     let margin_mm = args.margin_mm.unwrap_or(15.0);
     let show_filename = args.show_filename.unwrap_or(true);
+    let filename_without_ext = args.filename_without_ext.unwrap_or(false);
+    let filename_remove_text = args.filename_remove_text.clone().unwrap_or_default();
+    let order_mode = args.order_mode.as_deref().unwrap_or("z");
+    let border_enabled = args.border_enabled.unwrap_or(false);
+    let border_color = args.border_color.as_deref().unwrap_or("black");
     let resolved_orientation = if args.orientation == "auto" {
         recommend_settings(&images).orientation
     } else {
@@ -335,15 +413,21 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     let image_cell_h = cell_h - filename_reserve;
 
     let total_pages = images.len().div_ceil(per_page);
+    reorder_images(&mut images, &grid, order_mode);
 
-    let output_dir = Path::new(&args.folder).join("_docsy_image_out");
+    let first_folder = folders_from_args(&args.folder, &args.folders)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| args.folder.clone());
+    let output_dir = Path::new(&first_folder).join("_docsy_image_out");
     std::fs::create_dir_all(&output_dir)?;
     let ext = if args.output_format == "pdf" {
         "pdf"
     } else {
         "docx"
     };
-    let output_path = output_dir.join(format!("image_paddler_output.{}", ext));
+    let output_stem = output_file_stem(&images);
+    let output_path = unique_output_path(&output_dir, &format!("{output_stem}_docsy_paddler"), ext);
 
     match args.output_format.as_str() {
         "pdf" => generate_pdf(
@@ -357,6 +441,10 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
             image_cell_h,
             filename_reserve,
             show_filename,
+            filename_without_ext,
+            &filename_remove_text,
+            border_enabled,
+            border_color,
             &args.scale_mode,
             args.dpi,
         )?,
@@ -371,6 +459,10 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
             image_cell_h,
             filename_reserve,
             show_filename,
+            filename_without_ext,
+            &filename_remove_text,
+            border_enabled,
+            border_color,
             &args.scale_mode,
             args.dpi,
         )?,
@@ -381,6 +473,108 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
         pages: total_pages as u32,
         images: images.len() as u32,
     })
+}
+
+fn reorder_images(images: &mut Vec<ImageInfo>, grid: &LayoutGrid, order_mode: &str) {
+    let per_page = grid.rows * grid.cols;
+    let mut reordered = Vec::with_capacity(images.len());
+    for chunk in images.chunks(per_page) {
+        let order = cell_order(grid, order_mode);
+        for idx in order {
+            if idx < chunk.len() {
+                reordered.push(chunk[idx].clone());
+            }
+        }
+    }
+    *images = reordered;
+}
+
+fn cell_order(grid: &LayoutGrid, order_mode: &str) -> Vec<usize> {
+    let mut order = Vec::with_capacity(grid.rows * grid.cols);
+    match order_mode {
+        "n" => {
+            for col in 0..grid.cols {
+                for row in 0..grid.rows {
+                    order.push(row * grid.cols + col);
+                }
+            }
+        }
+        "reverse_n" => {
+            for col in (0..grid.cols).rev() {
+                for row in 0..grid.rows {
+                    order.push(row * grid.cols + col);
+                }
+            }
+        }
+        _ => {
+            for row in 0..grid.rows {
+                for col in 0..grid.cols {
+                    order.push(row * grid.cols + col);
+                }
+            }
+        }
+    }
+    order
+}
+
+fn display_filename(path: &str, without_ext: bool, remove_text: &str) -> String {
+    let path = Path::new(path);
+    let mut name = if without_ext {
+        path.file_stem()
+    } else {
+        path.file_name()
+    }
+    .and_then(|s| s.to_str())
+    .unwrap_or("")
+    .to_string();
+    if !remove_text.is_empty() {
+        name = name.replace(remove_text, "");
+    }
+    name
+}
+
+fn output_file_stem(images: &[ImageInfo]) -> String {
+    let first_name = images
+        .first()
+        .and_then(|img| Path::new(&img.path).file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("images");
+    let re = Regex::new(r"(?i)(?:[_-]?(?:frame|img|image)?[_-]?\d+)$").unwrap();
+    let cleaned = re.replace(first_name, "");
+    let stem = cleaned.trim_matches(['_', '-', ' ']);
+    let fallback = if stem.is_empty() { first_name } else { stem };
+    sanitize_output_name(fallback)
+}
+
+fn sanitize_output_name(name: &str) -> String {
+    let value: String = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric()
+                || matches!(ch, '-' | '_')
+                || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+            {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if value.is_empty() {
+        "images".into()
+    } else {
+        value
+    }
+}
+
+fn unique_output_path(dir: &Path, stem: &str, ext: &str) -> std::path::PathBuf {
+    let mut candidate = dir.join(format!("{stem}.{ext}"));
+    let mut index = 2;
+    while candidate.exists() {
+        candidate = dir.join(format!("{stem}_{index}.{ext}"));
+        index += 1;
+    }
+    candidate
 }
 
 fn compute_placement(
@@ -426,6 +620,10 @@ fn generate_pdf(
     image_cell_h_mm: f64,
     filename_reserve_mm: f64,
     show_filename: bool,
+    filename_without_ext: bool,
+    filename_remove_text: &str,
+    border_enabled: bool,
+    border_color: &str,
     scale_mode: &str,
     dpi: u32,
 ) -> Result<()> {
@@ -447,6 +645,25 @@ fn generate_pdf(
             let cell_y_mm = page_h_mm
                 - margin_mm
                 - (row as f64 + 1.0) * (image_cell_h_mm + filename_reserve_mm);
+            let image_area_y_mm = cell_y_mm + filename_reserve_mm;
+            if border_enabled {
+                let rect_x_pt = cell_x_mm * 72.0 / 25.4;
+                let rect_y_pt = cell_y_mm * 72.0 / 25.4;
+                let rect_w_pt = cell_w_mm * 72.0 / 25.4;
+                let rect_h_pt = (image_cell_h_mm + filename_reserve_mm) * 72.0 / 25.4;
+                ops.push(Op::SetOutlineColor {
+                    col: pdf_border_color(border_color),
+                });
+                ops.push(Op::SetOutlineThickness { pt: Pt(0.75) });
+                ops.push(Op::DrawRectangle {
+                    rectangle: Rect::from_xywh(
+                        Pt(rect_x_pt as f32),
+                        Pt(rect_y_pt as f32),
+                        Pt(rect_w_pt as f32),
+                        Pt(rect_h_pt as f32),
+                    ),
+                });
+            }
 
             let img = ::image::open(&img_info.path).map_err(|e| anyhow::anyhow!("{}", e))?;
             let raw_image =
@@ -469,7 +686,7 @@ fn generate_pdf(
             let offset_y_pt = (cell_h_pt - draw_h_pt) / 2.0;
 
             let base_x_pt = cell_x_mm * 72.0 / 25.4 + offset_x_pt;
-            let base_y_pt = cell_y_mm * 72.0 / 25.4 + offset_y_pt;
+            let base_y_pt = image_area_y_mm * 72.0 / 25.4 + offset_y_pt;
 
             let scale_factor = draw_w_pt / (img_info.width as f64 * 72.0 / dpi as f64);
 
@@ -488,12 +705,10 @@ fn generate_pdf(
             ops.push(Op::RestoreGraphicsState);
 
             if show_filename {
-                let name = Path::new(&img_info.path)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
+                let name =
+                    display_filename(&img_info.path, filename_without_ext, filename_remove_text);
                 let text_x_pt = cell_x_mm * 72.0 / 25.4;
-                let text_y_pt = (cell_y_mm - 2.0) * 72.0 / 25.4;
+                let text_y_pt = (cell_y_mm + 1.5) * 72.0 / 25.4;
                 ops.push(Op::StartTextSection);
                 ops.push(Op::SetFont {
                     font: PdfFontHandle::Builtin(font),
@@ -509,7 +724,7 @@ fn generate_pdf(
                     col: Color::Rgb(Rgb::new(0.2, 0.2, 0.2, None)),
                 });
                 ops.push(Op::ShowText {
-                    items: vec![TextItem::Text(name.to_string())],
+                    items: vec![TextItem::Text(name)],
                 });
                 ops.push(Op::EndTextSection);
             }
@@ -529,6 +744,13 @@ fn generate_pdf(
     Ok(())
 }
 
+fn pdf_border_color(color: &str) -> printpdf::Color {
+    match color {
+        "white" => printpdf::Color::Rgb(printpdf::Rgb::new(1.0, 1.0, 1.0, None)),
+        _ => printpdf::Color::Rgb(printpdf::Rgb::new(0.0, 0.0, 0.0, None)),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn generate_docx(
     images: &[ImageInfo],
@@ -541,6 +763,10 @@ fn generate_docx(
     image_cell_h_mm: f64,
     _filename_reserve_mm: f64,
     show_filename: bool,
+    filename_without_ext: bool,
+    filename_remove_text: &str,
+    border_enabled: bool,
+    border_color: &str,
     scale_mode: &str,
     dpi: u32,
 ) -> Result<()> {
@@ -556,28 +782,42 @@ fn generate_docx(
     let margin_r_twips = margin_l_twips;
     let margin_t_twips = margin_l_twips;
     let margin_b_twips = margin_l_twips;
+    let usable_w_twips = page_w_twips.saturating_sub(margin_l_twips + margin_r_twips);
+    let usable_h_twips = page_h_twips.saturating_sub(margin_t_twips + margin_b_twips);
+    let cell_w_twips = (usable_w_twips / grid.cols as u64).max(1);
+    let cell_h_twips = (usable_h_twips / grid.rows as u64).max(1);
 
     let mut media_entries: Vec<(String, Vec<u8>, String, String)> = Vec::new();
     let mut image_idx = 0usize;
 
     let mut body_xml = String::new();
 
-    for chunk in images.chunks(per_page) {
+    let total_pages = images.len().div_ceil(per_page);
+
+    for (chunk_idx, chunk) in images.chunks(per_page).enumerate() {
         let mut table_xml = String::new();
         table_xml.push_str(
             "<w:tbl><w:tblPr>\
 <w:tblW w:w=\"0\" w:type=\"auto\"/>\
+<w:tblLayout w:type=\"fixed\"/>\
 <w:tblBorders><w:top w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
 <w:left w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
 <w:bottom w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
 <w:right w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
 <w:insideH w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
 <w:insideV w:val=\"none\" w:sz=\"0\" w:space=\"0\" w:color=\"auto\"/>\
-</w:tblBorders></w:tblPr>",
+</w:tblBorders></w:tblPr><w:tblGrid>",
         );
+        for _ in 0..grid.cols {
+            table_xml.push_str(&format!("<w:gridCol w:w=\"{}\"/>", cell_w_twips));
+        }
+        table_xml.push_str("</w:tblGrid>");
 
         for row_idx in 0..grid.rows {
-            table_xml.push_str("<w:tr>");
+            table_xml.push_str(&format!(
+                "<w:tr><w:trPr><w:trHeight w:val=\"{}\" w:hRule=\"atLeast\"/></w:trPr>",
+                cell_h_twips
+            ));
             for col_idx in 0..grid.cols {
                 let idx = row_idx * grid.cols + col_idx;
                 if idx < chunk.len() {
@@ -619,17 +859,38 @@ fn generate_docx(
                     let draw_w_emu = (draw_w_pt * 914400.0 / 72.0) as u64;
                     let draw_h_emu = (draw_h_pt * 914400.0 / 72.0) as u64;
 
-                    let name = Path::new(&img_info.path)
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("");
-                    let escaped_name = xml_escape(name);
+                    let name = display_filename(
+                        &img_info.path,
+                        filename_without_ext,
+                        filename_remove_text,
+                    );
+                    let escaped_name = xml_escape(&name);
 
-                    table_xml.push_str("<w:tc><w:tcPr><w:tcW w:w=\"0\" w:type=\"auto\"/></w:tcPr>");
+                    table_xml.push_str(&format!(
+                        "<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/><w:vAlign w:val=\"center\"/>",
+                        cell_w_twips
+                    ));
+                    if border_enabled {
+                        table_xml.push_str(&format!(
+                            "<w:tcBorders>\
+<w:top w:val=\"single\" w:sz=\"8\" w:space=\"0\" w:color=\"{}\"/>\
+<w:left w:val=\"single\" w:sz=\"8\" w:space=\"0\" w:color=\"{}\"/>\
+<w:bottom w:val=\"single\" w:sz=\"8\" w:space=\"0\" w:color=\"{}\"/>\
+<w:right w:val=\"single\" w:sz=\"8\" w:space=\"0\" w:color=\"{}\"/>\
+</w:tcBorders>",
+                            docx_border_color(border_color),
+                            docx_border_color(border_color),
+                            docx_border_color(border_color),
+                            docx_border_color(border_color)
+                        ));
+                    }
+                    table_xml.push_str("</w:tcPr>");
                     table_xml.push_str(&format!(
                         "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:drawing>\
 <wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">\
 <wp:extent cx=\"{}\" cy=\"{}\"/>\
+<wp:docPr id=\"{}\" name=\"{}\"/>\
+<wp:cNvGraphicFramePr/>\
 <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\
 <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
 <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
@@ -640,6 +901,8 @@ fn generate_docx(
 </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>",
                         draw_w_emu,
                         draw_h_emu,
+                        image_idx,
+                        escaped_name,
                         image_idx,
                         escaped_name,
                         image_idx,
@@ -656,9 +919,10 @@ fn generate_docx(
 
                     table_xml.push_str("</w:tc>");
                 } else {
-                    table_xml.push_str(
-                        "<w:tc><w:tcPr><w:tcW w:w=\"0\" w:type=\"auto\"/></w:tcPr><w:p/></w:tc>",
-                    );
+                    table_xml.push_str(&format!(
+                        "<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/></w:tcPr><w:p/></w:tc>",
+                        cell_w_twips
+                    ));
                 }
             }
             table_xml.push_str("</w:tr>");
@@ -666,6 +930,9 @@ fn generate_docx(
 
         table_xml.push_str("</w:tbl>");
         body_xml.push_str(&table_xml);
+        if chunk_idx + 1 < total_pages {
+            body_xml.push_str("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
+        }
     }
 
     let mut rels_xml = String::new();
@@ -687,7 +954,8 @@ fn generate_docx(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-<Default Extension="xml" ContentType="application/xml"/>"#,
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
     );
     let mut seen_ext: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (_, _, ct, ext) in &media_entries {
@@ -711,8 +979,8 @@ fn generate_docx(
 <w:body>
 {}
 <w:sectPr>
-<w:pgSz w:w=\"{}\" w:h=\"{}\"/>
-<w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/>
+<w:pgSz w:w="{}" w:h="{}"/>
+<w:pgMar w:top="{}" w:right="{}" w:bottom="{}" w:left="{}" w:header="0" w:footer="0" w:gutter="0"/>
 </w:sectPr>
 </w:body>
 </w:document>"#,
@@ -757,6 +1025,13 @@ fn generate_docx(
     Ok(())
 }
 
+fn docx_border_color(color: &str) -> &'static str {
+    match color {
+        "white" => "FFFFFF",
+        _ => "000000",
+    }
+}
+
 fn xml_escape(input: &str) -> String {
     input
         .replace('&', "&amp;")
@@ -769,6 +1044,7 @@ fn xml_escape(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
 
     #[test]
     fn test_parse_layout_grid() {
@@ -859,5 +1135,68 @@ mod tests {
         let mut v = vec!["img_10.jpg", "img_2.jpg", "img_1.jpg"];
         v.sort_by(|a, b| natural_sort_key(a).cmp(&natural_sort_key(b)));
         assert_eq!(v, vec!["img_1.jpg", "img_2.jpg", "img_10.jpg"]);
+    }
+
+    #[test]
+    fn generated_docx_has_valid_package_parts_and_unique_name() {
+        let root = std::env::temp_dir().join(format!(
+            "docsy_image_paddler_test_{}_{}",
+            std::process::id(),
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let img_path = root.join("evidence_clip_frame_0001.png");
+        let img: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+            image::ImageBuffer::from_pixel(240, 120, image::Rgba([240, 240, 240, 255]));
+        img.save(&img_path).unwrap();
+
+        let args = RunArgs {
+            folder: root.display().to_string(),
+            folders: None,
+            output_format: "docx".into(),
+            layout: "1".into(),
+            orientation: "portrait".into(),
+            dpi: 300,
+            scale_mode: "fit".into(),
+            custom_rows: None,
+            custom_cols: None,
+            margin_mm: Some(6.0),
+            show_filename: Some(true),
+            filename_without_ext: Some(true),
+            filename_remove_text: Some("_clip".into()),
+            order_mode: Some("z".into()),
+            border_enabled: Some(true),
+            border_color: Some("black".into()),
+        };
+
+        let first = run(&args).unwrap();
+        let second = run(&args).unwrap();
+        assert_ne!(first.output_path, second.output_path);
+        assert!(first
+            .output_path
+            .ends_with("evidence_clip_docsy_paddler.docx"));
+        assert!(second
+            .output_path
+            .ends_with("evidence_clip_docsy_paddler_2.docx"));
+
+        let file = std::fs::File::open(&first.output_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        archive.by_name("[Content_Types].xml").unwrap();
+        archive.by_name("_rels/.rels").unwrap();
+        archive.by_name("word/_rels/document.xml.rels").unwrap();
+        archive.by_name("word/media/image1.png").unwrap();
+
+        let mut document_xml = String::new();
+        archive
+            .by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut document_xml)
+            .unwrap();
+        assert!(document_xml.contains("<wp:docPr"));
+        assert!(document_xml.contains("<w:tcBorders>"));
+        assert!(document_xml.contains(">evidence_frame_0001<"));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

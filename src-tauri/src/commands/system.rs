@@ -34,6 +34,29 @@ pub fn open_log_dir() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn read_image_data_url(path: String) -> Result<String, String> {
+    use base64::Engine;
+
+    let path = std::path::PathBuf::from(&path);
+    let ext = path
+        .extension()
+        .and_then(|v| v.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "gif" => "image/gif",
+        _ => "application/octet-stream",
+    };
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
+}
+
+#[tauri::command]
 pub async fn get_diagnostic_info() -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(build_diagnostic_info)
         .await

@@ -22,7 +22,8 @@ pub fn extract(args: &serde_json::Value) -> Result<serde_json::Value> {
     std::fs::create_dir_all(&output_dir).context("创建抽帧输出目录失败")?;
 
     let format = normalized_format(args);
-    let output_pattern = output_dir.join(format!("frame_%04d.{format}"));
+    let prefix = output_prefix_for(input_path, args);
+    let output_pattern = output_dir.join(format!("{prefix}_frame_%04d.{format}"));
     let fps = args.get("fps").and_then(|v| v.as_f64()).unwrap_or(1.0);
     if !fps.is_finite() || fps <= 0.0 {
         anyhow::bail!("抽帧频率必须大于 0");
@@ -89,6 +90,24 @@ fn output_dir_for(input: &Path, args: &serde_json::Value) -> Result<PathBuf> {
     Ok(parent
         .join("_docsy_video_frames")
         .join(format!("{}_{}", sanitize_name(stem), ts)))
+}
+
+fn output_prefix_for(input: &Path, args: &serde_json::Value) -> String {
+    if let Some(prefix) = args
+        .get("filename_prefix")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        return sanitize_name(prefix);
+    }
+
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    sanitize_name(&format!("{stem}_{ts}"))
 }
 
 fn normalized_format(args: &serde_json::Value) -> String {
@@ -161,7 +180,10 @@ fn sanitize_name(name: &str) -> String {
     let sanitized: String = name
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+            if ch.is_ascii_alphanumeric()
+                || matches!(ch, '-' | '_')
+                || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+            {
                 ch
             } else {
                 '_'

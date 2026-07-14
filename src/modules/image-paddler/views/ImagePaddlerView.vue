@@ -9,7 +9,7 @@
         <el-form label-width="80px" size="small">
           <el-form-item label="文件夹">
             <el-button @click="selectFolder">选择文件夹</el-button>
-            <span class="folder-path" v-if="folder">{{ folder }}</span>
+            <span class="folder-path" v-if="folders.length">{{ folders.join('；') }}</span>
           </el-form-item>
 
           <el-form-item label="输出格式">
@@ -57,15 +57,42 @@
           </el-form-item>
 
           <el-form-item label="页边距">
-            <el-input-number v-model="settings.margin_mm" :min="5" :max="30" :step="1" />
+            <el-input-number v-model="settings.margin_mm" :min="0" :max="30" :step="1" />
+            <span class="unit-label">mm</span>
           </el-form-item>
 
           <el-form-item label="文件名">
             <el-switch v-model="settings.show_filename" />
           </el-form-item>
 
+          <el-form-item label="扩展名">
+            <el-switch v-model="settings.filename_without_ext" active-text="隐藏" inactive-text="保留" />
+          </el-form-item>
+
+          <el-form-item label="删文字">
+            <el-input v-model="settings.filename_remove_text" placeholder="从嵌入文件名中删除这些字" />
+          </el-form-item>
+
+          <el-form-item label="排列">
+            <el-select v-model="settings.order_mode">
+              <el-option label="Z 字" value="z" />
+              <el-option label="N 字" value="n" />
+              <el-option label="倒 N 字" value="reverse_n" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="边框">
+            <div class="inline-controls">
+              <el-switch v-model="settings.border_enabled" />
+              <el-select v-model="settings.border_color" :disabled="!settings.border_enabled">
+                <el-option label="黑色" value="black" />
+                <el-option label="白色" value="white" />
+              </el-select>
+            </div>
+          </el-form-item>
+
           <el-form-item>
-            <el-button type="primary" @click="analyze" :loading="analyzing" :disabled="!folder">
+            <el-button type="primary" @click="analyze" :loading="analyzing" :disabled="!folders.length">
               分析
             </el-button>
             <el-button type="success" @click="run" :loading="generating" :disabled="!analysis">
@@ -111,10 +138,19 @@
             <div class="page-preview-shell">
               <div class="page-preview" :class="resolvedOrientation" :style="previewPageStyle">
                 <div class="preview-grid" :style="previewGridStyle">
-                  <div v-for="(img, idx) in previewSlots" :key="idx" class="preview-cell">
+                  <div
+                    v-for="(img, idx) in previewSlots"
+                    :key="idx"
+                    class="preview-cell"
+                    :class="{
+                      'preview-cell-bordered': settings.border_enabled,
+                      'preview-cell-white-border': settings.border_enabled && settings.border_color === 'white',
+                      'preview-cell-no-name': !settings.show_filename,
+                    }"
+                  >
                     <template v-if="img">
                       <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :class="settings.scale_mode" />
-                      <div class="preview-name">{{ fileName(img.path) }}</div>
+                      <div v-if="settings.show_filename" class="preview-name">{{ fileName(img.path) }}</div>
                     </template>
                   </div>
                 </div>
@@ -135,7 +171,7 @@
           <div class="image-list">
             <h4>图片列表 ({{ analysis.images.length }})</h4>
             <div class="image-grid">
-              <div v-for="(img, idx) in analysis.images.slice(0, 50)" :key="idx" class="image-thumb">
+              <div v-for="(img, idx) in orderedImages.slice(0, 50)" :key="idx" class="image-thumb">
                 <img :src="imageSrc(img.path)" :alt="fileName(img.path)" class="thumb-image" />
                 <span class="thumb-name">{{ fileName(img.path) }}</span>
                 <span class="thumb-size">{{ img.width }}×{{ img.height }}</span>
@@ -153,17 +189,20 @@
 </template>
 
 <script setup>
-import { computed, ref, reactive } from 'vue'
+import { computed, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { ElMessage } from 'element-plus'
 
 const folder = ref('')
+const folders = ref([])
 const analyzing = ref(false)
 const generating = ref(false)
 const analysis = ref(null)
 const generatedResult = ref(null)
+const previewSources = reactive({})
+let unlistenDragDrop = null
 
 const settings = reactive({
   output_format: 'pdf',
@@ -175,6 +214,11 @@ const settings = reactive({
   dpi: 300,
   margin_mm: 12,
   show_filename: true,
+  filename_without_ext: true,
+  filename_remove_text: '',
+  order_mode: 'z',
+  border_enabled: false,
+  border_color: 'black',
 })
 
 const layoutGrid = computed(() => parseLayout(settings.layout, settings.custom_rows, settings.custom_cols))
@@ -183,7 +227,8 @@ const resolvedOrientation = computed(() => {
   return analysis.value?.recommended?.orientation || 'portrait'
 })
 const resolvedOrientationLabel = computed(() => resolvedOrientation.value === 'landscape' ? '横向' : '竖向')
-const previewImages = computed(() => (analysis.value?.images || []).slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
+const orderedImages = computed(() => reorderImages(analysis.value?.images || [], layoutGrid.value, settings.order_mode))
+const previewImages = computed(() => orderedImages.value.slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
 const previewSlots = computed(() => {
   const slots = [...previewImages.value]
   while (slots.length < layoutGrid.value.rows * layoutGrid.value.cols) slots.push(null)
@@ -191,7 +236,7 @@ const previewSlots = computed(() => {
 })
 const previewPageStyle = computed(() => ({
   aspectRatio: resolvedOrientation.value === 'landscape' ? '297 / 210' : '210 / 297',
-  padding: `${Math.max(8, settings.margin_mm)}px`,
+  padding: `${Math.max(0, settings.margin_mm) * 1.2}px`,
 }))
 const previewGridStyle = computed(() => ({
   gridTemplateColumns: `repeat(${layoutGrid.value.cols}, minmax(0, 1fr))`,
@@ -199,20 +244,22 @@ const previewGridStyle = computed(() => ({
 }))
 
 async function selectFolder() {
-  const selected = await open({ directory: true })
+  const selected = await open({ directory: true, multiple: true })
   if (selected) {
-    folder.value = selected
+    folders.value = Array.isArray(selected) ? selected : [selected]
+    folder.value = folders.value[0] || ''
     analysis.value = null
     generatedResult.value = null
   }
 }
 
 async function analyze() {
-  if (!folder.value) return
+  if (!folders.value.length) return
   analyzing.value = true
-  const result = await tauriCallSafe('analyze_image_paddler_folder', { folder: folder.value })
+  const result = await tauriCallSafe('analyze_image_paddler_folder', { folder: folder.value, folders: folders.value })
   if (result.ok) {
     analysis.value = result.data
+    await preloadImages(analysis.value.images.slice(0, 80).map(img => img.path))
   } else {
     ElMessage.error(result.error || '图片分析失败')
   }
@@ -220,11 +267,12 @@ async function analyze() {
 }
 
 async function run() {
-  if (!folder.value) return
+  if (!folders.value.length) return
   generating.value = true
   const result = await tauriCallSafe('run_image_paddler', {
     args: {
       folder: folder.value,
+      folders: folders.value,
       ...settings,
       orientation: resolvedOrientation.value,
     },
@@ -276,11 +324,58 @@ function clampNumber(value, min, max, fallback) {
 }
 
 function imageSrc(path) {
-  return convertFileSrc(path)
+  return previewSources[path] || ''
 }
 
 function fileName(path) {
-  return String(path || '').split('/').pop() || path
+  let name = String(path || '').split(/[\\/]/).pop() || path
+  if (settings.filename_without_ext) {
+    name = name.replace(/\.[^.]+$/, '')
+  }
+  if (settings.filename_remove_text) {
+    name = name.split(settings.filename_remove_text).join('')
+  }
+  return name
+}
+
+async function preloadImages(paths) {
+  await Promise.all(paths.map(async (path) => {
+    if (previewSources[path]) return
+    const result = await tauriCallSafe('read_image_data_url', { path })
+    if (result.ok) {
+      previewSources[path] = result.data
+    }
+  }))
+}
+
+function reorderImages(images, grid, mode) {
+  const perPage = grid.rows * grid.cols
+  const result = []
+  for (let start = 0; start < images.length; start += perPage) {
+    const chunk = images.slice(start, start + perPage)
+    for (const idx of cellOrder(grid, mode)) {
+      if (idx < chunk.length) result.push(chunk[idx])
+    }
+  }
+  return result
+}
+
+function cellOrder(grid, mode) {
+  const order = []
+  if (mode === 'n') {
+    for (let col = 0; col < grid.cols; col += 1) {
+      for (let row = 0; row < grid.rows; row += 1) order.push(row * grid.cols + col)
+    }
+  } else if (mode === 'reverse_n') {
+    for (let col = grid.cols - 1; col >= 0; col -= 1) {
+      for (let row = 0; row < grid.rows; row += 1) order.push(row * grid.cols + col)
+    }
+  } else {
+    for (let row = 0; row < grid.rows; row += 1) {
+      for (let col = 0; col < grid.cols; col += 1) order.push(row * grid.cols + col)
+    }
+  }
+  return order
 }
 
 function applyRecommendedSettings() {
@@ -293,6 +388,27 @@ function applyRecommendedSettings() {
   settings.show_filename = recommended.show_filename !== false
   ElMessage.success('已应用推荐参数')
 }
+
+onMounted(async () => {
+  unlistenDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
+    if (event.payload.type === 'enter' || event.payload.type === 'over') {
+      return
+    }
+    if (event.payload.type === 'drop') {
+      const paths = event.payload.paths || []
+      if (paths.length) {
+        folders.value = paths
+        folder.value = paths[0]
+        analysis.value = null
+        generatedResult.value = null
+      }
+    }
+  })
+})
+
+onBeforeUnmount(() => {
+  if (unlistenDragDrop) unlistenDragDrop()
+})
 
 function orientationLabel(value) {
   if (value === 'landscape') return '横向'
@@ -440,6 +556,15 @@ function scaleModeLabel(value) {
   overflow: hidden;
 }
 
+.preview-cell-bordered {
+  border: 2px solid #303133;
+}
+
+.preview-cell-white-border {
+  border-color: #fff;
+  box-shadow: inset 0 0 0 1px #dcdfe6;
+}
+
 .preview-cell img {
   max-width: 100%;
   max-height: calc(100% - 20px);
@@ -449,6 +574,12 @@ function scaleModeLabel(value) {
   width: 100%;
   height: calc(100% - 20px);
   object-fit: contain;
+}
+
+.preview-cell-no-name img,
+.preview-cell-no-name img.fit {
+  max-height: 100%;
+  height: 100%;
 }
 
 .preview-cell img.original {
@@ -558,5 +689,11 @@ function scaleModeLabel(value) {
   justify-content: center;
   color: #909399;
   font-size: 13px;
+}
+
+.unit-label {
+  margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
 }
 </style>
