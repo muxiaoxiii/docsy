@@ -133,7 +133,13 @@
           <div class="preview-section">
             <div class="section-head">
               <h4>第一页预览</h4>
-              <span>{{ previewImages.length }} / {{ layoutGrid.rows * layoutGrid.cols }} 张</span>
+              <div class="preview-toolbar">
+                <span>{{ previewImages.length }} / {{ layoutGrid.rows * layoutGrid.cols }} 张</span>
+                <el-button size="small" text @click="adjustPageZoom(-10)">-</el-button>
+                <el-slider v-model="pageZoom" :min="50" :max="180" :step="5" class="zoom-slider" />
+                <el-button size="small" text @click="adjustPageZoom(10)">+</el-button>
+                <span class="zoom-value">{{ pageZoom }}%</span>
+              </div>
             </div>
             <div class="page-preview-shell">
               <div class="page-preview" :class="resolvedOrientation" :style="previewPageStyle">
@@ -169,16 +175,34 @@
 
           <!-- Image List -->
           <div class="image-list">
-            <h4>图片列表 ({{ analysis.images.length }})</h4>
-            <div class="image-grid">
-              <div v-for="(img, idx) in orderedImages.slice(0, 50)" :key="idx" class="image-thumb">
-                <img :src="imageSrc(img.path)" :alt="fileName(img.path)" class="thumb-image" />
-                <span class="thumb-name">{{ fileName(img.path) }}</span>
-                <span class="thumb-size">{{ img.width }}×{{ img.height }}</span>
+            <div class="section-head">
+              <h4>图片预览</h4>
+              <div class="preview-toolbar">
+                <span>{{ imagePageStart + 1 }}-{{ imagePageEnd }} / {{ orderedImages.length }}</span>
+                <el-select v-model="imagePageSize" size="small" class="page-size-select">
+                  <el-option label="24 张" :value="24" />
+                  <el-option label="48 张" :value="48" />
+                  <el-option label="96 张" :value="96" />
+                </el-select>
+                <el-button size="small" text @click="adjustImageZoom(-10)">-</el-button>
+                <el-slider v-model="imageZoom" :min="60" :max="180" :step="5" class="zoom-slider" />
+                <el-button size="small" text @click="adjustImageZoom(10)">+</el-button>
+                <span class="zoom-value">{{ imageZoom }}%</span>
               </div>
-              <div v-if="analysis.images.length > 50" class="more-images">
-                +{{ analysis.images.length - 50 }} 更多
+            </div>
+            <div class="image-grid-scroll">
+              <div class="image-grid" :style="imageGridStyle">
+                <div v-for="(img, idx) in pagedImages" :key="img.path || idx" class="image-thumb" :style="imageThumbStyle">
+                  <img :src="imageSrc(img.path)" :alt="fileName(img.path)" class="thumb-image" :style="thumbImageStyle" />
+                  <span class="thumb-name">{{ fileName(img.path) }}</span>
+                  <span class="thumb-size">{{ img.width }}×{{ img.height }}</span>
+                </div>
               </div>
+            </div>
+            <div class="pager-row">
+              <el-button size="small" :disabled="imagePage <= 1" @click="imagePage -= 1">上一页</el-button>
+              <span>第 {{ imagePage }} / {{ imagePageCount }} 页</span>
+              <el-button size="small" :disabled="imagePage >= imagePageCount" @click="imagePage += 1">下一页</el-button>
             </div>
           </div>
         </template>
@@ -189,7 +213,7 @@
 </template>
 
 <script setup>
-import { computed, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -202,6 +226,10 @@ const generating = ref(false)
 const analysis = ref(null)
 const generatedResult = ref(null)
 const previewSources = reactive({})
+const pageZoom = ref(100)
+const imageZoom = ref(100)
+const imagePage = ref(1)
+const imagePageSize = ref(24)
 let unlistenDragDrop = null
 
 const settings = reactive({
@@ -229,6 +257,10 @@ const resolvedOrientation = computed(() => {
 const resolvedOrientationLabel = computed(() => resolvedOrientation.value === 'landscape' ? '横向' : '竖向')
 const orderedImages = computed(() => reorderImages(analysis.value?.images || [], layoutGrid.value, settings.order_mode))
 const previewImages = computed(() => orderedImages.value.slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
+const imagePageCount = computed(() => Math.max(1, Math.ceil(orderedImages.value.length / imagePageSize.value)))
+const imagePageStart = computed(() => Math.min((imagePage.value - 1) * imagePageSize.value, orderedImages.value.length))
+const imagePageEnd = computed(() => Math.min(imagePageStart.value + imagePageSize.value, orderedImages.value.length))
+const pagedImages = computed(() => orderedImages.value.slice(imagePageStart.value, imagePageEnd.value))
 const previewSlots = computed(() => {
   const slots = [...previewImages.value]
   while (slots.length < layoutGrid.value.rows * layoutGrid.value.cols) slots.push(null)
@@ -237,10 +269,24 @@ const previewSlots = computed(() => {
 const previewPageStyle = computed(() => ({
   aspectRatio: resolvedOrientation.value === 'landscape' ? '297 / 210' : '210 / 297',
   padding: `${Math.max(0, settings.margin_mm) * 1.2}px`,
+  width: `${pageZoom.value}%`,
+  minWidth: '220px',
 }))
 const previewGridStyle = computed(() => ({
   gridTemplateColumns: `repeat(${layoutGrid.value.cols}, minmax(0, 1fr))`,
   gridTemplateRows: `repeat(${layoutGrid.value.rows}, minmax(0, 1fr))`,
+}))
+const thumbCardSize = computed(() => Math.round(112 * imageZoom.value / 100))
+const thumbImageSize = computed(() => Math.round(72 * imageZoom.value / 100))
+const imageGridStyle = computed(() => ({
+  gridTemplateColumns: `repeat(auto-fill, minmax(${thumbCardSize.value}px, 1fr))`,
+}))
+const imageThumbStyle = computed(() => ({
+  minHeight: `${thumbCardSize.value + 38}px`,
+}))
+const thumbImageStyle = computed(() => ({
+  width: `${thumbImageSize.value}px`,
+  height: `${thumbImageSize.value}px`,
 }))
 
 async function selectFolder() {
@@ -259,7 +305,8 @@ async function analyze() {
   const result = await tauriCallSafe('analyze_image_paddler_folder', { folder: folder.value, folders: folders.value })
   if (result.ok) {
     analysis.value = result.data
-    await preloadImages(analysis.value.images.slice(0, 80).map(img => img.path))
+    imagePage.value = 1
+    await preloadVisibleImages()
   } else {
     ElMessage.error(result.error || '图片分析失败')
   }
@@ -389,6 +436,28 @@ function applyRecommendedSettings() {
   ElMessage.success('已应用推荐参数')
 }
 
+function adjustPageZoom(delta) {
+  pageZoom.value = clampNumber(pageZoom.value + delta, 50, 180, 100)
+}
+
+function adjustImageZoom(delta) {
+  imageZoom.value = clampNumber(imageZoom.value + delta, 60, 180, 100)
+}
+
+async function preloadVisibleImages() {
+  const paths = [...previewImages.value, ...pagedImages.value].map(img => img.path)
+  await preloadImages([...new Set(paths)])
+}
+
+watch([pagedImages, previewImages], () => {
+  preloadVisibleImages()
+})
+
+watch([imagePageSize, orderedImages], () => {
+  if (imagePage.value > imagePageCount.value) imagePage.value = imagePageCount.value
+  if (imagePage.value < 1) imagePage.value = 1
+})
+
 onMounted(async () => {
   unlistenDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
     if (event.payload.type === 'enter' || event.payload.type === 'over') {
@@ -517,24 +586,41 @@ function scaleModeLabel(value) {
   color: #303133;
 }
 
-.page-preview-shell {
+.preview-toolbar {
   display: flex;
-  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.zoom-slider {
+  width: 130px;
+}
+
+.zoom-value {
+  width: 42px;
+  text-align: right;
+  color: #606266;
+}
+
+.page-size-select {
+  width: 82px;
+}
+
+.page-preview-shell {
+  display: block;
   padding: 12px;
   background: #f5f7fa;
   border: 1px solid #e4e7ed;
   border-radius: 4px;
+  overflow: auto;
 }
 
 .page-preview {
-  width: min(100%, 420px);
   background: #fff;
   border: 1px solid #dcdfe6;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.10);
-}
-
-.page-preview.landscape {
-  width: min(100%, 520px);
+  margin: 0 auto;
 }
 
 .preview-grid {
@@ -646,10 +732,19 @@ function scaleModeLabel(value) {
   font-size: 13px;
 }
 
+.image-grid-scroll {
+  max-height: 46vh;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
 .image-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   gap: 8px;
+  align-items: start;
 }
 
 .image-thumb {
@@ -660,8 +755,6 @@ function scaleModeLabel(value) {
 }
 
 .thumb-image {
-  width: 72px;
-  height: 72px;
   margin: 0 auto 4px;
   border-radius: 4px;
   display: block;
@@ -689,6 +782,16 @@ function scaleModeLabel(value) {
   justify-content: center;
   color: #909399;
   font-size: 13px;
+}
+
+.pager-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 10px;
+  color: #606266;
+  font-size: 12px;
 }
 
 .unit-label {
