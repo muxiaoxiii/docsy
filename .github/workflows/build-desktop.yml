@@ -47,6 +47,52 @@ jobs:
           done
           npm ci
 
+      - name: Install external tools on macOS
+        if: runner.os == 'macOS'
+        run: brew install qpdf poppler ffmpeg
+
+      - name: Install external tools on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $toolsRoot = Join-Path $env:RUNNER_TEMP "docsy-tools"
+          New-Item -ItemType Directory -Force $toolsRoot | Out-Null
+
+          function Install-ZipTool {
+            param(
+              [string] $Name,
+              [string] $Url,
+              [string[]] $Executables
+            )
+            $zipPath = Join-Path $toolsRoot "$Name.zip"
+            $dest = Join-Path $toolsRoot $Name
+            Invoke-WebRequest -Uri $Url -OutFile $zipPath
+            Expand-Archive -Path $zipPath -DestinationPath $dest -Force
+            foreach ($exe in $Executables) {
+              $match = Get-ChildItem -Path $dest -Recurse -Filter $exe | Select-Object -First 1
+              if (-not $match) {
+                throw "$Name package does not contain $exe"
+              }
+              Add-Content -Path $env:GITHUB_PATH -Value $match.DirectoryName
+            }
+          }
+
+          Install-ZipTool `
+            -Name "qpdf" `
+            -Url "https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip" `
+            -Executables @("qpdf.exe")
+
+          Install-ZipTool `
+            -Name "poppler" `
+            -Url "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip" `
+            -Executables @("pdftoppm.exe", "pdftotext.exe")
+
+          Install-ZipTool `
+            -Name "ffmpeg" `
+            -Url "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" `
+            -Executables @("ffmpeg.exe", "ffprobe.exe")
+
       - name: Run frontend tests
         run: npm run test -- --run
 
