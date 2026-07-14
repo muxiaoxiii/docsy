@@ -25,7 +25,7 @@ const props = defineProps({
   page: { type: Number, default: 1 },
   scale: { type: Number, default: 1.6 },
   reloadKey: { type: Number, default: 0 },
-  engine: { type: String, default: 'backend' },
+  engine: { type: String, default: 'auto' },
 })
 
 const emit = defineEmits(['loaded', 'error'])

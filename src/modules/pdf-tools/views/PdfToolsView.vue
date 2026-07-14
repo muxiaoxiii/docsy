@@ -1,11 +1,11 @@
 <template>
   <div class="pdf-tools-view">
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
-      <el-tab-pane label="证据处理" name="evidence-workbench">
+      <el-tab-pane label="证据处理" name="evidence-workbench" lazy>
         <EvidencePdfWorkbench />
       </el-tab-pane>
 
-      <el-tab-pane label="解锁" name="unlock">
+      <el-tab-pane label="解锁" name="unlock" lazy>
         <div class="tab-content">
           <h3>PDF 解锁</h3>
           <p class="hint">移除 PDF 文件的密码保护</p>
@@ -22,7 +22,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="合并" name="merge">
+      <el-tab-pane label="合并" name="merge" lazy>
         <div class="tab-content">
           <h3>PDF 合并</h3>
           <p class="hint">将多个 PDF 合并为一个文件</p>
@@ -40,7 +40,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="拆分" name="split">
+      <el-tab-pane label="拆分" name="split" lazy>
         <div class="tab-content split-workspace">
           <h3>PDF 拆分</h3>
           <p class="hint">按页码范围将合并后的证据 PDF 拆回多个文件</p>
@@ -143,9 +143,10 @@
                 </div>
               </div>
               <PdfJsPreview
+                v-if="activeTab === 'split' && splitFile"
                 :file-path="splitFile"
                 :page="splitPreviewPage"
-                :scale="1.2"
+                :scale="0.9"
                 @error="message => ElMessage.error(message)"
               />
             </section>
@@ -156,7 +157,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="证据扫描" name="evidence-scan">
+      <el-tab-pane label="证据扫描" name="evidence-scan" lazy>
         <div class="tab-content">
           <h3>证据扫描</h3>
           <p class="hint">扫描文件夹，按子文件夹自动分组合并 PDF</p>

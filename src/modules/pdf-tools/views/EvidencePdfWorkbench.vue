@@ -12,6 +12,14 @@
         </div>
       </div>
 
+      <div v-if="importingMergedPdf" class="local-processing">
+        <span class="processing-spinner" />
+        <div>
+          <strong>正在分析合并 PDF</strong>
+          <p>大文件可能需要一段时间，当前只占用这个任务区域；其他标签和窗口仍可继续操作。</p>
+        </div>
+      </div>
+
       <div v-if="overlayFiles.length" class="session-summary">
         <div class="summary-item">
           <span>证据文件</span>
@@ -510,6 +518,7 @@ const detectingHeaderFooter = ref(false)
 const detectingAllHeaderFooter = ref(false)
 const detectionSummary = ref('')
 const detectionCandidates = ref([])
+const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
 
 const overlayRows = computed(() => {
   return assignPageRanges(overlayFiles.value)
@@ -682,12 +691,17 @@ async function importMergedPdfAsEvidence() {
 
   importingMergedPdf.value = true
   try {
+    const countResult = await tauriCallSafe('get_pdf_page_count', { input })
+    const totalPages = countResult.ok ? Number(countResult.data || 0) : 0
+    if (totalPages > MERGED_IMPORT_AUTO_SCAN_PAGES) {
+      ElMessage.warning(`该 PDF 共 ${totalPages} 页，为避免卡顿，先自动识别前 ${MERGED_IMPORT_AUTO_SCAN_PAGES} 页；后续页段可手动补充。`)
+    }
     const headerScanMm = mergedImportScanZoneMm(cleanupHeaderHeightMm.value)
     const footerScanMm = mergedImportScanZoneMm(cleanupFooterHeightMm.value)
     const inspect = await tauriCallSafe('inspect_merged_evidence_pdf', {
       args: {
         inputPath: input,
-        maxPages: 2000,
+        maxPages: MERGED_IMPORT_AUTO_SCAN_PAGES,
         headerZoneMm: headerScanMm,
         footerZoneMm: footerScanMm,
       },
@@ -1460,6 +1474,39 @@ function removeOverlayFile(index) {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.local-processing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #d9ecff;
+  border-radius: 6px;
+  background: #ecf5ff;
+  color: #303133;
+}
+
+.local-processing p {
+  margin: 3px 0 0;
+  color: #606266;
+  font-size: 12px;
+}
+
+.processing-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #a0cfff;
+  border-top-color: #409eff;
+  border-radius: 50%;
+  animation: docsy-spin 0.8s linear infinite;
+}
+
+@keyframes docsy-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 h3 {

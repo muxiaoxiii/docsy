@@ -69,8 +69,8 @@ pub fn render_preview(args: &serde_json::Value) -> Result<PreviewResult> {
 
 pub(crate) fn render_pdf_page_to_png(input: &Path, page: u32, dpi: u32) -> Result<PathBuf> {
     let pdftoppm = find_pdftoppm().context("未找到 pdftoppm，无法渲染 PDF 预览")?;
-    let prefix = temp_named_path("docsy_pdf_preview", "out");
-    let output = prefix.with_extension("png");
+    let prefix = temp_named_path("docsy_pdf_preview");
+    let output = PathBuf::from(format!("{}.png", prefix.display()));
 
     let command_output = std::process::Command::new(pdftoppm)
         .arg("-png")
@@ -101,11 +101,11 @@ fn find_pdftoppm() -> Option<PathBuf> {
     crate::external::PopplerTool::binary_path_for("pdftoppm").ok()
 }
 
-fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
+fn temp_named_path(prefix: &str) -> PathBuf {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
     let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
+    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}"))
 }

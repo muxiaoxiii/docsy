@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::external::ExternalTool;
 
@@ -22,6 +24,8 @@ pub struct DetectionArgs {
     header_zone_mm: Option<f32>,
     #[serde(default)]
     footer_zone_mm: Option<f32>,
+    #[serde(default = "default_scan_artifacts")]
+    scan_artifacts: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,6 +167,10 @@ fn default_footer_zone_ratio() -> f32 {
     0.12
 }
 
+fn default_scan_artifacts() -> bool {
+    true
+}
+
 pub fn detect(args: &serde_json::Value) -> Result<DetectionResult> {
     let args: DetectionArgs =
         serde_json::from_value(args.clone()).context("解析页眉页脚检测参数失败")?;
@@ -171,7 +179,11 @@ pub fn detect(args: &serde_json::Value) -> Result<DetectionResult> {
         anyhow::bail!("PDF 不存在: {}", input.display());
     }
 
-    let artifact = inspect_artifacts(input).unwrap_or_default();
+    let artifact = if args.scan_artifacts {
+        inspect_artifacts(input).unwrap_or_default()
+    } else {
+        ArtifactSummary::default()
+    };
     let xml = run_pdftotext_bbox(input, args.max_pages)?;
     let words = parse_pdftotext_bbox(&xml)?;
     let page_sizes = parse_pdftotext_page_sizes(&xml)?;
@@ -205,11 +217,17 @@ pub fn suggest_split_ranges(args: &serde_json::Value) -> Result<SplitSuggestionR
         "maxPages": max_pages,
         "headerZoneMm": args.header_zone_mm,
         "footerZoneMm": args.footer_zone_mm.unwrap_or(25.0),
-        "footerZoneRatio": 0.03
+        "footerZoneRatio": 0.03,
+        "scanArtifacts": false
     }))?;
     let items = build_split_suggestions_from_pages(&detection.pages);
     let page_number_footer_pages = count_page_number_footers(&detection.pages);
-    let warnings = split_suggestion_warnings(&items, total_pages, page_number_footer_pages);
+    let mut warnings = split_suggestion_warnings(&items, total_pages, page_number_footer_pages);
+    if max_pages < total_pages {
+        warnings.push(format!(
+            "为避免大文件卡顿，本次只自动识别前 {max_pages} 页；后续页段请手动补充或分批处理"
+        ));
+    }
     Ok(SplitSuggestionResult {
         input_path: detection.input_path,
         total_pages,
@@ -224,13 +242,13 @@ fn inspect_artifacts(input: &Path) -> Result<ArtifactSummary> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let qdf = temp_named_path("docsy_artifact_scan", "pdf");
-    let output = std::process::Command::new(&bin)
+    let mut command = Command::new(&bin);
+    command
         .arg("--qdf")
         .arg("--object-streams=disable")
         .arg(input)
-        .arg(&qdf)
-        .output()
-        .context("执行 qpdf Artifact 检测失败")?;
+        .arg(&qdf);
+    let output = run_command_with_timeout(command, Duration::from_secs(90), "qpdf Artifact 检测")?;
 
     if !output.status.success() {
         let _ = fs::remove_file(&qdf);
@@ -259,21 +277,50 @@ fn parse_artifact_summary(text: &str) -> ArtifactSummary {
 
 fn run_pdftotext_bbox(input: &Path, max_pages: u32) -> Result<String> {
     let pdftotext = find_pdftotext().context("未找到 pdftotext，无法检测页眉页脚")?;
-    let output = std::process::Command::new(pdftotext)
+    let mut command = Command::new(pdftotext);
+    command
         .arg("-bbox")
         .arg("-f")
         .arg("1")
         .arg("-l")
         .arg(max_pages.max(1).to_string())
         .arg(input)
-        .arg("-")
-        .output()
-        .context("执行 pdftotext 失败")?;
+        .arg("-");
+    let output = run_command_with_timeout(command, Duration::from_secs(120), "pdftotext 检测")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("pdftotext 检测失败: {}", stderr.trim());
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn run_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    label: &str,
+) -> Result<Output> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("启动 {label} 失败"))?;
+    let started = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .with_context(|| format!("等待 {label} 失败"))?
+            .is_some()
+        {
+            return child
+                .wait_with_output()
+                .with_context(|| format!("读取 {label} 输出失败"));
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("{label} 超时，请先减少自动识别页数或手动设置拆分页段");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn parse_pdftotext_bbox(xml: &str) -> Result<Vec<WordBox>> {
@@ -746,6 +793,7 @@ mod tests {
                 footer_zone_ratio: 0.12,
                 header_zone_mm: None,
                 footer_zone_mm: None,
+                scan_artifacts: false,
             },
         );
         assert_eq!(pages.len(), 1);
@@ -775,6 +823,7 @@ mod tests {
                 footer_zone_ratio: 0.12,
                 header_zone_mm: Some(20.0),
                 footer_zone_mm: None,
+                scan_artifacts: false,
             },
         );
         assert_eq!(pages[0].headers.len(), 1);
@@ -871,6 +920,7 @@ mod tests {
                 footer_zone_ratio: 0.12,
                 header_zone_mm: None,
                 footer_zone_mm: None,
+                scan_artifacts: false,
             },
         );
         assert_eq!(pages.len(), 2);

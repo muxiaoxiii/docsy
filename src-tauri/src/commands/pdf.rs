@@ -58,10 +58,13 @@ pub fn split_pdf(input: String, output_dir: String) -> Result<Vec<String>, Strin
 }
 
 #[tauri::command]
-pub fn split_merged_evidence_pdf(
+pub async fn split_merged_evidence_pdf(
     args: serde_json::Value,
 ) -> Result<crate::pdf::split::SplitMergedResult, String> {
-    crate::pdf::split::split_merged(&args).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::split::split_merged(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -95,24 +98,33 @@ pub fn apply_evidence_pdf_rules(args: serde_json::Value) -> Result<serde_json::V
 }
 
 #[tauri::command]
-pub fn preview_pdf_header_footer(
+pub async fn preview_pdf_header_footer(
     args: serde_json::Value,
 ) -> Result<crate::pdf::overlay::PreviewResult, String> {
-    crate::pdf::overlay::preview_overlay(&args).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::overlay::preview_overlay(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn detect_pdf_header_footer(
+pub async fn detect_pdf_header_footer(
     args: serde_json::Value,
 ) -> Result<crate::pdf::detection::DetectionResult, String> {
-    crate::pdf::detection::detect(&args).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::detection::detect(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn inspect_merged_evidence_pdf(
+pub async fn inspect_merged_evidence_pdf(
     args: serde_json::Value,
 ) -> Result<crate::pdf::detection::SplitSuggestionResult, String> {
-    crate::pdf::detection::suggest_split_ranges(&args).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::detection::suggest_split_ranges(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -130,10 +142,13 @@ pub fn delete_pdf_header_footer_artifacts(
 }
 
 #[tauri::command]
-pub fn render_pdf_preview(
+pub async fn render_pdf_preview(
     args: serde_json::Value,
 ) -> Result<crate::pdf::overlay::PreviewResult, String> {
-    crate::pdf::overlay::render_preview(&args).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::overlay::render_preview(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
