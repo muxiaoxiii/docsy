@@ -452,8 +452,10 @@ import {
   buildOutputDir,
   createEvidenceFile,
   expandPlaceholders,
+  fileName,
   pageRangeText,
   parentDir,
+  stripPdf,
   totalPages,
 } from '../composables/useEvidencePdfSession.js'
 import {
@@ -707,12 +709,14 @@ async function importMergedPdfAsEvidence() {
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   })
   if (!input) return
-  const outputDir = parentDir(input)
+  const outputDir = defaultMergedImportOutputDir(input)
 
   importingMergedPdf.value = true
+  let knownTotalPages = 1
   try {
     const countResult = await tauriCallSafe('get_pdf_page_count', { input })
     const totalPages = countResult.ok ? Number(countResult.data || 0) : 0
+    knownTotalPages = Math.max(1, totalPages || 1)
     if (totalPages > MERGED_IMPORT_AUTO_SCAN_PAGES) {
       ElMessage.warning(`该 PDF 共 ${totalPages} 页，为避免卡顿，先自动识别前 ${MERGED_IMPORT_AUTO_SCAN_PAGES} 页；后续页段可手动补充。`)
     }
@@ -741,12 +745,7 @@ async function importMergedPdfAsEvidence() {
         source: item.source || 'unknown',
       }))
     if (!items.length) {
-      items.push({
-        name: defaultMergedImportName(outputDir, 0),
-        pageStart: 1,
-        pageEnd: planTotalPages,
-        source: 'manual',
-      })
+      items.push(defaultMergedImportRange(outputDir, planTotalPages))
       warnings.push('未识别到可用页眉页段，已生成一个覆盖全文的手动页段')
     }
 
@@ -760,7 +759,7 @@ async function importMergedPdfAsEvidence() {
     selectedMergedImportIndex.value = 0
     previewPage.value = items[0]?.pageStart || 1
     truePreview.value = null
-    refreshPreview()
+    safeRefreshPreview()
     if (!inspect.ok) {
       ElMessage.warning('自动分析失败，已进入手动拆分页段确认')
     } else if (items.some(item => item.source === 'manual')) {
@@ -768,6 +767,16 @@ async function importMergedPdfAsEvidence() {
     } else {
       ElMessage.success(`已识别 ${items.length} 个页段，请核对后确认拆入`)
     }
+  } catch (err) {
+    mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages, [
+      `分析流程中断：${String(err?.message || err || '未知错误')}`,
+      '已生成一个覆盖全文的手动页段',
+    ])
+    selectedMergedImportIndex.value = 0
+    previewPage.value = 1
+    truePreview.value = null
+    safeRefreshPreview()
+    ElMessage.warning('分析中断，已进入手动拆分页段确认')
   } finally {
     importingMergedPdf.value = false
   }
@@ -897,6 +906,38 @@ function defaultMergedImportName(outputDir, index) {
     return stripPdf(fileName(outputDir)) || '文件1'
   }
   return `文件${index + 1}`
+}
+
+function defaultMergedImportOutputDir(inputPath) {
+  const stem = stripPdf(fileName(inputPath)) || '合并PDF'
+  return `${parentDir(inputPath)}/${stem}-分项`
+}
+
+function defaultMergedImportRange(outputDir, total) {
+  return {
+    name: defaultMergedImportName(outputDir, 0),
+    pageStart: 1,
+    pageEnd: Math.max(1, Number(total || 1)),
+    source: 'manual',
+  }
+}
+
+function buildManualMergedImportPlan(inputPath, outputDir, total, warnings = []) {
+  return {
+    inputPath,
+    outputDir,
+    totalPages: Math.max(1, Number(total || 1)),
+    warnings,
+    items: [defaultMergedImportRange(outputDir, total)],
+  }
+}
+
+function safeRefreshPreview() {
+  try {
+    refreshPreview()
+  } catch (err) {
+    console.warn('刷新拆分预览失败', err)
+  }
 }
 
 function selectMergedImportRange(row) {
