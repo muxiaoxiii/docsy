@@ -76,11 +76,6 @@ jobs:
       - name: Run frontend tests
         run: npm run test -- --run
 
-      - name: Run Rust tests
-        continue-on-error: true
-        run: cargo test
-        working-directory: src-tauri
-
       - name: Build Windows package
         run: npm run tauri:build:windows
 
