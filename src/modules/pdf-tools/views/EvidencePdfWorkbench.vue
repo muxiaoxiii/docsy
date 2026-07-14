@@ -739,13 +739,13 @@ async function importMergedPdfAsEvidence() {
     const items = detectedItems
       .filter((item) => Number(item.pageStart) > 0 && Number(item.pageEnd) >= Number(item.pageStart))
       .map((item, index) => ({
-        name: defaultMergedImportName(outputDir, index),
+        name: defaultMergedImportName(input, index),
         pageStart: Number(item.pageStart),
         pageEnd: Number(item.pageEnd),
         source: item.source || 'unknown',
       }))
     if (!items.length) {
-      items.push(defaultMergedImportRange(outputDir, planTotalPages))
+      items.push(defaultMergedImportRange(input, planTotalPages))
       warnings.push('未识别到可用页眉页段，已生成一个覆盖全文的手动页段')
     }
 
@@ -877,12 +877,7 @@ async function selectMergedImportOutputDir() {
   if (!mergedImportPlan.value) return
   const selected = await open({ directory: true })
   if (!selected) return
-  const previousDefaultName = defaultMergedImportName(mergedImportPlan.value.outputDir, 0)
-  const first = mergedImportPlan.value.items?.[0]
   mergedImportPlan.value.outputDir = selected
-  if (first && (!String(first.name || '').trim() || first.name === previousDefaultName || first.name === '文件1')) {
-    first.name = defaultMergedImportName(selected, 0)
-  }
 }
 
 function cancelMergedImportPlan() {
@@ -901,9 +896,9 @@ function normalizedMergedImportItems() {
   }))
 }
 
-function defaultMergedImportName(outputDir, index) {
+function defaultMergedImportName(inputPath, index) {
   if (index === 0) {
-    return stripPdf(fileName(outputDir)) || '文件1'
+    return stripPdf(fileName(inputPath)) || '文件1'
   }
   return `文件${index + 1}`
 }
@@ -913,9 +908,9 @@ function defaultMergedImportOutputDir(inputPath) {
   return `${parentDir(inputPath)}/${stem}-分项`
 }
 
-function defaultMergedImportRange(outputDir, total) {
+function defaultMergedImportRange(inputPath, total) {
   return {
-    name: defaultMergedImportName(outputDir, 0),
+    name: defaultMergedImportName(inputPath, 0),
     pageStart: 1,
     pageEnd: Math.max(1, Number(total || 1)),
     source: 'manual',
@@ -928,7 +923,7 @@ function buildManualMergedImportPlan(inputPath, outputDir, total, warnings = [])
     outputDir,
     totalPages: Math.max(1, Number(total || 1)),
     warnings,
-    items: [defaultMergedImportRange(outputDir, total)],
+    items: [defaultMergedImportRange(inputPath, total)],
   }
 }
 
