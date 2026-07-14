@@ -44,6 +44,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { Setting } from '@element-plus/icons-vue'
 import { getMenuItems } from './core/moduleRegistry.js'
 import { tauriCallSafe } from './core/tauriBridge.js'
 

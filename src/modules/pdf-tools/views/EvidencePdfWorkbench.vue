@@ -725,11 +725,13 @@ async function importMergedPdfAsEvidence() {
         footerZoneMm: footerScanMm,
       },
     })
-    if (!inspect.ok) {
-      ElMessage.error(inspect.error || '合并 PDF 页眉分析失败')
-      return
-    }
-    const items = (inspect.data.items || [])
+    const detectedItems = inspect.ok ? (inspect.data.items || []) : []
+    const detectedTotalPages = inspect.ok ? Number(inspect.data.totalPages || 0) : 0
+    const warnings = inspect.ok
+      ? [...(inspect.data.warnings || [])]
+      : [inspect.error || '合并 PDF 页眉分析失败，已保留手动拆分页段']
+    const planTotalPages = Math.max(1, detectedTotalPages || totalPages || 1)
+    const items = detectedItems
       .filter((item) => Number(item.pageStart) > 0 && Number(item.pageEnd) >= Number(item.pageStart))
       .map((item, index) => ({
         name: defaultMergedImportName(outputDir, index),
@@ -738,22 +740,33 @@ async function importMergedPdfAsEvidence() {
         source: item.source || 'unknown',
       }))
     if (!items.length) {
-      ElMessage.warning('未识别到可拆分页段')
-      return
+      items.push({
+        name: defaultMergedImportName(outputDir, 0),
+        pageStart: 1,
+        pageEnd: planTotalPages,
+        source: 'manual',
+      })
+      warnings.push('未识别到可用页眉页段，已生成一个覆盖全文的手动页段')
     }
 
     mergedImportPlan.value = {
       inputPath: input,
       outputDir,
-      totalPages: Number(inspect.data.totalPages || 0),
-      warnings: inspect.data.warnings || [],
+      totalPages: planTotalPages,
+      warnings,
       items,
     }
     selectedMergedImportIndex.value = 0
     previewPage.value = items[0]?.pageStart || 1
     truePreview.value = null
     refreshPreview()
-    ElMessage.success(`已识别 ${items.length} 个页段，请核对后确认拆入`)
+    if (!inspect.ok) {
+      ElMessage.warning('自动分析失败，已进入手动拆分页段确认')
+    } else if (items.some(item => item.source === 'manual')) {
+      ElMessage.warning('未识别到页眉页段，请手动调整拆分范围')
+    } else {
+      ElMessage.success(`已识别 ${items.length} 个页段，请核对后确认拆入`)
+    }
   } finally {
     importingMergedPdf.value = false
   }
