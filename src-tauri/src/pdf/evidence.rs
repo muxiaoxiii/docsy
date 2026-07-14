@@ -382,7 +382,7 @@ fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<Str
         output = powershell_escape(&output.display().to_string()),
     );
 
-    let mut child = std::process::Command::new("powershell")
+    let status = std::process::Command::new("powershell")
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -392,10 +392,9 @@ fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<Str
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn()
+        .status()
         .context("启动 Microsoft Word 转换失败")?;
 
-    let status = wait_child_with_timeout(&mut child, std::time::Duration::from_secs(120))?;
     if !status.success() || !output.exists() {
         anyhow::bail!("Microsoft Word 转 PDF 失败: {doc_path}");
     }
@@ -443,25 +442,6 @@ fn convert_doc_to_pdf_with_libreoffice(
 #[cfg(windows)]
 fn powershell_escape(value: &str) -> String {
     value.replace('\'', "''")
-}
-
-#[cfg(windows)]
-fn wait_child_with_timeout(
-    child: &mut std::process::Child,
-    timeout: std::time::Duration,
-) -> Result<std::process::ExitStatus> {
-    let start = std::time::Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-        if start.elapsed() >= timeout {
-            child.kill().ok();
-            child.wait().ok();
-            anyhow::bail!("DOC/DOCX 转 PDF 超时");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
 }
 
 fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Result<()> {
