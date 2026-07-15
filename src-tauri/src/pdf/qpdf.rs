@@ -1,6 +1,6 @@
 use crate::external::ExternalTool;
-use anyhow::Result;
-use std::path::Path;
+use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
 
 pub struct InspectResult {
     pub encrypted: bool,
@@ -53,6 +53,7 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     let bin = qpdf.binary_path()?;
 
     let mut cmd = std::process::Command::new(&bin);
+    add_optimization_args(&mut cmd);
     cmd.arg("--empty").arg("--pages");
     for input in inputs {
         cmd.arg(input);
@@ -65,6 +66,34 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     }
 
     Ok(output.to_string())
+}
+
+pub fn optimize_to(input: &Path, output: &Path) -> Result<()> {
+    let qpdf = crate::external::QpdfTool;
+    let bin = qpdf.binary_path()?;
+    let mut command = std::process::Command::new(&bin);
+    add_optimization_args(&mut command);
+    let command_output = command
+        .arg(input)
+        .arg(output)
+        .output()
+        .context("执行 qpdf 压缩整理失败")?;
+
+    if !command_output.status.success() {
+        let stderr = String::from_utf8_lossy(&command_output.stderr);
+        anyhow::bail!("qpdf 压缩整理失败: {}", stderr.trim());
+    }
+
+    Ok(())
+}
+
+fn add_optimization_args(command: &mut std::process::Command) {
+    command
+        .arg("--object-streams=generate")
+        .arg("--compress-streams=y")
+        .arg("--recompress-flate")
+        .arg("--compression-level=9")
+        .arg("--remove-unreferenced-resources=yes");
 }
 
 pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {
@@ -120,7 +149,7 @@ pub fn page_count(input: &str) -> Result<u32> {
     Ok(count)
 }
 
-fn unique_output_path(input: &Path, suffix: &str) -> std::path::PathBuf {
+fn unique_output_path(input: &Path, suffix: &str) -> PathBuf {
     let parent = input.parent().unwrap_or(Path::new("."));
     let stem = input
         .file_stem()

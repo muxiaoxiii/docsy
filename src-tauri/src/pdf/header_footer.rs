@@ -11,6 +11,7 @@ use super::artifacts::{self, HeaderFooterArtifactTargets};
 use super::normalize::normalize_pdf_to_a4;
 use super::page_info::{get_page_infos, PageSize};
 use super::preview::{render_preview, PreviewResult};
+use super::qpdf;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -297,14 +298,15 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     let overlay_path = temp_named_path("docsy_overlay", "pdf");
     fs::write(&overlay_path, &overlay_pdf).context("写入临时页眉页脚层失败")?;
 
-    let qpdf = crate::external::QpdfTool;
-    let bin = qpdf.binary_path()?;
+    let qpdf_tool = crate::external::QpdfTool;
+    let bin = qpdf_tool.binary_path()?;
+    let overlay_output = temp_named_path("docsy_overlay_result", "pdf");
     let command_output = std::process::Command::new(&bin)
         .arg(work_input)
         .arg("--overlay")
         .arg(&overlay_path)
         .arg("--")
-        .arg(output)
+        .arg(&overlay_output)
         .output()
         .context("执行 qpdf overlay 失败")?;
 
@@ -313,9 +315,12 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     cleanup_semantic_temp(semantic_deleted_path);
 
     if !command_output.status.success() {
+        let _ = fs::remove_file(&overlay_output);
         let stderr = String::from_utf8_lossy(&command_output.stderr);
         anyhow::bail!("qpdf overlay 失败: {}", stderr.trim());
     }
+    write_optimized_or_copy(&overlay_output, output).context("写入页眉页脚处理结果失败")?;
+    let _ = fs::remove_file(&overlay_output);
 
     Ok(HeaderFooterResult {
         input_path: args.input_path.clone(),
@@ -325,6 +330,16 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         cleaned,
         semantic_removed,
     })
+}
+
+fn write_optimized_or_copy(input: &Path, output: &Path) -> Result<()> {
+    match qpdf::optimize_to(input, output) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            fs::copy(input, output).context("复制 PDF 处理结果失败")?;
+            Ok(())
+        }
+    }
 }
 
 fn delete_standard_artifacts_if_requested(
@@ -352,6 +367,7 @@ fn build_overlay_pdf(
     total_pages: u32,
 ) -> Result<Vec<u8>> {
     let mut doc = PdfDocument::new("Docsy Header Footer Processor");
+    let mut font_cache = OverlayFontCache::default();
     let mut pdf_pages = Vec::new();
 
     for (index, size) in pages.iter().enumerate() {
@@ -360,7 +376,7 @@ fn build_overlay_pdf(
 
         if let Some(config) = header {
             let text = expand_placeholders(&config.text, current_page, total_pages);
-            let font = select_font(&text, &mut doc);
+            let font = font_cache.select_font(&text, &mut doc);
             let y = size.height_pt - mm_to_pt(config.margin_mm);
             let x = compute_x(config, &text, font.clone(), size.width_pt);
             ops.extend(text_ops(font, config.font_size, x, y, text));
@@ -368,7 +384,7 @@ fn build_overlay_pdf(
 
         if let Some(config) = footer {
             let text = expand_placeholders(&config.text, current_page, total_pages);
-            let font = select_font(&text, &mut doc);
+            let font = font_cache.select_font(&text, &mut doc);
             let y = mm_to_pt(config.margin_mm);
             let x = compute_x(config, &text, font.clone(), size.width_pt);
             ops.extend(text_ops(font, config.font_size, x, y, text));
@@ -384,6 +400,32 @@ fn build_overlay_pdf(
     Ok(doc
         .with_pages(pdf_pages)
         .save(&PdfSaveOptions::default(), &mut Vec::new()))
+}
+
+#[derive(Default)]
+struct OverlayFontCache {
+    cjk: Option<PdfFontHandle>,
+}
+
+impl OverlayFontCache {
+    fn select_font(&mut self, text: &str, doc: &mut PdfDocument) -> PdfFontHandle {
+        if has_cjk(text) {
+            if let Some(font) = &self.cjk {
+                return font.clone();
+            }
+            if let Some(font_path) = find_cjk_font_path() {
+                if let Ok(bytes) = fs::read(&font_path) {
+                    if let Some(parsed) = ParsedFont::from_bytes(&bytes, 0, &mut Vec::new()) {
+                        let font = PdfFontHandle::External(doc.add_font(&parsed));
+                        self.cjk = Some(font.clone());
+                        return font;
+                    }
+                }
+            }
+        }
+
+        PdfFontHandle::Builtin(BuiltinFont::Helvetica)
+    }
 }
 
 fn cleanup_ops(cleanup: &CleanupConfig, size: &PageSize) -> Vec<Op> {
@@ -503,20 +545,6 @@ fn find_cjk_font_path() -> Option<PathBuf> {
         .map(Path::new)
         .find(|path| path.exists())
         .map(Path::to_path_buf)
-}
-
-fn select_font(text: &str, doc: &mut PdfDocument) -> PdfFontHandle {
-    if has_cjk(text) {
-        if let Some(font_path) = find_cjk_font_path() {
-            if let Ok(bytes) = fs::read(&font_path) {
-                if let Some(parsed) = ParsedFont::from_bytes(&bytes, 0, &mut Vec::new()) {
-                    return PdfFontHandle::External(doc.add_font(&parsed));
-                }
-            }
-        }
-    }
-
-    PdfFontHandle::Builtin(BuiltinFont::Helvetica)
 }
 
 fn compute_x(config: &OverlayTextConfig, text: &str, font: PdfFontHandle, page_width: f32) -> f32 {
@@ -645,6 +673,9 @@ mod tests {
             &PageSize {
                 width_pt: A4_WIDTH_PT,
                 height_pt: A4_HEIGHT_PT,
+                raw_width_pt: A4_WIDTH_PT,
+                raw_height_pt: A4_HEIGHT_PT,
+                rotate: 0,
             },
         );
         assert_eq!(ops.len(), 4);

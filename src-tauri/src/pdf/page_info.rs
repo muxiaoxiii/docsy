@@ -10,6 +10,9 @@ pub const A4_HEIGHT_PT: f32 = 841.89;
 pub struct PageSize {
     pub width_pt: f32,
     pub height_pt: f32,
+    pub raw_width_pt: f32,
+    pub raw_height_pt: f32,
+    pub rotate: i32,
 }
 
 pub fn get_page_infos(input: &str) -> Result<Vec<PageSize>> {
@@ -46,6 +49,9 @@ pub(crate) fn parse_page_sizes(json: &Value) -> Result<Vec<PageSize>> {
             .unwrap_or(PageSize {
                 width_pt: A4_WIDTH_PT,
                 height_pt: A4_HEIGHT_PT,
+                raw_width_pt: A4_WIDTH_PT,
+                raw_height_pt: A4_HEIGHT_PT,
+                rotate: 0,
             });
         sizes.push(size);
     }
@@ -69,15 +75,8 @@ fn page_size_from_page_entry(page: &Value) -> Option<PageSize> {
         .or_else(|| page.get("Rotate"))
         .and_then(|v| v.as_i64())
         .unwrap_or(0)
-        .rem_euclid(180);
-    if rotate == 90 {
-        Some(PageSize {
-            width_pt: size.height_pt,
-            height_pt: size.width_pt,
-        })
-    } else {
-        Some(size)
-    }
+        .rem_euclid(360);
+    Some(apply_rotation(size, rotate as i32))
 }
 
 fn resolve_page_size(objects: Option<&Vec<Value>>, obj_ref: &str) -> Option<PageSize> {
@@ -94,11 +93,37 @@ fn resolve_page_size(objects: Option<&Vec<Value>>, obj_ref: &str) -> Option<Page
             .or_else(|| value.get("/MediaBox"))
             .or_else(|| value.get("MediaBox"))?;
         if let Some(size) = page_size_from_box(box_value) {
-            return Some(size);
+            let rotate = value
+                .get("/Rotate")
+                .or_else(|| value.get("Rotate"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+                .rem_euclid(360) as i32;
+            return Some(apply_rotation(size, rotate));
         }
     }
 
     None
+}
+
+fn apply_rotation(size: PageSize, rotate: i32) -> PageSize {
+    if rotate == 90 || rotate == 270 {
+        PageSize {
+            width_pt: size.height_pt,
+            height_pt: size.width_pt,
+            raw_width_pt: size.width_pt,
+            raw_height_pt: size.height_pt,
+            rotate,
+        }
+    } else {
+        PageSize {
+            width_pt: size.width_pt,
+            height_pt: size.height_pt,
+            raw_width_pt: size.width_pt,
+            raw_height_pt: size.height_pt,
+            rotate,
+        }
+    }
 }
 
 fn page_size_from_box(value: &Value) -> Option<PageSize> {
@@ -113,6 +138,9 @@ fn page_size_from_box(value: &Value) -> Option<PageSize> {
     Some(PageSize {
         width_pt: (x1 - x0).abs(),
         height_pt: (y1 - y0).abs(),
+        raw_width_pt: (x1 - x0).abs(),
+        raw_height_pt: (y1 - y0).abs(),
+        rotate: 0,
     })
 }
 
@@ -134,5 +162,38 @@ mod tests {
         let pages = parse_page_sizes(&value).expect("page sizes should parse");
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].width_pt, 595.28);
+    }
+
+    #[test]
+    fn parses_rotated_page_size_as_visual_size() {
+        let value = json!({
+            "pages": [{
+                "object": "3 0 R",
+                "mediaBox": [0, 0, 595.28, 841.89],
+                "rotate": 90
+            }]
+        });
+        let pages = parse_page_sizes(&value).expect("page sizes should parse");
+        assert_eq!(pages[0].width_pt, 841.89);
+        assert_eq!(pages[0].height_pt, 595.28);
+        assert_eq!(pages[0].raw_width_pt, 595.28);
+        assert_eq!(pages[0].raw_height_pt, 841.89);
+        assert_eq!(pages[0].rotate, 90);
+    }
+
+    #[test]
+    fn resolves_rotated_page_size_from_page_object() {
+        let value = json!({
+            "pages": [{ "object": "3 0 R" }],
+            "qpdf": [{
+                "obj:3 0 R": {
+                    "value": { "/MediaBox": [0, 0, 595.28, 841.89], "/Rotate": 270 }
+                }
+            }]
+        });
+        let pages = parse_page_sizes(&value).expect("page sizes should parse");
+        assert_eq!(pages[0].width_pt, 841.89);
+        assert_eq!(pages[0].height_pt, 595.28);
+        assert_eq!(pages[0].rotate, 270);
     }
 }
