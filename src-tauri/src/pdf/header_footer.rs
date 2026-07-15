@@ -1,13 +1,14 @@
 use anyhow::{Context, Result};
 use printpdf::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::external::ExternalTool;
 
 use super::annotations;
-use super::artifacts::{self, HeaderFooterArtifactTargets};
+use super::artifacts;
 use super::normalize::normalize_pdf_to_a4;
 use super::page_info::{get_page_infos, PageSize};
 use super::preview::{render_preview, PreviewResult};
@@ -59,6 +60,8 @@ struct OverlayTextConfig {
     align: String,
     #[serde(default)]
     offset_x_mm: f32,
+    #[serde(default = "default_text_color")]
+    color: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -113,6 +116,10 @@ fn default_margin_mm() -> f32 {
 
 fn default_align() -> String {
     "center".to_string()
+}
+
+fn default_text_color() -> String {
+    "#000000".to_string()
 }
 
 fn default_a4_orientation() -> String {
@@ -223,14 +230,14 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         fs::create_dir_all(parent).context("创建输出目录失败")?;
     }
 
-    let semantic_deleted_path = delete_standard_artifacts_if_requested(args)?;
+    let semantic_deleted_path = edit_or_delete_standard_artifacts_if_requested(args)?;
     let semantic_removed = semantic_deleted_path
         .as_ref()
-        .map(|(_, removed)| *removed)
+        .map(|artifact_result| artifact_result.changed_count())
         .unwrap_or(0);
     let semantic_input = semantic_deleted_path
         .as_ref()
-        .map(|(path, _)| path.as_path())
+        .map(|artifact_result| artifact_result.path.as_path())
         .unwrap_or(input);
 
     let normalized_path = if args.normalize_a4 {
@@ -274,6 +281,14 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         &page_infos,
         page_start,
         total_pages,
+        &semantic_deleted_path
+            .as_ref()
+            .map(|artifact_result| artifact_result.edited_header_pages.clone())
+            .unwrap_or_default(),
+        &semantic_deleted_path
+            .as_ref()
+            .map(|artifact_result| artifact_result.edited_footer_pages.clone())
+            .unwrap_or_default(),
     )?;
     let overlay_path = temp_named_path("docsy_overlay", "pdf");
     fs::write(&overlay_path, &overlay_pdf).context("写入临时页眉页脚层失败")?;
@@ -322,24 +337,73 @@ fn write_optimized_or_copy(input: &Path, output: &Path) -> Result<()> {
     }
 }
 
-fn delete_standard_artifacts_if_requested(
+struct StandardArtifactProcessingResult {
+    path: PathBuf,
+    removed: usize,
+    edited: usize,
+    edited_header_pages: BTreeSet<usize>,
+    edited_footer_pages: BTreeSet<usize>,
+}
+
+impl StandardArtifactProcessingResult {
+    fn changed_count(&self) -> usize {
+        self.removed + self.edited
+    }
+}
+
+fn edit_or_delete_standard_artifacts_if_requested(
     args: &HeaderFooterJob,
-) -> Result<Option<(PathBuf, usize)>> {
+) -> Result<Option<StandardArtifactProcessingResult>> {
     if !args.cleanup.header_enabled && !args.cleanup.footer_enabled {
         return Ok(None);
     }
-    let result = artifacts::delete_header_footer_artifacts_to_temp(
+    let page_infos = get_page_infos(&args.input_path)?;
+    let page_count = page_infos.len();
+    let header_texts = args
+        .header
+        .as_ref()
+        .map(|config| {
+            artifact_replacement_texts(config, page_count, args.page_start, args.total_pages)
+        })
+        .unwrap_or_default();
+    let footer_texts = args
+        .footer
+        .as_ref()
+        .map(|config| {
+            artifact_replacement_texts(config, page_count, args.page_start, args.total_pages)
+        })
+        .unwrap_or_default();
+    let edit_result = artifacts::edit_header_footer_artifacts_to_temp(
         &args.input_path,
-        HeaderFooterArtifactTargets {
-            header: args.cleanup.header_enabled,
-            footer: args.cleanup.footer_enabled,
+        &artifacts::HeaderFooterArtifactEditPlan {
+            remove_header: args.cleanup.header_enabled,
+            remove_footer: args.cleanup.footer_enabled,
+            header_texts,
+            footer_texts,
         },
     )?;
-    Ok(result.map(|(path, result)| {
-        let removed_by_region = result.removed_header_count() + result.removed_footer_count();
-        debug_assert_eq!(removed_by_region, result.removed_count());
-        (path, removed_by_region)
-    }))
+    Ok(
+        edit_result.map(|(path, result)| StandardArtifactProcessingResult {
+            path,
+            removed: result.removed_header + result.removed_footer,
+            edited: result.edited_header + result.edited_footer,
+            edited_header_pages: result.edited_header_pages,
+            edited_footer_pages: result.edited_footer_pages,
+        }),
+    )
+}
+
+fn artifact_replacement_texts(
+    config: &OverlayTextConfig,
+    page_count: usize,
+    page_start: u32,
+    total_pages: Option<u32>,
+) -> Vec<String> {
+    let page_start = page_start.max(1);
+    let total_pages = total_pages.unwrap_or(page_count as u32);
+    (0..page_count)
+        .map(|index| expand_placeholders(&config.text, page_start + index as u32, total_pages))
+        .collect()
 }
 
 fn build_overlay_pdf(
@@ -348,6 +412,8 @@ fn build_overlay_pdf(
     pages: &[PageSize],
     page_start: u32,
     total_pages: u32,
+    skip_header_pages: &BTreeSet<usize>,
+    skip_footer_pages: &BTreeSet<usize>,
 ) -> Result<Vec<u8>> {
     let mut doc = PdfDocument::new("Docsy Header Footer Processor");
     let mut font_cache = OverlayFontCache::default();
@@ -357,20 +423,20 @@ fn build_overlay_pdf(
         let current_page = page_start + index as u32;
         let mut ops = Vec::new();
 
-        if let Some(config) = header {
+        if let Some(config) = header.filter(|_| !skip_header_pages.contains(&index)) {
             let text = expand_placeholders(&config.text, current_page, total_pages);
             let font = font_cache.select_font(&text, &mut doc);
             let y = size.height_pt - mm_to_pt(config.margin_mm);
             let x = compute_x(config, &text, font.clone(), size.width_pt);
-            ops.extend(text_ops(font, config.font_size, x, y, text));
+            ops.extend(text_ops(font, config.font_size, x, y, &config.color, text));
         }
 
-        if let Some(config) = footer {
+        if let Some(config) = footer.filter(|_| !skip_footer_pages.contains(&index)) {
             let text = expand_placeholders(&config.text, current_page, total_pages);
             let font = font_cache.select_font(&text, &mut doc);
             let y = mm_to_pt(config.margin_mm);
             let x = compute_x(config, &text, font.clone(), size.width_pt);
-            ops.extend(text_ops(font, config.font_size, x, y, text));
+            ops.extend(text_ops(font, config.font_size, x, y, &config.color, text));
         }
 
         pdf_pages.push(PdfPage::new(
@@ -411,7 +477,15 @@ impl OverlayFontCache {
     }
 }
 
-fn text_ops(font: PdfFontHandle, font_size: f32, x: f32, y: f32, text: String) -> Vec<Op> {
+fn text_ops(
+    font: PdfFontHandle,
+    font_size: f32,
+    x: f32,
+    y: f32,
+    color: &str,
+    text: String,
+) -> Vec<Op> {
+    let (r, g, b) = parse_hex_color(color).unwrap_or((0.0, 0.0, 0.0));
     vec![
         Op::StartTextSection,
         Op::SetTextCursor {
@@ -424,9 +498,9 @@ fn text_ops(font: PdfFontHandle, font_size: f32, x: f32, y: f32, text: String) -
         Op::SetLineHeight { lh: Pt(font_size) },
         Op::SetFillColor {
             col: Color::Rgb(Rgb {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
+                r,
+                g,
+                b,
                 icc_profile: None,
             }),
         },
@@ -435,6 +509,17 @@ fn text_ops(font: PdfFontHandle, font_size: f32, x: f32, y: f32, text: String) -
         },
         Op::EndTextSection,
     ]
+}
+
+fn parse_hex_color(value: &str) -> Option<(f32, f32, f32)> {
+    let trimmed = value.trim().trim_start_matches('#');
+    if trimmed.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&trimmed[0..2], 16).ok()? as f32 / 255.0;
+    let g = u8::from_str_radix(&trimmed[2..4], 16).ok()? as f32 / 255.0;
+    let b = u8::from_str_radix(&trimmed[4..6], 16).ok()? as f32 / 255.0;
+    Some((r, g, b))
 }
 
 fn expand_placeholders(template: &str, page: u32, total: u32) -> String {
@@ -589,9 +674,9 @@ fn cleanup_temp(path: Option<PathBuf>) {
     }
 }
 
-fn cleanup_semantic_temp(path: Option<(PathBuf, usize)>) {
-    if let Some((path, _)) = path {
-        let _ = fs::remove_file(path);
+fn cleanup_semantic_temp(result: Option<StandardArtifactProcessingResult>) {
+    if let Some(result) = result {
+        let _ = fs::remove_file(result.path);
     }
 }
 
@@ -614,5 +699,14 @@ mod tests {
             Path::new("/tmp/a.pdf"),
             Path::new("/tmp/a_overlay.pdf")
         ));
+    }
+
+    #[test]
+    fn parses_hex_text_color() {
+        let (r, g, b) = parse_hex_color("#336699").unwrap();
+        assert!((r - 0.2).abs() < 0.01);
+        assert!((g - 0.4).abs() < 0.01);
+        assert!((b - 0.6).abs() < 0.01);
+        assert!(parse_hex_color("not-a-color").is_none());
     }
 }

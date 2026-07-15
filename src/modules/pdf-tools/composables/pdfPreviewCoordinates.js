@@ -45,6 +45,7 @@ export function textOverlayStyle(kind, pageInfo = DEFAULT_PAGE_INFO, config = {}
     ...horizontal,
     top: `${yPercent}%`,
     fontSize: `${Math.max(MIN_PREVIEW_FONT_PX, Number(config.fontSize || 0) * PREVIEW_FONT_SCALE)}px`,
+    color: config.color || '#111827',
   }
 }
 

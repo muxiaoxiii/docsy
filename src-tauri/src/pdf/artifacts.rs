@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -26,20 +27,6 @@ pub struct DeleteHeaderFooterArtifactsResult {
     removed_header: usize,
     removed_footer: usize,
     pages_touched: usize,
-}
-
-impl DeleteHeaderFooterArtifactsResult {
-    pub(crate) fn removed_count(&self) -> usize {
-        self.removed
-    }
-
-    pub(crate) fn removed_header_count(&self) -> usize {
-        self.removed_header
-    }
-
-    pub(crate) fn removed_footer_count(&self) -> usize {
-        self.removed_footer
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -71,6 +58,30 @@ impl ArtifactRemovalStats {
 enum ArtifactRegion {
     Header,
     Footer,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HeaderFooterArtifactEditPlan {
+    pub remove_header: bool,
+    pub remove_footer: bool,
+    pub header_texts: Vec<String>,
+    pub footer_texts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HeaderFooterArtifactEditResult {
+    pub removed_header: usize,
+    pub removed_footer: usize,
+    pub edited_header: usize,
+    pub edited_footer: usize,
+    pub edited_header_pages: BTreeSet<usize>,
+    pub edited_footer_pages: BTreeSet<usize>,
+}
+
+impl HeaderFooterArtifactEditResult {
+    pub(crate) fn changed_count(&self) -> usize {
+        self.removed_header + self.removed_footer + self.edited_header + self.edited_footer
+    }
 }
 
 pub fn delete_header_footer_artifacts(
@@ -160,21 +171,165 @@ pub fn delete_header_footer_artifacts_file(
     })
 }
 
-pub fn delete_header_footer_artifacts_to_temp(
+pub(crate) fn edit_header_footer_artifacts_to_temp(
     input_path: &str,
-    targets: HeaderFooterArtifactTargets,
-) -> Result<Option<(PathBuf, DeleteHeaderFooterArtifactsResult)>> {
-    if !targets.header && !targets.footer {
+    plan: &HeaderFooterArtifactEditPlan,
+) -> Result<Option<(PathBuf, HeaderFooterArtifactEditResult)>> {
+    if !plan.remove_header && !plan.remove_footer {
         return Ok(None);
     }
-    let output = temp_named_path("docsy_hf_artifacts_removed", "pdf");
-    let result =
-        delete_header_footer_artifacts_file(input_path, &output.to_string_lossy(), targets)?;
-    if result.removed == 0 {
+    let output = temp_named_path("docsy_hf_artifacts_edited", "pdf");
+    let result = edit_header_footer_artifacts_file(input_path, &output, plan)?;
+    if result.changed_count() == 0 {
         let _ = std::fs::remove_file(&output);
         return Ok(None);
     }
     Ok(Some((output, result)))
+}
+
+fn edit_header_footer_artifacts_file(
+    input_path: &str,
+    output_path: &Path,
+    plan: &HeaderFooterArtifactEditPlan,
+) -> Result<HeaderFooterArtifactEditResult> {
+    let input = Path::new(input_path);
+    let mut doc = Document::load(input).context("读取 PDF 失败")?;
+    let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
+    let mut result = HeaderFooterArtifactEditResult::default();
+
+    for (page_index, page_id) in page_ids.into_iter().enumerate() {
+        let content = match doc.get_and_decode_page_content(page_id) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        let properties = page_properties(&doc, page_id);
+        let (edited, page_result) =
+            edit_target_artifact_ranges(&content.operations, plan, &properties, page_index);
+        if page_result.changed_count() == 0 {
+            continue;
+        }
+        let encoded = Content { operations: edited }
+            .encode()
+            .context("编码编辑标准页眉页脚后的内容流失败")?;
+        doc.change_page_content(page_id, encoded)
+            .context("写回编辑标准页眉页脚后的内容流失败")?;
+        merge_edit_result(&mut result, page_result);
+    }
+
+    doc.prune_objects();
+    doc.save(output_path)
+        .context("保存编辑标准页眉页脚后的 PDF 失败")?;
+    Ok(result)
+}
+
+fn merge_edit_result(
+    target: &mut HeaderFooterArtifactEditResult,
+    source: HeaderFooterArtifactEditResult,
+) {
+    target.removed_header += source.removed_header;
+    target.removed_footer += source.removed_footer;
+    target.edited_header += source.edited_header;
+    target.edited_footer += source.edited_footer;
+    target
+        .edited_header_pages
+        .extend(source.edited_header_pages);
+    target
+        .edited_footer_pages
+        .extend(source.edited_footer_pages);
+}
+
+fn edit_target_artifact_ranges(
+    operations: &[Operation],
+    plan: &HeaderFooterArtifactEditPlan,
+    properties: &Dictionary,
+    page_index: usize,
+) -> (Vec<Operation>, HeaderFooterArtifactEditResult) {
+    let mut output = Vec::with_capacity(operations.len());
+    let mut result = HeaderFooterArtifactEditResult::default();
+    let targets = HeaderFooterArtifactTargets {
+        header: plan.remove_header,
+        footer: plan.remove_footer,
+    };
+    let mut index = 0_usize;
+
+    while index < operations.len() {
+        if let Some(region) = target_artifact_region(&operations[index], targets, properties) {
+            if let Some(end) = matching_marked_content_end(operations, index) {
+                let replacement = match region {
+                    ArtifactRegion::Header => plan.header_texts.get(page_index),
+                    ArtifactRegion::Footer => plan.footer_texts.get(page_index),
+                };
+                if let Some(replacement) = replacement.filter(|value| !value.is_empty()) {
+                    let mut range = operations[index..=end].to_vec();
+                    if replace_first_text_show(&mut range, replacement) {
+                        match region {
+                            ArtifactRegion::Header => {
+                                result.edited_header += 1;
+                                result.edited_header_pages.insert(page_index);
+                            }
+                            ArtifactRegion::Footer => {
+                                result.edited_footer += 1;
+                                result.edited_footer_pages.insert(page_index);
+                            }
+                        }
+                        output.extend(range);
+                        index = end + 1;
+                        continue;
+                    }
+                } else {
+                    match region {
+                        ArtifactRegion::Header => result.removed_header += 1,
+                        ArtifactRegion::Footer => result.removed_footer += 1,
+                    }
+                    index = end + 1;
+                    continue;
+                }
+            }
+        }
+        output.push(operations[index].clone());
+        index += 1;
+    }
+
+    (output, result)
+}
+
+fn replace_first_text_show(operations: &mut [Operation], replacement: &str) -> bool {
+    for operation in operations {
+        match operation.operator.as_str() {
+            "Tj" | "'" => {
+                if let Some(object) = operation.operands.first_mut() {
+                    *object = Object::string_literal(replacement);
+                    return true;
+                }
+            }
+            "\"" => {
+                if let Some(object) = operation.operands.get_mut(2) {
+                    *object = Object::string_literal(replacement);
+                    return true;
+                }
+            }
+            "TJ" => {
+                if let Some(Object::Array(items)) = operation.operands.first_mut() {
+                    let mut replaced = false;
+                    for item in items {
+                        if matches!(item, Object::String(_, _)) {
+                            if !replaced {
+                                *item = Object::string_literal(replacement);
+                                replaced = true;
+                            } else {
+                                *item = Object::string_literal("");
+                            }
+                        }
+                    }
+                    if replaced {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn remove_target_artifact_ranges(
@@ -467,7 +622,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(result.removed_count(), 1);
+        assert_eq!(result.removed, 1);
         assert_eq!(result.pages_touched, 1);
 
         let doc = Document::load(&output).unwrap();

@@ -1,3 +1,5 @@
+import { expandSplitNameTokens } from './splitFileName.js'
+
 const CN_DIGITS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九']
 
 export function createEvidenceFile(path) {
@@ -12,6 +14,10 @@ export function createEvidenceFile(path) {
     outputPath: '',
     detectionSummary: '',
     detectionCandidates: [],
+    existingHeaderText: '',
+    existingFooterText: '',
+    existingHeaderArtifact: false,
+    existingFooterArtifact: false,
     statusText: '等待',
     statusType: 'info',
   }
@@ -39,12 +45,23 @@ export function pageRangeText(file) {
 
 export function buildHeaderText(file, index, rules) {
   if (rules.headerMode === 'none') return ''
-  if (rules.headerMode === 'per_file') return file.header || stripPdf(file.name)
-  if (rules.headerMode === 'custom') return rules.headerText || stripPdf(file.name)
-  if (rules.headerMode === 'seq') return `证据${index + 1}`
-  if (rules.headerMode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`
-  if (rules.headerMode === 'prefix_seq') return `${rules.headerText || ''}证据${index + 1}`
-  return stripPdf(file.name)
+  let base = ''
+  if (rules.headerMode === 'per_file') base = file.header || stripPdf(file.name)
+  else if (rules.headerMode === 'custom') base = rules.headerText || stripPdf(file.name)
+  else if (rules.headerMode === 'seq') base = `证据${index + 1}`
+  else if (rules.headerMode === 'seq_cn') base = `证据${toChineseNumber(index + 1)}`
+  else if (rules.headerMode === 'prefix_seq') base = `${rules.headerText || ''}证据${index + 1}`
+  else base = stripPdf(file.name)
+  return decorateHeaderText(base, file, index, rules)
+}
+
+function decorateHeaderText(base, file, index, rules) {
+  const name = stripPdf(file?.name || '')
+  const contextText = String(base || '').replaceAll('[name]', name)
+  const prefix = expandSplitNameTokens(rules.headerPrefix || '', index, rules.headerDateValue || '')
+  const suffix = expandSplitNameTokens(rules.headerSuffix || '', index, rules.headerDateValue || '')
+  const body = expandSplitNameTokens(contextText, index, rules.headerDateValue || '')
+  return `${prefix}${body}${suffix}`.trim()
 }
 
 export function expandPlaceholders(template, page, total) {
@@ -83,14 +100,16 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         fontSize: rules.headerFontSize,
         marginMm: rules.headerMarginMm,
         align: rules.headerAlign,
-        offsetXMm: 0,
+        offsetXMm: rules.headerOffsetXMm || 0,
+        color: rules.headerColor || '#000000',
       } : null,
       footer: rules.footerEnabled && rules.footerText ? {
         text: rules.footerText,
         fontSize: rules.footerFontSize,
         marginMm: rules.footerMarginMm,
         align: rules.footerAlign,
-        offsetXMm: 0,
+        offsetXMm: rules.footerOffsetXMm || 0,
+        color: rules.footerColor || '#000000',
       } : null,
     }
   })
@@ -120,9 +139,13 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
       headerRule: {
         mode: rules.headerMode,
         text: rules.headerText,
+        prefix: rules.headerPrefix || '',
+        suffix: rules.headerSuffix || '',
         align: rules.headerAlign,
         fontSize: rules.headerFontSize,
         marginMm: rules.headerMarginMm,
+        offsetXmm: rules.headerOffsetXMm || 0,
+        color: rules.headerColor || '#000000',
       },
       footerRule: {
         enabled: rules.footerEnabled,
@@ -131,6 +154,8 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         align: rules.footerAlign,
         fontSize: rules.footerFontSize,
         marginMm: rules.footerMarginMm,
+        offsetXmm: rules.footerOffsetXMm || 0,
+        color: rules.footerColor || '#000000',
       },
       cleanupRule: {
         headerEnabled: rules.cleanupHeaderEnabled,

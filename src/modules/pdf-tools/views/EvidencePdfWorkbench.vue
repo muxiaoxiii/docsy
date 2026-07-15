@@ -53,10 +53,6 @@
         </div>
       </div>
 
-      <div v-if="showPresetBar" class="preset-bar">
-        <el-button size="small" type="primary" @click="openHeaderFooterSettings">替换页眉页码</el-button>
-      </div>
-
       <div v-if="showSplitResultActions" class="split-result-actions">
         <div>
           <div class="block-title">拆分后处理</div>
@@ -102,25 +98,28 @@
       </div>
 
       <div v-if="showProcessingControls" class="rule-block">
-        <div class="block-title">删除已有页眉页脚</div>
+        <div class="block-title">已有页眉页脚处理</div>
         <div class="rule-grid">
           <div class="rule-item">
-            <label>删除标准页眉</label>
-            <el-switch v-model="cleanupHeaderEnabled" active-text="删除" inactive-text="保留" />
+            <label>检测结果</label>
+            <strong>{{ existingHeaderFooterSummary }}</strong>
           </div>
           <div class="rule-item">
             <label>页眉识别范围 mm</label>
-            <el-input-number v-model="cleanupHeaderHeightMm" :min="4" :max="60" :step="1" :disabled="!cleanupHeaderEnabled" />
-            <span class="field-hint">只用于检测和预览，不遮盖原文</span>
+            <el-input-number v-model="cleanupHeaderHeightMm" :min="4" :max="60" :step="1" />
           </div>
           <div class="rule-item">
-            <label>删除标准页脚</label>
-            <el-switch v-model="cleanupFooterEnabled" active-text="删除" inactive-text="保留" />
+            <label>处理计划</label>
+            <span class="field-hint">{{ existingDeletionPlanText }}</span>
           </div>
           <div class="rule-item">
             <label>页脚识别范围 mm</label>
-            <el-input-number v-model="cleanupFooterHeightMm" :min="4" :max="60" :step="1" :disabled="!cleanupFooterEnabled" />
-            <span class="field-hint">只用于检测和预览，不遮盖原文</span>
+            <el-input-number v-model="cleanupFooterHeightMm" :min="4" :max="60" :step="1" />
+          </div>
+          <div class="rule-item">
+            <label>检测</label>
+            <el-button size="small" :disabled="!overlayFiles.length" :loading="detectingAllHeaderFooter" @click="detectAllHeaderFooter">检测已有页眉页脚</el-button>
+            <span class="field-hint">检测后可查看现有页眉页脚；标准结构优先原位编辑，普通文本仅提示保留</span>
           </div>
         </div>
       </div>
@@ -145,6 +144,14 @@
             <el-input v-model="headerText" placeholder="输入页眉文本" />
           </div>
           <div class="rule-item">
+            <label>页眉前缀</label>
+            <el-input v-model="headerPrefix" placeholder="可用 [##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+          </div>
+          <div class="rule-item">
+            <label>页眉后缀</label>
+            <el-input v-model="headerSuffix" placeholder="可用 [##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+          </div>
+          <div class="rule-item">
             <label>页眉位置</label>
             <el-select v-model="headerAlign" :disabled="headerMode === 'none'">
               <el-option label="居中" value="center" />
@@ -159,6 +166,14 @@
           <div class="rule-item">
             <label>页眉距顶 mm</label>
             <el-input-number v-model="headerMarginMm" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
+          </div>
+          <div class="rule-item">
+            <label>页眉水平偏移 mm</label>
+            <el-input-number v-model="headerOffsetXMm" :min="-120" :max="120" :step="1" :disabled="headerMode === 'none'" />
+          </div>
+          <div class="rule-item">
+            <label>页眉颜色</label>
+            <el-color-picker v-model="headerColor" :disabled="headerMode === 'none'" />
           </div>
           <div class="rule-item">
             <label>页脚页码</label>
@@ -184,7 +199,24 @@
             <label>页脚距底 mm</label>
             <el-input-number v-model="footerMarginMm" :min="3" :max="60" :step="1" :disabled="!footerEnabled" />
           </div>
+          <div class="rule-item">
+            <label>页脚水平偏移 mm</label>
+            <el-input-number v-model="footerOffsetXMm" :min="-120" :max="120" :step="1" :disabled="!footerEnabled" />
+          </div>
+          <div class="rule-item">
+            <label>页脚颜色</label>
+            <el-color-picker v-model="footerColor" :disabled="!footerEnabled" />
+          </div>
         </div>
+        <el-alert
+          v-if="headerFooterOverflowWarnings.length"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="processing-notes"
+        >
+          <template #title>{{ headerFooterOverflowWarnings.join('；') }}</template>
+        </el-alert>
       </div>
 
       <div v-if="showProcessingControls" class="rule-block">
@@ -209,7 +241,6 @@
         <el-button :disabled="!overlayFiles.length" @click="selectOverlayOutputDir">输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="openPlannedOutputDir">打开输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages">刷新页数</el-button>
-        <el-button :disabled="!overlayFiles.length" @click="detectAllHeaderFooter" :loading="detectingAllHeaderFooter">批量检测</el-button>
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
           {{ processButtonText }}
         </el-button>
@@ -338,40 +369,31 @@
         </el-table>
       </div>
 
-      <div v-if="detectionPlanRows.length" class="detection-plan">
+      <div v-if="existingHeaderFooterRows.length" class="detection-plan">
         <div class="plan-head">
           <div>
-            <div class="block-title">检测确认</div>
-            <p class="hint">确认旧页眉页脚识别结果后，再批量回填证据名称和清除区域</p>
-          </div>
-          <div class="plan-actions">
-            <el-button size="small" @click="acceptAllDetectedHeaders">采用全部页眉</el-button>
-            <el-button size="small" @click="acceptAllDetectedCleanup">采用全部清除区</el-button>
-            <el-button size="small" type="primary" @click="acceptAllDetectionPlan">全部采用</el-button>
+            <div class="block-title">已有页眉页脚</div>
+            <p class="hint">用于判断是否存在旧页眉页脚；标准结构会在处理时语义删除，普通文本不会遮盖</p>
           </div>
         </div>
-        <el-table :data="detectionPlanRows" size="small" border>
+        <el-table :data="existingHeaderFooterRows" size="small" border>
           <el-table-column prop="fileName" label="文件" min-width="150" show-overflow-tooltip />
-          <el-table-column label="推荐页眉" min-width="150" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.headerText || '-' }}</template>
+          <el-table-column label="现有页眉" min-width="170" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.existingHeader || '-' }}</template>
           </el-table-column>
-          <el-table-column label="页脚格式" width="110">
-            <template #default="{ row }">{{ row.footerText || '-' }}</template>
+          <el-table-column label="现有页码/页脚" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.existingFooter || '-' }}</template>
           </el-table-column>
-          <el-table-column label="清除区" width="118">
+          <el-table-column label="处理" width="170">
             <template #default="{ row }">
-              {{ row.headerCleanupMm ? `页眉 ${row.headerCleanupMm}mm` : '' }}
-              {{ row.footerCleanupMm ? `页脚 ${row.footerCleanupMm}mm` : '' }}
+              <el-tag v-if="row.editHeader" size="small" type="success">标准页眉可编辑</el-tag>
+              <el-tag v-if="row.editFooter" size="small" type="success">标准页脚可编辑</el-tag>
+              <span v-if="!row.editHeader && !row.editFooter">保留原文</span>
             </template>
           </el-table-column>
-          <el-table-column label="风险" width="78">
+          <el-table-column label="状态" width="108">
             <template #default="{ row }">
-              <el-tag :type="row.riskType" size="small">{{ row.riskText }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="92">
-            <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="acceptDetectionPlanRow(row)">采用</el-button>
+              <el-tag :type="row.statusType" size="small">{{ row.statusText }}</el-tag>
             </template>
           </el-table-column>
         </el-table>
@@ -396,8 +418,17 @@
         </el-table-column>
         <el-table-column label="页眉" min-width="170">
           <template #default="{ row, $index }">
-            <el-input v-if="workflowMode !== 'split' && headerMode === 'per_file'" v-model="row.header" size="small" @click.stop />
-            <span v-else class="table-text">{{ displayRowHeader(row, $index) || '-' }}</span>
+            <el-input
+              v-if="isEditingHeader(row)"
+              v-model="row.header"
+              size="small"
+              @click.stop
+              @blur="finishHeaderEdit"
+              @keyup.enter="finishHeaderEdit"
+            />
+            <span v-else class="table-text editable-text" @dblclick.stop="startHeaderEdit(row, $index)">
+              {{ displayRowHeader(row, $index) || '-' }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="页数" width="70">
@@ -406,7 +437,7 @@
         <el-table-column label="页码范围" width="105">
           <template #default="{ row }">{{ pageRangeText(row) }}</template>
         </el-table-column>
-        <el-table-column label="来源页段" width="105">
+        <el-table-column v-if="workflowMode === 'split'" label="来源页段" width="105">
           <template #default="{ row }">{{ sourceRangeText(row) }}</template>
         </el-table-column>
         <el-table-column label="状态" width="92">
@@ -500,7 +531,7 @@
       </div>
       <template #footer>
         <el-button @click="headerFooterSettingsVisible = false">关闭</el-button>
-        <el-button type="primary" @click="applyHeaderFooterSettings">保存并预览</el-button>
+        <el-button type="primary" @click="applyHeaderFooterSettings">保存设置</el-button>
       </template>
     </el-dialog>
 
@@ -523,7 +554,7 @@
             检测
           </el-button>
           <el-button size="small" type="primary" :loading="truePreviewLoading" :disabled="!selectedOverlayFile || Boolean(mergedImportPlan)" @click="renderTruePreview">
-            预览替换效果
+            生成真实预览
           </el-button>
         </div>
       </div>
@@ -542,16 +573,7 @@
         <el-table-column label="页段" width="86">
           <template #default="{ row }">{{ row.pageRange?.start }}-{{ row.pageRange?.end }}</template>
         </el-table-column>
-        <el-table-column prop="count" label="次数" width="58" />
-        <el-table-column label="可信度" width="76">
-          <template #default="{ row }">{{ Math.round((row.confidence || 0) * 100) }}%</template>
-        </el-table-column>
-        <el-table-column label="操作" width="118">
-          <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="applyDetectionCandidate(row)">回填</el-button>
-            <el-button size="small" link type="primary" @click="applyCleanupFromCandidate(row)">清除区</el-button>
-          </template>
-        </el-table-column>
+        <el-table-column prop="count" label="出现页数" width="76" />
       </el-table>
 
       <div v-if="truePreview" class="true-preview-stage">
@@ -588,7 +610,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
@@ -680,15 +702,21 @@ const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
 const headerMode = ref('filename')
 const headerText = ref('')
+const headerPrefix = ref('')
+const headerSuffix = ref('')
 const headerAlign = ref('center')
 const headerFontSize = ref(10)
 const headerMarginMm = ref(10)
+const headerOffsetXMm = ref(0)
+const headerColor = ref('#000000')
 const footerEnabled = ref(true)
 const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)
 const footerAlign = ref('center')
 const footerFontSize = ref(9)
 const footerMarginMm = ref(10)
+const footerOffsetXMm = ref(0)
+const footerColor = ref('#000000')
 const outputMode = ref('files_and_merge')
 const mergeFileName = ref('merged_evidence.pdf')
 const previewPage = ref(1)
@@ -701,6 +729,7 @@ const detectingHeaderFooter = ref(false)
 const detectingAllHeaderFooter = ref(false)
 const detectionSummary = ref('')
 const detectionCandidates = ref([])
+const editingHeaderPath = ref('')
 const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
 
 applyWorkflowDefaults()
@@ -717,7 +746,7 @@ const previewMaxPage = computed(() => {
 })
 const previewHint = computed(() => mergedImportPlan.value
   ? '合并 PDF 原文预览'
-  : '当前预览基于实际 PDF 页面渲染，清除区域和新文字会叠加显示'
+  : '普通预览会即时显示新页眉页脚位置；真实预览需手动生成'
 )
 const showRulePreviewOverlays = computed(() => !mergedImportPlan.value)
 const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
@@ -738,8 +767,8 @@ const firstFooterPreview = computed(() => {
 })
 const processingNotes = computed(() => {
   const notes = []
-  if (cleanupHeaderEnabled.value || cleanupFooterEnabled.value) {
-    notes.push('清除页眉页脚时会先尝试标准语义删除，无法语义删除的内容将用区域覆盖兜底')
+  if (autoCleanupHeaderEnabled.value || autoCleanupFooterEnabled.value || cleanupHeaderEnabled.value || cleanupFooterEnabled.value) {
+    notes.push('已有页眉页脚优先做标准结构原位处理；不能可靠处理的正文文本会保留，不遮盖')
   }
   if (normalizeA4.value) {
     notes.push('A4 规范化会把小页面居中补白到 A4，超过 A4 的页面才等比缩小；会尽量保留原 PDF 内容层')
@@ -761,11 +790,6 @@ const showSessionSummary = computed(() =>
   !mergedImportPlan.value &&
   workflowMode.value !== 'split'
 )
-const showPresetBar = computed(() =>
-  overlayFiles.value.length > 0 &&
-  !mergedImportPlan.value &&
-  workflowMode.value !== 'split'
-)
 const showSplitResultActions = computed(() =>
   workflowMode.value === 'split' &&
   overlayFiles.value.length > 0 &&
@@ -777,10 +801,16 @@ const splitReplacementOutputDirValue = computed(() =>
 const processButtonText = computed(() =>
   workflowMode.value === 'merge' ? '执行合并处理' : '执行证据处理'
 )
+const autoCleanupHeaderEnabled = computed(() =>
+  overlayFiles.value.some((file) => file.existingHeaderArtifact)
+)
+const autoCleanupFooterEnabled = computed(() =>
+  overlayFiles.value.some((file) => file.existingFooterArtifact)
+)
 const canApplyOverlay = computed(() =>
   overlayFiles.value.length > 0 &&
   totalOverlayPages.value > 0 &&
-  (normalizeA4.value || removeAnnotations.value || cleanupHeaderEnabled.value || cleanupFooterEnabled.value || headerMode.value !== 'none' || footerEnabled.value)
+  (normalizeA4.value || removeAnnotations.value || autoCleanupHeaderEnabled.value || autoCleanupFooterEnabled.value || headerMode.value !== 'none' || footerEnabled.value)
 )
 const canApplySplitReplacement = computed(() =>
   showSplitResultActions.value &&
@@ -794,21 +824,28 @@ const currentRules = computed(() => ({
   rasterDpi: rasterDpi.value,
   removeAnnotations: removeAnnotations.value,
   annotationKinds: annotationKinds.value,
-  cleanupHeaderEnabled: cleanupHeaderEnabled.value,
-  cleanupFooterEnabled: cleanupFooterEnabled.value,
+  cleanupHeaderEnabled: autoCleanupHeaderEnabled.value || cleanupHeaderEnabled.value,
+  cleanupFooterEnabled: autoCleanupFooterEnabled.value || cleanupFooterEnabled.value,
   cleanupHeaderHeightMm: cleanupHeaderHeightMm.value,
   cleanupFooterHeightMm: cleanupFooterHeightMm.value,
   headerMode: headerMode.value,
   headerText: headerText.value,
+  headerPrefix: headerPrefix.value,
+  headerSuffix: headerSuffix.value,
+  headerDateValue: splitNameDateValue.value,
   headerAlign: headerAlign.value,
   headerFontSize: headerFontSize.value,
   headerMarginMm: headerMarginMm.value,
+  headerOffsetXMm: headerOffsetXMm.value,
+  headerColor: headerColor.value,
   footerEnabled: footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,
   footerAlign: footerAlign.value,
   footerFontSize: footerFontSize.value,
   footerMarginMm: footerMarginMm.value,
+  footerOffsetXMm: footerOffsetXMm.value,
+  footerColor: footerColor.value,
   outputMode: outputMode.value,
   mergeAfterProcessing: outputMode.value !== 'files_only',
   mergeFileName: mergeFileName.value,
@@ -834,11 +871,15 @@ const previewHeaderStyle = computed(() => textOverlayStyle('header', previewData
   align: headerAlign.value,
   marginMm: headerMarginMm.value,
   fontSize: headerFontSize.value,
+  offsetXMm: headerOffsetXMm.value,
+  color: headerColor.value,
 }))
 const previewFooterStyle = computed(() => textOverlayStyle('footer', previewData.value, {
   align: footerAlign.value,
   marginMm: footerMarginMm.value,
   fontSize: footerFontSize.value,
+  offsetXMm: footerOffsetXMm.value,
+  color: footerColor.value,
 }))
 const truePreviewFrameStyle = computed(() => ({
   aspectRatio: truePreview.value?.widthPx && truePreview.value?.heightPx
@@ -848,10 +889,34 @@ const truePreviewFrameStyle = computed(() => ({
 const visibleDetectionCandidates = computed(() => detectionCandidates.value.filter((candidate) =>
   candidate.bbox?.page === previewPage.value
 ))
-const detectionPlanRows = computed(() => overlayRows.value
-  .map((file, index) => buildDetectionPlanRow(file, index))
-  .filter((row) => row.headerCandidate || row.footerCandidate)
+const existingHeaderFooterRows = computed(() => overlayRows.value
+  .map((file) => buildExistingHeaderFooterRow(file))
+  .filter((row) => row.existingHeader || row.existingFooter || row.deleteHeader || row.deleteFooter)
 )
+const existingHeaderFooterSummary = computed(() => {
+  if (!overlayFiles.value.length) return '未导入文件'
+  const headerCount = overlayFiles.value.filter((file) => file.existingHeaderText || file.existingHeaderArtifact).length
+  const footerCount = overlayFiles.value.filter((file) => file.existingFooterText || file.existingFooterArtifact).length
+  if (!headerCount && !footerCount) return '尚未检测'
+  return `页眉 ${headerCount} 个，页码/页脚 ${footerCount} 个`
+})
+const existingDeletionPlanText = computed(() => {
+  const parts = []
+  if (autoCleanupHeaderEnabled.value) parts.push('标准页眉会优先原位编辑')
+  if (autoCleanupFooterEnabled.value) parts.push('标准页脚会优先原位编辑')
+  return parts.length ? parts.join('；') : '未检测到可无损处理的标准页眉页脚'
+})
+const headerFooterOverflowWarnings = computed(() => {
+  const warnings = []
+  const widthPt = previewData.value?.widthPt || 595.28
+  if (previewHeaderText.value && estimateTextWidthPt(previewHeaderText.value, headerFontSize.value) > widthPt * 0.92) {
+    warnings.push('当前页眉可能超出页面宽度，请缩短文本、调整位置或减小字号')
+  }
+  if (previewFooterText.value && estimateTextWidthPt(previewFooterText.value, footerFontSize.value) > widthPt * 0.92) {
+    warnings.push('当前页脚可能超出页面宽度，请缩短文本、调整位置或减小字号')
+  }
+  return warnings
+})
 const mergedImportWarnings = computed(() => {
   if (!mergedImportPlan.value) return []
   return [
@@ -872,9 +937,7 @@ watch(selectedOverlayFile, () => {
 })
 
 watch([previewPage, currentRules], () => {
-  if (truePreview.value) {
-    scheduleTruePreviewRefresh()
-  }
+  truePreview.value = null
 }, {
   deep: true,
 })
@@ -1337,11 +1400,9 @@ function openHeaderFooterSettings() {
   headerFooterSettingsVisible.value = true
 }
 
-async function applyHeaderFooterSettings() {
+function applyHeaderFooterSettings() {
   headerFooterSettingsVisible.value = false
   refreshPreview()
-  await nextTick()
-  renderTruePreview()
 }
 
 function applyReplacementPreset() {
@@ -1570,8 +1631,9 @@ async function detectAllHeaderFooter() {
     const result = await detectFileHeaderFooter(file)
     if (result.ok) {
       applyDetectionResultToFile(file, result.data)
-      file.statusText = '已检测'
-      file.statusType = 'success'
+      const status = fileExistingStatus(file)
+      file.statusText = status.text
+      file.statusType = status.type
       success += 1
     } else {
       file.statusText = '检测失败'
@@ -1585,6 +1647,17 @@ async function detectAllHeaderFooter() {
   }
   failed ? ElMessage.warning(`已检测 ${success} 个，失败 ${failed} 个`) : ElMessage.success(`已检测 ${success} 个 PDF`)
   detectingAllHeaderFooter.value = false
+}
+
+function fileExistingStatus(file) {
+  const parts = []
+  if (file.existingHeaderText || file.existingHeaderArtifact) parts.push('现有页眉')
+  if (file.existingFooterText || file.existingFooterArtifact) parts.push('现有页码')
+  if (!parts.length) return { text: '无旧页眉页码', type: 'success' }
+  if (file.existingHeaderArtifact || file.existingFooterArtifact) {
+    return { text: parts.join('/') + '，可删', type: 'warning' }
+  }
+  return { text: parts.join('/') + '，保留', type: 'warning' }
 }
 
 async function detectFileHeaderFooter(file) {
@@ -1612,11 +1685,35 @@ function applyDetectionResultToFile(file, data) {
   if (header) parts.push(`页眉候选：${header.text}`)
   if (footer) parts.push(`页脚候选：${footer.text}`)
   if (candidates.length) parts.push(`候选 ${candidates.length} 个`)
+  file.existingHeaderText = header?.text || ''
+  file.existingFooterText = footer?.normalizedText || footer?.text || ''
+  file.existingHeaderArtifact = Boolean(data.artifact?.hasHeader)
+  file.existingFooterArtifact = Boolean(data.artifact?.hasFooter)
   file.detectionSummary = parts.length ? parts.join('；') : '未发现稳定的文本型页眉页脚候选'
   file.detectionCandidates = candidates
   if (file.path === selectedOverlayFile.value?.path) {
     detectionSummary.value = file.detectionSummary
     detectionCandidates.value = candidates
+  }
+}
+
+function buildExistingHeaderFooterRow(file) {
+  const hasTextHeader = Boolean(file.existingHeaderText)
+  const hasTextFooter = Boolean(file.existingFooterText)
+  const deleteHeader = Boolean(file.existingHeaderArtifact)
+  const deleteFooter = Boolean(file.existingFooterArtifact)
+  const statusParts = []
+  if (deleteHeader || deleteFooter) statusParts.push('可删除')
+  if ((hasTextHeader && !deleteHeader) || (hasTextFooter && !deleteFooter)) statusParts.push('需保留')
+  return {
+    file,
+    fileName: file.name,
+    existingHeader: file.existingHeaderText,
+    existingFooter: file.existingFooterText,
+    editHeader: deleteHeader,
+    editFooter: deleteFooter,
+    statusText: statusParts.join('/') || '已检测',
+    statusType: deleteHeader || deleteFooter ? 'success' : 'warning',
   }
 }
 
@@ -1806,6 +1903,19 @@ function boundedCleanupHeight(value) {
   return Math.min(60, Math.max(4, Math.ceil(Number(value || 0))))
 }
 
+function estimateTextWidthPt(text, fontSize) {
+  return String(text || '')
+    .split('')
+    .reduce((sum, ch) => sum + estimatePreviewCharWidth(ch) * Number(fontSize || 10), 0)
+}
+
+function estimatePreviewCharWidth(ch) {
+  if (/[\u3400-\u9fff\uf900-\ufaff]/.test(ch)) return 1
+  if (/\s/.test(ch)) return 0.28
+  if (/[0-9A-Za-z]/.test(ch)) return 0.56
+  return 0.5
+}
+
 function detectionBoxStyle(candidate) {
   return bboxOverlayStyle(candidate.bbox)
 }
@@ -1818,6 +1928,21 @@ function selectPreviewRow(row) {
     truePreview.value = null
     previewReloadKey.value += 1
   }
+}
+
+function isEditingHeader(row) {
+  return editingHeaderPath.value && editingHeaderPath.value === row.path
+}
+
+function startHeaderEdit(row, index) {
+  if (!row) return
+  headerMode.value = 'per_file'
+  row.header = row.header || displayRowHeader(row, index) || stripPdf(row.name)
+  editingHeaderPath.value = row.path
+}
+
+function finishHeaderEdit() {
+  editingHeaderPath.value = ''
 }
 
 function rowHeaderPreview(row, index) {
