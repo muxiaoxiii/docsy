@@ -497,7 +497,7 @@ fn build_candidates(
             &page.footers
         };
         for line in lines {
-            if is_noise(&line.text) {
+            if is_noise(&line.text, &line.normalized_text) {
                 continue;
             }
             grouped
@@ -615,7 +615,13 @@ fn labels_for(normalized_text: &str) -> Vec<String> {
     labels
 }
 
-fn is_noise(text: &str) -> bool {
+fn is_noise(text: &str, normalized_text: &str) -> bool {
+    if labels_for(normalized_text)
+        .iter()
+        .any(|label| label == "page-number")
+    {
+        return false;
+    }
     let value = text.trim();
     value.len() < 2 || value.len() > 120
 }
@@ -723,7 +729,7 @@ fn best_split_header(page: &PageDetection) -> Option<String> {
     page.headers
         .iter()
         .find(|line| {
-            !is_noise(&line.text)
+            !is_noise(&line.text, &line.normalized_text)
                 && !labels_for(&line.normalized_text).contains(&"page-number".to_string())
         })
         .map(|line| line.text.trim().to_string())
@@ -833,6 +839,36 @@ mod tests {
             normalize_header_footer_text("Page 3 of 20"),
             "Page {page} of {total}"
         );
+    }
+
+    #[test]
+    fn keeps_standalone_numeric_footer_candidates() {
+        let page = |page: u32, footer: &str| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![],
+            footers: vec![TextLineDetection {
+                text: footer.to_string(),
+                normalized_text: normalize_header_footer_text(footer),
+                bbox: BBox {
+                    x0: 540.0,
+                    y0: 800.0,
+                    x1: 548.0,
+                    y1: 822.0,
+                    page,
+                    width: 595.0,
+                    height: 842.0,
+                },
+            }],
+        };
+        let pages = vec![page(1, "1"), page(2, "2"), page(3, "3")];
+        let candidates = build_candidates(&pages, "footer", pages.len() as u32);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].normalized_text, "{page}");
+        assert_eq!(candidates[0].count, 3);
+        assert!(candidates[0].labels.contains(&"page-number".to_string()));
     }
 
     #[test]
