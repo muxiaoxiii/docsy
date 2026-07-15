@@ -145,15 +145,18 @@
               <el-option label="不插入页眉" value="none" />
               <el-option label="文件名" value="filename" />
               <el-option label="按证据列表名称" value="per_file" />
-              <el-option label="自定义文本" value="custom" />
-              <el-option label="序号（证据1）" value="seq" />
-              <el-option label="中文序号（证据一）" value="seq_cn" />
-              <el-option label="固定前缀+序号" value="prefix_seq" />
+              <el-option label="固定文本" value="custom" />
+              <el-option label="自定义模板" value="template" />
+              <el-option label="证据编号" value="seq" />
+              <el-option label="中文证据编号" value="seq_cn" />
             </el-select>
           </div>
-          <div class="rule-item" v-if="headerMode === 'custom' || headerMode === 'prefix_seq'">
-            <label>{{ headerMode === 'custom' ? '页眉文本' : '固定前缀' }}</label>
-            <el-input v-model="headerText" placeholder="输入页眉文本" />
+          <div class="rule-item" v-if="headerMode === 'custom' || headerMode === 'template'">
+            <label>{{ headerMode === 'template' ? '页眉模板' : '页眉文本' }}</label>
+            <el-input
+              v-model="headerText"
+              :placeholder="headerMode === 'template' ? '例如 证据[##]、[文件名]-[##]' : '输入固定页眉文本'"
+            />
           </div>
           <div class="rule-item">
             <label>页眉前缀</label>
@@ -513,15 +516,18 @@
             <el-option label="不插入页眉" value="none" />
             <el-option label="文件名" value="filename" />
             <el-option label="按证据列表名称" value="per_file" />
-            <el-option label="自定义文本" value="custom" />
-            <el-option label="序号（证据1）" value="seq" />
-            <el-option label="中文序号（证据一）" value="seq_cn" />
-            <el-option label="固定前缀+序号" value="prefix_seq" />
+            <el-option label="固定文本" value="custom" />
+            <el-option label="自定义模板" value="template" />
+            <el-option label="证据编号" value="seq" />
+            <el-option label="中文证据编号" value="seq_cn" />
           </el-select>
         </div>
-        <div class="rule-item" v-if="headerMode === 'custom' || headerMode === 'prefix_seq'">
-          <label>{{ headerMode === 'custom' ? '页眉文本' : '固定前缀' }}</label>
-          <el-input v-model="headerText" />
+        <div class="rule-item" v-if="headerMode === 'custom' || headerMode === 'template'">
+          <label>{{ headerMode === 'template' ? '页眉模板' : '页眉文本' }}</label>
+          <el-input
+            v-model="headerText"
+            :placeholder="headerMode === 'template' ? '例如 证据[##]、[文件名]-[##]' : '输入固定页眉文本'"
+          />
         </div>
         <div class="rule-item">
           <label>页眉前缀</label>
@@ -2028,7 +2034,7 @@ function rowHeaderPreview(row, index) {
 
 function displayRowHeader(row, index) {
   if (!insertHeaderFooterEnabled.value) return ''
-  if (workflowMode.value === 'split') {
+  if (workflowMode.value === 'split' && headerMode.value === 'per_file') {
     return row?.header ?? rowHeaderPreview(row, index)
   }
   return rowHeaderPreview(row, index)

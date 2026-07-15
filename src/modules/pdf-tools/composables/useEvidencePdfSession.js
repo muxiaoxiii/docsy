@@ -66,7 +66,8 @@ export function buildHeaderText(file, index, rules) {
   if (rules.headerMode === 'none') return ''
   let base = ''
   if (rules.headerMode === 'per_file') base = file.header ?? stripPdf(file.name)
-  else if (rules.headerMode === 'custom') base = rules.headerText || stripPdf(file.name)
+  else if (rules.headerMode === 'custom') base = rules.headerText || ''
+  else if (rules.headerMode === 'template') base = rules.headerText || '证据[##]'
   else if (rules.headerMode === 'seq') base = `证据${index + 1}`
   else if (rules.headerMode === 'seq_cn') base = `证据${toChineseNumber(index + 1)}`
   else if (rules.headerMode === 'prefix_seq') base = `${rules.headerText || ''}证据${index + 1}`
@@ -121,7 +122,9 @@ export function sortByNatural(items, valueGetter, order = 'ascending') {
 
 function decorateHeaderText(base, file, index, rules) {
   const name = stripPdf(file?.name || '')
-  const contextText = String(base || '').replaceAll('[name]', name)
+  const contextText = String(base || '')
+    .replaceAll('[name]', name)
+    .replaceAll('[文件名]', name)
   const prefix = expandSplitNameTokens(rules.headerPrefix || '', index, rules.headerDateValue || '')
   const suffix = expandSplitNameTokens(rules.headerSuffix || '', index, rules.headerDateValue || '')
   const body = expandSplitNameTokens(contextText, index, rules.headerDateValue || '')
