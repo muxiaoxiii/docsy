@@ -69,7 +69,6 @@
         <div class="plan-actions">
           <el-button size="small" @click="selectSplitReplacementOutputDir">输出目录</el-button>
           <el-button size="small" @click="openHeaderFooterSettings">设置页眉页脚</el-button>
-          <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter">删除现有页眉页脚</el-button>
           <el-button
             size="small"
             type="primary"
@@ -79,6 +78,35 @@
           >
             生成处理后文件
           </el-button>
+        </div>
+      </div>
+
+      <div v-if="showExistingHeaderFooterControls" class="rule-block existing-hf-block">
+        <div class="block-title-row">
+          <div class="block-title">原页眉页脚</div>
+          <div class="block-actions">
+            <el-button size="small" :loading="detectingAllHeaderFooter" @click="detectAllHeaderFooter">重新检测</el-button>
+            <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter">删除现有</el-button>
+            <el-button size="small" :disabled="!hasExistingRemovalRule" @click="restoreExistingHeaderFooterMarks">恢复删除标记</el-button>
+          </div>
+        </div>
+        <div class="existing-summary-grid">
+          <div class="summary-pill">
+            <span>原页眉</span>
+            <strong>{{ existingHeaderCount }}</strong>
+          </div>
+          <div class="summary-pill">
+            <span>原页脚</span>
+            <strong>{{ existingFooterCount }}</strong>
+          </div>
+          <div class="summary-pill warning" :class="{ active: hasExistingRemovalRule }">
+            <span>待删除</span>
+            <strong>{{ existingRemovalCount }}</strong>
+          </div>
+          <div class="summary-pill" :class="{ active: existingEditCount || existingConvertCount }">
+            <span>待编辑/转换</span>
+            <strong>{{ existingEditCount + existingConvertCount }}</strong>
+          </div>
         </div>
       </div>
 
@@ -222,7 +250,6 @@
         <el-button :disabled="!overlayFiles.length" @click="selectOverlayOutputDir">输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="openPlannedOutputDir">打开输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages">刷新页数</el-button>
-        <el-button :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter">删除现有页眉页脚</el-button>
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
           {{ processButtonText }}
         </el-button>
@@ -234,7 +261,7 @@
         <span v-if="outputMode === 'merge_only'">合并完成后会清理中间单文件副本</span>
       </div>
       <el-alert
-        v-if="showProcessingControls && processingNotes.length"
+        v-if="showRuleActionNotes"
         type="warning"
         :closable="false"
         show-icon
@@ -370,7 +397,7 @@
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="原页眉" prop="existingHeader" sortable="custom" min-width="150">
+        <el-table-column label="原页眉" prop="existingHeader" sortable="custom" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <el-input
               v-if="isEditingExistingHeader(row)"
@@ -390,7 +417,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="原页脚" prop="existingFooter" sortable="custom" min-width="150">
+        <el-table-column label="原页脚" prop="existingFooter" sortable="custom" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <el-input
               v-if="isEditingExistingFooter(row)"
@@ -410,7 +437,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="新页眉" prop="header" sortable="custom" min-width="170">
+        <el-table-column label="新页眉" prop="header" sortable="custom" min-width="160" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingHeader(row)"
@@ -425,7 +452,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="新页脚" prop="footer" sortable="custom" min-width="150">
+        <el-table-column label="新页脚" prop="footer" sortable="custom" min-width="135" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingFooter(row)"
@@ -762,7 +789,7 @@ const previewMaxPage = computed(() => {
 })
 const previewHint = computed(() => mergedImportPlan.value
   ? '合并 PDF 原文预览'
-  : '普通预览会即时显示新页眉页脚位置；真实预览需手动生成'
+  : '实时位置；真实预览需手动生成'
 )
 const showRulePreviewOverlays = computed(() => !mergedImportPlan.value)
 const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
@@ -798,6 +825,9 @@ const processingNotes = computed(() => {
   if (hasExistingEditRule.value) {
     notes.push('原页眉/原页脚列中的标准结构编辑会原位处理；普通文本型旧内容会先删除匹配文本再按新规则重建')
   }
+  if (hasUnresolvedExistingOverlapRisk.value) {
+    notes.push('存在未处理的原页眉页脚，新插入内容可能与旧内容重叠')
+  }
   return notes
 })
 const showProcessingControls = computed(() =>
@@ -814,6 +844,14 @@ const showSplitResultActions = computed(() =>
   overlayFiles.value.length > 0 &&
   !mergedImportPlan.value
 )
+const showExistingHeaderFooterControls = computed(() =>
+  overlayFiles.value.length > 0 &&
+  !mergedImportPlan.value
+)
+const showRuleActionNotes = computed(() =>
+  (showProcessingControls.value || showSplitResultActions.value) &&
+  processingNotes.value.length > 0
+)
 const splitReplacementOutputDirValue = computed(() =>
   splitReplacementOutputDir.value || defaultSplitReplacementOutputDir()
 )
@@ -829,8 +867,17 @@ const autoCleanupFooterEnabled = computed(() =>
 const hasDetectedExistingHeaderFooter = computed(() =>
   overlayFiles.value.some((file) => hasExistingHeaderFooter(file))
 )
+const existingHeaderCount = computed(() =>
+  overlayFiles.value.filter((file) => hasExistingHeader(file)).length
+)
+const existingFooterCount = computed(() =>
+  overlayFiles.value.filter((file) => hasExistingFooter(file)).length
+)
 const hasExistingRemovalRule = computed(() =>
   overlayFiles.value.some((file) => file.removeExistingHeader || file.removeExistingFooter)
+)
+const existingRemovalCount = computed(() =>
+  overlayFiles.value.reduce((sum, file) => sum + Number(Boolean(file.removeExistingHeader)) + Number(Boolean(file.removeExistingFooter)), 0)
 )
 const hasExistingEditRule = computed(() =>
   overlayFiles.value.some((file) =>
@@ -838,6 +885,28 @@ const hasExistingEditRule = computed(() =>
     (file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter),
   )
 )
+const existingEditCount = computed(() =>
+  overlayFiles.value.reduce((sum, file) =>
+    sum +
+    Number(Boolean(file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader)) +
+    Number(Boolean(file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter)),
+  0)
+)
+const existingConvertCount = computed(() =>
+  overlayFiles.value.reduce((sum, file) =>
+    sum +
+    Number(Boolean(file.convertPlainHeader && !file.removeExistingHeader)) +
+    Number(Boolean(file.convertPlainFooter && !file.removeExistingFooter)),
+  0)
+)
+const hasUnresolvedExistingOverlapRisk = computed(() => {
+  const insertsHeader = headerMode.value !== 'none'
+  const insertsFooter = footerEnabled.value
+  return overlayFiles.value.some((file) =>
+    (insertsHeader && hasExistingHeader(file) && !file.removeExistingHeader && !file.convertPlainHeader) ||
+    (insertsFooter && hasExistingFooter(file) && !file.removeExistingFooter && !file.convertPlainFooter),
+  )
+})
 const canApplyOverlay = computed(() =>
   overlayFiles.value.length > 0 &&
   totalOverlayPages.value > 0 &&
@@ -2005,6 +2074,18 @@ async function markRemoveExistingHeaderFooter() {
   refreshPreview()
 }
 
+function restoreExistingHeaderFooterMarks() {
+  overlayFiles.value.forEach((file) => {
+    file.removeExistingHeader = false
+    file.removeExistingFooter = false
+    const status = fileExistingStatus(file)
+    file.statusText = status.text
+    file.statusType = status.type
+  })
+  truePreview.value = null
+  refreshPreview()
+}
+
 function headerFooterHandlingText(row) {
   const parts = []
   if (row?.removeExistingHeader) parts.push('页眉删除')
@@ -2098,6 +2179,10 @@ function removeOverlayFile(index) {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.preview-head {
+  flex-direction: column;
 }
 
 .section-actions {
@@ -2203,6 +2288,63 @@ h3 {
   font-weight: 600;
   margin-bottom: 10px;
   color: #303133;
+}
+
+.block-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.block-title-row .block-title {
+  margin-bottom: 0;
+}
+
+.block-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.existing-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.summary-pill {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.summary-pill span {
+  display: block;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.summary-pill strong {
+  display: block;
+  margin-top: 4px;
+  color: #303133;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.summary-pill.active {
+  border-color: #f3d19e;
+  background: #fdf6ec;
+}
+
+.summary-pill.warning.active strong {
+  color: #b42318;
 }
 
 .rule-grid {
@@ -2461,6 +2603,10 @@ h3 {
   }
 
   .session-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .existing-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
