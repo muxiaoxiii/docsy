@@ -67,7 +67,7 @@ export function buildHeaderText(file, index, rules) {
   let base = ''
   if (rules.headerMode === 'per_file') base = file.header ?? stripPdf(file.name)
   else if (rules.headerMode === 'custom') base = rules.headerText || ''
-  else if (rules.headerMode === 'template') base = rules.headerText || '证据[##]'
+  else if (rules.headerMode === 'template') base = rules.headerText || ''
   else if (rules.headerMode === 'seq') base = `证据${index + 1}`
   else if (rules.headerMode === 'seq_cn') base = `证据${toChineseNumber(index + 1)}`
   else if (rules.headerMode === 'prefix_seq') base = `${rules.headerText || ''}证据${index + 1}`

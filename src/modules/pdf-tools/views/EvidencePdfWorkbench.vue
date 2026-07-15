@@ -146,25 +146,22 @@
               <el-option label="文件名" value="filename" />
               <el-option label="按证据列表名称" value="per_file" />
               <el-option label="固定文本" value="custom" />
-              <el-option label="自定义模板" value="template" />
-              <el-option label="证据编号" value="seq" />
-              <el-option label="中文证据编号" value="seq_cn" />
             </el-select>
           </div>
-          <div class="rule-item" v-if="headerMode === 'custom' || headerMode === 'template'">
-            <label>{{ headerMode === 'template' ? '页眉模板' : '页眉文本' }}</label>
+          <div class="rule-item" v-if="headerMode === 'custom'">
+            <label>页眉文本</label>
             <el-input
               v-model="headerText"
-              :placeholder="headerMode === 'template' ? '例如 证据[##]、[文件名]-[##]' : '输入固定页眉文本'"
+              placeholder="可写固定文字，也可用 [##]、[序号]、[文件名]、[YYYYMMDD]"
             />
           </div>
           <div class="rule-item">
             <label>页眉前缀</label>
-            <el-input v-model="headerPrefix" placeholder="可用 [##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+            <el-input v-model="headerPrefix" placeholder="例如 证据[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
           </div>
           <div class="rule-item">
             <label>页眉后缀</label>
-            <el-input v-model="headerSuffix" placeholder="可用 [##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+            <el-input v-model="headerSuffix" placeholder="例如 -[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
           </div>
           <div class="rule-item">
             <label>页眉位置</label>
@@ -517,25 +514,22 @@
             <el-option label="文件名" value="filename" />
             <el-option label="按证据列表名称" value="per_file" />
             <el-option label="固定文本" value="custom" />
-            <el-option label="自定义模板" value="template" />
-            <el-option label="证据编号" value="seq" />
-            <el-option label="中文证据编号" value="seq_cn" />
           </el-select>
         </div>
-        <div class="rule-item" v-if="headerMode === 'custom' || headerMode === 'template'">
-          <label>{{ headerMode === 'template' ? '页眉模板' : '页眉文本' }}</label>
+        <div class="rule-item" v-if="headerMode === 'custom'">
+          <label>页眉文本</label>
           <el-input
             v-model="headerText"
-            :placeholder="headerMode === 'template' ? '例如 证据[##]、[文件名]-[##]' : '输入固定页眉文本'"
+            placeholder="可写固定文字，也可用 [##]、[序号]、[文件名]、[YYYYMMDD]"
           />
         </div>
         <div class="rule-item">
           <label>页眉前缀</label>
-          <el-input v-model="headerPrefix" placeholder="可用 [##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+          <el-input v-model="headerPrefix" placeholder="例如 证据[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
         </div>
         <div class="rule-item">
           <label>页眉后缀</label>
-          <el-input v-model="headerSuffix" placeholder="可用 [##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+          <el-input v-model="headerSuffix" placeholder="例如 -[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
         </div>
         <div class="rule-item">
           <label>页眉位置</label>
@@ -790,6 +784,21 @@ const editingFooterPath = ref('')
 const editingExistingHeaderPath = ref('')
 const editingExistingFooterPath = ref('')
 const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
+
+watch(headerMode, (mode) => {
+  if (mode === 'template') {
+    headerMode.value = 'custom'
+  } else if (mode === 'seq') {
+    headerText.value = '证据[序号]'
+    headerMode.value = 'custom'
+  } else if (mode === 'seq_cn') {
+    headerText.value = '证据[中文序号]'
+    headerMode.value = 'custom'
+  } else if (mode === 'prefix_seq') {
+    headerText.value = `${headerText.value || ''}证据[序号]`
+    headerMode.value = 'custom'
+  }
+}, { immediate: true })
 
 applyWorkflowDefaults()
 

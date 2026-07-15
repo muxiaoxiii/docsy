@@ -385,9 +385,9 @@ describe('Evidence PDF session helpers', () => {
     expect(buildHeaderText(file, 0, { ...baseRules, headerMode: 'filename' })).toBe('鉴定意见')
     expect(buildHeaderText(file, 0, { ...baseRules, headerMode: 'custom', headerText: '' })).toBe('')
     expect(buildHeaderText(file, 0, { ...baseRules, headerMode: 'custom', headerText: '固定说明' })).toBe('固定说明')
-    expect(buildHeaderText(file, 1, { ...baseRules, headerMode: 'seq' })).toBe('证据2')
-    expect(buildHeaderText(file, 10, { ...baseRules, headerMode: 'seq_cn' })).toBe('证据十一')
-    expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'template', headerText: '证据[##]-[文件名]' })).toBe('证据03-鉴定意见')
+    expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'custom', headerText: '证据[##]-[文件名]' })).toBe('证据03-鉴定意见')
+    expect(buildHeaderText(file, 10, { ...baseRules, headerMode: 'custom', headerText: '证据[中文序号]' })).toBe('证据十一')
+    expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'filename', headerPrefix: '证据[##]-' })).toBe('证据03-鉴定意见')
     expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'prefix_seq', headerText: '原告' })).toBe('原告证据3')
   })
 

@@ -33,6 +33,7 @@ export function expandSplitNameTokens(value, index = 0, dateValue = '') {
   return String(value || '').replace(/\[([^\]]+)\]/g, (match, token) => {
     if (/^#+$/.test(token)) return formatSequenceToken(token, index)
     if (token === '序号') return String(index + 1)
+    if (token === '中文序号') return toChineseNumber(index + 1)
     if (token === '日期' || /[YyMmDd]/.test(token)) {
       return formatDateToken(token === '日期' ? 'YYYYMMDD' : token, dateValue)
     }
@@ -80,4 +81,20 @@ export function formatDateToken(pattern, value) {
         return token
     }
   })
+}
+
+const CN_DIGITS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+
+export function toChineseNumber(value) {
+  const num = Number(value)
+  if (!Number.isInteger(num) || num <= 0) return String(value)
+  if (num < 10) return CN_DIGITS[num]
+  if (num === 10) return '十'
+  if (num < 20) return `十${CN_DIGITS[num % 10]}`
+  if (num < 100) {
+    const tens = Math.floor(num / 10)
+    const ones = num % 10
+    return `${CN_DIGITS[tens]}十${CN_DIGITS[ones]}`
+  }
+  return String(value)
 }

@@ -21,6 +21,7 @@ describe('split file name helpers', () => {
 
   it('expands date and sequence tokens in one name part', () => {
     expect(expandSplitNameTokens('证据[##]-[DD]', 8, '20260420')).toBe('证据09-20')
+    expect(expandSplitNameTokens('证据[中文序号]', 10, '20260420')).toBe('证据十一')
   })
 
   it('uses the selected separator consistently for all parts', () => {
