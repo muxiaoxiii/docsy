@@ -2,7 +2,7 @@ export default {
   id: 'evidence-pdf',
   name: '证据处理',
   icon: 'DocumentChecked',
-  description: '证据 PDF 的合并、拆分、页眉页码和扫描',
+  description: '证据 PDF 的分项处理、合并证据处理、页眉页码和扫描',
   category: 'pdf',
   order: 20,
   defaultVisible: true,
@@ -23,7 +23,7 @@ export default {
   homeCards: [
     {
       title: '证据处理',
-      description: '证据合并、证据拆分、证据扫描',
+      description: '分项证据处理、合并证据处理、证据扫描',
       route: 'evidence-pdf',
       icon: 'DocumentChecked',
     },

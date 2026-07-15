@@ -7,8 +7,8 @@
           <p class="hint">{{ workflowHint }}</p>
         </div>
         <div class="section-actions">
-          <el-button v-if="workflowMode !== 'split'" type="primary" @click="selectOverlayFiles">导入单独证据 PDF</el-button>
-          <el-button v-if="workflowMode !== 'merge'" :loading="importingMergedPdf" @click="importMergedPdfAsEvidence">导入已合并证据 PDF</el-button>
+          <el-button v-if="workflowMode !== 'split'" type="primary" @click="selectOverlayFiles">{{ splitImportButtonText }}</el-button>
+          <el-button v-if="workflowMode !== 'merge'" :loading="importingMergedPdf" @click="importMergedPdfAsEvidence">{{ mergedImportButtonText }}</el-button>
         </div>
       </div>
 
@@ -23,7 +23,7 @@
         <span class="processing-spinner" />
         <div>
           <strong>正在拆分 PDF</strong>
-          <p>大文件会按页段逐个输出，当前只占用证据拆分区域；请先不要重复点击确认拆分。</p>
+          <p>大文件会按页段逐个输出，当前只占用合并证据处理区域；请先不要重复点击确认拆分。</p>
         </div>
       </div>
       <div v-if="overlaying" class="local-processing">
@@ -62,8 +62,8 @@
 
       <div v-if="showSplitResultActions" class="split-result-actions">
         <div>
-          <div class="block-title">拆分后处理</div>
-          <p class="hint">处理后文件会输出到新文件夹，不覆盖原拆分文件。</p>
+          <div class="block-title">{{ splitResultActionTitle }}</div>
+          <p class="hint">{{ splitResultActionHint }}</p>
           <p class="path-text">输出文件夹：{{ splitReplacementOutputDirValue }}</p>
         </div>
         <div class="plan-actions">
@@ -276,7 +276,7 @@
       <div v-if="mergedImportPlan" class="merged-import-plan">
         <div class="plan-head">
           <div>
-            <div class="block-title">证据拆分确认</div>
+            <div class="block-title">合并证据页段确认</div>
             <p class="hint">核对页段后拆成证据列表</p>
           </div>
           <div class="plan-actions">
@@ -705,15 +705,22 @@ const props = defineProps({
 
 const workflowMode = computed(() => (['merge', 'split'].includes(props.workflow) ? props.workflow : 'all'))
 const workflowTitle = computed(() => {
-  if (workflowMode.value === 'merge') return '证据合并'
-  if (workflowMode.value === 'split') return '证据拆分'
+  if (workflowMode.value === 'merge') return '分项证据处理'
+  if (workflowMode.value === 'split') return '合并证据处理'
   return '证据处理'
 })
 const workflowHint = computed(() => {
-  if (workflowMode.value === 'merge') return '处理单独证据 PDF 的页眉、连续页码、A4、批注，并按需合并输出'
-  if (workflowMode.value === 'split') return '读取已合并证据 PDF 的页眉页码，核对页段后拆回证据列表'
+  if (workflowMode.value === 'merge') return '处理分项证据 PDF 的页眉、连续页码、A4、批注，并按需合并输出'
+  if (workflowMode.value === 'split') return '处理已合并证据 PDF；单个文件可识别页段拆分，多个文件可按统一规则批量处理'
   return '按法律证据包流程处理页眉、页码、A4、批注、合并与反向拆分'
 })
+const splitImportButtonText = computed(() => '导入分项证据 PDF')
+const mergedImportButtonText = computed(() => '导入合并证据 PDF')
+const splitResultActionTitle = computed(() => hasSourceSplitRanges.value ? '分项文件后处理' : '合并证据批量处理')
+const splitResultActionHint = computed(() => hasSourceSplitRanges.value
+  ? '处理后文件会输出到新文件夹，不覆盖原分项文件。'
+  : '多个合并证据 PDF 会按同一规则批量输出到新文件夹，不覆盖原文件。'
+)
 
 const overlayFiles = ref([])
 const overlayOutputDir = ref('')
@@ -805,6 +812,12 @@ applyWorkflowDefaults()
 const overlayRows = computed(() => {
   return assignPageRanges(overlayFiles.value)
 })
+const hasSourceSplitRanges = computed(() => overlayFiles.value.some(file => Number(file.sourcePageStart || 0) > 0))
+const hasMergedBatchImports = computed(() =>
+  workflowMode.value === 'split' &&
+  overlayFiles.value.length > 0 &&
+  !hasSourceSplitRanges.value
+)
 
 const selectedOverlayFile = computed(() => overlayRows.value[selectedOverlayIndex.value] || null)
 const activePreviewFilePath = computed(() => mergedImportPlan.value?.inputPath || selectedOverlayFile.value?.path || '')
@@ -862,17 +875,18 @@ const processingNotes = computed(() => {
 })
 const showProcessingControls = computed(() =>
   !mergedImportPlan.value &&
-  workflowMode.value !== 'split'
+  (workflowMode.value !== 'split' || hasMergedBatchImports.value)
 )
 const showSessionSummary = computed(() =>
   overlayFiles.value.length > 0 &&
   !mergedImportPlan.value &&
-  workflowMode.value !== 'split'
+  (workflowMode.value !== 'split' || hasMergedBatchImports.value)
 )
 const showSplitResultActions = computed(() =>
   workflowMode.value === 'split' &&
   overlayFiles.value.length > 0 &&
-  !mergedImportPlan.value
+  !mergedImportPlan.value &&
+  hasSourceSplitRanges.value
 )
 const showExistingHeaderFooterControls = computed(() =>
   overlayFiles.value.length > 0 &&
@@ -886,7 +900,7 @@ const splitReplacementOutputDirValue = computed(() =>
   splitReplacementOutputDir.value || defaultSplitReplacementOutputDir()
 )
 const processButtonText = computed(() =>
-  workflowMode.value === 'merge' ? '执行合并处理' : '执行证据处理'
+  workflowMode.value === 'merge' ? '执行分项证据处理' : '执行合并证据处理'
 )
 const autoCleanupHeaderEnabled = computed(() =>
   overlayFiles.value.some((file) => file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader)
@@ -1113,11 +1127,18 @@ async function selectOverlayFiles() {
 
 async function importMergedPdfAsEvidence() {
   if (importingMergedPdf.value) return
-  const input = await open({
-    multiple: false,
+  const selected = await open({
+    multiple: true,
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   })
-  if (!input) return
+  if (!selected) return
+  const paths = Array.isArray(selected) ? selected : [selected]
+  if (!paths.length) return
+  if (paths.length > 1) {
+    await importMergedPdfsForBatch(paths)
+    return
+  }
+  const input = paths[0]
   const outputDir = defaultMergedImportOutputDir(input)
 
   importingMergedPdf.value = true
@@ -1192,6 +1213,34 @@ async function importMergedPdfAsEvidence() {
     truePreview.value = null
     safeRefreshPreview()
     ElMessage.warning('分析中断，已进入手动拆分页段确认')
+  } finally {
+    importingMergedPdf.value = false
+  }
+}
+
+async function importMergedPdfsForBatch(paths) {
+  importingMergedPdf.value = true
+  try {
+    mergedImportPlan.value = null
+    overlayFiles.value = paths.map((path) => ({
+      ...createEvidenceFile(path),
+      header: stripPdf(fileName(path)),
+      sourceDetectionSource: 'merged_pdf',
+      detectionSummary: '作为合并证据 PDF 批量处理',
+      statusText: '等待',
+      statusType: 'info',
+    }))
+    overlayOutputDir.value = defaultMergedBatchOutputDir(paths)
+    splitReplacementOutputDir.value = overlayOutputDir.value
+    selectedOverlayIndex.value = 0
+    selectedMergedImportIndex.value = 0
+    previewPage.value = 1
+    truePreview.value = null
+    applyWorkflowDefaults()
+    await refreshOverlayPageCounts()
+    await detectAllHeaderFooter({ silent: true })
+    refreshPreview()
+    ElMessage.success(`已导入 ${paths.length} 个合并证据 PDF，可按统一规则批量处理`)
   } finally {
     importingMergedPdf.value = false
   }
@@ -1324,6 +1373,11 @@ function defaultMergedImportName(inputPath, index) {
 function defaultMergedImportOutputDir(inputPath) {
   const stem = stripPdf(fileName(inputPath)) || '合并PDF'
   return `${parentDir(inputPath)}/${stem}-分项`
+}
+
+function defaultMergedBatchOutputDir(paths = []) {
+  const first = Array.isArray(paths) ? paths[0] : ''
+  return `${parentDir(first || '.')}/合并证据处理`
 }
 
 function defaultMergedImportRange(inputPath, total) {

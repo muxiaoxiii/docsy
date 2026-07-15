@@ -1,10 +1,10 @@
 <template>
   <div class="evidence-pdf-view">
     <el-tabs v-model="activeTab" tab-position="left" class="evidence-tabs">
-      <el-tab-pane label="证据合并" name="merge" lazy>
+      <el-tab-pane label="分项证据处理" name="merge" lazy>
         <EvidencePdfWorkbench workflow="merge" />
       </el-tab-pane>
-      <el-tab-pane label="证据拆分" name="split" lazy>
+      <el-tab-pane label="合并证据处理" name="split" lazy>
         <EvidencePdfWorkbench workflow="split" />
       </el-tab-pane>
       <el-tab-pane label="证据扫描" name="scan" lazy>
