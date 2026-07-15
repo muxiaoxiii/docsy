@@ -212,6 +212,9 @@
         </div>
         <div class="import-plan-meta">
           <span>总页数：{{ mergedImportPlan.totalPages || '-' }}</span>
+          <span>已扫描：{{ mergedImportPlan.pagesAnalyzed || '-' }} 页</span>
+          <span>页眉：{{ mergedImportPlan.headerPages || 0 }} 页</span>
+          <span>页码页脚：{{ mergedImportPlan.pageNumberFooterPages || 0 }} 页</span>
           <span>输出目录：{{ mergedImportPlan.outputDir }}</span>
         </div>
         <el-alert
@@ -253,13 +256,6 @@
             <template #default="{ row }">
               <el-tag :type="mergedImportSourceType(row)" size="small">
                 {{ mergedImportSourceText(row) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="92">
-            <template #default="{ row }">
-              <el-tag :type="mergedImportRangeStatus(row).type" size="small">
-                {{ mergedImportRangeStatus(row).text }}
               </el-tag>
             </template>
           </el-table-column>
@@ -755,6 +751,9 @@ async function importMergedPdfAsEvidence() {
     })
     const detectedItems = inspect.ok ? (inspect.data.items || []) : []
     const detectedTotalPages = inspect.ok ? Number(inspect.data.totalPages || 0) : 0
+    const detectedPagesAnalyzed = inspect.ok ? Number(inspect.data.pagesAnalyzed || 0) : 0
+    const detectedHeaderPages = inspect.ok ? Number(inspect.data.headerPages || 0) : 0
+    const detectedPageNumberFooterPages = inspect.ok ? Number(inspect.data.pageNumberFooterPages || 0) : 0
     const warnings = inspect.ok
       ? [...(inspect.data.warnings || [])]
       : [inspect.error || '合并 PDF 页眉分析失败，已保留手动拆分页段']
@@ -776,6 +775,9 @@ async function importMergedPdfAsEvidence() {
       inputPath: input,
       outputDir,
       totalPages: planTotalPages,
+      pagesAnalyzed: detectedPagesAnalyzed,
+      headerPages: detectedHeaderPages,
+      pageNumberFooterPages: detectedPageNumberFooterPages,
       warnings,
       items,
     }
@@ -945,6 +947,9 @@ function buildManualMergedImportPlan(inputPath, outputDir, total, warnings = [])
     inputPath,
     outputDir,
     totalPages: Math.max(1, Number(total || 1)),
+    pagesAnalyzed: 0,
+    headerPages: 0,
+    pageNumberFooterPages: 0,
     warnings,
     items: [defaultMergedImportRange(inputPath, total)],
   }
@@ -1035,19 +1040,6 @@ function mergedImportRangePageCount(row) {
   const pageStart = Number(row?.pageStart || 0)
   const pageEnd = Number(row?.pageEnd || 0)
   return pageStart > 0 && pageEnd >= pageStart ? pageEnd - pageStart + 1 : 0
-}
-
-function mergedImportRangeStatus(row) {
-  const pageStart = Number(row?.pageStart || 0)
-  const pageEnd = Number(row?.pageEnd || 0)
-  const total = Number(mergedImportPlan.value?.totalPages || 0)
-  if (!String(row?.name || '').trim() || !pageStart || !pageEnd || pageStart > pageEnd || pageEnd > total) {
-    return { type: 'danger', text: '错误' }
-  }
-  if (row.source === 'fallback' || row.source === 'manual') {
-    return { type: 'warning', text: '核对' }
-  }
-  return { type: 'success', text: '正常' }
 }
 
 function mergedImportSourceType(row) {

@@ -57,6 +57,7 @@ pub struct SplitSuggestionResult {
     input_path: String,
     total_pages: u32,
     pages_analyzed: u32,
+    header_pages: usize,
     page_number_footer_pages: usize,
     warnings: Vec<String>,
     items: Vec<SplitSuggestionItem>,
@@ -220,8 +221,15 @@ pub fn suggest_split_ranges(args: &serde_json::Value) -> Result<SplitSuggestionR
         "scanArtifacts": false
     }))?;
     let items = build_split_suggestions_from_pages(&detection.pages);
+    let header_pages = count_split_header_pages(&detection.pages);
     let page_number_footer_pages = count_page_number_footers(&detection.pages);
-    let mut warnings = split_suggestion_warnings(&items, total_pages, page_number_footer_pages);
+    let mut warnings = split_suggestion_warnings(
+        &items,
+        total_pages,
+        detection.pages_analyzed,
+        header_pages,
+        page_number_footer_pages,
+    );
     if max_pages < total_pages {
         warnings.push(format!(
             "为避免大文件卡顿，本次只自动识别前 {max_pages} 页；后续页段请手动补充或分批处理"
@@ -231,6 +239,7 @@ pub fn suggest_split_ranges(args: &serde_json::Value) -> Result<SplitSuggestionR
         input_path: detection.input_path,
         total_pages,
         pages_analyzed: detection.pages_analyzed,
+        header_pages,
         page_number_footer_pages,
         warnings,
         items,
@@ -676,12 +685,24 @@ fn count_page_number_footers(pages: &[PageDetection]) -> usize {
         .count()
 }
 
+fn count_split_header_pages(pages: &[PageDetection]) -> usize {
+    pages
+        .iter()
+        .filter(|page| best_split_header(page).is_some())
+        .count()
+}
+
 fn split_suggestion_warnings(
     items: &[SplitSuggestionItem],
     total_pages: u32,
+    pages_analyzed: u32,
+    header_pages: usize,
     page_number_footer_pages: usize,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
+    warnings.push(format!(
+        "拆分识别概况：文件共 {total_pages} 页，本次扫描 {pages_analyzed} 页，识别到 {header_pages} 页含页眉、{page_number_footer_pages} 页含页码型页脚"
+    ));
     if items.is_empty() {
         warnings.push("未识别到页眉变化，请手动设置拆分页段".to_string());
         return warnings;
@@ -694,11 +715,6 @@ fn split_suggestion_warnings(
     }
     if items.iter().all(|item| item.source != "header") {
         warnings.push("未识别到稳定页眉，当前仅生成一个默认页段".to_string());
-    }
-    if page_number_footer_pages > 0 {
-        warnings.push(format!(
-            "识别到 {page_number_footer_pages} 页含页码型页脚，可用于人工核对"
-        ));
     }
     warnings
 }
@@ -870,6 +886,66 @@ mod tests {
                     source: "header".to_string(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn split_warning_summarizes_header_and_page_number_counts() {
+        let page = |page: u32, header: Option<&str>, footer: Option<&str>| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: header
+                .map(|text| {
+                    vec![TextLineDetection {
+                        text: text.to_string(),
+                        normalized_text: normalize_header_footer_text(text),
+                        bbox: BBox {
+                            x0: 0.0,
+                            y0: 0.0,
+                            x1: 10.0,
+                            y1: 10.0,
+                            page,
+                            width: 595.0,
+                            height: 842.0,
+                        },
+                    }]
+                })
+                .unwrap_or_default(),
+            footers: footer
+                .map(|text| {
+                    vec![TextLineDetection {
+                        text: text.to_string(),
+                        normalized_text: normalize_header_footer_text(text),
+                        bbox: BBox {
+                            x0: 0.0,
+                            y0: 820.0,
+                            x1: 10.0,
+                            y1: 840.0,
+                            page,
+                            width: 595.0,
+                            height: 842.0,
+                        },
+                    }]
+                })
+                .unwrap_or_default(),
+        };
+        let pages = vec![
+            page(1, Some("证据一"), Some("1/2")),
+            page(2, Some("证据一"), Some("2/2")),
+            page(3, None, None),
+        ];
+        let warnings = split_suggestion_warnings(
+            &build_split_suggestions_from_pages(&pages),
+            3,
+            pages.len() as u32,
+            count_split_header_pages(&pages),
+            count_page_number_footers(&pages),
+        );
+
+        assert_eq!(
+            warnings[0],
+            "拆分识别概况：文件共 3 页，本次扫描 3 页，识别到 2 页含页眉、2 页含页码型页脚"
         );
     }
 
