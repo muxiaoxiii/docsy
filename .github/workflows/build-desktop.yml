@@ -63,12 +63,31 @@ jobs:
           function Install-ZipTool {
             param(
               [string] $Name,
-              [string] $Url,
+              [string[]] $Urls,
               [string[]] $Executables
             )
             $zipPath = Join-Path $toolsRoot "$Name.zip"
             $dest = Join-Path $toolsRoot $Name
-            Invoke-WebRequest -Uri $Url -OutFile $zipPath
+            $downloaded = $false
+            foreach ($url in $Urls) {
+              for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                  Invoke-WebRequest -Uri $url -OutFile $zipPath
+                  $downloaded = $true
+                  break
+                } catch {
+                  if ($attempt -eq 3) {
+                    Write-Warning "$Name download failed from $url"
+                  } else {
+                    Start-Sleep -Seconds ($attempt * 5)
+                  }
+                }
+              }
+              if ($downloaded) { break }
+            }
+            if (-not $downloaded) {
+              throw "$Name download failed from all mirrors"
+            }
             Expand-Archive -Path $zipPath -DestinationPath $dest -Force
             foreach ($exe in $Executables) {
               $match = Get-ChildItem -Path $dest -Recurse -Filter $exe | Select-Object -First 1
@@ -81,17 +100,20 @@ jobs:
 
           Install-ZipTool `
             -Name "qpdf" `
-            -Url "https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip" `
+            -Urls @("https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip") `
             -Executables @("qpdf.exe")
 
           Install-ZipTool `
             -Name "poppler" `
-            -Url "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip" `
+            -Urls @("https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip") `
             -Executables @("pdftoppm.exe", "pdftotext.exe")
 
           Install-ZipTool `
             -Name "ffmpeg" `
-            -Url "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" `
+            -Urls @(
+              "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+              "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+            ) `
             -Executables @("ffmpeg.exe", "ffprobe.exe")
 
       - name: Run frontend tests
