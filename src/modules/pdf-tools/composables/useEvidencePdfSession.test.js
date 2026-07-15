@@ -11,7 +11,9 @@ import {
   candidateTargetRange,
   createEvidenceFile,
   expandPlaceholders,
+  naturalCompare,
   pageRangeText,
+  sortByNatural,
   toChineseNumber,
   totalPages,
 } from './useEvidencePdfSession.js'
@@ -77,6 +79,39 @@ describe('Evidence PDF session helpers', () => {
     const file = { ...createEvidenceFile('/case/合同.pdf'), header: '' }
 
     expect(buildHeaderText(file, 0, baseRules)).toBe('')
+  })
+
+  it('sorts Chinese file labels in natural numeric order', () => {
+    const values = ['证据11-1.pdf', '证据2.pdf', '证据1.pdf', '证据10.pdf']
+
+    expect([...values].sort(naturalCompare)).toEqual([
+      '证据1.pdf',
+      '证据2.pdf',
+      '证据10.pdf',
+      '证据11-1.pdf',
+    ])
+  })
+
+  it('sorts rows by natural values while preserving ties', () => {
+    const rows = [
+      { name: '1-10' },
+      { name: '1-2' },
+      { name: '11-20' },
+      { name: '1-2' },
+    ]
+
+    expect(sortByNatural(rows, row => row.name).map(row => row.name)).toEqual([
+      '1-2',
+      '1-2',
+      '1-10',
+      '11-20',
+    ])
+    expect(sortByNatural(rows, row => row.name, 'descending').map(row => row.name)).toEqual([
+      '11-20',
+      '1-10',
+      '1-2',
+      '1-2',
+    ])
   })
 
   it('supports per-file footer overrides including blank values', () => {

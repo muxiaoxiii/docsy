@@ -85,6 +85,34 @@ export function candidateTargetRange(candidate, pages = 0) {
   return { start, end: Math.max(start, end) }
 }
 
+const NATURAL_COLLATOR = new Intl.Collator('zh-Hans-CN', {
+  numeric: true,
+  sensitivity: 'base',
+})
+
+export function naturalCompare(left, right) {
+  const leftEmpty = left === null || left === undefined || left === ''
+  const rightEmpty = right === null || right === undefined || right === ''
+  if (leftEmpty && rightEmpty) return 0
+  if (leftEmpty) return 1
+  if (rightEmpty) return -1
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right
+  }
+  return NATURAL_COLLATOR.compare(String(left), String(right))
+}
+
+export function sortByNatural(items, valueGetter, order = 'ascending') {
+  const direction = order === 'descending' ? -1 : 1
+  return [...items]
+    .map((item, index) => ({ item, index, value: valueGetter(item, index) }))
+    .sort((left, right) => {
+      const result = naturalCompare(left.value, right.value)
+      return result === 0 ? left.index - right.index : result * direction
+    })
+    .map(({ item }) => item)
+}
+
 function decorateHeaderText(base, file, index, rules) {
   const name = stripPdf(file?.name || '')
   const contextText = String(base || '').replaceAll('[name]', name)

@@ -311,30 +311,31 @@
           border
           highlight-current-row
           @row-click="selectMergedImportRange"
+          @sort-change="sortMergedImportItems"
         >
           <el-table-column type="index" label="#" width="44" />
-          <el-table-column label="文件名" min-width="160">
+          <el-table-column label="文件名" prop="name" sortable="custom" min-width="160">
             <template #default="{ row }">
               <el-input v-model="row.name" size="small" />
             </template>
           </el-table-column>
-          <el-table-column label="输出文件名" min-width="180" show-overflow-tooltip>
+          <el-table-column label="输出文件名" prop="outputName" sortable="custom" min-width="180" show-overflow-tooltip>
             <template #default="{ row, $index }">{{ splitOutputNamePreview(row, $index) }}.pdf</template>
           </el-table-column>
-          <el-table-column label="起始页" width="108">
+          <el-table-column label="起始页" prop="pageStart" sortable="custom" width="108">
             <template #default="{ row }">
               <el-input-number v-model="row.pageStart" :min="1" :max="mergedImportPlan.totalPages || 999999" size="small" />
             </template>
           </el-table-column>
-          <el-table-column label="结束页" width="108">
+          <el-table-column label="结束页" prop="pageEnd" sortable="custom" width="108">
             <template #default="{ row }">
               <el-input-number v-model="row.pageEnd" :min="1" :max="mergedImportPlan.totalPages || 999999" size="small" />
             </template>
           </el-table-column>
-          <el-table-column label="页数" width="64">
+          <el-table-column label="页数" prop="pageCount" sortable="custom" width="64">
             <template #default="{ row }">{{ mergedImportRangePageCount(row) || '-' }}</template>
           </el-table-column>
-          <el-table-column label="识别来源" width="96">
+          <el-table-column label="识别来源" prop="source" sortable="custom" width="96">
             <template #default="{ row }">
               <el-tag :type="mergedImportSourceType(row)" size="small">
                 {{ mergedImportSourceText(row) }}
@@ -357,18 +358,19 @@
         size="small"
         border
         class="overlay-table"
-        highlight-current-row
-        @row-click="selectPreviewRow"
-      >
-        <el-table-column type="index" label="#" width="44" />
-        <el-table-column label="文件" min-width="180" show-overflow-tooltip>
+          highlight-current-row
+          @row-click="selectPreviewRow"
+          @sort-change="sortOverlayFiles"
+        >
+          <el-table-column type="index" label="#" width="44" />
+        <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <button class="file-link" type="button" @click.stop="openEvidenceFile(row)">
               {{ row.name }}
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="页眉" min-width="170">
+        <el-table-column label="页眉" prop="header" sortable="custom" min-width="170">
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingHeader(row)"
@@ -383,7 +385,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="页脚" min-width="150">
+        <el-table-column label="页脚" prop="footer" sortable="custom" min-width="150">
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingFooter(row)"
@@ -398,21 +400,21 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="页数" width="70">
+        <el-table-column label="页数" prop="pages" sortable="custom" width="70">
           <template #default="{ row }">{{ row.pages || '-' }}</template>
         </el-table-column>
-        <el-table-column label="页码范围" width="105">
+        <el-table-column label="页码范围" prop="pageRange" sortable="custom" width="105">
           <template #default="{ row }">{{ pageRangeText(row) }}</template>
         </el-table-column>
-        <el-table-column label="现有处理" width="150">
+        <el-table-column label="现有处理" prop="existingHandling" sortable="custom" width="150">
           <template #default="{ row }">
             <span class="table-text">{{ headerFooterHandlingText(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="workflowMode === 'split'" label="来源页段" width="105">
+        <el-table-column v-if="workflowMode === 'split'" label="来源页段" prop="sourceRange" sortable="custom" width="105">
           <template #default="{ row }">{{ sourceRangeText(row) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="92">
+        <el-table-column label="状态" prop="status" sortable="custom" width="92">
           <template #default="{ row }">
             <el-tag :type="row.statusType" size="small">{{ row.statusText }}</el-tag>
           </template>
@@ -590,6 +592,7 @@ import {
   fileName,
   pageRangeText,
   parentDir,
+  sortByNatural,
   stripPdf,
   totalPages,
 } from '../composables/useEvidencePdfSession.js'
@@ -1248,6 +1251,28 @@ function removeMergedImportRange(index) {
   )
 }
 
+function sortMergedImportItems({ prop, order }) {
+  if (!mergedImportPlan.value || !prop || !order) return
+  const selected = selectedMergedImportRange.value
+  mergedImportPlan.value.items = sortByNatural(
+    mergedImportPlan.value.items,
+    (row, index) => mergedImportSortValue(row, prop, index),
+    order,
+  )
+  if (selected) {
+    selectedMergedImportIndex.value = Math.max(0, mergedImportPlan.value.items.indexOf(selected))
+  }
+}
+
+function mergedImportSortValue(row, prop, index) {
+  if (prop === 'outputName') return splitOutputNamePreview(row, index)
+  if (prop === 'pageStart') return Number(row?.pageStart || 0)
+  if (prop === 'pageEnd') return Number(row?.pageEnd || 0)
+  if (prop === 'pageCount') return mergedImportRangePageCount(row)
+  if (prop === 'source') return mergedImportSourceText(row)
+  return row?.[prop] ?? ''
+}
+
 function mergedImportRangePageCount(row) {
   const pageStart = Number(row?.pageStart || 0)
   const pageEnd = Number(row?.pageEnd || 0)
@@ -1858,6 +1883,33 @@ function headerFooterHandlingText(row) {
 function sourceRangeText(row) {
   if (!row.sourcePageStart || !row.sourcePageEnd) return '-'
   return `${row.sourcePageStart}-${row.sourcePageEnd}`
+}
+
+function sortOverlayFiles({ prop, order }) {
+  if (!prop || !order) return
+  const selectedPath = selectedOverlayFile.value?.path
+  overlayFiles.value = sortByNatural(
+    overlayFiles.value,
+    (row, index) => overlaySortValue(row, prop, index),
+    order,
+  )
+  if (selectedPath) {
+    selectedOverlayIndex.value = Math.max(0, overlayFiles.value.findIndex((file) => file.path === selectedPath))
+  } else {
+    selectedOverlayIndex.value = 0
+  }
+  refreshPreview()
+}
+
+function overlaySortValue(row, prop, index) {
+  if (prop === 'header') return displayRowHeader(row, index)
+  if (prop === 'footer') return displayRowFooter(row, index)
+  if (prop === 'pages') return Number(row?.pages || 0)
+  if (prop === 'pageRange') return Number(row?.pageStart || 0)
+  if (prop === 'existingHandling') return headerFooterHandlingText(row)
+  if (prop === 'sourceRange') return Number(row?.sourcePageStart || 0)
+  if (prop === 'status') return row?.statusText || ''
+  return row?.[prop] ?? ''
 }
 
 function moveOverlayFile(index, direction) {
