@@ -111,8 +111,10 @@ onBeforeUnmount(() => {
 }
 
 .brand-logo {
-  width: 32px;
+  width: 40px;
   height: 32px;
+  object-fit: contain;
+  flex: 0 0 40px;
 }
 
 .brand-name {
