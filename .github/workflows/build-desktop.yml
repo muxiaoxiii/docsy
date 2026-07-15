@@ -24,7 +24,8 @@ jobs:
             os: windows-latest
             command: npm run tauri:build:windows
             artifacts: |
-              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
 
     steps:
       - uses: actions/checkout@v4
