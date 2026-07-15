@@ -176,6 +176,19 @@
             <el-input-number v-model="headerFontSize" :min="6" :max="24" :step="1" :disabled="headerMode === 'none'" />
           </div>
           <div class="rule-item">
+            <label>页眉字体</label>
+            <el-select v-model="headerFontFamily" :disabled="headerMode === 'none'">
+              <el-option label="自动" value="auto" />
+              <el-option label="宋体" value="songti" />
+              <el-option label="黑体" value="heiti" />
+              <el-option label="楷体" value="kaiti" />
+              <el-option label="仿宋" value="fangsong" />
+              <el-option label="Helvetica" value="helvetica" />
+              <el-option label="Times" value="times" />
+              <el-option label="Courier" value="courier" />
+            </el-select>
+          </div>
+          <div class="rule-item">
             <label>页眉距顶 mm</label>
             <el-input-number v-model="headerMarginMm" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
           </div>
@@ -206,6 +219,19 @@
           <div class="rule-item">
             <label>页脚字号</label>
             <el-input-number v-model="footerFontSize" :min="6" :max="24" :step="1" :disabled="!footerEnabled" />
+          </div>
+          <div class="rule-item">
+            <label>页脚字体</label>
+            <el-select v-model="footerFontFamily" :disabled="!footerEnabled">
+              <el-option label="自动" value="auto" />
+              <el-option label="宋体" value="songti" />
+              <el-option label="黑体" value="heiti" />
+              <el-option label="楷体" value="kaiti" />
+              <el-option label="仿宋" value="fangsong" />
+              <el-option label="Helvetica" value="helvetica" />
+              <el-option label="Times" value="times" />
+              <el-option label="Courier" value="courier" />
+            </el-select>
           </div>
           <div class="rule-item">
             <label>页脚距底 mm</label>
@@ -544,6 +570,19 @@
           <el-input-number v-model="headerFontSize" :min="6" :max="24" :step="1" :disabled="headerMode === 'none'" />
         </div>
         <div class="rule-item">
+          <label>页眉字体</label>
+          <el-select v-model="headerFontFamily" :disabled="headerMode === 'none'">
+            <el-option label="自动" value="auto" />
+            <el-option label="宋体" value="songti" />
+            <el-option label="黑体" value="heiti" />
+            <el-option label="楷体" value="kaiti" />
+            <el-option label="仿宋" value="fangsong" />
+            <el-option label="Helvetica" value="helvetica" />
+            <el-option label="Times" value="times" />
+            <el-option label="Courier" value="courier" />
+          </el-select>
+        </div>
+        <div class="rule-item">
           <label>页眉距顶 mm</label>
           <el-input-number v-model="headerMarginMm" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
         </div>
@@ -581,6 +620,19 @@
         <div class="rule-item">
           <label>页脚字号</label>
           <el-input-number v-model="footerFontSize" :min="6" :max="24" :step="1" :disabled="!footerEnabled" />
+        </div>
+        <div class="rule-item">
+          <label>页脚字体</label>
+          <el-select v-model="footerFontFamily" :disabled="!footerEnabled">
+            <el-option label="自动" value="auto" />
+            <el-option label="宋体" value="songti" />
+            <el-option label="黑体" value="heiti" />
+            <el-option label="楷体" value="kaiti" />
+            <el-option label="仿宋" value="fangsong" />
+            <el-option label="Helvetica" value="helvetica" />
+            <el-option label="Times" value="times" />
+            <el-option label="Courier" value="courier" />
+          </el-select>
         </div>
         <div class="rule-item">
           <label>页脚距底 mm</label>
@@ -767,6 +819,7 @@ const headerPrefix = ref('')
 const headerSuffix = ref('')
 const headerAlign = ref('center')
 const headerFontSize = ref(10)
+const headerFontFamily = ref('auto')
 const headerMarginMm = ref(10)
 const headerOffsetXMm = ref(0)
 const headerColor = ref('#000000')
@@ -775,6 +828,7 @@ const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)
 const footerAlign = ref('center')
 const footerFontSize = ref(9)
+const footerFontFamily = ref('auto')
 const footerMarginMm = ref(10)
 const footerOffsetXMm = ref(0)
 const footerColor = ref('#000000')
@@ -994,6 +1048,7 @@ const currentRules = computed(() => ({
   headerDateValue: splitNameDateValue.value,
   headerAlign: headerAlign.value,
   headerFontSize: headerFontSize.value,
+  headerFontFamily: headerFontFamily.value,
   headerMarginMm: headerMarginMm.value,
   headerOffsetXMm: headerOffsetXMm.value,
   headerColor: headerColor.value,
@@ -1002,6 +1057,7 @@ const currentRules = computed(() => ({
   footerContinuous: footerContinuous.value,
   footerAlign: footerAlign.value,
   footerFontSize: footerFontSize.value,
+  footerFontFamily: footerFontFamily.value,
   footerMarginMm: footerMarginMm.value,
   footerOffsetXMm: footerOffsetXMm.value,
   footerColor: footerColor.value,
@@ -1033,6 +1089,7 @@ const previewHeaderStyle = computed(() => textOverlayStyle('header', previewData
   align: headerAlign.value,
   marginMm: headerMarginMm.value,
   fontSize: headerFontSize.value,
+  fontFamily: headerFontFamily.value,
   offsetXMm: headerOffsetXMm.value,
   color: headerColor.value,
 }))
@@ -1040,6 +1097,7 @@ const previewFooterStyle = computed(() => textOverlayStyle('footer', previewData
   align: footerAlign.value,
   marginMm: footerMarginMm.value,
   fontSize: footerFontSize.value,
+  fontFamily: footerFontFamily.value,
   offsetXMm: footerOffsetXMm.value,
   color: footerColor.value,
 }))
@@ -1627,12 +1685,14 @@ function applyReplacementPreset() {
   headerMode.value = workflowMode.value === 'split' ? 'per_file' : 'filename'
   headerAlign.value = 'right'
   headerFontSize.value = 10
+  headerFontFamily.value = 'auto'
   headerMarginMm.value = 10
   footerEnabled.value = true
   footerContinuous.value = true
   footerText.value = '{page}/{total}'
   footerAlign.value = 'center'
   footerFontSize.value = 9
+  footerFontFamily.value = 'auto'
   footerMarginMm.value = 10
   outputMode.value = 'files_and_merge'
   refreshPreview()
@@ -2027,7 +2087,7 @@ function finishExistingHeaderEdit(row) {
     row.existingHeaderEdited = next !== original
     row.removeExistingHeader = false
   } else if (next !== original) {
-    row.existingHeaderText = original
+    row.existingHeaderText = next
     row.convertPlainHeader = true
     row.removeExistingHeader = false
     row.header = next
@@ -2075,7 +2135,7 @@ function finishExistingFooterEdit(row) {
     row.existingFooterEdited = next !== original
     row.removeExistingFooter = false
   } else if (next !== original) {
-    row.existingFooterText = original
+    row.existingFooterText = next
     row.convertPlainFooter = true
     row.removeExistingFooter = false
     row.footer = next

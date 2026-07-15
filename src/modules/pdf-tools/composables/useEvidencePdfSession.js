@@ -64,6 +64,9 @@ export function pageRangeText(file) {
 
 export function buildHeaderText(file, index, rules) {
   if (rules.headerMode === 'none') return ''
+  if (file?.headerEdited || file?.convertPlainHeader) {
+    return decorateHeaderText(file.header ?? '', file, index, rules)
+  }
   let base = ''
   if (rules.headerMode === 'per_file') base = file.header ?? stripPdf(file.name)
   else if (rules.headerMode === 'custom') base = rules.headerText || ''
@@ -171,22 +174,8 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         headerReplacement: existingHeaderReplacement,
         footerReplacement: existingFooterReplacement,
       },
-      header: header ? {
-        text: header,
-        fontSize: rules.headerFontSize,
-        marginMm: rules.headerMarginMm,
-        align: rules.headerAlign,
-        offsetXMm: rules.headerOffsetXMm || 0,
-        color: rules.headerColor || '#000000',
-      } : null,
-      footer: rules.footerEnabled && footerText ? {
-        text: footerText,
-        fontSize: rules.footerFontSize,
-        marginMm: rules.footerMarginMm,
-        align: rules.footerAlign,
-        offsetXMm: rules.footerOffsetXMm || 0,
-        color: rules.footerColor || '#000000',
-      } : null,
+      header: header ? overlayConfigForFile(file, 'header', header, rules) : null,
+      footer: rules.footerEnabled && footerText ? overlayConfigForFile(file, 'footer', footerText, rules) : null,
     }
   })
 }
@@ -209,7 +198,54 @@ function buildPlainTextTargets(file, region) {
     normalizedText: normalizedText || text,
     pageStart: pageStart || 1,
     pageEnd: pageEnd || file.pages || 1,
+    bbox: isHeader ? file.existingHeaderBBox : file.existingFooterBBox,
   }]
+}
+
+function overlayConfigForFile(file, region, text, rules) {
+  const isHeader = region === 'header'
+  const bbox = isHeader ? file.existingHeaderBBox : file.existingFooterBBox
+  const useDetectedPlacement = isHeader ? file.convertPlainHeader : file.convertPlainFooter
+  const base = isHeader
+    ? {
+        text,
+        fontFamily: rules.headerFontFamily || 'auto',
+        fontSize: rules.headerFontSize,
+        marginMm: rules.headerMarginMm,
+        align: rules.headerAlign,
+        offsetXMm: rules.headerOffsetXMm || 0,
+        color: rules.headerColor || '#000000',
+      }
+    : {
+        text,
+        fontFamily: rules.footerFontFamily || 'auto',
+        fontSize: rules.footerFontSize,
+        marginMm: rules.footerMarginMm,
+        align: rules.footerAlign,
+        offsetXMm: rules.footerOffsetXMm || 0,
+        color: rules.footerColor || '#000000',
+      }
+  if (!useDetectedPlacement || !bbox || !bbox.width || !bbox.height) return base
+  const centerX = (Number(bbox.x0) + Number(bbox.x1)) / 2
+  const pageWidth = Number(bbox.width)
+  const pageHeight = Number(bbox.height)
+  const align = centerX < pageWidth * 0.36 ? 'left' : centerX > pageWidth * 0.64 ? 'right' : 'center'
+  const anchorX = align === 'left' ? Number(bbox.x0) : align === 'right' ? Number(bbox.x1) : centerX
+  const baseX = align === 'left' ? 0 : align === 'right' ? pageWidth : pageWidth / 2
+  const yTop = Number(bbox.y0)
+  const yBottom = Number(bbox.y1)
+  const fontSize = Math.max(6, Math.min(24, yBottom - yTop || base.fontSize))
+  return {
+    ...base,
+    fontSize,
+    align,
+    offsetXMm: ptToMm(anchorX - baseX),
+    marginMm: isHeader ? ptToMm(yBottom) : ptToMm(pageHeight - yBottom),
+  }
+}
+
+function ptToMm(value) {
+  return Number(value || 0) * 25.4 / 72
 }
 
 function standardArtifactReplacementConfig(file, region, rules) {
@@ -223,6 +259,7 @@ function standardArtifactReplacementConfig(file, region, rules) {
     ? {
         text,
         fontSize: rules.headerFontSize,
+        fontFamily: rules.headerFontFamily || 'auto',
         marginMm: rules.headerMarginMm,
         align: rules.headerAlign,
         offsetXMm: rules.headerOffsetXMm || 0,
@@ -231,6 +268,7 @@ function standardArtifactReplacementConfig(file, region, rules) {
     : {
         text,
         fontSize: rules.footerFontSize,
+        fontFamily: rules.footerFontFamily || 'auto',
         marginMm: rules.footerMarginMm,
         align: rules.footerAlign,
         offsetXMm: rules.footerOffsetXMm || 0,
@@ -266,6 +304,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         suffix: rules.headerSuffix || '',
         align: rules.headerAlign,
         fontSize: rules.headerFontSize,
+        fontFamily: rules.headerFontFamily || 'auto',
         marginMm: rules.headerMarginMm,
         offsetXmm: rules.headerOffsetXMm || 0,
         color: rules.headerColor || '#000000',
@@ -276,6 +315,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         continuous: rules.footerContinuous !== false,
         align: rules.footerAlign,
         fontSize: rules.footerFontSize,
+        fontFamily: rules.footerFontFamily || 'auto',
         marginMm: rules.footerMarginMm,
         offsetXmm: rules.footerOffsetXMm || 0,
         color: rules.footerColor || '#000000',

@@ -75,12 +75,28 @@ struct PlainTextCleanupTargetConfig {
     page_start: u32,
     #[serde(default)]
     page_end: u32,
+    #[serde(default)]
+    bbox: Option<PlainTextCleanupBBoxConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlainTextCleanupBBoxConfig {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    page: u32,
+    width: f32,
+    height: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OverlayTextConfig {
     text: String,
+    #[serde(default)]
+    font_family: String,
     #[serde(default = "default_font_size")]
     font_size: f32,
     #[serde(default = "default_margin_mm")]
@@ -255,7 +271,9 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     if !input.exists() {
         anyhow::bail!("原始 PDF 不存在: {}", input.display());
     }
-    let output = Path::new(&args.output_path);
+    let output_requested = Path::new(&args.output_path);
+    let output_path = unique_output_path(output_requested);
+    let output = output_path.as_path();
     if same_path(input, output) {
         anyhow::bail!("输出路径不能和原始 PDF 相同，请另存为副本");
     }
@@ -312,7 +330,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         cleanup_semantic_temp(semantic_deleted_path);
         return Ok(HeaderFooterResult {
             input_path: args.input_path.clone(),
-            output_path: args.output_path.clone(),
+            output_path: output.to_string_lossy().to_string(),
             pages,
             normalized: args.normalize_a4,
             cleaned,
@@ -359,7 +377,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
 
     Ok(HeaderFooterResult {
         input_path: args.input_path.clone(),
-        output_path: args.output_path.clone(),
+        output_path: output.to_string_lossy().to_string(),
         pages,
         normalized: args.normalize_a4,
         cleaned,
@@ -407,6 +425,15 @@ fn plain_text_target_from_config(
         },
         page_start,
         page_end: config.page_end.max(page_start),
+        bbox: config.bbox.as_ref().map(|bbox| content_text::PlainTextTargetBBox {
+            x0: bbox.x0,
+            y0: bbox.y0,
+            x1: bbox.x1,
+            y1: bbox.y1,
+            page: bbox.page,
+            width: bbox.width,
+            height: bbox.height,
+        }),
     }
 }
 
@@ -418,6 +445,31 @@ fn write_optimized_or_copy(input: &Path, output: &Path) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn unique_output_path(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("output");
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("");
+    for index in 1..10_000 {
+        let name = if extension.is_empty() {
+            format!("{stem}-{index}")
+        } else {
+            format!("{stem}-{index}.{extension}")
+        };
+        let candidate = parent.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path.to_path_buf()
 }
 
 struct StandardArtifactProcessingResult {
@@ -508,7 +560,7 @@ fn build_overlay_pdf(
 
         if let Some(config) = header.filter(|_| !skip_header_pages.contains(&index)) {
             let text = expand_placeholders(&config.text, current_page, total_pages);
-            let font = font_cache.select_font(&text, &mut doc);
+            let font = font_cache.select_font(&text, &config.font_family, &mut doc);
             let y = size.height_pt - mm_to_pt(config.margin_mm);
             let x = compute_x(config, &text, font.clone(), size.width_pt);
             ops.extend(text_ops(font, config.font_size, x, y, &config.color, text));
@@ -516,7 +568,7 @@ fn build_overlay_pdf(
 
         if let Some(config) = footer.filter(|_| !skip_footer_pages.contains(&index)) {
             let text = expand_placeholders(&config.text, current_page, total_pages);
-            let font = font_cache.select_font(&text, &mut doc);
+            let font = font_cache.select_font(&text, &config.font_family, &mut doc);
             let y = mm_to_pt(config.margin_mm);
             let x = compute_x(config, &text, font.clone(), size.width_pt);
             ops.extend(text_ops(font, config.font_size, x, y, &config.color, text));
@@ -537,10 +589,45 @@ fn build_overlay_pdf(
 #[derive(Default)]
 struct OverlayFontCache {
     cjk: Option<PdfFontHandle>,
+    songti: Option<PdfFontHandle>,
+    heiti: Option<PdfFontHandle>,
+    kaiti: Option<PdfFontHandle>,
+    fangsong: Option<PdfFontHandle>,
 }
 
 impl OverlayFontCache {
-    fn select_font(&mut self, text: &str, doc: &mut PdfDocument) -> PdfFontHandle {
+    fn select_font(
+        &mut self,
+        text: &str,
+        font_family: &str,
+        doc: &mut PdfDocument,
+    ) -> PdfFontHandle {
+        match normalized_font_family(font_family).as_str() {
+            "helvetica" => return PdfFontHandle::Builtin(BuiltinFont::Helvetica),
+            "times" => return PdfFontHandle::Builtin(BuiltinFont::TimesRoman),
+            "courier" => return PdfFontHandle::Builtin(BuiltinFont::Courier),
+            "songti" => {
+                if let Some(font) = load_named_cjk_font(&mut self.songti, "songti", doc) {
+                    return font;
+                }
+            }
+            "heiti" => {
+                if let Some(font) = load_named_cjk_font(&mut self.heiti, "heiti", doc) {
+                    return font;
+                }
+            }
+            "kaiti" => {
+                if let Some(font) = load_named_cjk_font(&mut self.kaiti, "kaiti", doc) {
+                    return font;
+                }
+            }
+            "fangsong" => {
+                if let Some(font) = load_named_cjk_font(&mut self.fangsong, "fangsong", doc) {
+                    return font;
+                }
+            }
+            _ => {}
+        }
         if has_cjk(text) {
             if let Some(font) = &self.cjk {
                 return font.clone();
@@ -558,6 +645,35 @@ impl OverlayFontCache {
 
         PdfFontHandle::Builtin(BuiltinFont::Helvetica)
     }
+}
+
+fn normalized_font_family(value: &str) -> String {
+    match value.trim().to_lowercase().as_str() {
+        "宋体" | "simsun" | "songti" | "song" => "songti".to_string(),
+        "黑体" | "simhei" | "heiti" | "hei" => "heiti".to_string(),
+        "楷体" | "kaiti" | "kai" => "kaiti".to_string(),
+        "仿宋" | "fangsong" | "fang song" => "fangsong".to_string(),
+        "times" | "times new roman" | "times-roman" => "times".to_string(),
+        "courier" | "courier new" => "courier".to_string(),
+        "helvetica" | "arial" => "helvetica".to_string(),
+        _ => "auto".to_string(),
+    }
+}
+
+fn load_named_cjk_font(
+    cache: &mut Option<PdfFontHandle>,
+    family: &str,
+    doc: &mut PdfDocument,
+) -> Option<PdfFontHandle> {
+    if let Some(font) = cache {
+        return Some(font.clone());
+    }
+    let path = find_named_cjk_font_path(family)?;
+    let bytes = fs::read(path).ok()?;
+    let parsed = ParsedFont::from_bytes(&bytes, 0, &mut Vec::new())?;
+    let font = PdfFontHandle::External(doc.add_font(&parsed));
+    *cache = Some(font.clone());
+    Some(font)
 }
 
 fn text_ops(
@@ -653,6 +769,59 @@ fn find_cjk_font_path() -> Option<PathBuf> {
             "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
             "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
         ]
+    };
+
+    candidates
+        .iter()
+        .map(Path::new)
+        .find(|path| path.exists())
+        .map(Path::to_path_buf)
+}
+
+fn find_named_cjk_font_path(family: &str) -> Option<PathBuf> {
+    let candidates = if cfg!(target_os = "macos") {
+        match family {
+            "songti" => vec![
+                "/System/Library/Fonts/Supplemental/Songti.ttc",
+                "/System/Library/Fonts/Supplemental/Songti.ttf",
+            ],
+            "heiti" => vec![
+                "/System/Library/Fonts/STHeiti Medium.ttc",
+                "/System/Library/Fonts/STHeiti Light.ttc",
+                "/System/Library/Fonts/PingFang.ttc",
+            ],
+            "kaiti" => vec![
+                "/System/Library/Fonts/Supplemental/Kaiti.ttc",
+                "/System/Library/Fonts/Supplemental/Kaiti.ttf",
+            ],
+            "fangsong" => vec![
+                "/System/Library/Fonts/Supplemental/STFangsong.ttf",
+                "/System/Library/Fonts/Supplemental/Fangsong.ttf",
+            ],
+            _ => vec![],
+        }
+    } else if cfg!(target_os = "windows") {
+        match family {
+            "songti" => vec!["C:\\Windows\\Fonts\\simsun.ttc"],
+            "heiti" => vec!["C:\\Windows\\Fonts\\simhei.ttf", "C:\\Windows\\Fonts\\msyh.ttc"],
+            "kaiti" => vec!["C:\\Windows\\Fonts\\simkai.ttf"],
+            "fangsong" => vec!["C:\\Windows\\Fonts\\simfang.ttf"],
+            _ => vec![],
+        }
+    } else {
+        match family {
+            "songti" => vec![
+                "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/arphic/uming.ttc",
+            ],
+            "heiti" => vec![
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            ],
+            "kaiti" => vec!["/usr/share/fonts/truetype/arphic/ukai.ttc"],
+            "fangsong" => vec!["/usr/share/fonts/truetype/arphic/uming.ttc"],
+            _ => vec![],
+        }
     };
 
     candidates

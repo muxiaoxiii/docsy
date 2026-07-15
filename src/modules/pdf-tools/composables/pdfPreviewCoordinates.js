@@ -45,6 +45,7 @@ export function textOverlayStyle(kind, pageInfo = DEFAULT_PAGE_INFO, config = {}
     ...horizontal,
     top: `${yPercent}%`,
     fontSize: `${Math.max(MIN_PREVIEW_FONT_PX, Number(config.fontSize || 0) * PREVIEW_FONT_SCALE)}px`,
+    fontFamily: previewFontFamily(config.fontFamily),
     color: config.color || '#111827',
   }
 }
@@ -76,5 +77,26 @@ function horizontalStyle(align, edgePercent, offsetPercent) {
   return {
     left: `calc(50% + ${offsetPercent}%)`,
     transform: 'translate(-50%, -50%)',
+  }
+}
+
+function previewFontFamily(fontFamily = 'auto') {
+  switch (fontFamily) {
+    case 'songti':
+      return '"Songti SC", SimSun, serif'
+    case 'heiti':
+      return '"Heiti SC", "Microsoft YaHei", SimHei, sans-serif'
+    case 'kaiti':
+      return '"Kaiti SC", KaiTi, serif'
+    case 'fangsong':
+      return 'FangSong, STFangsong, serif'
+    case 'times':
+      return '"Times New Roman", Times, serif'
+    case 'courier':
+      return '"Courier New", Courier, monospace'
+    case 'helvetica':
+      return 'Helvetica, Arial, sans-serif'
+    default:
+      return 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   }
 }

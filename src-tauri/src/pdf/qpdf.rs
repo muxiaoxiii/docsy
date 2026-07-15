@@ -51,6 +51,7 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
 pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
+    let output_path = unique_available_path(Path::new(output));
 
     let mut cmd = std::process::Command::new(&bin);
     add_optimization_args(&mut cmd);
@@ -58,14 +59,14 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     for input in inputs {
         cmd.arg(input);
     }
-    cmd.arg("--").arg(output);
+    cmd.arg("--").arg(&output_path);
 
     let status = cmd.status()?;
     if !status.success() {
         anyhow::bail!("qpdf 合并失败");
     }
 
-    Ok(output.to_string())
+    Ok(output_path.display().to_string())
 }
 
 pub fn optimize_to(input: &Path, output: &Path) -> Result<()> {
@@ -94,6 +95,31 @@ fn add_optimization_args(command: &mut std::process::Command) {
         .arg("--recompress-flate")
         .arg("--compression-level=9")
         .arg("--remove-unreferenced-resources=yes");
+}
+
+fn unique_available_path(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("output");
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("");
+    for index in 1..10_000 {
+        let name = if extension.is_empty() {
+            format!("{stem}-{index}")
+        } else {
+            format!("{stem}-{index}.{extension}")
+        };
+        let candidate = parent.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path.to_path_buf()
 }
 
 pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {

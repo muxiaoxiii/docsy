@@ -190,6 +190,43 @@ describe('Evidence PDF session helpers', () => {
     })
   })
 
+  it('uses edited plain text header as replacement while deleting the original detected target', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/测试页眉3.pdf'),
+        pages: 1,
+        existingHeaderText: '新测试页眉3',
+        existingHeaderTargetText: '测试页眉3',
+        existingHeaderNormalizedText: '测试页眉3',
+        existingHeaderBBox: {
+          x0: 505,
+          y0: 15,
+          x1: 578,
+          y1: 35,
+          page: 1,
+          width: 595,
+          height: 842,
+        },
+        convertPlainHeader: true,
+        header: '新测试页眉3',
+        headerEdited: true,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, baseRules, '/out')
+
+    expect(items[0].cleanup.plainHeaderTargets[0]).toMatchObject({
+      text: '测试页眉3',
+      normalizedText: '测试页眉3',
+      pageStart: 1,
+      pageEnd: 1,
+    })
+    expect(items[0].cleanup.plainHeaderTargets[0].bbox).toMatchObject({ x0: 505, y0: 15 })
+    expect(items[0].header.text).toBe('新测试页眉3')
+    expect(items[0].header.align).toBe('right')
+    expect(items[0].header.marginMm).toBeCloseTo(12.347, 2)
+  })
+
   it('can delete a confirmed plain text header without inserting a replacement', () => {
     const files = [
       {

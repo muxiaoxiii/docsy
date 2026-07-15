@@ -293,47 +293,60 @@ fn edit_target_artifact_ranges(
 }
 
 fn replace_first_text_show(operations: &mut [Operation], replacement: &str) -> bool {
+    let mut replaced = false;
     for operation in operations {
         match operation.operator.as_str() {
             "Tj" | "'" => {
                 if let Some(object) = operation.operands.first_mut() {
-                    return replace_string_object(object, replacement);
+                    if replaced {
+                        empty_string_object(object);
+                    } else if replace_string_object(object, replacement) {
+                        replaced = true;
+                    }
                 }
             }
             "\"" => {
                 if let Some(object) = operation.operands.get_mut(2) {
-                    return replace_string_object(object, replacement);
+                    if replaced {
+                        empty_string_object(object);
+                    } else if replace_string_object(object, replacement) {
+                        replaced = true;
+                    }
                 }
             }
             "TJ" => {
                 if let Some(Object::Array(items)) = operation.operands.first_mut() {
-                    let Some(first_string_index) = items
-                        .iter()
-                        .position(|item| matches!(item, Object::String(_, _)))
-                    else {
-                        continue;
-                    };
-                    let Some(replacement_object) =
-                        replacement_object_like(&items[first_string_index], replacement)
-                    else {
-                        return false;
-                    };
-                    for (index, item) in items.iter_mut().enumerate() {
-                        if matches!(item, Object::String(_, _)) {
-                            *item = if index == first_string_index {
-                                replacement_object.clone()
-                            } else {
-                                empty_string_like(item)
-                            };
+                    if replaced {
+                        empty_all_string_items(items);
+                    } else {
+                        let Some(first_string_index) = items
+                            .iter()
+                            .position(|item| matches!(item, Object::String(_, _)))
+                        else {
+                            continue;
+                        };
+                        let Some(replacement_object) =
+                            replacement_object_like(&items[first_string_index], replacement)
+                        else {
+                            continue;
+                        };
+                        for (index, item) in items.iter_mut().enumerate() {
+                            if matches!(item, Object::String(_, _)) {
+                                *item = if index == first_string_index {
+                                    replacement_object.clone()
+                                } else {
+                                    empty_string_like(item)
+                                };
+                            }
                         }
+                        replaced = true;
                     }
-                    return true;
                 }
             }
             _ => {}
         }
     }
-    false
+    replaced
 }
 
 fn replace_string_object(object: &mut Object, replacement: &str) -> bool {
@@ -364,6 +377,18 @@ fn empty_string_like(original: &Object) -> Object {
     match original {
         Object::String(_, format) => Object::String(Vec::new(), *format),
         _ => Object::String(Vec::new(), StringFormat::Literal),
+    }
+}
+
+fn empty_string_object(object: &mut Object) {
+    *object = empty_string_like(object);
+}
+
+fn empty_all_string_items(items: &mut [Object]) {
+    for item in items {
+        if matches!(item, Object::String(_, _)) {
+            *item = empty_string_like(item);
+        }
     }
 }
 
@@ -726,6 +751,44 @@ mod tests {
         assert!(text.iter().any(|value| value.contains("new header")));
         assert!(!text.iter().any(|value| value.contains("old header")));
         assert!(text.iter().any(|value| value.contains("body text")));
+    }
+
+    #[test]
+    fn edits_artifact_range_and_clears_remaining_text_shows() {
+        let operations = vec![
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Subtype" => "Footer",
+                    }),
+                ],
+            ),
+            Operation::new("Tj", vec![Object::string_literal("1")]),
+            Operation::new("Tj", vec![Object::string_literal(" / ")]),
+            Operation::new("Tj", vec![Object::string_literal("old footer")]),
+            Operation::new("EMC", vec![]),
+            Operation::new("Tj", vec![Object::string_literal("body text")]),
+        ];
+        let plan = HeaderFooterArtifactEditPlan {
+            remove_footer: true,
+            footer_texts: vec!["1/20 new footer".to_string()],
+            ..Default::default()
+        };
+        let (edited, result) =
+            edit_target_artifact_ranges(&operations, &plan, &Dictionary::new(), 0);
+
+        assert_eq!(result.edited_footer, 1);
+        let text = edited
+            .iter()
+            .flat_map(|op| op.operands.iter())
+            .filter_map(|object| object.as_str().ok())
+            .map(|bytes| String::from_utf8_lossy(bytes).to_string())
+            .collect::<Vec<_>>();
+        assert!(text.iter().any(|value| value == "1/20 new footer"));
+        assert!(!text.iter().any(|value| value == "old footer"));
+        assert!(text.iter().any(|value| value == "body text"));
     }
 
     #[test]

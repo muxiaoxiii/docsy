@@ -19,6 +19,18 @@ pub(crate) struct PlainTextTarget {
     pub normalized_text: String,
     pub page_start: u32,
     pub page_end: u32,
+    pub bbox: Option<PlainTextTargetBBox>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PlainTextTargetBBox {
+    pub x0: f32,
+    pub y0: f32,
+    pub x1: f32,
+    pub y1: f32,
+    pub page: u32,
+    pub width: f32,
+    pub height: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -150,10 +162,12 @@ fn filter_page_operations(
         let shown_text = shown_text(operation);
         let mut remove_region = None;
         if let Some(text) = shown_text.as_deref() {
-            if is_in_header_zone(state.y, plan) && matches_any_target(text, &plan.header_targets) {
+            if is_in_header_zone(state.y, plan)
+                && matches_any_target(text, &plan.header_targets, &state)
+            {
                 remove_region = Some(TextRegion::Header);
             } else if is_in_footer_zone(state.y, plan)
-                && matches_any_target(text, &plan.footer_targets)
+                && matches_any_target(text, &plan.footer_targets, &state)
             {
                 remove_region = Some(TextRegion::Footer);
             }
@@ -275,8 +289,10 @@ fn is_in_footer_zone(y: f32, plan: &PagePlainTextPlan) -> bool {
         && plan.page_box.width > 0.0
 }
 
-fn matches_any_target(text: &str, targets: &[&PlainTextTarget]) -> bool {
-    targets.iter().any(|target| target_matches(text, target))
+fn matches_any_target(text: &str, targets: &[&PlainTextTarget], state: &TextState) -> bool {
+    targets
+        .iter()
+        .any(|target| target_matches(text, target) || target_bbox_matches(state, target))
 }
 
 fn target_matches(text: &str, target: &PlainTextTarget) -> bool {
@@ -293,6 +309,26 @@ fn target_matches(text: &str, target: &PlainTextTarget) -> bool {
         return placeholder_pattern_matches(&normalized_text, &target_normalized);
     }
     false
+}
+
+fn target_bbox_matches(state: &TextState, target: &PlainTextTarget) -> bool {
+    let Some(bbox) = target.bbox else {
+        return false;
+    };
+    if bbox.width <= 0.0 || bbox.height <= 0.0 {
+        return false;
+    }
+    if bbox.page > 0 && (bbox.page < target.page_start || bbox.page > target.page_end) {
+        return false;
+    }
+    let x_padding = 18.0;
+    let y_padding = 18.0;
+    let pdf_y0 = bbox.height - bbox.y1;
+    let pdf_y1 = bbox.height - bbox.y0;
+    state.x >= bbox.x0 - x_padding
+        && state.x <= bbox.x1 + x_padding
+        && state.y >= pdf_y0 - y_padding
+        && state.y <= pdf_y1 + y_padding
 }
 
 fn placeholder_pattern_matches(text: &str, pattern: &str) -> bool {
@@ -437,6 +473,7 @@ mod tests {
             normalized_text: "Existing Header".to_string(),
             page_start: 1,
             page_end: 1,
+            bbox: None,
         };
         let plan = PagePlainTextPlan {
             header_targets: vec![&target],
@@ -464,9 +501,68 @@ mod tests {
             normalized_text: "{page}/{total}".to_string(),
             page_start: 1,
             page_end: 20,
+            bbox: None,
         };
         assert!(target_matches(" 2 / 20 ", &target));
         assert!(!target_matches("body 2 / 20", &target));
+    }
+
+    #[test]
+    fn deletes_header_by_detected_bbox_when_text_is_not_decodable() {
+        let operations = vec![
+            Operation::new("BT", vec![]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    506.into(),
+                    808.into(),
+                ],
+            ),
+            Operation::new("Tj", vec![Object::string_literal("encoded-glyphs")]),
+            Operation::new("ET", vec![]),
+            Operation::new("BT", vec![]),
+            Operation::new(
+                "Tm",
+                vec![1.into(), 0.into(), 0.into(), 1.into(), 90.into(), 700.into()],
+            ),
+            Operation::new("Tj", vec![Object::string_literal("body text")]),
+            Operation::new("ET", vec![]),
+        ];
+        let target = PlainTextTarget {
+            text: "测试页眉3".to_string(),
+            normalized_text: "测试页眉3".to_string(),
+            page_start: 1,
+            page_end: 1,
+            bbox: Some(PlainTextTargetBBox {
+                x0: 505.0,
+                y0: 15.0,
+                x1: 578.0,
+                y1: 35.0,
+                page: 1,
+                width: 595.0,
+                height: 842.0,
+            }),
+        };
+        let plan = PagePlainTextPlan {
+            header_targets: vec![&target],
+            footer_targets: vec![],
+            header_zone_pt: 60.0,
+            footer_zone_pt: 60.0,
+            page_box: PageBox {
+                width: 595.0,
+                min_y: 0.0,
+                max_y: 842.0,
+            },
+        };
+        let (filtered, result) = filter_page_operations(&operations, &plan);
+        assert_eq!(result.removed_header, 1);
+        let text = filtered.iter().filter_map(shown_text).collect::<Vec<_>>();
+        assert!(!text.iter().any(|value| value == "encoded-glyphs"));
+        assert!(text.iter().any(|value| value == "body text"));
     }
 
     #[test]
@@ -480,6 +576,7 @@ mod tests {
                 normalized_text: "Existing Header".to_string(),
                 page_start: 1,
                 page_end: 1,
+                bbox: None,
             }],
             header_zone_mm: 25.0,
             footer_zone_mm: 25.0,
@@ -513,6 +610,7 @@ mod tests {
                 normalized_text: "Existing Header".to_string(),
                 page_start: 1,
                 page_end: 1,
+                bbox: None,
             }],
             header_zone_mm: 25.0,
             footer_zone_mm: 25.0,
