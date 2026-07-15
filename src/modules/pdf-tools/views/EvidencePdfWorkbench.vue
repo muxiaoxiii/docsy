@@ -134,8 +134,11 @@
       </div>
 
       <div v-if="showProcessingControls" class="rule-block">
-        <div class="block-title">插入新页眉页脚</div>
-        <div class="rule-grid">
+        <div class="block-title-row">
+          <div class="block-title">插入新页眉页脚</div>
+          <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
+        </div>
+        <div v-if="insertHeaderFooterEnabled" class="rule-grid">
           <div class="rule-item">
             <label>页眉来源</label>
             <el-select v-model="headerMode">
@@ -218,7 +221,7 @@
           </div>
         </div>
         <el-alert
-          v-if="headerFooterOverflowWarnings.length"
+          v-if="insertHeaderFooterEnabled && headerFooterOverflowWarnings.length"
           type="warning"
           :closable="false"
           show-icon
@@ -496,8 +499,14 @@
       </el-table>
     </section>
 
-    <el-dialog v-model="headerFooterSettingsVisible" title="页眉页脚格式" width="760px" destroy-on-close>
-      <div class="dialog-rule-grid">
+    <el-dialog v-model="headerFooterSettingsVisible" width="760px" destroy-on-close>
+      <template #header>
+        <div class="dialog-title-row">
+          <span>页眉页脚格式</span>
+          <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
+        </div>
+      </template>
+      <div v-if="insertHeaderFooterEnabled" class="dialog-rule-grid">
         <div class="rule-item">
           <label>页眉来源</label>
           <el-select v-model="headerMode">
@@ -744,6 +753,7 @@ const annotationKinds = ref([
 ])
 const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
+const insertHeaderFooterEnabled = ref(true)
 const headerMode = ref('filename')
 const headerText = ref('')
 const headerPrefix = ref('')
@@ -796,10 +806,12 @@ const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
 const plannedOutputDir = computed(() => buildOutputDir(overlayRows.value, overlayOutputDir.value))
 const plannedMergeOutputPath = computed(() => buildMergeOutputPath(overlayRows.value, overlayOutputDir.value, mergeFileName.value))
 const firstHeaderPreview = computed(() => {
+  if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
   return first ? rowHeaderPreview(first, 0) : ''
 })
 const firstFooterPreview = computed(() => {
+  if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
   if (!first || !footerEnabled.value || !footerText.value || !totalOverlayPages.value) return ''
   return expandPlaceholders(
@@ -824,6 +836,9 @@ const processingNotes = computed(() => {
   }
   if (hasExistingEditRule.value) {
     notes.push('原页眉/原页脚列中的标准结构编辑会原位处理；普通文本型旧内容会先删除匹配文本再按新规则重建')
+  }
+  if (hasExistingConvertRule.value) {
+    notes.push('普通文本型旧页眉页脚会先删除匹配文本，再按新页眉页脚规则重建')
   }
   if (hasUnresolvedExistingOverlapRisk.value) {
     notes.push('存在未处理的原页眉页脚，新插入内容可能与旧内容重叠')
@@ -885,6 +900,12 @@ const hasExistingEditRule = computed(() =>
     (file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter),
   )
 )
+const hasExistingConvertRule = computed(() =>
+  overlayFiles.value.some((file) =>
+    (file.convertPlainHeader && !file.removeExistingHeader) ||
+    (file.convertPlainFooter && !file.removeExistingFooter),
+  )
+)
 const existingEditCount = computed(() =>
   overlayFiles.value.reduce((sum, file) =>
     sum +
@@ -900,8 +921,8 @@ const existingConvertCount = computed(() =>
   0)
 )
 const hasUnresolvedExistingOverlapRisk = computed(() => {
-  const insertsHeader = headerMode.value !== 'none'
-  const insertsFooter = footerEnabled.value
+  const insertsHeader = insertHeaderFooterEnabled.value && headerMode.value !== 'none'
+  const insertsFooter = insertHeaderFooterEnabled.value && footerEnabled.value
   return overlayFiles.value.some((file) =>
     (insertsHeader && hasExistingHeader(file) && !file.removeExistingHeader && !file.convertPlainHeader) ||
     (insertsFooter && hasExistingFooter(file) && !file.removeExistingFooter && !file.convertPlainFooter),
@@ -910,12 +931,21 @@ const hasUnresolvedExistingOverlapRisk = computed(() => {
 const canApplyOverlay = computed(() =>
   overlayFiles.value.length > 0 &&
   totalOverlayPages.value > 0 &&
-  (normalizeA4.value || removeAnnotations.value || hasExistingEditRule.value || hasExistingRemovalRule.value || headerMode.value !== 'none' || footerEnabled.value)
+  hasApplicableProcessingRule.value
 )
 const canApplySplitReplacement = computed(() =>
   showSplitResultActions.value &&
   totalOverlayPages.value > 0 &&
-  !overlaying.value
+  !overlaying.value &&
+  hasApplicableProcessingRule.value
+)
+const hasApplicableProcessingRule = computed(() =>
+  normalizeA4.value ||
+  removeAnnotations.value ||
+  hasExistingEditRule.value ||
+  hasExistingConvertRule.value ||
+  hasExistingRemovalRule.value ||
+  (insertHeaderFooterEnabled.value && (headerMode.value !== 'none' || footerEnabled.value))
 )
 
 const currentRules = computed(() => ({
@@ -928,7 +958,7 @@ const currentRules = computed(() => ({
   cleanupFooterEnabled: autoCleanupFooterEnabled.value,
   cleanupHeaderHeightMm: cleanupHeaderHeightMm.value,
   cleanupFooterHeightMm: cleanupFooterHeightMm.value,
-  headerMode: headerMode.value,
+  headerMode: insertHeaderFooterEnabled.value ? headerMode.value : 'none',
   headerText: headerText.value,
   headerPrefix: headerPrefix.value,
   headerSuffix: headerSuffix.value,
@@ -938,7 +968,7 @@ const currentRules = computed(() => ({
   headerMarginMm: headerMarginMm.value,
   headerOffsetXMm: headerOffsetXMm.value,
   headerColor: headerColor.value,
-  footerEnabled: footerEnabled.value,
+  footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,
   footerAlign: footerAlign.value,
@@ -952,14 +982,14 @@ const currentRules = computed(() => ({
 }))
 
 const previewHeaderText = computed(() => {
-  if (!selectedOverlayFile.value || headerMode.value === 'none') return ''
+  if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
   if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
   return buildSessionHeaderText(selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value)
 })
 
 const previewFooterText = computed(() => {
   const footerTemplate = selectedOverlayFile.value?.footer ?? footerText.value
-  if (!selectedOverlayFile.value || !footerEnabled.value || !footerTemplate) return ''
+  if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || !footerEnabled.value || !footerTemplate) return ''
   if (!shouldShowLiveFooter(selectedOverlayFile.value)) return ''
   const page = footerContinuous.value
     ? selectedOverlayFile.value.pageStart + previewPage.value - 1
@@ -1036,6 +1066,7 @@ watch([previewPage, currentRules], () => {
 
 function applyWorkflowDefaults() {
   if (workflowMode.value === 'split') {
+    insertHeaderFooterEnabled.value = false
     headerMode.value = 'none'
     footerEnabled.value = false
     footerContinuous.value = true
@@ -1043,6 +1074,7 @@ function applyWorkflowDefaults() {
     mergeFileName.value = 'split_evidence.pdf'
     return
   }
+  insertHeaderFooterEnabled.value = true
   headerMode.value = 'filename'
   footerEnabled.value = true
   footerContinuous.value = true
@@ -1518,6 +1550,7 @@ function applyHeaderFooterSettings() {
 }
 
 function applyReplacementPreset() {
+  insertHeaderFooterEnabled.value = true
   normalizeA4.value = false
   removeAnnotations.value = false
   cleanupHeaderHeightMm.value = 18
@@ -1537,8 +1570,9 @@ function applyReplacementPreset() {
 }
 
 function hasReplacementRule() {
-  return headerMode.value !== 'none' ||
-    footerEnabled.value ||
+  return (insertHeaderFooterEnabled.value && (headerMode.value !== 'none' || footerEnabled.value)) ||
+    hasExistingEditRule.value ||
+    hasExistingConvertRule.value ||
     hasExistingRemovalRule.value
 }
 
@@ -1854,6 +1888,7 @@ function isEditingHeader(row) {
 
 async function startHeaderEdit(row, index) {
   if (!row) return
+  insertHeaderFooterEnabled.value = true
   headerMode.value = 'per_file'
   if (row.header === null || row.header === undefined) {
     row.header = rowHeaderPreview(row, index) || stripPdf(row.name)
@@ -1875,6 +1910,8 @@ function isEditingFooter(row) {
 
 async function startFooterEdit(row, index) {
   if (!row) return
+  insertHeaderFooterEnabled.value = true
+  footerEnabled.value = true
   if (row.footer === null || row.footer === undefined) {
     row.footer = rowFooterPreview(row, index)
   }
@@ -1926,6 +1963,7 @@ function finishExistingHeaderEdit(row) {
     row.removeExistingHeader = false
     row.header = next
     row.headerEdited = true
+    insertHeaderFooterEnabled.value = true
     headerMode.value = 'per_file'
     ElMessage.info('普通文本型旧页眉会删除匹配旧文本，并按新页眉重建')
   }
@@ -1973,6 +2011,8 @@ function finishExistingFooterEdit(row) {
     row.removeExistingFooter = false
     row.footer = next
     row.footerEdited = true
+    insertHeaderFooterEnabled.value = true
+    footerEnabled.value = true
     ElMessage.info('普通文本型旧页脚会删除匹配旧文本，并按新页脚重建')
   }
   const status = fileExistingStatus(row)
@@ -1987,6 +2027,7 @@ function rowHeaderPreview(row, index) {
 }
 
 function displayRowHeader(row, index) {
+  if (!insertHeaderFooterEnabled.value) return ''
   if (workflowMode.value === 'split') {
     return row?.header ?? rowHeaderPreview(row, index)
   }
@@ -1995,7 +2036,7 @@ function displayRowHeader(row, index) {
 
 function rowFooterPreview(row, index) {
   const footerTemplate = row?.footer ?? footerText.value
-  if (!footerEnabled.value || !footerTemplate || !row) return ''
+  if (!insertHeaderFooterEnabled.value || !footerEnabled.value || !footerTemplate || !row) return ''
   const page = footerContinuous.value
     ? row.pageStart || 1
     : 1
@@ -2459,6 +2500,17 @@ h3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.dialog-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 28px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
 }
 
 .table-text {

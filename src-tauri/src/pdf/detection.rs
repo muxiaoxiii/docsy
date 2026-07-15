@@ -872,6 +872,32 @@ mod tests {
     }
 
     #[test]
+    fn still_filters_short_non_page_footer_noise() {
+        let pages = vec![PageDetection {
+            page: 1,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![],
+            footers: vec![TextLineDetection {
+                text: "*".to_string(),
+                normalized_text: normalize_header_footer_text("*"),
+                bbox: BBox {
+                    x0: 540.0,
+                    y0: 800.0,
+                    x1: 548.0,
+                    y1: 822.0,
+                    page: 1,
+                    width: 595.0,
+                    height: 842.0,
+                },
+            }],
+        }];
+        let candidates = build_candidates(&pages, "footer", pages.len() as u32);
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
     fn detects_artifact_summary() {
         let text = "/Artifact << /Type /Pagination /Subtype /Header >> BDC q Q EMC";
         let summary = parse_artifact_summary(text);
