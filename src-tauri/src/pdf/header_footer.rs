@@ -38,6 +38,8 @@ struct HeaderFooterJob {
     header: Option<OverlayTextConfig>,
     #[serde(default)]
     footer: Option<OverlayTextConfig>,
+    #[serde(default)]
+    extra_overlays: Vec<OverlayTextConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -95,6 +97,8 @@ struct PlainTextCleanupBBoxConfig {
 #[serde(rename_all = "camelCase")]
 struct OverlayTextConfig {
     text: String,
+    #[serde(default)]
+    region: String,
     #[serde(default)]
     font_family: String,
     #[serde(default = "default_font_size")]
@@ -323,7 +327,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
 
     let cleaned = args.cleanup.header_enabled || args.cleanup.footer_enabled;
-    if args.header.is_none() && args.footer.is_none() {
+    if args.header.is_none() && args.footer.is_none() && args.extra_overlays.is_empty() {
         fs::copy(work_input, output).context("复制 PDF 失败")?;
         cleanup_temp(normalized_path);
         cleanup_plain_text_temp(plain_deleted_path);
@@ -341,6 +345,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     let overlay_pdf = build_overlay_pdf(
         args.header.as_ref(),
         args.footer.as_ref(),
+        &args.extra_overlays,
         &page_infos,
         page_start,
         total_pages,
@@ -425,15 +430,18 @@ fn plain_text_target_from_config(
         },
         page_start,
         page_end: config.page_end.max(page_start),
-        bbox: config.bbox.as_ref().map(|bbox| content_text::PlainTextTargetBBox {
-            x0: bbox.x0,
-            y0: bbox.y0,
-            x1: bbox.x1,
-            y1: bbox.y1,
-            page: bbox.page,
-            width: bbox.width,
-            height: bbox.height,
-        }),
+        bbox: config
+            .bbox
+            .as_ref()
+            .map(|bbox| content_text::PlainTextTargetBBox {
+                x0: bbox.x0,
+                y0: bbox.y0,
+                x1: bbox.x1,
+                y1: bbox.y1,
+                page: bbox.page,
+                width: bbox.width,
+                height: bbox.height,
+            }),
     }
 }
 
@@ -457,7 +465,10 @@ fn unique_output_path(path: &Path) -> PathBuf {
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
         .unwrap_or("output");
-    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("");
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
     for index in 1..10_000 {
         let name = if extension.is_empty() {
             format!("{stem}-{index}")
@@ -544,6 +555,7 @@ fn artifact_replacement_texts(
 fn build_overlay_pdf(
     header: Option<&OverlayTextConfig>,
     footer: Option<&OverlayTextConfig>,
+    extra_overlays: &[OverlayTextConfig],
     pages: &[PageSize],
     page_start: u32,
     total_pages: u32,
@@ -559,19 +571,43 @@ fn build_overlay_pdf(
         let mut ops = Vec::new();
 
         if let Some(config) = header.filter(|_| !skip_header_pages.contains(&index)) {
-            let text = expand_placeholders(&config.text, current_page, total_pages);
-            let font = font_cache.select_font(&text, &config.font_family, &mut doc);
-            let y = size.height_pt - mm_to_pt(config.margin_mm);
-            let x = compute_x(config, &text, font.clone(), size.width_pt);
-            ops.extend(text_ops(font, config.font_size, x, y, &config.color, text));
+            append_overlay_text_ops(
+                &mut ops,
+                config,
+                OverlayRegion::Header,
+                size,
+                current_page,
+                total_pages,
+                &mut font_cache,
+                &mut doc,
+            );
         }
 
         if let Some(config) = footer.filter(|_| !skip_footer_pages.contains(&index)) {
-            let text = expand_placeholders(&config.text, current_page, total_pages);
-            let font = font_cache.select_font(&text, &config.font_family, &mut doc);
-            let y = mm_to_pt(config.margin_mm);
-            let x = compute_x(config, &text, font.clone(), size.width_pt);
-            ops.extend(text_ops(font, config.font_size, x, y, &config.color, text));
+            append_overlay_text_ops(
+                &mut ops,
+                config,
+                OverlayRegion::Footer,
+                size,
+                current_page,
+                total_pages,
+                &mut font_cache,
+                &mut doc,
+            );
+        }
+
+        for config in extra_overlays {
+            let region = overlay_region(&config.region);
+            append_overlay_text_ops(
+                &mut ops,
+                config,
+                region,
+                size,
+                current_page,
+                total_pages,
+                &mut font_cache,
+                &mut doc,
+            );
         }
 
         pdf_pages.push(PdfPage::new(
@@ -584,6 +620,43 @@ fn build_overlay_pdf(
     Ok(doc
         .with_pages(pdf_pages)
         .save(&PdfSaveOptions::default(), &mut Vec::new()))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum OverlayRegion {
+    Header,
+    Footer,
+}
+
+fn overlay_region(value: &str) -> OverlayRegion {
+    if value.trim().eq_ignore_ascii_case("header") {
+        OverlayRegion::Header
+    } else {
+        OverlayRegion::Footer
+    }
+}
+
+fn append_overlay_text_ops(
+    ops: &mut Vec<Op>,
+    config: &OverlayTextConfig,
+    region: OverlayRegion,
+    size: &PageSize,
+    current_page: u32,
+    total_pages: u32,
+    font_cache: &mut OverlayFontCache,
+    doc: &mut PdfDocument,
+) {
+    let text = expand_placeholders(&config.text, current_page, total_pages);
+    if text.is_empty() {
+        return;
+    }
+    let font = font_cache.select_font(&text, &config.font_family, doc);
+    let y = match region {
+        OverlayRegion::Header => size.height_pt - mm_to_pt(config.margin_mm),
+        OverlayRegion::Footer => mm_to_pt(config.margin_mm),
+    };
+    let x = compute_x(config, &text, font.clone(), size.width_pt);
+    ops.extend(text_ops(font, config.font_size, x, y, &config.color, text));
 }
 
 #[derive(Default)]
@@ -803,7 +876,10 @@ fn find_named_cjk_font_path(family: &str) -> Option<PathBuf> {
     } else if cfg!(target_os = "windows") {
         match family {
             "songti" => vec!["C:\\Windows\\Fonts\\simsun.ttc"],
-            "heiti" => vec!["C:\\Windows\\Fonts\\simhei.ttf", "C:\\Windows\\Fonts\\msyh.ttc"],
+            "heiti" => vec![
+                "C:\\Windows\\Fonts\\simhei.ttf",
+                "C:\\Windows\\Fonts\\msyh.ttc",
+            ],
             "kaiti" => vec!["C:\\Windows\\Fonts\\simkai.ttf"],
             "fangsong" => vec!["C:\\Windows\\Fonts\\simfang.ttf"],
             _ => vec![],

@@ -99,6 +99,10 @@
             <span>原页脚</span>
             <strong>{{ existingFooterCount }}</strong>
           </div>
+          <div class="summary-pill">
+            <span>原页码</span>
+            <strong>{{ existingPageNumberCount }}</strong>
+          </div>
           <div class="summary-pill warning" :class="{ active: hasExistingRemovalRule }">
             <span>待删除</span>
             <strong>{{ existingRemovalCount }}</strong>
@@ -466,6 +470,26 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="原页码" prop="existingPageNumber" sortable="custom" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-input
+              v-if="isEditingExistingPageNumber(row)"
+              v-model="row.existingPageNumberText"
+              size="small"
+              @click.stop
+              @blur="finishExistingPageNumberEdit(row)"
+              @keyup.enter="finishExistingPageNumberEdit(row)"
+            />
+            <span
+              v-else
+              class="table-text editable-text"
+              :class="{ 'deleted-existing-text': row.removeExistingPageNumber }"
+              @dblclick.stop="startExistingPageNumberEdit(row)"
+            >
+              {{ displayExistingPageNumber(row) || '-' }}
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column label="新页眉" prop="header" sortable="custom" min-width="160" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <el-input
@@ -697,6 +721,15 @@
             <span>{{ marker.label }}</span>
           </div>
           <div
+            v-for="overlay in convertedExistingPreviewOverlays"
+            :key="overlay.key"
+            class="preview-text"
+            :class="overlay.region === 'header' ? 'preview-header-text' : 'preview-footer-text'"
+            :style="overlay.style"
+          >
+            {{ overlay.text }}
+          </div>
+          <div
             v-if="showRulePreviewOverlays && previewHeaderText"
             class="preview-text preview-header-text"
             :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
@@ -844,6 +877,7 @@ const editingHeaderPath = ref('')
 const editingFooterPath = ref('')
 const editingExistingHeaderPath = ref('')
 const editingExistingFooterPath = ref('')
+const editingExistingPageNumberPath = ref('')
 const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
 
 watch(headerMode, (mode) => {
@@ -917,10 +951,10 @@ const processingNotes = computed(() => {
     notes.push('删除现有页眉页脚不会使用白色遮盖；只能删除标准结构或已确认匹配的普通文本')
   }
   if (hasExistingEditRule.value) {
-    notes.push('原页眉/原页脚列中的标准结构编辑会原位处理；普通文本型旧内容会先删除匹配文本再按新规则重建')
+    notes.push('原页眉、原页脚、原页码列中的标准结构编辑会尽量原位处理；普通文本型旧内容会先删除匹配文本再按原位置重建')
   }
   if (hasExistingConvertRule.value) {
-    notes.push('普通文本型旧页眉页脚会先删除匹配文本，再按新页眉页脚规则重建')
+    notes.push('普通文本型旧页眉页脚页码会先删除匹配文本，再按检测到的位置重建')
   }
   if (hasUnresolvedExistingOverlapRisk.value) {
     notes.push('存在未处理的原页眉页脚，新插入内容可能与旧内容重叠')
@@ -971,11 +1005,19 @@ const existingHeaderCount = computed(() =>
 const existingFooterCount = computed(() =>
   overlayFiles.value.filter((file) => hasExistingFooter(file)).length
 )
+const existingPageNumberCount = computed(() =>
+  overlayFiles.value.filter((file) => hasExistingPageNumber(file)).length
+)
 const hasExistingRemovalRule = computed(() =>
-  overlayFiles.value.some((file) => file.removeExistingHeader || file.removeExistingFooter)
+  overlayFiles.value.some((file) => file.removeExistingHeader || file.removeExistingFooter || file.removeExistingPageNumber)
 )
 const existingRemovalCount = computed(() =>
-  overlayFiles.value.reduce((sum, file) => sum + Number(Boolean(file.removeExistingHeader)) + Number(Boolean(file.removeExistingFooter)), 0)
+  overlayFiles.value.reduce((sum, file) =>
+    sum +
+    Number(Boolean(file.removeExistingHeader)) +
+    Number(Boolean(file.removeExistingFooter)) +
+    Number(Boolean(file.removeExistingPageNumber)),
+  0)
 )
 const hasExistingEditRule = computed(() =>
   overlayFiles.value.some((file) =>
@@ -986,7 +1028,8 @@ const hasExistingEditRule = computed(() =>
 const hasExistingConvertRule = computed(() =>
   overlayFiles.value.some((file) =>
     (file.convertPlainHeader && !file.removeExistingHeader) ||
-    (file.convertPlainFooter && !file.removeExistingFooter),
+    (file.convertPlainFooter && !file.removeExistingFooter) ||
+    (file.convertPlainPageNumber && !file.removeExistingPageNumber),
   )
 )
 const existingEditCount = computed(() =>
@@ -1000,7 +1043,8 @@ const existingConvertCount = computed(() =>
   overlayFiles.value.reduce((sum, file) =>
     sum +
     Number(Boolean(file.convertPlainHeader && !file.removeExistingHeader)) +
-    Number(Boolean(file.convertPlainFooter && !file.removeExistingFooter)),
+    Number(Boolean(file.convertPlainFooter && !file.removeExistingFooter)) +
+    Number(Boolean(file.convertPlainPageNumber && !file.removeExistingPageNumber)),
   0)
 )
 const hasUnresolvedExistingOverlapRisk = computed(() => {
@@ -1008,7 +1052,8 @@ const hasUnresolvedExistingOverlapRisk = computed(() => {
   const insertsFooter = insertHeaderFooterEnabled.value && footerEnabled.value
   return overlayFiles.value.some((file) =>
     (insertsHeader && hasExistingHeader(file) && !file.removeExistingHeader && !file.convertPlainHeader) ||
-    (insertsFooter && hasExistingFooter(file) && !file.removeExistingFooter && !file.convertPlainFooter),
+    (insertsFooter && hasExistingFooter(file) && !file.removeExistingFooter && !file.convertPlainFooter) ||
+    (insertsFooter && hasExistingPageNumber(file) && !file.removeExistingPageNumber && !file.convertPlainPageNumber),
   )
 })
 const canApplyOverlay = computed(() =>
@@ -1116,7 +1161,35 @@ const deletionPreviewMarkers = computed(() => {
   if ((file.removeExistingFooter || file.convertPlainFooter) && isPageInDetectedRange(previewPage.value, file.existingFooterPageStart, file.existingFooterPageEnd)) {
     markers.push(buildDeletionPreviewMarker(file.existingFooterBBox, 'footer', file.removeExistingFooter ? '删除旧页脚' : '替换旧页脚'))
   }
+  if ((file.removeExistingPageNumber || file.convertPlainPageNumber) && isPageInDetectedRange(previewPage.value, file.existingPageNumberPageStart, file.existingPageNumberPageEnd)) {
+    markers.push(buildDeletionPreviewMarker(file.existingPageNumberBBox, 'footer', file.removeExistingPageNumber ? '删除旧页码' : '替换旧页码'))
+  }
   return markers.filter(Boolean)
+})
+const convertedExistingPreviewOverlays = computed(() => {
+  if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value) return []
+  const items = buildHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value)
+  const item = items.find((candidate) => candidate.inputPath === selectedOverlayFile.value.path)
+  return (item?.extraOverlays || []).map((overlay, index) => {
+    const region = overlay.region === 'header' ? 'header' : 'footer'
+    return {
+      key: `${selectedOverlayFile.value.path}-converted-${index}`,
+      region,
+      text: expandPlaceholders(
+        overlay.text,
+        footerContinuous.value ? selectedOverlayFile.value.pageStart + previewPage.value - 1 : previewPage.value,
+        footerContinuous.value ? totalOverlayPages.value || selectedOverlayFile.value.pages || 1 : selectedOverlayFile.value.pages || 1,
+      ),
+      style: textOverlayStyle(region, previewData.value, {
+        align: overlay.align,
+        marginMm: overlay.marginMm,
+        fontSize: overlay.fontSize,
+        fontFamily: overlay.fontFamily,
+        offsetXMm: overlay.offsetXMm,
+        color: overlay.color,
+      }),
+    }
+  })
 })
 const headerFooterOverflowWarnings = computed(() => {
   const warnings = []
@@ -1890,13 +1963,13 @@ async function detectAllHeaderFooter(options = {}) {
 }
 
 function fileExistingStatus(file) {
-  if (file.removeExistingHeader || file.removeExistingFooter) {
+  if (file.removeExistingHeader || file.removeExistingFooter || file.removeExistingPageNumber) {
     return { text: '删除待处理', type: 'warning' }
   }
-  if (file.existingHeaderEdited || file.existingFooterEdited) {
+  if (file.existingHeaderEdited || file.existingFooterEdited || file.existingPageNumberEdited) {
     return { text: '旧内容已编辑', type: 'warning' }
   }
-  if (file.convertPlainHeader || file.convertPlainFooter) {
+  if (file.convertPlainHeader || file.convertPlainFooter || file.convertPlainPageNumber) {
     return { text: '转换待处理', type: 'warning' }
   }
   if (file.existingHeaderArtifact || file.existingFooterArtifact) {
@@ -1921,7 +1994,9 @@ async function detectFileHeaderFooter(file) {
 
 function applyDetectionResultToFile(file, data) {
   const header = data.headerCandidates?.[0]
-  const footer = data.footerCandidates?.[0]
+  const footerCandidates = data.footerCandidates || []
+  const pageNumber = footerCandidates.find(isPageNumberCandidate) || null
+  const footer = footerCandidates.find((candidate) => !isPageNumberCandidate(candidate)) || null
   const candidates = [
     ...(data.headerCandidates || []).slice(0, 6),
     ...(data.footerCandidates || []).slice(0, 6),
@@ -1931,31 +2006,46 @@ function applyDetectionResultToFile(file, data) {
   if (data.artifact?.hasFooter) parts.push(`发现结构化页脚 ${data.artifact.footerCount} 处`)
   if (header) parts.push(`页眉候选：${header.text}`)
   if (footer) parts.push(`页脚候选：${footer.text}`)
+  if (pageNumber) parts.push(`页码候选：${pageNumber.text}`)
   if (candidates.length) parts.push(`候选 ${candidates.length} 个`)
   file.existingHeaderText = header?.text || ''
   file.existingFooterText = footer?.text || footer?.normalizedText || ''
+  file.existingPageNumberText = pageNumber?.text || pageNumber?.normalizedText || ''
   file.existingHeaderTargetText = header?.text || ''
   file.existingFooterTargetText = footer?.text || footer?.normalizedText || ''
+  file.existingPageNumberTargetText = pageNumber?.text || pageNumber?.normalizedText || ''
   file.existingHeaderNormalizedText = header?.normalizedText || header?.text || ''
   file.existingFooterNormalizedText = footer?.normalizedText || footer?.text || ''
+  file.existingPageNumberNormalizedText = pageNumber?.normalizedText || pageNumber?.text || ''
   file.existingHeaderBBox = header?.bbox || null
   file.existingFooterBBox = footer?.bbox || null
+  file.existingPageNumberBBox = pageNumber?.bbox || null
   const headerTargetRange = candidateTargetRange(header, file.pages)
   const footerTargetRange = candidateTargetRange(footer, file.pages)
+  const pageNumberTargetRange = candidateTargetRange(pageNumber, file.pages)
   file.existingHeaderPageStart = headerTargetRange.start
   file.existingHeaderPageEnd = headerTargetRange.end
   file.existingFooterPageStart = footerTargetRange.start
   file.existingFooterPageEnd = footerTargetRange.end
+  file.existingPageNumberPageStart = pageNumberTargetRange.start
+  file.existingPageNumberPageEnd = pageNumberTargetRange.end
   file.existingHeaderArtifact = Boolean(data.artifact?.hasHeader)
   file.existingFooterArtifact = Boolean(data.artifact?.hasFooter)
   file.existingHeaderEdited = false
   file.existingFooterEdited = false
+  file.existingPageNumberEdited = false
   if (!file.existingHeaderText || file.existingHeaderArtifact) file.convertPlainHeader = false
   if (!file.existingFooterText || file.existingFooterArtifact) file.convertPlainFooter = false
+  if (!file.existingPageNumberText) file.convertPlainPageNumber = false
   if (!hasExistingHeader(file)) file.removeExistingHeader = false
   if (!hasExistingFooter(file)) file.removeExistingFooter = false
+  if (!hasExistingPageNumber(file)) file.removeExistingPageNumber = false
   file.detectionSummary = parts.length ? parts.join('；') : '未发现稳定的文本型页眉页脚候选'
   file.detectionCandidates = candidates
+}
+
+function isPageNumberCandidate(candidate) {
+  return Boolean(candidate?.labels?.includes?.('page-number') || String(candidate?.normalizedText || '').includes('{page}'))
 }
 
 function estimateTextWidthPt(text, fontSize) {
@@ -2090,11 +2180,7 @@ function finishExistingHeaderEdit(row) {
     row.existingHeaderText = next
     row.convertPlainHeader = true
     row.removeExistingHeader = false
-    row.header = next
-    row.headerEdited = true
-    insertHeaderFooterEnabled.value = true
-    headerMode.value = 'per_file'
-    ElMessage.info('普通文本型旧页眉会删除匹配旧文本，并按新页眉重建')
+    ElMessage.info('普通文本型旧页眉会删除匹配旧文本，并在检测到的位置重建')
   }
   const status = fileExistingStatus(row)
   row.statusText = status.text
@@ -2138,16 +2224,57 @@ function finishExistingFooterEdit(row) {
     row.existingFooterText = next
     row.convertPlainFooter = true
     row.removeExistingFooter = false
-    row.footer = next
-    row.footerEdited = true
-    insertHeaderFooterEnabled.value = true
-    footerEnabled.value = true
-    ElMessage.info('普通文本型旧页脚会删除匹配旧文本，并按新页脚重建')
+    ElMessage.info('普通文本型旧页脚会删除匹配旧文本，并在检测到的位置重建')
   }
   const status = fileExistingStatus(row)
   row.statusText = status.text
   row.statusType = status.type
   editingExistingFooterPath.value = ''
+  refreshPreview()
+}
+
+function isEditingExistingPageNumber(row) {
+  return editingExistingPageNumberPath.value && editingExistingPageNumberPath.value === row.path
+}
+
+function startExistingPageNumberEdit(row) {
+  if (!hasExistingPageNumber(row)) return
+  if (row.removeExistingPageNumber) {
+    row.removeExistingPageNumber = false
+  }
+  if (!row.existingPageNumberText) {
+    row.existingPageNumberText = row.existingPageNumberTargetText || ''
+  }
+  editingExistingPageNumberPath.value = row.path
+}
+
+function finishExistingPageNumberEdit(row) {
+  if (!row) {
+    editingExistingPageNumberPath.value = ''
+    return
+  }
+  const next = String(row.existingPageNumberText ?? '').trim()
+  const original = row.existingPageNumberTargetText || row.existingPageNumberText || ''
+  if (!next) {
+    row.existingPageNumberText = original
+    row.existingPageNumberEdited = false
+    row.convertPlainPageNumber = false
+    row.removeExistingPageNumber = false
+  } else if (next !== original) {
+    row.existingPageNumberText = next
+    row.existingPageNumberEdited = true
+    row.convertPlainPageNumber = true
+    row.removeExistingPageNumber = false
+    ElMessage.info('旧页码会删除匹配旧文本，并在检测到的位置重建')
+  } else {
+    row.existingPageNumberEdited = false
+    row.convertPlainPageNumber = false
+    row.removeExistingPageNumber = false
+  }
+  const status = fileExistingStatus(row)
+  row.statusText = status.text
+  row.statusType = status.type
+  editingExistingPageNumberPath.value = ''
   refreshPreview()
 }
 
@@ -2188,6 +2315,10 @@ function displayExistingFooter(row) {
   return row?.existingFooterText || row?.existingFooterTargetText || ''
 }
 
+function displayExistingPageNumber(row) {
+  return row?.existingPageNumberText || row?.existingPageNumberTargetText || ''
+}
+
 function shouldShowLiveHeader(row) {
   return Boolean(row)
 }
@@ -2204,8 +2335,12 @@ function hasExistingFooter(row) {
   return Boolean(row?.existingFooterText || row?.existingFooterArtifact)
 }
 
+function hasExistingPageNumber(row) {
+  return Boolean(row?.existingPageNumberText || row?.existingPageNumberTargetText)
+}
+
 function hasExistingHeaderFooter(row) {
-  return hasExistingHeader(row) || hasExistingFooter(row)
+  return hasExistingHeader(row) || hasExistingFooter(row) || hasExistingPageNumber(row)
 }
 
 async function markRemoveExistingHeaderFooter() {
@@ -2236,6 +2371,10 @@ async function markRemoveExistingHeaderFooter() {
       file.removeExistingFooter = true
       file.existingFooterEdited = false
     }
+    if (hasExistingPageNumber(file)) {
+      file.removeExistingPageNumber = true
+      file.existingPageNumberEdited = false
+    }
     const status = fileExistingStatus(file)
     file.statusText = status.text
     file.statusType = status.type
@@ -2248,6 +2387,7 @@ function restoreExistingHeaderFooterMarks() {
   overlayFiles.value.forEach((file) => {
     file.removeExistingHeader = false
     file.removeExistingFooter = false
+    file.removeExistingPageNumber = false
     const status = fileExistingStatus(file)
     file.statusText = status.text
     file.statusType = status.type
@@ -2270,6 +2410,10 @@ function headerFooterHandlingText(row) {
   else if (row?.existingFooterText && row?.convertPlainFooter) parts.push('页脚转换')
   else if (row?.existingFooterText) parts.push('页脚可转换')
   else parts.push('页脚新增')
+  if (row?.removeExistingPageNumber) parts.push('页码删除')
+  else if (row?.existingPageNumberEdited) parts.push('页码已编辑')
+  else if (row?.existingPageNumberText && row?.convertPlainPageNumber) parts.push('页码转换')
+  else if (row?.existingPageNumberText) parts.push('页码可转换')
   return parts.join(' / ')
 }
 
@@ -2297,6 +2441,7 @@ function sortOverlayFiles({ prop, order }) {
 function overlaySortValue(row, prop, index) {
   if (prop === 'existingHeader') return displayExistingHeader(row)
   if (prop === 'existingFooter') return displayExistingFooter(row)
+  if (prop === 'existingPageNumber') return displayExistingPageNumber(row)
   if (prop === 'header') return displayRowHeader(row, index)
   if (prop === 'footer') return displayRowFooter(row, index)
   if (prop === 'pages') return Number(row?.pages || 0)

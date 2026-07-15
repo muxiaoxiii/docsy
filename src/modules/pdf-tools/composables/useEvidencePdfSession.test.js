@@ -41,6 +41,12 @@ const baseRules = {
   outputMode: 'files_only',
 }
 
+const noInsertionRules = {
+  ...baseRules,
+  headerMode: 'none',
+  footerEnabled: false,
+}
+
 describe('Evidence PDF session helpers', () => {
   it('assigns continuous page ranges across separate PDFs', () => {
     const files = [
@@ -150,18 +156,18 @@ describe('Evidence PDF session helpers', () => {
     expect(items[0].footer.text).toBe('new footer')
   })
 
-  it('converts confirmed plain text headers and footers into cleanup targets plus overlay', () => {
+  it('converts confirmed plain text headers and footers into cleanup targets plus independent overlays', () => {
     const files = [
       {
         ...createEvidenceFile('/case/合同.pdf'),
         pages: 3,
-        header: 'new header',
-        footer: 'new footer',
-        existingHeaderText: 'old plain header',
+        existingHeaderText: 'new header',
+        existingHeaderTargetText: 'old plain header',
         existingHeaderNormalizedText: 'oldplainheader',
         existingHeaderPageStart: 1,
         existingHeaderPageEnd: 3,
-        existingFooterText: '1/3',
+        existingFooterText: 'new footer',
+        existingFooterTargetText: '1/3',
         existingFooterNormalizedText: '{page}/{total}',
         existingFooterPageStart: 1,
         existingFooterPageEnd: 3,
@@ -170,12 +176,13 @@ describe('Evidence PDF session helpers', () => {
       },
     ]
 
-    const items = buildHeaderFooterItems(files, baseRules, '/out')
+    const items = buildHeaderFooterItems(files, noInsertionRules, '/out')
 
     expect(canWriteHeader(files[0])).toBe(true)
     expect(canWriteFooter(files[0])).toBe(true)
-    expect(items[0].header.text).toBe('new header')
-    expect(items[0].footer.text).toBe('new footer')
+    expect(items[0].header).toBeNull()
+    expect(items[0].footer).toBeNull()
+    expect(items[0].extraOverlays.map(item => item.text)).toEqual(['new header', 'new footer'])
     expect(items[0].cleanup.plainHeaderTargets[0]).toMatchObject({
       text: 'old plain header',
       normalizedText: 'oldplainheader',
@@ -208,8 +215,6 @@ describe('Evidence PDF session helpers', () => {
           height: 842,
         },
         convertPlainHeader: true,
-        header: '新测试页眉3',
-        headerEdited: true,
       },
     ]
 
@@ -222,9 +227,58 @@ describe('Evidence PDF session helpers', () => {
       pageEnd: 1,
     })
     expect(items[0].cleanup.plainHeaderTargets[0].bbox).toMatchObject({ x0: 505, y0: 15 })
-    expect(items[0].header.text).toBe('新测试页眉3')
-    expect(items[0].header.align).toBe('right')
-    expect(items[0].header.marginMm).toBeCloseTo(12.347, 2)
+    expect(items[0].header.text).toBe('测试页眉3')
+    expect(items[0].extraOverlays[0].text).toBe('新测试页眉3')
+    expect(items[0].extraOverlays[0].align).toBe('right')
+    expect(items[0].extraOverlays[0].marginMm).toBeCloseTo(12.347, 2)
+  })
+
+  it('keeps existing page number separate from existing footer text when editing old page numbers', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/测试页眉3.pdf'),
+        pages: 1,
+        existingFooterText: '页脚说明',
+        existingFooterTargetText: '页脚说明',
+        existingFooterNormalizedText: '页脚说明',
+        existingFooterBBox: {
+          x0: 50,
+          y0: 800,
+          x1: 120,
+          y1: 820,
+          page: 1,
+          width: 595,
+          height: 842,
+        },
+        existingPageNumberText: '第1页',
+        existingPageNumberTargetText: '1',
+        existingPageNumberNormalizedText: '{page}',
+        existingPageNumberBBox: {
+          x0: 535,
+          y0: 806,
+          x1: 545,
+          y1: 820,
+          page: 1,
+          width: 595,
+          height: 842,
+        },
+        convertPlainPageNumber: true,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, noInsertionRules, '/out')
+
+    expect(items[0].cleanup.plainFooterTargets).toHaveLength(1)
+    expect(items[0].cleanup.plainFooterTargets[0]).toMatchObject({
+      text: '1',
+      normalizedText: '{page}',
+    })
+    expect(items[0].extraOverlays).toHaveLength(1)
+    expect(items[0].extraOverlays[0]).toMatchObject({
+      region: 'footer',
+      text: '第1页',
+      align: 'right',
+    })
   })
 
   it('can delete a confirmed plain text header without inserting a replacement', () => {

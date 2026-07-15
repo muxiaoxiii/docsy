@@ -19,24 +19,33 @@ export function createEvidenceFile(path) {
     detectionCandidates: [],
     existingHeaderText: '',
     existingFooterText: '',
+    existingPageNumberText: '',
     existingHeaderTargetText: '',
     existingFooterTargetText: '',
+    existingPageNumberTargetText: '',
     existingHeaderNormalizedText: '',
     existingFooterNormalizedText: '',
+    existingPageNumberNormalizedText: '',
     existingHeaderBBox: null,
     existingFooterBBox: null,
+    existingPageNumberBBox: null,
     existingHeaderPageStart: 1,
     existingHeaderPageEnd: 0,
     existingFooterPageStart: 1,
     existingFooterPageEnd: 0,
+    existingPageNumberPageStart: 1,
+    existingPageNumberPageEnd: 0,
     existingHeaderArtifact: false,
     existingFooterArtifact: false,
     existingHeaderEdited: false,
     existingFooterEdited: false,
+    existingPageNumberEdited: false,
     convertPlainHeader: false,
     convertPlainFooter: false,
+    convertPlainPageNumber: false,
     removeExistingHeader: false,
     removeExistingFooter: false,
+    removeExistingPageNumber: false,
     statusText: '等待',
     statusType: 'info',
   }
@@ -63,10 +72,10 @@ export function pageRangeText(file) {
 }
 
 export function buildHeaderText(file, index, rules) {
-  if (rules.headerMode === 'none') return ''
-  if (file?.headerEdited || file?.convertPlainHeader) {
+  if (file?.headerEdited) {
     return decorateHeaderText(file.header ?? '', file, index, rules)
   }
+  if (rules.headerMode === 'none') return ''
   let base = ''
   if (rules.headerMode === 'per_file') base = file.header ?? stripPdf(file.name)
   else if (rules.headerMode === 'custom') base = rules.headerText || ''
@@ -153,6 +162,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const footerText = file.footer ?? rules.footerText
     const existingHeaderReplacement = standardArtifactReplacementConfig(file, 'header', rules)
     const existingFooterReplacement = standardArtifactReplacementConfig(file, 'footer', rules)
+    const extraOverlays = convertedExistingOverlays(file, rules)
     file.outputPath = outputPath
     return {
       inputPath: file.path,
@@ -164,7 +174,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       rasterDpi: rules.rasterDpi,
       cleanup: {
         headerEnabled: Boolean(file.removeExistingHeader || existingHeaderReplacement),
-        footerEnabled: Boolean(file.removeExistingFooter || existingFooterReplacement),
+        footerEnabled: Boolean(file.removeExistingFooter || file.removeExistingPageNumber || existingFooterReplacement),
         forceDeleteHeader: Boolean(file.removeExistingHeader),
         forceDeleteFooter: Boolean(file.removeExistingFooter),
         headerHeightMm: rules.cleanupHeaderHeightMm,
@@ -176,38 +186,51 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       },
       header: header ? overlayConfigForFile(file, 'header', header, rules) : null,
       footer: rules.footerEnabled && footerText ? overlayConfigForFile(file, 'footer', footerText, rules) : null,
+      extraOverlays,
     }
   })
 }
 
 function buildPlainTextTargets(file, region) {
-  const isHeader = region === 'header'
-  const enabled = isHeader
+  if (region === 'header') return [plainTextTarget(file, 'header')].filter(Boolean)
+  return [
+    plainTextTarget(file, 'footer'),
+    plainTextTarget(file, 'pageNumber'),
+  ].filter(Boolean)
+}
+
+function plainTextTarget(file, region) {
+  const enabled = region === 'header'
     ? file.convertPlainHeader || file.removeExistingHeader
-    : file.convertPlainFooter || file.removeExistingFooter
-  if (!enabled) return []
-  const text = isHeader
-    ? file.existingHeaderTargetText || file.existingHeaderText
-    : file.existingFooterTargetText || file.existingFooterText
-  if (!text) return []
-  const normalizedText = isHeader ? file.existingHeaderNormalizedText : file.existingFooterNormalizedText
-  const pageStart = isHeader ? file.existingHeaderPageStart : file.existingFooterPageStart
-  const pageEnd = isHeader ? file.existingHeaderPageEnd : file.existingFooterPageEnd
-  return [{
+    : region === 'footer'
+      ? file.convertPlainFooter || file.removeExistingFooter
+      : file.convertPlainPageNumber || file.removeExistingPageNumber
+  if (!enabled) return null
+  const text = existingTargetText(file, region)
+  if (!text) return null
+  const normalizedText = existingNormalizedText(file, region)
+  const pageStart = existingPageStart(file, region)
+  const pageEnd = existingPageEnd(file, region)
+  return {
     text,
     normalizedText: normalizedText || text,
     pageStart: pageStart || 1,
     pageEnd: pageEnd || file.pages || 1,
-    bbox: isHeader ? file.existingHeaderBBox : file.existingFooterBBox,
-  }]
+    bbox: existingBBox(file, region),
+  }
 }
 
 function overlayConfigForFile(file, region, text, rules) {
   const isHeader = region === 'header'
-  const bbox = isHeader ? file.existingHeaderBBox : file.existingFooterBBox
-  const useDetectedPlacement = isHeader ? file.convertPlainHeader : file.convertPlainFooter
+  const bbox = existingBBox(file, region)
+  const useDetectedPlacement = region === 'header'
+    ? file.convertPlainHeader
+    : region === 'footer'
+      ? file.convertPlainFooter
+      : file.convertPlainPageNumber
   const base = isHeader
     ? {
+        region: 'header',
         text,
         fontFamily: rules.headerFontFamily || 'auto',
         fontSize: rules.headerFontSize,
@@ -217,6 +240,7 @@ function overlayConfigForFile(file, region, text, rules) {
         color: rules.headerColor || '#000000',
       }
     : {
+        region: 'footer',
         text,
         fontFamily: rules.footerFontFamily || 'auto',
         fontSize: rules.footerFontSize,
@@ -237,11 +261,59 @@ function overlayConfigForFile(file, region, text, rules) {
   const fontSize = Math.max(6, Math.min(24, yBottom - yTop || base.fontSize))
   return {
     ...base,
+    region: isHeader ? 'header' : 'footer',
     fontSize,
     align,
     offsetXMm: ptToMm(anchorX - baseX),
     marginMm: isHeader ? ptToMm(yBottom) : ptToMm(pageHeight - yBottom),
   }
+}
+
+function convertedExistingOverlays(file, rules) {
+  const overlays = []
+  if (file.convertPlainHeader && !file.removeExistingHeader) {
+    const text = String(file.existingHeaderText || '').trim()
+    if (text) overlays.push(overlayConfigForFile(file, 'header', text, rules))
+  }
+  if (file.convertPlainFooter && !file.removeExistingFooter) {
+    const text = String(file.existingFooterText || '').trim()
+    if (text) overlays.push(overlayConfigForFile(file, 'footer', text, rules))
+  }
+  if (file.convertPlainPageNumber && !file.removeExistingPageNumber) {
+    const text = String(file.existingPageNumberText || '').trim()
+    if (text) overlays.push(overlayConfigForFile(file, 'pageNumber', text, rules))
+  }
+  return overlays
+}
+
+function existingTargetText(file, region) {
+  if (region === 'header') return file.existingHeaderTargetText || file.existingHeaderText
+  if (region === 'footer') return file.existingFooterTargetText || file.existingFooterText
+  return file.existingPageNumberTargetText || file.existingPageNumberText
+}
+
+function existingNormalizedText(file, region) {
+  if (region === 'header') return file.existingHeaderNormalizedText
+  if (region === 'footer') return file.existingFooterNormalizedText
+  return file.existingPageNumberNormalizedText
+}
+
+function existingBBox(file, region) {
+  if (region === 'header') return file.existingHeaderBBox
+  if (region === 'footer') return file.existingFooterBBox
+  return file.existingPageNumberBBox
+}
+
+function existingPageStart(file, region) {
+  if (region === 'header') return file.existingHeaderPageStart
+  if (region === 'footer') return file.existingFooterPageStart
+  return file.existingPageNumberPageStart
+}
+
+function existingPageEnd(file, region) {
+  if (region === 'header') return file.existingHeaderPageEnd
+  if (region === 'footer') return file.existingFooterPageEnd
+  return file.existingPageNumberPageEnd
 }
 
 function ptToMm(value) {
