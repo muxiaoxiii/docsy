@@ -1812,6 +1812,7 @@ h3 {
 .true-preview-stage {
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   padding: 12px;
   background: #f5f7fa;
   border: 1px solid #e4e7ed;
@@ -1827,16 +1828,20 @@ h3 {
 }
 
 .true-preview-page {
+  position: relative;
+  flex: 0 0 auto;
   width: min(100%, 620px);
   background: #fff;
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
 }
 
 .page-preview img,
 .true-preview-page img {
   display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
+  object-fit: contain;
 }
 
 .cleanup-zone {

@@ -225,6 +225,7 @@ function cancelRender() {
 .preview-stage {
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   padding: 12px;
   background: #f5f7fa;
   border: 1px solid #e4e7ed;
@@ -234,16 +235,19 @@ function cancelRender() {
 
 .page-preview {
   position: relative;
+  flex: 0 0 auto;
   width: min(100%, 620px);
   background: #fff;
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
 }
 
 .pdf-canvas,
 .pdf-image {
   display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
+  object-fit: contain;
 }
 
 .docsy-overlay {
