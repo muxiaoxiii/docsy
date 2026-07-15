@@ -39,22 +39,32 @@ pub struct UnlockResult {
 }
 
 #[tauri::command]
-pub fn unlock_pdf(input: String) -> Result<UnlockResult, String> {
-    let result =
-        crate::pdf::qpdf::unlock(&std::path::PathBuf::from(&input)).map_err(|e| e.to_string())?;
+pub async fn unlock_pdf(input: String) -> Result<UnlockResult, String> {
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::pdf::qpdf::unlock(&std::path::PathBuf::from(&input))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
     Ok(UnlockResult {
         output_path: result.output_path,
     })
 }
 
 #[tauri::command]
-pub fn merge_pdfs(inputs: Vec<String>, output: String) -> Result<String, String> {
-    crate::pdf::qpdf::merge(&inputs, &output).map_err(|e| e.to_string())
+pub async fn merge_pdfs(inputs: Vec<String>, output: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::qpdf::merge(&inputs, &output))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn split_pdf(input: String, output_dir: String) -> Result<Vec<String>, String> {
-    crate::pdf::qpdf::split(&input, &output_dir).map_err(|e| e.to_string())
+pub async fn split_pdf(input: String, output_dir: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::qpdf::split(&input, &output_dir))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -68,33 +78,55 @@ pub async fn split_merged_evidence_pdf(
 }
 
 #[tauri::command]
-pub fn scan_evidence_folder(root: String) -> Result<serde_json::Value, String> {
-    crate::pdf::evidence::scan_folder(&root).map_err(|e| e.to_string())
+pub async fn scan_evidence_folder(root: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::evidence::scan_folder(&root))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn build_evidence_group_pdfs(args: serde_json::Value) -> Result<serde_json::Value, String> {
-    crate::pdf::evidence::build_group_pdfs(&args).map_err(|e| e.to_string())
+pub async fn build_evidence_group_pdfs(
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::evidence::build_group_pdfs(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn merge_evidence_pdfs(args: serde_json::Value) -> Result<String, String> {
-    crate::pdf::evidence::merge_all(&args).map_err(|e| e.to_string())
+pub async fn merge_evidence_pdfs(args: serde_json::Value) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::evidence::merge_all(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn overlay_pdf_text(args: serde_json::Value) -> Result<serde_json::Value, String> {
-    crate::pdf::overlay::overlay_text(&args).map_err(|e| e.to_string())
+pub async fn overlay_pdf_text(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::overlay::overlay_text(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn batch_overlay_pdf_text(args: serde_json::Value) -> Result<serde_json::Value, String> {
-    crate::pdf::overlay::batch_overlay(&args).map_err(|e| e.to_string())
+pub async fn batch_overlay_pdf_text(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::overlay::batch_overlay(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn apply_evidence_pdf_rules(args: serde_json::Value) -> Result<serde_json::Value, String> {
-    crate::pdf::evidence_session::apply_rules(&args).map_err(|e| e.to_string())
+pub async fn apply_evidence_pdf_rules(
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::pdf::evidence_session::apply_rules(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -19,6 +19,20 @@
           <p>大文件可能需要一段时间，当前只占用这个任务区域；其他标签和窗口仍可继续操作。</p>
         </div>
       </div>
+      <div v-if="splittingMergedImport" class="local-processing">
+        <span class="processing-spinner" />
+        <div>
+          <strong>正在拆分 PDF</strong>
+          <p>大文件会按页段逐个输出，当前只占用证据拆分区域；请先不要重复点击确认拆分。</p>
+        </div>
+      </div>
+      <div v-if="overlaying" class="local-processing">
+        <span class="processing-spinner" />
+        <div>
+          <strong>正在处理证据 PDF</strong>
+          <p>页眉页脚、A4、批注和合并会在后台执行；文件较大时请等待当前批次完成。</p>
+        </div>
+      </div>
 
       <div v-if="overlayFiles.length && !mergedImportPlan" class="session-summary">
         <div class="summary-item">
@@ -217,6 +231,41 @@
           <span>页码页脚：{{ mergedImportPlan.pageNumberFooterPages || 0 }} 页</span>
           <span>输出目录：{{ mergedImportPlan.outputDir }}</span>
         </div>
+        <div class="split-name-options">
+          <div class="block-title">拆分文件名</div>
+          <div class="rule-grid">
+            <div class="rule-item">
+              <label>前缀</label>
+              <el-input v-model="splitNamePrefix" placeholder="可选" />
+            </div>
+            <div class="rule-item">
+              <label>后缀</label>
+              <el-input v-model="splitNameSuffix" placeholder="可选" />
+            </div>
+            <div class="rule-item">
+              <label>日期</label>
+              <el-switch v-model="splitNameDateEnabled" active-text="加入" inactive-text="不加" />
+            </div>
+            <div class="rule-item" v-if="splitNameDateEnabled">
+              <label>日期文本</label>
+              <el-input v-model="splitNameDateText" placeholder="YYYYMMDD" />
+            </div>
+            <div class="rule-item">
+              <label>分隔符</label>
+              <el-select v-model="splitNameSeparator">
+                <el-option label="-" value="-" />
+                <el-option label="_" value="_" />
+                <el-option label="空格" value=" " />
+                <el-option label="无" value="" />
+                <el-option label="自定义" value="custom" />
+              </el-select>
+            </div>
+            <div class="rule-item" v-if="splitNameSeparator === 'custom'">
+              <label>自定义分隔符</label>
+              <el-input v-model="splitNameCustomSeparator" placeholder="输入分隔符" />
+            </div>
+          </div>
+        </div>
         <el-alert
           v-if="mergedImportWarnings.length"
           type="warning"
@@ -238,6 +287,9 @@
             <template #default="{ row }">
               <el-input v-model="row.name" size="small" />
             </template>
+          </el-table-column>
+          <el-table-column label="输出文件名" min-width="180" show-overflow-tooltip>
+            <template #default="{ row, $index }">{{ splitOutputNamePreview(row, $index) }}.pdf</template>
           </el-table-column>
           <el-table-column label="起始页" width="108">
             <template #default="{ row }">
@@ -491,6 +543,12 @@ const splittingMergedImport = ref(false)
 const selectedOverlayIndex = ref(0)
 const selectedMergedImportIndex = ref(0)
 const mergedImportPlan = ref(null)
+const splitNamePrefix = ref('')
+const splitNameSuffix = ref('')
+const splitNameDateEnabled = ref(false)
+const splitNameDateText = ref(todayCompact())
+const splitNameSeparator = ref('-')
+const splitNameCustomSeparator = ref('')
 
 const normalizeA4 = ref(false)
 const a4Orientation = ref('auto')
@@ -586,10 +644,10 @@ const processingNotes = computed(() => {
 })
 const showProcessingControls = computed(() =>
   !mergedImportPlan.value &&
-  (workflowMode.value !== 'split' || overlayFiles.value.length > 0)
+  workflowMode.value !== 'split'
 )
 const processButtonText = computed(() =>
-  workflowMode.value === 'split' ? '执行拆分后处理' : '执行合并处理'
+  workflowMode.value === 'merge' ? '执行合并处理' : '执行证据处理'
 )
 const canApplyOverlay = computed(() =>
   overlayFiles.value.length > 0 &&
@@ -914,7 +972,7 @@ function cancelMergedImportPlan() {
 
 function normalizedMergedImportItems() {
   return (mergedImportPlan.value?.items || []).map((item, index) => ({
-    name: String(item.name || `文件${index + 1}`).trim(),
+    name: formatSplitOutputName(item, index),
     pageStart: Number(item.pageStart || 0),
     pageEnd: Number(item.pageEnd || 0),
     source: item.source || 'unknown',
@@ -923,7 +981,7 @@ function normalizedMergedImportItems() {
 
 function defaultMergedImportName(inputPath, index) {
   if (index === 0) {
-    return stripPdf(fileName(inputPath)) || '文件1'
+    return '目录'
   }
   return `文件${index + 1}`
 }
@@ -940,6 +998,35 @@ function defaultMergedImportRange(inputPath, total) {
     pageEnd: Math.max(1, Number(total || 1)),
     source: 'manual',
   }
+}
+
+function splitOutputNamePreview(row, index) {
+  return formatSplitOutputName(row, index)
+}
+
+function formatSplitOutputName(row, index) {
+  const base = String(row?.name || defaultMergedImportName('', index)).trim() || defaultMergedImportName('', index)
+  const parts = [
+    splitNamePrefix.value,
+    splitNameDateEnabled.value ? splitNameDateText.value : '',
+    base,
+    splitNameSuffix.value,
+  ]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+  return parts.join(splitFileNameSeparator()) || base
+}
+
+function splitFileNameSeparator() {
+  return splitNameSeparator.value === 'custom' ? splitNameCustomSeparator.value : splitNameSeparator.value
+}
+
+function todayCompact() {
+  const date = new Date()
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${yyyy}${mm}${dd}`
 }
 
 function buildManualMergedImportPlan(inputPath, outputDir, total, warnings = []) {

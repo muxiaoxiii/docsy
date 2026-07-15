@@ -635,7 +635,7 @@ fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSugge
                 current_name = Some(header);
                 current_source = "header".to_string();
             } else {
-                current_name = Some("文件1".to_string());
+                current_name = Some("目录".to_string());
                 current_source = "fallback".to_string();
             }
             previous_page = page.page;
@@ -887,6 +887,43 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn names_first_headerless_split_range_as_catalog() {
+        let page = |page: u32, header: Option<&str>| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: header
+                .map(|text| {
+                    vec![TextLineDetection {
+                        text: text.to_string(),
+                        normalized_text: text.to_string(),
+                        bbox: BBox {
+                            x0: 0.0,
+                            y0: 0.0,
+                            x1: 10.0,
+                            y1: 10.0,
+                            page,
+                            width: 595.0,
+                            height: 842.0,
+                        },
+                    }]
+                })
+                .unwrap_or_default(),
+            footers: vec![],
+        };
+        let items = build_split_suggestions_from_pages(&[
+            page(1, None),
+            page(2, Some("证据8-1")),
+            page(3, Some("证据8-1")),
+        ]);
+
+        assert_eq!(items[0].name, "目录");
+        assert_eq!(items[0].page_start, 1);
+        assert_eq!(items[0].page_end, 1);
+        assert_eq!(items[1].name, "证据8-1");
     }
 
     #[test]
