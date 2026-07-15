@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId, StringFormat};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -276,14 +276,13 @@ fn edit_target_artifact_ranges(
                         index = end + 1;
                         continue;
                     }
-                } else {
-                    match region {
-                        ArtifactRegion::Header => result.removed_header += 1,
-                        ArtifactRegion::Footer => result.removed_footer += 1,
-                    }
-                    index = end + 1;
-                    continue;
                 }
+                match region {
+                    ArtifactRegion::Header => result.removed_header += 1,
+                    ArtifactRegion::Footer => result.removed_footer += 1,
+                }
+                index = end + 1;
+                continue;
             }
         }
         output.push(operations[index].clone());
@@ -298,38 +297,87 @@ fn replace_first_text_show(operations: &mut [Operation], replacement: &str) -> b
         match operation.operator.as_str() {
             "Tj" | "'" => {
                 if let Some(object) = operation.operands.first_mut() {
-                    *object = Object::string_literal(replacement);
-                    return true;
+                    return replace_string_object(object, replacement);
                 }
             }
             "\"" => {
                 if let Some(object) = operation.operands.get_mut(2) {
-                    *object = Object::string_literal(replacement);
-                    return true;
+                    return replace_string_object(object, replacement);
                 }
             }
             "TJ" => {
                 if let Some(Object::Array(items)) = operation.operands.first_mut() {
-                    let mut replaced = false;
-                    for item in items {
+                    let Some(first_string_index) = items
+                        .iter()
+                        .position(|item| matches!(item, Object::String(_, _)))
+                    else {
+                        continue;
+                    };
+                    let Some(replacement_object) =
+                        replacement_object_like(&items[first_string_index], replacement)
+                    else {
+                        return false;
+                    };
+                    for (index, item) in items.iter_mut().enumerate() {
                         if matches!(item, Object::String(_, _)) {
-                            if !replaced {
-                                *item = Object::string_literal(replacement);
-                                replaced = true;
+                            *item = if index == first_string_index {
+                                replacement_object.clone()
                             } else {
-                                *item = Object::string_literal("");
-                            }
+                                empty_string_like(item)
+                            };
                         }
                     }
-                    if replaced {
-                        return true;
-                    }
+                    return true;
                 }
             }
             _ => {}
         }
     }
     false
+}
+
+fn replace_string_object(object: &mut Object, replacement: &str) -> bool {
+    let Some(replacement_object) = replacement_object_like(object, replacement) else {
+        return false;
+    };
+    *object = replacement_object;
+    true
+}
+
+fn replacement_object_like(original: &Object, replacement: &str) -> Option<Object> {
+    let Object::String(bytes, format) = original else {
+        return None;
+    };
+    if is_utf16be_pdf_string(bytes) {
+        return Some(Object::String(
+            encode_utf16be_pdf_string(replacement),
+            *format,
+        ));
+    }
+    if replacement.is_ascii() {
+        return Some(Object::String(replacement.as_bytes().to_vec(), *format));
+    }
+    None
+}
+
+fn empty_string_like(original: &Object) -> Object {
+    match original {
+        Object::String(_, format) => Object::String(Vec::new(), *format),
+        _ => Object::String(Vec::new(), StringFormat::Literal),
+    }
+}
+
+fn is_utf16be_pdf_string(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xFE, 0xFF])
+}
+
+fn encode_utf16be_pdf_string(value: &str) -> Vec<u8> {
+    let mut encoded = vec![0xFE, 0xFF];
+    for unit in value.encode_utf16() {
+        encoded.push((unit >> 8) as u8);
+        encoded.push((unit & 0xFF) as u8);
+    }
+    encoded
 }
 
 fn remove_target_artifact_ranges(
@@ -640,6 +688,121 @@ mod tests {
 
         let _ = std::fs::remove_file(input);
         let _ = std::fs::remove_file(output);
+    }
+
+    #[test]
+    fn edits_ascii_header_artifact_in_place() {
+        let operations = vec![
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Subtype" => "Header",
+                    }),
+                ],
+            ),
+            Operation::new("Tj", vec![Object::string_literal("old header")]),
+            Operation::new("EMC", vec![]),
+            Operation::new("Tj", vec![Object::string_literal("body text")]),
+        ];
+        let plan = HeaderFooterArtifactEditPlan {
+            remove_header: true,
+            header_texts: vec!["new header".to_string()],
+            ..Default::default()
+        };
+        let (edited, result) =
+            edit_target_artifact_ranges(&operations, &plan, &Dictionary::new(), 0);
+
+        assert_eq!(result.edited_header, 1);
+        assert_eq!(result.removed_header, 0);
+        assert!(result.edited_header_pages.contains(&0));
+        let text = edited
+            .iter()
+            .flat_map(|op| op.operands.iter())
+            .filter_map(|object| object.as_str().ok())
+            .map(|bytes| String::from_utf8_lossy(bytes).to_string())
+            .collect::<Vec<_>>();
+        assert!(text.iter().any(|value| value.contains("new header")));
+        assert!(!text.iter().any(|value| value.contains("old header")));
+        assert!(text.iter().any(|value| value.contains("body text")));
+    }
+
+    #[test]
+    fn removes_standard_artifact_when_replacement_encoding_is_unsafe() {
+        let operations = vec![
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Subtype" => "Header",
+                    }),
+                ],
+            ),
+            Operation::new("Tj", vec![Object::string_literal("old header")]),
+            Operation::new("EMC", vec![]),
+            Operation::new("Tj", vec![Object::string_literal("body text")]),
+        ];
+        let plan = HeaderFooterArtifactEditPlan {
+            remove_header: true,
+            header_texts: vec!["证据一".to_string()],
+            ..Default::default()
+        };
+        let (edited, result) =
+            edit_target_artifact_ranges(&operations, &plan, &Dictionary::new(), 0);
+
+        assert_eq!(result.edited_header, 0);
+        assert_eq!(result.removed_header, 1);
+        assert_eq!(
+            edited
+                .iter()
+                .map(|op| op.operator.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Tj"]
+        );
+        let text = edited
+            .iter()
+            .flat_map(|op| op.operands.iter())
+            .filter_map(|object| object.as_str().ok())
+            .map(|bytes| String::from_utf8_lossy(bytes).to_string())
+            .collect::<Vec<_>>();
+        assert!(text.iter().any(|value| value.contains("body text")));
+    }
+
+    #[test]
+    fn edits_utf16be_header_artifact_in_place() {
+        let utf16_old = encode_utf16be_pdf_string("旧页眉");
+        let operations = vec![
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Subtype" => "Header",
+                    }),
+                ],
+            ),
+            Operation::new(
+                "Tj",
+                vec![Object::String(utf16_old, StringFormat::Hexadecimal)],
+            ),
+            Operation::new("EMC", vec![]),
+        ];
+        let plan = HeaderFooterArtifactEditPlan {
+            remove_header: true,
+            header_texts: vec!["证据一".to_string()],
+            ..Default::default()
+        };
+        let (edited, result) =
+            edit_target_artifact_ranges(&operations, &plan, &Dictionary::new(), 0);
+
+        assert_eq!(result.edited_header, 1);
+        let Object::String(bytes, format) = &edited[1].operands[0] else {
+            panic!("expected string");
+        };
+        assert_eq!(*format, StringFormat::Hexadecimal);
+        assert_eq!(bytes, &encode_utf16be_pdf_string("证据一"));
     }
 
     fn create_artifact_test_pdf(path: &Path) {

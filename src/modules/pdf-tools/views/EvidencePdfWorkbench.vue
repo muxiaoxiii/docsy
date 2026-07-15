@@ -56,12 +56,13 @@
       <div v-if="showSplitResultActions" class="split-result-actions">
         <div>
           <div class="block-title">拆分后处理</div>
-          <p class="hint">批量替换页眉页码会输出到新文件夹，不覆盖原拆分文件。</p>
+          <p class="hint">处理后文件会输出到新文件夹，不覆盖原拆分文件。</p>
           <p class="path-text">输出文件夹：{{ splitReplacementOutputDirValue }}</p>
         </div>
         <div class="plan-actions">
           <el-button size="small" @click="selectSplitReplacementOutputDir">输出目录</el-button>
-          <el-button size="small" @click="openHeaderFooterSettings">设置页眉页码</el-button>
+          <el-button size="small" :disabled="!overlayFiles.length" :loading="detectingAllHeaderFooter" @click="detectAllHeaderFooter">检测已有页眉页脚</el-button>
+          <el-button size="small" @click="openHeaderFooterSettings">设置页眉页脚</el-button>
           <el-button
             size="small"
             type="primary"
@@ -69,7 +70,7 @@
             :disabled="!canApplySplitReplacement"
             @click="applySplitHeaderFooterReplacement"
           >
-            全部替换页眉页码
+            生成处理后文件
           </el-button>
         </div>
       </div>
@@ -373,7 +374,7 @@
         <div class="plan-head">
           <div>
             <div class="block-title">已有页眉页脚</div>
-            <p class="hint">用于判断是否存在旧页眉页脚；标准结构会在处理时语义删除，普通文本不会遮盖</p>
+            <p class="hint">用于判断是否存在旧页眉页脚；标准结构会优先原位编辑，不能安全编辑时删除标准结构后插入新文本，普通文本不会遮盖</p>
           </div>
         </div>
         <el-table :data="existingHeaderFooterRows" size="small" border>
@@ -455,7 +456,7 @@
       </el-table>
     </section>
 
-    <el-dialog v-model="headerFooterSettingsVisible" title="替换页眉页码" width="720px" destroy-on-close>
+    <el-dialog v-model="headerFooterSettingsVisible" title="页眉页脚格式" width="760px" destroy-on-close>
       <div class="dialog-rule-grid">
         <div class="rule-item">
           <label>页眉来源</label>
@@ -474,6 +475,14 @@
           <el-input v-model="headerText" />
         </div>
         <div class="rule-item">
+          <label>页眉前缀</label>
+          <el-input v-model="headerPrefix" placeholder="可用 [##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+        </div>
+        <div class="rule-item">
+          <label>页眉后缀</label>
+          <el-input v-model="headerSuffix" placeholder="可用 [##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+        </div>
+        <div class="rule-item">
           <label>页眉位置</label>
           <el-select v-model="headerAlign" :disabled="headerMode === 'none'">
             <el-option label="居中" value="center" />
@@ -490,12 +499,12 @@
           <el-input-number v-model="headerMarginMm" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
         </div>
         <div class="rule-item">
-          <label>删除旧页眉</label>
-          <el-switch v-model="cleanupHeaderEnabled" active-text="删除标准页眉" inactive-text="保留" />
+          <label>页眉水平偏移 mm</label>
+          <el-input-number v-model="headerOffsetXMm" :min="-120" :max="120" :step="1" :disabled="headerMode === 'none'" />
         </div>
         <div class="rule-item">
-          <label>删除旧页脚</label>
-          <el-switch v-model="cleanupFooterEnabled" active-text="删除标准页脚" inactive-text="保留" />
+          <label>页眉颜色</label>
+          <el-color-picker v-model="headerColor" :disabled="headerMode === 'none'" />
         </div>
         <div class="rule-item">
           <label>页脚页码</label>
@@ -528,10 +537,18 @@
           <label>页脚距底 mm</label>
           <el-input-number v-model="footerMarginMm" :min="3" :max="60" :step="1" :disabled="!footerEnabled" />
         </div>
+        <div class="rule-item">
+          <label>页脚水平偏移 mm</label>
+          <el-input-number v-model="footerOffsetXMm" :min="-120" :max="120" :step="1" :disabled="!footerEnabled" />
+        </div>
+        <div class="rule-item">
+          <label>页脚颜色</label>
+          <el-color-picker v-model="footerColor" :disabled="!footerEnabled" />
+        </div>
       </div>
       <template #footer>
         <el-button @click="headerFooterSettingsVisible = false">关闭</el-button>
-        <el-button type="primary" @click="applyHeaderFooterSettings">保存设置</el-button>
+        <el-button type="primary" @click="applyHeaderFooterSettings">应用到预览</el-button>
       </template>
     </el-dialog>
 
@@ -610,7 +627,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
@@ -631,7 +648,6 @@ import {
 } from '../composables/useEvidencePdfSession.js'
 import {
   bboxOverlayStyle,
-  ptToMm,
   textOverlayStyle,
 } from '../composables/pdfPreviewCoordinates.js'
 import {
@@ -696,8 +712,6 @@ const annotationKinds = ref([
   'Polygon',
   'PolyLine',
 ])
-const cleanupHeaderEnabled = ref(false)
-const cleanupFooterEnabled = ref(false)
 const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
 const headerMode = ref('filename')
@@ -724,7 +738,6 @@ const previewReloadKey = ref(0)
 const previewData = ref({})
 const truePreview = ref(null)
 const truePreviewLoading = ref(false)
-let truePreviewRefreshTimer = null
 const detectingHeaderFooter = ref(false)
 const detectingAllHeaderFooter = ref(false)
 const detectionSummary = ref('')
@@ -767,7 +780,7 @@ const firstFooterPreview = computed(() => {
 })
 const processingNotes = computed(() => {
   const notes = []
-  if (autoCleanupHeaderEnabled.value || autoCleanupFooterEnabled.value || cleanupHeaderEnabled.value || cleanupFooterEnabled.value) {
+  if (autoCleanupHeaderEnabled.value || autoCleanupFooterEnabled.value) {
     notes.push('已有页眉页脚优先做标准结构原位处理；不能可靠处理的正文文本会保留，不遮盖')
   }
   if (normalizeA4.value) {
@@ -824,8 +837,8 @@ const currentRules = computed(() => ({
   rasterDpi: rasterDpi.value,
   removeAnnotations: removeAnnotations.value,
   annotationKinds: annotationKinds.value,
-  cleanupHeaderEnabled: autoCleanupHeaderEnabled.value || cleanupHeaderEnabled.value,
-  cleanupFooterEnabled: autoCleanupFooterEnabled.value || cleanupFooterEnabled.value,
+  cleanupHeaderEnabled: autoCleanupHeaderEnabled.value,
+  cleanupFooterEnabled: autoCleanupFooterEnabled.value,
   cleanupHeaderHeightMm: cleanupHeaderHeightMm.value,
   cleanupFooterHeightMm: cleanupFooterHeightMm.value,
   headerMode: headerMode.value,
@@ -891,7 +904,7 @@ const visibleDetectionCandidates = computed(() => detectionCandidates.value.filt
 ))
 const existingHeaderFooterRows = computed(() => overlayRows.value
   .map((file) => buildExistingHeaderFooterRow(file))
-  .filter((row) => row.existingHeader || row.existingFooter || row.deleteHeader || row.deleteFooter)
+  .filter((row) => row.existingHeader || row.existingFooter || row.editHeader || row.editFooter)
 )
 const existingHeaderFooterSummary = computed(() => {
   if (!overlayFiles.value.length) return '未导入文件'
@@ -931,7 +944,6 @@ const selectedMergedImportRange = computed(() =>
 watch(selectedOverlayFile, () => {
   previewPage.value = 1
   truePreview.value = null
-  clearTruePreviewRefresh()
   detectionSummary.value = selectedOverlayFile.value?.detectionSummary || ''
   detectionCandidates.value = selectedOverlayFile.value?.detectionCandidates || []
 })
@@ -940,10 +952,6 @@ watch([previewPage, currentRules], () => {
   truePreview.value = null
 }, {
   deep: true,
-})
-
-onBeforeUnmount(() => {
-  clearTruePreviewRefresh()
 })
 
 function applyWorkflowDefaults() {
@@ -1408,8 +1416,6 @@ function applyHeaderFooterSettings() {
 function applyReplacementPreset() {
   normalizeA4.value = false
   removeAnnotations.value = false
-  cleanupHeaderEnabled.value = true
-  cleanupFooterEnabled.value = true
   cleanupHeaderHeightMm.value = 18
   cleanupFooterHeightMm.value = 18
   headerMode.value = workflowMode.value === 'split' ? 'per_file' : 'filename'
@@ -1427,9 +1433,7 @@ function applyReplacementPreset() {
 }
 
 function hasReplacementRule() {
-  return cleanupHeaderEnabled.value ||
-    cleanupFooterEnabled.value ||
-    headerMode.value !== 'none' ||
+  return headerMode.value !== 'none' ||
     footerEnabled.value
 }
 
@@ -1589,21 +1593,6 @@ async function renderTruePreview() {
   truePreviewLoading.value = false
 }
 
-function scheduleTruePreviewRefresh() {
-  clearTruePreviewRefresh()
-  truePreviewRefreshTimer = window.setTimeout(() => {
-    truePreviewRefreshTimer = null
-    renderTruePreview()
-  }, 600)
-}
-
-function clearTruePreviewRefresh() {
-  if (truePreviewRefreshTimer) {
-    window.clearTimeout(truePreviewRefreshTimer)
-    truePreviewRefreshTimer = null
-  }
-}
-
 async function detectHeaderFooter() {
   if (!selectedOverlayFile.value || detectingHeaderFooter.value) return
   detectingHeaderFooter.value = true
@@ -1655,7 +1644,7 @@ function fileExistingStatus(file) {
   if (file.existingFooterText || file.existingFooterArtifact) parts.push('现有页码')
   if (!parts.length) return { text: '无旧页眉页码', type: 'success' }
   if (file.existingHeaderArtifact || file.existingFooterArtifact) {
-    return { text: parts.join('/') + '，可删', type: 'warning' }
+    return { text: parts.join('/') + '，标准结构', type: 'warning' }
   }
   return { text: parts.join('/') + '，保留', type: 'warning' }
 }
@@ -1700,207 +1689,21 @@ function applyDetectionResultToFile(file, data) {
 function buildExistingHeaderFooterRow(file) {
   const hasTextHeader = Boolean(file.existingHeaderText)
   const hasTextFooter = Boolean(file.existingFooterText)
-  const deleteHeader = Boolean(file.existingHeaderArtifact)
-  const deleteFooter = Boolean(file.existingFooterArtifact)
+  const editHeader = Boolean(file.existingHeaderArtifact)
+  const editFooter = Boolean(file.existingFooterArtifact)
   const statusParts = []
-  if (deleteHeader || deleteFooter) statusParts.push('可删除')
-  if ((hasTextHeader && !deleteHeader) || (hasTextFooter && !deleteFooter)) statusParts.push('需保留')
+  if (editHeader || editFooter) statusParts.push('标准结构')
+  if ((hasTextHeader && !editHeader) || (hasTextFooter && !editFooter)) statusParts.push('普通文本保留')
   return {
     file,
     fileName: file.name,
     existingHeader: file.existingHeaderText,
     existingFooter: file.existingFooterText,
-    editHeader: deleteHeader,
-    editFooter: deleteFooter,
+    editHeader,
+    editFooter,
     statusText: statusParts.join('/') || '已检测',
-    statusType: deleteHeader || deleteFooter ? 'success' : 'warning',
+    statusType: editHeader || editFooter ? 'success' : 'warning',
   }
-}
-
-function applyDetectionCandidate(candidate) {
-  if (!candidate) return
-  if (candidate.region === 'header' && selectedOverlayFile.value) {
-    headerMode.value = 'per_file'
-    selectedOverlayFile.value.header = candidate.text
-    ElMessage.success('已回填页眉名称')
-    return
-  }
-  if (candidate.region === 'footer') {
-    footerEnabled.value = true
-    footerText.value = candidate.normalizedText || candidate.text
-    ElMessage.success('已回填页脚格式')
-  }
-}
-
-function buildDetectionPlanRow(file, index) {
-  const candidates = file.detectionCandidates || []
-  const headerCandidate = pickRecommendedHeader(candidates)
-  const footerCandidate = pickRecommendedFooter(candidates)
-  const headerCleanupMm = candidateCleanupHeightMm(headerCandidate)
-  const footerCleanupMm = candidateCleanupHeightMm(footerCandidate)
-  const confidence = Math.max(
-    Number(headerCandidate?.confidence || 0),
-    Number(footerCandidate?.confidence || 0),
-  )
-  return {
-    file,
-    index,
-    fileName: file.name,
-    headerCandidate,
-    footerCandidate,
-    headerText: headerCandidate?.text || '',
-    footerText: footerCandidate?.normalizedText || footerCandidate?.text || '',
-    headerCleanupMm,
-    footerCleanupMm,
-    confidence,
-    headerCandidateScore: candidateScore(headerCandidate, 'header'),
-    footerCandidateScore: candidateScore(footerCandidate, 'footer'),
-    riskType: confidence >= 0.75 ? 'success' : confidence >= 0.5 ? 'warning' : 'danger',
-    riskText: confidence >= 0.75 ? '较高' : confidence >= 0.5 ? '核对' : '低',
-  }
-}
-
-function pickRecommendedHeader(candidates) {
-  return candidates
-    .filter((candidate) => candidate.region === 'header')
-    .filter((candidate) => !candidateLabels(candidate).includes('page-number'))
-    .sort((a, b) => candidateScore(b, 'header') - candidateScore(a, 'header'))
-    .at(0)
-}
-
-function pickRecommendedFooter(candidates) {
-  return candidates
-    .filter((candidate) => candidate.region === 'footer')
-    .sort((a, b) => candidateScore(b, 'footer') - candidateScore(a, 'footer'))
-    .at(0)
-}
-
-function candidateScore(candidate, region) {
-  if (!candidate) return 0
-  const labels = candidateLabels(candidate)
-  let score = Number(candidate.confidence || 0)
-  if (region === 'header' && labels.includes('evidence-label')) score += 0.35
-  if (region === 'header' && looksLikeEvidenceHeader(candidate.text)) score += 0.25
-  if (region === 'footer' && labels.includes('page-number')) score += 0.45
-  if (region === 'footer' && (candidate.normalizedText || '').includes('{page}')) score += 0.30
-  return score
-}
-
-function candidateLabels(candidate) {
-  return Array.isArray(candidate?.labels) ? candidate.labels : []
-}
-
-function looksLikeEvidenceHeader(text) {
-  const value = String(text || '').trim()
-  return /证据|附件|材料|exhibit|evidence/i.test(value)
-}
-
-function acceptAllDetectionPlan() {
-  acceptAllDetectedHeaders(true)
-  acceptAllDetectedCleanup(true)
-  acceptBestDetectedFooter()
-  ElMessage.success('已采用检测确认表')
-}
-
-function acceptAllDetectedHeaders(silent = false) {
-  const rows = detectionPlanRows.value.filter((row) => row.headerText)
-  if (!rows.length) return
-  headerMode.value = 'per_file'
-  rows.forEach((row) => {
-    row.file.header = row.headerText
-  })
-  if (!silent) ElMessage.success(`已回填 ${rows.length} 个页眉`)
-}
-
-function acceptAllDetectedCleanup(silent = false) {
-  const { headerHeights, footerHeights } = mergeCleanupHeights(detectionPlanRows.value)
-  if (headerHeights.length) {
-    cleanupHeaderEnabled.value = true
-    cleanupHeaderHeightMm.value = Math.max(cleanupHeaderHeightMm.value, ...headerHeights)
-  }
-  if (footerHeights.length) {
-    cleanupFooterEnabled.value = true
-    cleanupFooterHeightMm.value = Math.max(cleanupFooterHeightMm.value, ...footerHeights)
-  }
-  if (!silent && (headerHeights.length || footerHeights.length)) {
-    ElMessage.success('已设置清除区域')
-  }
-}
-
-function acceptBestDetectedFooter() {
-  const row = [...detectionPlanRows.value]
-    .filter((item) => item.footerText)
-    .sort((a, b) => b.footerCandidateScore - a.footerCandidateScore)
-    .at(0)
-  if (!row) return
-  footerEnabled.value = true
-  footerText.value = row.footerText
-}
-
-function mergeCleanupHeights(rows) {
-  return {
-    headerHeights: rows
-      .filter((row) => row.headerCandidate)
-      .map((row) => row.headerCleanupMm)
-      .filter(Boolean),
-    footerHeights: rows
-      .filter((row) => row.footerCandidate)
-      .map((row) => row.footerCleanupMm)
-      .filter(Boolean),
-  }
-}
-
-function acceptDetectionPlanRow(row) {
-  if (row.headerText) {
-    headerMode.value = 'per_file'
-    row.file.header = row.headerText
-  }
-  if (row.footerText) {
-    footerEnabled.value = true
-    footerText.value = row.footerText
-  }
-  if (row.headerCleanupMm) {
-    cleanupHeaderEnabled.value = true
-    cleanupHeaderHeightMm.value = Math.max(cleanupHeaderHeightMm.value, row.headerCleanupMm)
-  }
-  if (row.footerCleanupMm) {
-    cleanupFooterEnabled.value = true
-    cleanupFooterHeightMm.value = Math.max(cleanupFooterHeightMm.value, row.footerCleanupMm)
-  }
-  selectedOverlayIndex.value = row.index
-  ElMessage.success('已采用该文件的检测结果')
-}
-
-function applyCleanupFromCandidate(candidate) {
-  const bbox = candidate?.bbox
-  if (!bbox) return
-  if (candidate.region === 'header') {
-    cleanupHeaderEnabled.value = true
-    cleanupHeaderHeightMm.value = boundedCleanupHeight(ptToMm(bbox.y1) + 2)
-    ElMessage.success('已设置页眉清除区域')
-    return
-  }
-  if (candidate.region === 'footer') {
-    cleanupFooterEnabled.value = true
-    cleanupFooterHeightMm.value = boundedCleanupHeight(ptToMm((bbox.height || 0) - bbox.y0) + 2)
-    ElMessage.success('已设置页脚清除区域')
-  }
-}
-
-function candidateCleanupHeightMm(candidate) {
-  const bbox = candidate?.bbox
-  if (!bbox) return 0
-  if (candidate.region === 'header') {
-    return boundedCleanupHeight(ptToMm(bbox.y1) + 2)
-  }
-  if (candidate.region === 'footer') {
-    return boundedCleanupHeight(ptToMm((bbox.height || 0) - bbox.y0) + 2)
-  }
-  return 0
-}
-
-function boundedCleanupHeight(value) {
-  return Math.min(60, Math.max(4, Math.ceil(Number(value || 0))))
 }
 
 function estimateTextWidthPt(text, fontSize) {
