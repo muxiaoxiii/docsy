@@ -6,6 +6,8 @@ import {
   buildHeaderText,
   buildMergeOutputPath,
   buildOutputDir,
+  canWriteFooter,
+  canWriteHeader,
   createEvidenceFile,
   expandPlaceholders,
   pageRangeText,
@@ -86,6 +88,50 @@ describe('Evidence PDF session helpers', () => {
 
     expect(items[0].footer.text).toBe('第{page}页')
     expect(items[1].footer).toBeNull()
+  })
+
+  it('does not overlay detected non-standard header or footer text', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/合同.pdf'),
+        pages: 2,
+        header: 'new header',
+        footer: 'new footer',
+        existingHeaderText: 'old plain header',
+        existingFooterText: 'old plain footer',
+        existingHeaderArtifact: false,
+        existingFooterArtifact: false,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, baseRules, '/out')
+
+    expect(canWriteHeader(files[0])).toBe(false)
+    expect(canWriteFooter(files[0])).toBe(false)
+    expect(items[0].header).toBeNull()
+    expect(items[0].footer).toBeNull()
+  })
+
+  it('keeps overlay task for standard artifact header and footer edits', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/合同.pdf'),
+        pages: 2,
+        header: 'new header',
+        footer: 'new footer',
+        existingHeaderText: 'old standard header',
+        existingFooterText: 'old standard footer',
+        existingHeaderArtifact: true,
+        existingFooterArtifact: true,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, baseRules, '/out')
+
+    expect(canWriteHeader(files[0])).toBe(true)
+    expect(canWriteFooter(files[0])).toBe(true)
+    expect(items[0].header.text).toBe('new header')
+    expect(items[0].footer.text).toBe('new footer')
   })
 
   it('can number footers per file instead of continuously', () => {

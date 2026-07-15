@@ -402,6 +402,11 @@
         <el-table-column label="页码范围" width="105">
           <template #default="{ row }">{{ pageRangeText(row) }}</template>
         </el-table-column>
+        <el-table-column label="现有处理" width="150">
+          <template #default="{ row }">
+            <span class="table-text">{{ headerFooterHandlingText(row) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="workflowMode === 'split'" label="来源页段" width="105">
           <template #default="{ row }">{{ sourceRangeText(row) }}</template>
         </el-table-column>
@@ -575,6 +580,8 @@ import {
   buildHeaderText as buildSessionHeaderText,
   buildMergeOutputPath,
   buildOutputDir,
+  canWriteFooter,
+  canWriteHeader,
   createEvidenceFile,
   expandPlaceholders,
   fileName,
@@ -795,12 +802,14 @@ const currentRules = computed(() => ({
 
 const previewHeaderText = computed(() => {
   if (!selectedOverlayFile.value || headerMode.value === 'none') return ''
+  if (hasExistingHeader(selectedOverlayFile.value)) return ''
   return buildSessionHeaderText(selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value)
 })
 
 const previewFooterText = computed(() => {
   const footerTemplate = selectedOverlayFile.value?.footer ?? footerText.value
   if (!selectedOverlayFile.value || !footerEnabled.value || !footerTemplate) return ''
+  if (hasExistingFooter(selectedOverlayFile.value)) return ''
   const page = footerContinuous.value
     ? selectedOverlayFile.value.pageStart + previewPage.value - 1
     : previewPage.value
@@ -1532,14 +1541,13 @@ async function detectAllHeaderFooter(options = {}) {
 }
 
 function fileExistingStatus(file) {
-  const parts = []
-  if (file.existingHeaderText || file.existingHeaderArtifact) parts.push('现有页眉')
-  if (file.existingFooterText || file.existingFooterArtifact) parts.push('现有页码')
-  if (!parts.length) return { text: '无旧页眉页码', type: 'success' }
   if (file.existingHeaderArtifact || file.existingFooterArtifact) {
-    return { text: parts.join('/') + '，标准结构', type: 'warning' }
+    return { text: '现有可编辑', type: 'warning' }
   }
-  return { text: parts.join('/') + '，保留', type: 'warning' }
+  if (file.existingHeaderText || file.existingFooterText) {
+    return { text: '普通文本保留', type: 'warning' }
+  }
+  return { text: '无旧页眉页码', type: 'success' }
 }
 
 async function detectFileHeaderFooter(file) {
@@ -1609,6 +1617,10 @@ function isEditingHeader(row) {
 
 function startHeaderEdit(row, index) {
   if (!row) return
+  if (!canWriteHeader(row)) {
+    ElMessage.warning('检测到的是普通文本页眉，暂不能无损编辑；为避免重叠，不会新增覆盖层')
+    return
+  }
   headerMode.value = 'per_file'
   if (row.header === null || row.header === undefined) {
     row.header = displayRowHeader(row, index) || stripPdf(row.name)
@@ -1630,6 +1642,10 @@ function isEditingFooter(row) {
 
 function startFooterEdit(row, index) {
   if (!row) return
+  if (!canWriteFooter(row)) {
+    ElMessage.warning('检测到的是普通文本页脚，暂不能无损编辑；为避免重叠，不会新增覆盖层')
+    return
+  }
   if (row.footer === null || row.footer === undefined) {
     row.footer = displayRowFooter(row, index)
   }
@@ -1649,6 +1665,7 @@ function rowHeaderPreview(row, index) {
 }
 
 function displayRowHeader(row, index) {
+  if (row?.existingHeaderText && !row?.headerEdited) return row.existingHeaderText
   if (workflowMode.value === 'split') {
     return row?.header ?? ''
   }
@@ -1668,8 +1685,28 @@ function rowFooterPreview(row, index) {
 }
 
 function displayRowFooter(row, index) {
+  if (row?.existingFooterText && !row?.footerEdited) return row.existingFooterText
   if (row?.footer !== null && row?.footer !== undefined) return row.footer
   return rowFooterPreview(row, index)
+}
+
+function hasExistingHeader(row) {
+  return Boolean(row?.existingHeaderText || row?.existingHeaderArtifact)
+}
+
+function hasExistingFooter(row) {
+  return Boolean(row?.existingFooterText || row?.existingFooterArtifact)
+}
+
+function headerFooterHandlingText(row) {
+  const parts = []
+  if (row?.existingHeaderArtifact) parts.push('页眉可编辑')
+  else if (row?.existingHeaderText) parts.push('页眉普通保留')
+  else parts.push('页眉新增')
+  if (row?.existingFooterArtifact) parts.push('页脚可编辑')
+  else if (row?.existingFooterText) parts.push('页脚普通保留')
+  else parts.push('页脚新增')
+  return parts.join(' / ')
 }
 
 function sourceRangeText(row) {

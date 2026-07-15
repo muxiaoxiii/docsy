@@ -58,6 +58,14 @@ export function buildHeaderText(file, index, rules) {
   return decorateHeaderText(base, file, index, rules)
 }
 
+export function canWriteHeader(file) {
+  return !(file?.existingHeaderText && !file?.existingHeaderArtifact)
+}
+
+export function canWriteFooter(file) {
+  return !(file?.existingFooterText && !file?.existingFooterArtifact)
+}
+
 function decorateHeaderText(base, file, index, rules) {
   const name = stripPdf(file?.name || '')
   const contextText = String(base || '').replaceAll('[name]', name)
@@ -99,7 +107,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         headerHeightMm: rules.cleanupHeaderHeightMm,
         footerHeightMm: rules.cleanupFooterHeightMm,
       },
-      header: header ? {
+      header: canWriteHeader(file) && header ? {
         text: header,
         fontSize: rules.headerFontSize,
         marginMm: rules.headerMarginMm,
@@ -107,7 +115,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         offsetXMm: rules.headerOffsetXMm || 0,
         color: rules.headerColor || '#000000',
       } : null,
-      footer: rules.footerEnabled && footerText ? {
+      footer: canWriteFooter(file) && rules.footerEnabled && footerText ? {
         text: footerText,
         fontSize: rules.footerFontSize,
         marginMm: rules.footerMarginMm,
