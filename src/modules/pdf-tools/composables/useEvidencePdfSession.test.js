@@ -8,6 +8,7 @@ import {
   buildOutputDir,
   canWriteFooter,
   canWriteHeader,
+  candidateTargetRange,
   createEvidenceFile,
   expandPlaceholders,
   pageRangeText,
@@ -191,6 +192,18 @@ describe('Evidence PDF session helpers', () => {
     expect(canWriteFooter(files[0])).toBe(true)
     expect(items[0].header.text).toBe('new header')
     expect(items[0].footer.text).toBe('new footer')
+  })
+
+  it('expands repeating detected header/footer targets to the full file', () => {
+    expect(candidateTargetRange({
+      pageRange: { start: 1, end: 20 },
+      repeating: true,
+    }, 159)).toEqual({ start: 1, end: 159 })
+
+    expect(candidateTargetRange({
+      pageRange: { start: 3, end: 5 },
+      repeating: false,
+    }, 159)).toEqual({ start: 3, end: 5 })
   })
 
   it('can number footers per file instead of continuously', () => {

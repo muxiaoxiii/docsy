@@ -582,6 +582,7 @@ import {
   buildOutputDir,
   canWriteFooter,
   canWriteHeader,
+  candidateTargetRange,
   createEvidenceFile,
   expandPlaceholders,
   fileName,
@@ -1581,10 +1582,12 @@ function applyDetectionResultToFile(file, data) {
   file.existingFooterText = footer?.text || footer?.normalizedText || ''
   file.existingHeaderNormalizedText = header?.normalizedText || header?.text || ''
   file.existingFooterNormalizedText = footer?.normalizedText || footer?.text || ''
-  file.existingHeaderPageStart = header?.pageRange?.start || 1
-  file.existingHeaderPageEnd = header?.pageRange?.end || file.pages || 0
-  file.existingFooterPageStart = footer?.pageRange?.start || 1
-  file.existingFooterPageEnd = footer?.pageRange?.end || file.pages || 0
+  const headerTargetRange = candidateTargetRange(header, file.pages)
+  const footerTargetRange = candidateTargetRange(footer, file.pages)
+  file.existingHeaderPageStart = headerTargetRange.start
+  file.existingHeaderPageEnd = headerTargetRange.end
+  file.existingFooterPageStart = footerTargetRange.start
+  file.existingFooterPageEnd = footerTargetRange.end
   file.existingHeaderArtifact = Boolean(data.artifact?.hasHeader)
   file.existingFooterArtifact = Boolean(data.artifact?.hasFooter)
   if (!file.existingHeaderText || file.existingHeaderArtifact) file.convertPlainHeader = false

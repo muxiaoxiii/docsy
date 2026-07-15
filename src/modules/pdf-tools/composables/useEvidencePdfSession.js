@@ -74,6 +74,15 @@ export function canWriteFooter(file) {
   return !(file?.existingFooterText && !file?.existingFooterArtifact && !file?.convertPlainFooter)
 }
 
+export function candidateTargetRange(candidate, pages = 0) {
+  if (!candidate) return { start: 1, end: 0 }
+  const start = candidate.pageRange?.start || 1
+  const end = candidate.repeating && pages
+    ? pages
+    : candidate.pageRange?.end || pages || start
+  return { start, end: Math.max(start, end) }
+}
+
 function decorateHeaderText(base, file, index, rules) {
   const name = stripPdf(file?.name || '')
   const contextText = String(base || '').replaceAll('[name]', name)

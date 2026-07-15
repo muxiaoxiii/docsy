@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
 use lopdf::{Document, Object, ObjectId};
 use regex::Regex;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default)]
@@ -78,7 +79,7 @@ fn delete_plain_header_footer_file(
             Ok(content) => content,
             Err(_) => continue,
         };
-        let Some((width, height)) = page_size(&doc, page_id) else {
+        let Some(page_box) = page_box(&doc, page_id) else {
             continue;
         };
         let page_plan = PagePlainTextPlan {
@@ -86,8 +87,7 @@ fn delete_plain_header_footer_file(
             footer_targets: active_targets(&plan.footer_targets, page_number),
             header_zone_pt: mm_to_pt(plan.header_zone_mm.max(1.0)),
             footer_zone_pt: mm_to_pt(plan.footer_zone_mm.max(1.0)),
-            width,
-            height,
+            page_box,
         };
         if page_plan.header_targets.is_empty() && page_plan.footer_targets.is_empty() {
             continue;
@@ -116,8 +116,14 @@ struct PagePlainTextPlan<'a> {
     footer_targets: Vec<&'a PlainTextTarget>,
     header_zone_pt: f32,
     footer_zone_pt: f32,
+    page_box: PageBox,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PageBox {
     width: f32,
-    height: f32,
+    min_y: f32,
+    max_y: f32,
 }
 
 fn active_targets(targets: &[PlainTextTarget], page_number: u32) -> Vec<&PlainTextTarget> {
@@ -258,11 +264,15 @@ fn object_text(object: &Object) -> Option<String> {
 }
 
 fn is_in_header_zone(y: f32, plan: &PagePlainTextPlan) -> bool {
-    y >= plan.height - plan.header_zone_pt && y <= plan.height + 24.0 && plan.width > 0.0
+    y >= plan.page_box.max_y - plan.header_zone_pt
+        && y <= plan.page_box.max_y + 24.0
+        && plan.page_box.width > 0.0
 }
 
 fn is_in_footer_zone(y: f32, plan: &PagePlainTextPlan) -> bool {
-    y >= -24.0 && y <= plan.footer_zone_pt && plan.width > 0.0
+    y >= plan.page_box.min_y - 24.0
+        && y <= plan.page_box.min_y + plan.footer_zone_pt
+        && plan.page_box.width > 0.0
 }
 
 fn matches_any_target(text: &str, targets: &[&PlainTextTarget]) -> bool {
@@ -324,17 +334,42 @@ fn normalize_for_match(text: &str) -> String {
         .collect()
 }
 
-fn page_size(doc: &Document, page_id: ObjectId) -> Option<(f32, f32)> {
-    let page = doc.get_object(page_id).ok()?.as_dict().ok()?;
-    let media_box = page.get(b"MediaBox").ok()?.as_array().ok()?;
-    if media_box.len() != 4 {
+fn page_box(doc: &Document, page_id: ObjectId) -> Option<PageBox> {
+    let mut current_id = page_id;
+    let mut seen = HashSet::new();
+    loop {
+        if !seen.insert(current_id) {
+            return None;
+        }
+        let node = doc.get_object(current_id).ok()?.as_dict().ok()?;
+        if let Some(page_box) =
+            node_box(doc, node, b"CropBox").or_else(|| node_box(doc, node, b"MediaBox"))
+        {
+            return Some(page_box);
+        }
+        current_id = node.get(b"Parent").ok()?.as_reference().ok()?;
+    }
+}
+
+fn node_box(doc: &Document, node: &lopdf::Dictionary, key: &[u8]) -> Option<PageBox> {
+    let value = node.get(key).ok()?;
+    let page_box = match value {
+        Object::Reference(id) => doc.get_object(*id).ok()?,
+        other => other,
+    };
+    let page_box = page_box.as_array().ok()?;
+    if page_box.len() != 4 {
         return None;
     }
-    let x0 = object_number(&media_box[0])?;
-    let y0 = object_number(&media_box[1])?;
-    let x1 = object_number(&media_box[2])?;
-    let y1 = object_number(&media_box[3])?;
-    Some(((x1 - x0).abs(), (y1 - y0).abs()))
+    let x0 = object_number(&page_box[0])?;
+    let y0 = object_number(&page_box[1])?;
+    let x1 = object_number(&page_box[2])?;
+    let y1 = object_number(&page_box[3])?;
+    Some(PageBox {
+        width: (x1 - x0).abs(),
+        min_y: y0.min(y1),
+        max_y: y0.max(y1),
+    })
 }
 
 fn object_number(object: &Object) -> Option<f32> {
@@ -408,8 +443,11 @@ mod tests {
             footer_targets: vec![],
             header_zone_pt: 60.0,
             footer_zone_pt: 60.0,
-            width: 595.0,
-            height: 842.0,
+            page_box: PageBox {
+                width: 595.0,
+                min_y: 0.0,
+                max_y: 842.0,
+            },
         };
         let (filtered, result) = filter_page_operations(&operations, &plan);
         assert_eq!(result.removed_header, 1);
@@ -460,6 +498,29 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!text.iter().any(|value| value == "Existing Header"));
         assert!(text.iter().any(|value| value == "Body Existing Header"));
+        let _ = std::fs::remove_file(input);
+        let _ = std::fs::remove_file(output);
+    }
+
+    #[test]
+    fn deletes_plain_text_when_page_box_is_inherited() {
+        let input = temp_named_path("docsy_plain_text_inherited_input", "pdf");
+        let output = temp_named_path("docsy_plain_text_inherited_output", "pdf");
+        create_plain_text_test_pdf_with_inherited_media_box(&input);
+        let plan = PlainTextCleanupPlan {
+            header_targets: vec![PlainTextTarget {
+                text: "Existing Header".to_string(),
+                normalized_text: "Existing Header".to_string(),
+                page_start: 1,
+                page_end: 1,
+            }],
+            header_zone_mm: 25.0,
+            footer_zone_mm: 25.0,
+            ..Default::default()
+        };
+        let result =
+            delete_plain_header_footer_file(&input.to_string_lossy(), &output, &plan).unwrap();
+        assert_eq!(result.removed_header, 1);
         let _ = std::fs::remove_file(input);
         let _ = std::fs::remove_file(output);
     }
@@ -525,6 +586,62 @@ mod tests {
                 "Type" => "Pages",
                 "Kids" => vec![page_id.into()],
                 "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.save(path).unwrap();
+    }
+
+    fn create_plain_text_test_pdf_with_inherited_media_box(path: &Path) {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! {
+                "F1" => font_id,
+            },
+        });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 10.into()]),
+                Operation::new(
+                    "Tm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        460.into(),
+                        812.into(),
+                    ],
+                ),
+                Operation::new("Tj", vec![Object::string_literal("Existing Header")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+                "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
             }),
         );
         let catalog_id = doc.add_object(dictionary! {
