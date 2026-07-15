@@ -59,6 +59,10 @@ struct CleanupConfig {
     plain_header_targets: Vec<PlainTextCleanupTargetConfig>,
     #[serde(default)]
     plain_footer_targets: Vec<PlainTextCleanupTargetConfig>,
+    #[serde(default)]
+    header_replacement: Option<OverlayTextConfig>,
+    #[serde(default)]
+    footer_replacement: Option<OverlayTextConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -322,14 +326,8 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         &page_infos,
         page_start,
         total_pages,
-        &semantic_deleted_path
-            .as_ref()
-            .map(|artifact_result| artifact_result.edited_header_pages.clone())
-            .unwrap_or_default(),
-        &semantic_deleted_path
-            .as_ref()
-            .map(|artifact_result| artifact_result.edited_footer_pages.clone())
-            .unwrap_or_default(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
     )?;
     let overlay_path = temp_named_path("docsy_overlay", "pdf");
     fs::write(&overlay_path, &overlay_pdf).context("写入临时页眉页脚层失败")?;
@@ -426,8 +424,6 @@ struct StandardArtifactProcessingResult {
     path: PathBuf,
     removed: usize,
     edited: usize,
-    edited_header_pages: BTreeSet<usize>,
-    edited_footer_pages: BTreeSet<usize>,
 }
 
 impl StandardArtifactProcessingResult {
@@ -445,7 +441,8 @@ fn edit_or_delete_standard_artifacts_if_requested(
     let page_infos = get_page_infos(&args.input_path)?;
     let page_count = page_infos.len();
     let header_texts = args
-        .header
+        .cleanup
+        .header_replacement
         .as_ref()
         .filter(|_| !args.cleanup.force_delete_header)
         .map(|config| {
@@ -453,7 +450,8 @@ fn edit_or_delete_standard_artifacts_if_requested(
         })
         .unwrap_or_default();
     let footer_texts = args
-        .footer
+        .cleanup
+        .footer_replacement
         .as_ref()
         .filter(|_| !args.cleanup.force_delete_footer)
         .map(|config| {
@@ -474,8 +472,6 @@ fn edit_or_delete_standard_artifacts_if_requested(
             path,
             removed: result.removed_header + result.removed_footer,
             edited: result.edited_header + result.edited_footer,
-            edited_header_pages: result.edited_header_pages,
-            edited_footer_pages: result.edited_footer_pages,
         }),
     )
 }

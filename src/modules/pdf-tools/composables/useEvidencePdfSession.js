@@ -19,6 +19,8 @@ export function createEvidenceFile(path) {
     detectionCandidates: [],
     existingHeaderText: '',
     existingFooterText: '',
+    existingHeaderTargetText: '',
+    existingFooterTargetText: '',
     existingHeaderNormalizedText: '',
     existingFooterNormalizedText: '',
     existingHeaderBBox: null,
@@ -29,6 +31,8 @@ export function createEvidenceFile(path) {
     existingFooterPageEnd: 0,
     existingHeaderArtifact: false,
     existingFooterArtifact: false,
+    existingHeaderEdited: false,
+    existingFooterEdited: false,
     convertPlainHeader: false,
     convertPlainFooter: false,
     removeExistingHeader: false,
@@ -71,11 +75,11 @@ export function buildHeaderText(file, index, rules) {
 }
 
 export function canWriteHeader(file) {
-  return !(file?.existingHeaderText && !file?.existingHeaderArtifact && !file?.convertPlainHeader && !file?.removeExistingHeader)
+  return true
 }
 
 export function canWriteFooter(file) {
-  return !(file?.existingFooterText && !file?.existingFooterArtifact && !file?.convertPlainFooter && !file?.removeExistingFooter)
+  return true
 }
 
 export function candidateTargetRange(candidate, pages = 0) {
@@ -141,6 +145,8 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const pageStart = continuousFooter ? file.pageStart : 1
     const jobTotalPages = continuousFooter ? total : file.pages || 1
     const footerText = file.footer ?? rules.footerText
+    const existingHeaderReplacement = standardArtifactReplacementConfig(file, 'header', rules)
+    const existingFooterReplacement = standardArtifactReplacementConfig(file, 'footer', rules)
     file.outputPath = outputPath
     return {
       inputPath: file.path,
@@ -151,16 +157,18 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       a4Orientation: rules.a4Orientation,
       rasterDpi: rules.rasterDpi,
       cleanup: {
-        headerEnabled: rules.cleanupHeaderEnabled || Boolean(file.removeExistingHeader),
-        footerEnabled: rules.cleanupFooterEnabled || Boolean(file.removeExistingFooter),
+        headerEnabled: Boolean(file.removeExistingHeader || existingHeaderReplacement),
+        footerEnabled: Boolean(file.removeExistingFooter || existingFooterReplacement),
         forceDeleteHeader: Boolean(file.removeExistingHeader),
         forceDeleteFooter: Boolean(file.removeExistingFooter),
         headerHeightMm: rules.cleanupHeaderHeightMm,
         footerHeightMm: rules.cleanupFooterHeightMm,
         plainHeaderTargets: buildPlainTextTargets(file, 'header'),
         plainFooterTargets: buildPlainTextTargets(file, 'footer'),
+        headerReplacement: existingHeaderReplacement,
+        footerReplacement: existingFooterReplacement,
       },
-      header: canWriteHeader(file) && header ? {
+      header: header ? {
         text: header,
         fontSize: rules.headerFontSize,
         marginMm: rules.headerMarginMm,
@@ -168,7 +176,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         offsetXMm: rules.headerOffsetXMm || 0,
         color: rules.headerColor || '#000000',
       } : null,
-      footer: canWriteFooter(file) && rules.footerEnabled && footerText ? {
+      footer: rules.footerEnabled && footerText ? {
         text: footerText,
         fontSize: rules.footerFontSize,
         marginMm: rules.footerMarginMm,
@@ -186,7 +194,9 @@ function buildPlainTextTargets(file, region) {
     ? file.convertPlainHeader || file.removeExistingHeader
     : file.convertPlainFooter || file.removeExistingFooter
   if (!enabled) return []
-  const text = isHeader ? file.existingHeaderText : file.existingFooterText
+  const text = isHeader
+    ? file.existingHeaderTargetText || file.existingHeaderText
+    : file.existingFooterTargetText || file.existingFooterText
   if (!text) return []
   const normalizedText = isHeader ? file.existingHeaderNormalizedText : file.existingFooterNormalizedText
   const pageStart = isHeader ? file.existingHeaderPageStart : file.existingFooterPageStart
@@ -197,6 +207,32 @@ function buildPlainTextTargets(file, region) {
     pageStart: pageStart || 1,
     pageEnd: pageEnd || file.pages || 1,
   }]
+}
+
+function standardArtifactReplacementConfig(file, region, rules) {
+  const isHeader = region === 'header'
+  const artifact = isHeader ? file.existingHeaderArtifact : file.existingFooterArtifact
+  const edited = isHeader ? file.existingHeaderEdited : file.existingFooterEdited
+  const removed = isHeader ? file.removeExistingHeader : file.removeExistingFooter
+  const text = isHeader ? file.existingHeaderText : file.existingFooterText
+  if (!artifact || !edited || removed || !String(text || '').trim()) return null
+  return isHeader
+    ? {
+        text,
+        fontSize: rules.headerFontSize,
+        marginMm: rules.headerMarginMm,
+        align: rules.headerAlign,
+        offsetXMm: rules.headerOffsetXMm || 0,
+        color: rules.headerColor || '#000000',
+      }
+    : {
+        text,
+        fontSize: rules.footerFontSize,
+        marginMm: rules.footerMarginMm,
+        align: rules.footerAlign,
+        offsetXMm: rules.footerOffsetXMm || 0,
+        color: rules.footerColor || '#000000',
+      }
 }
 
 export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {

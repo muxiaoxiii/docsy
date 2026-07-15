@@ -370,7 +370,47 @@
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="页眉" prop="header" sortable="custom" min-width="170">
+        <el-table-column label="原页眉" prop="existingHeader" sortable="custom" min-width="150">
+          <template #default="{ row }">
+            <el-input
+              v-if="isEditingExistingHeader(row)"
+              v-model="row.existingHeaderText"
+              size="small"
+              @click.stop
+              @blur="finishExistingHeaderEdit(row)"
+              @keyup.enter="finishExistingHeaderEdit(row)"
+            />
+            <span
+              v-else
+              class="table-text editable-text"
+              :class="{ 'deleted-existing-text': row.removeExistingHeader }"
+              @dblclick.stop="startExistingHeaderEdit(row)"
+            >
+              {{ displayExistingHeader(row) || '-' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="原页脚" prop="existingFooter" sortable="custom" min-width="150">
+          <template #default="{ row }">
+            <el-input
+              v-if="isEditingExistingFooter(row)"
+              v-model="row.existingFooterText"
+              size="small"
+              @click.stop
+              @blur="finishExistingFooterEdit(row)"
+              @keyup.enter="finishExistingFooterEdit(row)"
+            />
+            <span
+              v-else
+              class="table-text editable-text"
+              :class="{ 'deleted-existing-text': row.removeExistingFooter }"
+              @dblclick.stop="startExistingFooterEdit(row)"
+            >
+              {{ displayExistingFooter(row) || '-' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="新页眉" prop="header" sortable="custom" min-width="170">
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingHeader(row)"
@@ -385,7 +425,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="页脚" prop="footer" sortable="custom" min-width="150">
+        <el-table-column label="新页脚" prop="footer" sortable="custom" min-width="150">
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingFooter(row)"
@@ -602,8 +642,6 @@ import {
   buildHeaderText as buildSessionHeaderText,
   buildMergeOutputPath,
   buildOutputDir,
-  canWriteFooter,
-  canWriteHeader,
   candidateTargetRange,
   createEvidenceFile,
   expandPlaceholders,
@@ -706,6 +744,8 @@ const truePreviewLoading = ref(false)
 const detectingAllHeaderFooter = ref(false)
 const editingHeaderPath = ref('')
 const editingFooterPath = ref('')
+const editingExistingHeaderPath = ref('')
+const editingExistingFooterPath = ref('')
 const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
 
 applyWorkflowDefaults()
@@ -755,6 +795,9 @@ const processingNotes = computed(() => {
   if (hasExistingRemovalRule.value) {
     notes.push('删除现有页眉页脚不会使用白色遮盖；只能删除标准结构或已确认匹配的普通文本')
   }
+  if (hasExistingEditRule.value) {
+    notes.push('原页眉/原页脚列中的标准结构编辑会原位处理；普通文本型旧内容会先删除匹配文本再按新规则重建')
+  }
   return notes
 })
 const showProcessingControls = computed(() =>
@@ -778,10 +821,10 @@ const processButtonText = computed(() =>
   workflowMode.value === 'merge' ? '执行合并处理' : '执行证据处理'
 )
 const autoCleanupHeaderEnabled = computed(() =>
-  headerMode.value !== 'none' && overlayFiles.value.some((file) => file.existingHeaderArtifact)
+  overlayFiles.value.some((file) => file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader)
 )
 const autoCleanupFooterEnabled = computed(() =>
-  footerEnabled.value && overlayFiles.value.some((file) => file.existingFooterArtifact)
+  overlayFiles.value.some((file) => file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter)
 )
 const hasDetectedExistingHeaderFooter = computed(() =>
   overlayFiles.value.some((file) => hasExistingHeaderFooter(file))
@@ -789,10 +832,16 @@ const hasDetectedExistingHeaderFooter = computed(() =>
 const hasExistingRemovalRule = computed(() =>
   overlayFiles.value.some((file) => file.removeExistingHeader || file.removeExistingFooter)
 )
+const hasExistingEditRule = computed(() =>
+  overlayFiles.value.some((file) =>
+    (file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader) ||
+    (file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter),
+  )
+)
 const canApplyOverlay = computed(() =>
   overlayFiles.value.length > 0 &&
   totalOverlayPages.value > 0 &&
-  (normalizeA4.value || removeAnnotations.value || autoCleanupHeaderEnabled.value || autoCleanupFooterEnabled.value || hasExistingRemovalRule.value || headerMode.value !== 'none' || footerEnabled.value)
+  (normalizeA4.value || removeAnnotations.value || hasExistingEditRule.value || hasExistingRemovalRule.value || headerMode.value !== 'none' || footerEnabled.value)
 )
 const canApplySplitReplacement = computed(() =>
   showSplitResultActions.value &&
@@ -875,11 +924,11 @@ const deletionPreviewMarkers = computed(() => {
   if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value) return []
   const file = selectedOverlayFile.value
   const markers = []
-  if (file.removeExistingHeader && isPageInDetectedRange(previewPage.value, file.existingHeaderPageStart, file.existingHeaderPageEnd)) {
-    markers.push(buildDeletionPreviewMarker(file.existingHeaderBBox, 'header', '删除旧页眉'))
+  if ((file.removeExistingHeader || file.convertPlainHeader) && isPageInDetectedRange(previewPage.value, file.existingHeaderPageStart, file.existingHeaderPageEnd)) {
+    markers.push(buildDeletionPreviewMarker(file.existingHeaderBBox, 'header', file.removeExistingHeader ? '删除旧页眉' : '替换旧页眉'))
   }
-  if (file.removeExistingFooter && isPageInDetectedRange(previewPage.value, file.existingFooterPageStart, file.existingFooterPageEnd)) {
-    markers.push(buildDeletionPreviewMarker(file.existingFooterBBox, 'footer', '删除旧页脚'))
+  if ((file.removeExistingFooter || file.convertPlainFooter) && isPageInDetectedRange(previewPage.value, file.existingFooterPageStart, file.existingFooterPageEnd)) {
+    markers.push(buildDeletionPreviewMarker(file.existingFooterBBox, 'footer', file.removeExistingFooter ? '删除旧页脚' : '替换旧页脚'))
   }
   return markers.filter(Boolean)
 })
@@ -1612,6 +1661,9 @@ function fileExistingStatus(file) {
   if (file.removeExistingHeader || file.removeExistingFooter) {
     return { text: '删除待处理', type: 'warning' }
   }
+  if (file.existingHeaderEdited || file.existingFooterEdited) {
+    return { text: '旧内容已编辑', type: 'warning' }
+  }
   if (file.convertPlainHeader || file.convertPlainFooter) {
     return { text: '转换待处理', type: 'warning' }
   }
@@ -1650,6 +1702,8 @@ function applyDetectionResultToFile(file, data) {
   if (candidates.length) parts.push(`候选 ${candidates.length} 个`)
   file.existingHeaderText = header?.text || ''
   file.existingFooterText = footer?.text || footer?.normalizedText || ''
+  file.existingHeaderTargetText = header?.text || ''
+  file.existingFooterTargetText = footer?.text || footer?.normalizedText || ''
   file.existingHeaderNormalizedText = header?.normalizedText || header?.text || ''
   file.existingFooterNormalizedText = footer?.normalizedText || footer?.text || ''
   file.existingHeaderBBox = header?.bbox || null
@@ -1662,16 +1716,12 @@ function applyDetectionResultToFile(file, data) {
   file.existingFooterPageEnd = footerTargetRange.end
   file.existingHeaderArtifact = Boolean(data.artifact?.hasHeader)
   file.existingFooterArtifact = Boolean(data.artifact?.hasFooter)
+  file.existingHeaderEdited = false
+  file.existingFooterEdited = false
   if (!file.existingHeaderText || file.existingHeaderArtifact) file.convertPlainHeader = false
   if (!file.existingFooterText || file.existingFooterArtifact) file.convertPlainFooter = false
   if (!hasExistingHeader(file)) file.removeExistingHeader = false
   if (!hasExistingFooter(file)) file.removeExistingFooter = false
-  if (header?.text && !file.headerEdited) {
-    file.header = header.text
-  }
-  if ((footer?.normalizedText || footer?.text) && !file.footerEdited) {
-    file.footer = footer.normalizedText || footer.text
-  }
   file.detectionSummary = parts.length ? parts.join('；') : '未发现稳定的文本型页眉页脚候选'
   file.detectionCandidates = candidates
 }
@@ -1735,16 +1785,9 @@ function isEditingHeader(row) {
 
 async function startHeaderEdit(row, index) {
   if (!row) return
-  if (!canWriteHeader(row)) {
-    const confirmed = await confirmPlainTextConversion(row, 'header')
-    if (!confirmed) return
-  } else if (row.existingHeaderArtifact && !row.removeExistingHeader) {
-    const confirmed = await confirmStandardArtifactEdit(row, 'header')
-    if (!confirmed) return
-  }
   headerMode.value = 'per_file'
   if (row.header === null || row.header === undefined) {
-    row.header = displayRowHeader(row, index) || stripPdf(row.name)
+    row.header = rowHeaderPreview(row, index) || stripPdf(row.name)
   }
   editingHeaderPath.value = row.path
 }
@@ -1763,15 +1806,8 @@ function isEditingFooter(row) {
 
 async function startFooterEdit(row, index) {
   if (!row) return
-  if (!canWriteFooter(row)) {
-    const confirmed = await confirmPlainTextConversion(row, 'footer')
-    if (!confirmed) return
-  } else if (row.existingFooterArtifact && !row.removeExistingFooter) {
-    const confirmed = await confirmStandardArtifactEdit(row, 'footer')
-    if (!confirmed) return
-  }
   if (row.footer === null || row.footer === undefined) {
-    row.footer = displayRowFooter(row, index)
+    row.footer = rowFooterPreview(row, index)
   }
   editingFooterPath.value = row.path
 }
@@ -1784,15 +1820,106 @@ function finishFooterEdit(row) {
   editingFooterPath.value = ''
 }
 
+function isEditingExistingHeader(row) {
+  return editingExistingHeaderPath.value && editingExistingHeaderPath.value === row.path
+}
+
+function startExistingHeaderEdit(row) {
+  if (!hasExistingHeader(row)) return
+  if (row.removeExistingHeader) {
+    row.removeExistingHeader = false
+  }
+  if (!row.existingHeaderText) {
+    row.existingHeaderText = row.existingHeaderTargetText || ''
+  }
+  editingExistingHeaderPath.value = row.path
+}
+
+function finishExistingHeaderEdit(row) {
+  if (!row) {
+    editingExistingHeaderPath.value = ''
+    return
+  }
+  const next = String(row.existingHeaderText ?? '').trim()
+  const original = row.existingHeaderTargetText || row.existingHeaderText || ''
+  if (!next) {
+    row.existingHeaderText = original
+    row.existingHeaderEdited = false
+    row.convertPlainHeader = false
+    row.removeExistingHeader = false
+  } else if (row.existingHeaderArtifact) {
+    row.existingHeaderText = next
+    row.existingHeaderEdited = next !== original
+    row.removeExistingHeader = false
+  } else if (next !== original) {
+    row.existingHeaderText = original
+    row.convertPlainHeader = true
+    row.removeExistingHeader = false
+    row.header = next
+    row.headerEdited = true
+    headerMode.value = 'per_file'
+    ElMessage.info('普通文本型旧页眉会删除匹配旧文本，并按新页眉重建')
+  }
+  const status = fileExistingStatus(row)
+  row.statusText = status.text
+  row.statusType = status.type
+  editingExistingHeaderPath.value = ''
+  refreshPreview()
+}
+
+function isEditingExistingFooter(row) {
+  return editingExistingFooterPath.value && editingExistingFooterPath.value === row.path
+}
+
+function startExistingFooterEdit(row) {
+  if (!hasExistingFooter(row)) return
+  if (row.removeExistingFooter) {
+    row.removeExistingFooter = false
+  }
+  if (!row.existingFooterText) {
+    row.existingFooterText = row.existingFooterTargetText || ''
+  }
+  editingExistingFooterPath.value = row.path
+}
+
+function finishExistingFooterEdit(row) {
+  if (!row) {
+    editingExistingFooterPath.value = ''
+    return
+  }
+  const next = String(row.existingFooterText ?? '').trim()
+  const original = row.existingFooterTargetText || row.existingFooterText || ''
+  if (!next) {
+    row.existingFooterText = original
+    row.existingFooterEdited = false
+    row.convertPlainFooter = false
+    row.removeExistingFooter = false
+  } else if (row.existingFooterArtifact) {
+    row.existingFooterText = next
+    row.existingFooterEdited = next !== original
+    row.removeExistingFooter = false
+  } else if (next !== original) {
+    row.existingFooterText = original
+    row.convertPlainFooter = true
+    row.removeExistingFooter = false
+    row.footer = next
+    row.footerEdited = true
+    ElMessage.info('普通文本型旧页脚会删除匹配旧文本，并按新页脚重建')
+  }
+  const status = fileExistingStatus(row)
+  row.statusText = status.text
+  row.statusType = status.type
+  editingExistingFooterPath.value = ''
+  refreshPreview()
+}
+
 function rowHeaderPreview(row, index) {
   return buildSessionHeaderText(row, index, currentRules.value)
 }
 
 function displayRowHeader(row, index) {
-  if (row?.removeExistingHeader) return rowHeaderPreview(row, index)
-  if (row?.existingHeaderText && !row?.headerEdited) return row.existingHeaderText
   if (workflowMode.value === 'split') {
-    return row?.header ?? ''
+    return row?.header ?? rowHeaderPreview(row, index)
   }
   return rowHeaderPreview(row, index)
 }
@@ -1810,32 +1937,24 @@ function rowFooterPreview(row, index) {
 }
 
 function displayRowFooter(row, index) {
-  if (row?.removeExistingFooter) return rowFooterPreview(row, index)
-  if (row?.existingFooterText && !row?.footerEdited) return row.existingFooterText
   if (row?.footer !== null && row?.footer !== undefined) return row.footer
   return rowFooterPreview(row, index)
 }
 
-function isPlainHeader(row) {
-  return Boolean(row?.existingHeaderText && !row?.existingHeaderArtifact)
+function displayExistingHeader(row) {
+  return row?.existingHeaderText || row?.existingHeaderTargetText || ''
 }
 
-function isPlainFooter(row) {
-  return Boolean(row?.existingFooterText && !row?.existingFooterArtifact)
+function displayExistingFooter(row) {
+  return row?.existingFooterText || row?.existingFooterTargetText || ''
 }
 
 function shouldShowLiveHeader(row) {
-  if (!row) return false
-  if (row.existingHeaderArtifact && !row.removeExistingHeader) return false
-  if (isPlainHeader(row) && !row.convertPlainHeader && !row.removeExistingHeader) return false
-  return true
+  return Boolean(row)
 }
 
 function shouldShowLiveFooter(row) {
-  if (!row) return false
-  if (row.existingFooterArtifact && !row.removeExistingFooter) return false
-  if (isPlainFooter(row) && !row.convertPlainFooter && !row.removeExistingFooter) return false
-  return true
+  return Boolean(row)
 }
 
 function hasExistingHeader(row) {
@@ -1870,8 +1989,14 @@ async function markRemoveExistingHeaderFooter() {
     return
   }
   targets.forEach((file) => {
-    if (hasExistingHeader(file)) file.removeExistingHeader = true
-    if (hasExistingFooter(file)) file.removeExistingFooter = true
+    if (hasExistingHeader(file)) {
+      file.removeExistingHeader = true
+      file.existingHeaderEdited = false
+    }
+    if (hasExistingFooter(file)) {
+      file.removeExistingFooter = true
+      file.existingFooterEdited = false
+    }
     const status = fileExistingStatus(file)
     file.statusText = status.text
     file.statusType = status.type
@@ -1880,61 +2005,16 @@ async function markRemoveExistingHeaderFooter() {
   refreshPreview()
 }
 
-async function confirmPlainTextConversion(row, region) {
-  const isHeader = region === 'header'
-  const text = isHeader ? row.existingHeaderText : row.existingFooterText
-  const start = isHeader ? row.existingHeaderPageStart : row.existingFooterPageStart
-  const end = isHeader ? row.existingHeaderPageEnd : row.existingFooterPageEnd
-  const label = isHeader ? '页眉' : '页脚'
-  const range = `${start || 1}-${end || row.pages || 1}`
-  try {
-    await ElMessageBox.confirm(
-      `将删除第 ${range} 页${label}区域内匹配的普通文本“${text}”，并转换为 Docsy 标准${label}。匹配不到的文本会保留，不会遮盖原文。`,
-      `转换普通文本${label}`,
-      {
-        confirmButtonText: '确认转换',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
-    if (isHeader) row.convertPlainHeader = true
-    else row.convertPlainFooter = true
-    const status = fileExistingStatus(row)
-    row.statusText = status.text
-    row.statusType = status.type
-    truePreview.value = null
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function confirmStandardArtifactEdit(row, region) {
-  const label = region === 'header' ? '页眉' : '页脚'
-  try {
-    await ElMessageBox.confirm(
-      `检测到现有标准${label}。继续编辑会尝试修改原有${label}对象；如果要删除旧${label}后重新插入，请取消并点击“删除现有页眉页脚”。`,
-      `编辑现有${label}`,
-      {
-        confirmButtonText: '继续编辑',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
-    return true
-  } catch {
-    return false
-  }
-}
-
 function headerFooterHandlingText(row) {
   const parts = []
   if (row?.removeExistingHeader) parts.push('页眉删除')
+  else if (row?.existingHeaderEdited) parts.push('页眉已编辑')
   else if (row?.existingHeaderArtifact) parts.push('页眉可编辑')
   else if (row?.existingHeaderText && row?.convertPlainHeader) parts.push('页眉转换')
   else if (row?.existingHeaderText) parts.push('页眉可转换')
   else parts.push('页眉新增')
   if (row?.removeExistingFooter) parts.push('页脚删除')
+  else if (row?.existingFooterEdited) parts.push('页脚已编辑')
   else if (row?.existingFooterArtifact) parts.push('页脚可编辑')
   else if (row?.existingFooterText && row?.convertPlainFooter) parts.push('页脚转换')
   else if (row?.existingFooterText) parts.push('页脚可转换')
@@ -1964,6 +2044,8 @@ function sortOverlayFiles({ prop, order }) {
 }
 
 function overlaySortValue(row, prop, index) {
+  if (prop === 'existingHeader') return displayExistingHeader(row)
+  if (prop === 'existingFooter') return displayExistingFooter(row)
   if (prop === 'header') return displayRowHeader(row, index)
   if (prop === 'footer') return displayRowFooter(row, index)
   if (prop === 'pages') return Number(row?.pages || 0)
@@ -2244,6 +2326,19 @@ h3 {
   text-overflow: ellipsis;
   vertical-align: middle;
   white-space: nowrap;
+}
+
+.editable-text {
+  cursor: text;
+}
+
+.deleted-existing-text {
+  padding: 1px 5px;
+  border: 1px dashed #d93025;
+  border-radius: 3px;
+  background: #fff7f7;
+  color: #b42318;
+  text-decoration: line-through;
 }
 
 .overlay-table {

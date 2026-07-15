@@ -126,7 +126,7 @@ describe('Evidence PDF session helpers', () => {
     expect(items[1].footer).toBeNull()
   })
 
-  it('does not overlay detected non-standard header or footer text', () => {
+  it('keeps detected old text separate from new header and footer insertion', () => {
     const files = [
       {
         ...createEvidenceFile('/case/合同.pdf'),
@@ -142,10 +142,12 @@ describe('Evidence PDF session helpers', () => {
 
     const items = buildHeaderFooterItems(files, baseRules, '/out')
 
-    expect(canWriteHeader(files[0])).toBe(false)
-    expect(canWriteFooter(files[0])).toBe(false)
-    expect(items[0].header).toBeNull()
-    expect(items[0].footer).toBeNull()
+    expect(canWriteHeader(files[0])).toBe(true)
+    expect(canWriteFooter(files[0])).toBe(true)
+    expect(items[0].cleanup.plainHeaderTargets).toHaveLength(0)
+    expect(items[0].cleanup.plainFooterTargets).toHaveLength(0)
+    expect(items[0].header.text).toBe('new header')
+    expect(items[0].footer.text).toBe('new footer')
   })
 
   it('converts confirmed plain text headers and footers into cleanup targets plus overlay', () => {
@@ -267,6 +269,36 @@ describe('Evidence PDF session helpers', () => {
 
     expect(canWriteHeader(files[0])).toBe(true)
     expect(canWriteFooter(files[0])).toBe(true)
+    expect(items[0].cleanup.headerEnabled).toBe(false)
+    expect(items[0].cleanup.footerEnabled).toBe(false)
+    expect(items[0].header.text).toBe('new header')
+    expect(items[0].footer.text).toBe('new footer')
+  })
+
+  it('edits standard existing header/footer separately from newly inserted text', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/合同.pdf'),
+        pages: 2,
+        header: 'new header',
+        footer: 'new footer',
+        existingHeaderText: 'edited old header',
+        existingFooterText: 'edited old footer',
+        existingHeaderTargetText: 'old standard header',
+        existingFooterTargetText: 'old standard footer',
+        existingHeaderArtifact: true,
+        existingFooterArtifact: true,
+        existingHeaderEdited: true,
+        existingFooterEdited: true,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, baseRules, '/out')
+
+    expect(items[0].cleanup.headerEnabled).toBe(true)
+    expect(items[0].cleanup.footerEnabled).toBe(true)
+    expect(items[0].cleanup.headerReplacement.text).toBe('edited old header')
+    expect(items[0].cleanup.footerReplacement.text).toBe('edited old footer')
     expect(items[0].header.text).toBe('new header')
     expect(items[0].footer.text).toBe('new footer')
   })
