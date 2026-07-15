@@ -47,6 +47,10 @@ struct CleanupConfig {
     header_enabled: bool,
     #[serde(default)]
     footer_enabled: bool,
+    #[serde(default)]
+    force_delete_header: bool,
+    #[serde(default)]
+    force_delete_footer: bool,
     #[serde(default = "default_cleanup_zone_mm")]
     header_height_mm: f32,
     #[serde(default = "default_cleanup_zone_mm")]
@@ -443,6 +447,7 @@ fn edit_or_delete_standard_artifacts_if_requested(
     let header_texts = args
         .header
         .as_ref()
+        .filter(|_| !args.cleanup.force_delete_header)
         .map(|config| {
             artifact_replacement_texts(config, page_count, args.page_start, args.total_pages)
         })
@@ -450,6 +455,7 @@ fn edit_or_delete_standard_artifacts_if_requested(
     let footer_texts = args
         .footer
         .as_ref()
+        .filter(|_| !args.cleanup.force_delete_footer)
         .map(|config| {
             artifact_replacement_texts(config, page_count, args.page_start, args.total_pages)
         })

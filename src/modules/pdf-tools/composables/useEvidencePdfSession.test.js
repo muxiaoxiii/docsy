@@ -172,6 +172,48 @@ describe('Evidence PDF session helpers', () => {
     expect(items[0].header).toBeNull()
   })
 
+  it('can explicitly delete existing standard headers without inserting replacements', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/合同.pdf'),
+        pages: 2,
+        existingHeaderText: 'old standard header',
+        existingHeaderArtifact: true,
+        removeExistingHeader: true,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, {
+      ...baseRules,
+      headerMode: 'none',
+      footerEnabled: false,
+      cleanupHeaderEnabled: false,
+      cleanupFooterEnabled: false,
+    }, '/out')
+
+    expect(items[0].cleanup.headerEnabled).toBe(true)
+    expect(items[0].cleanup.forceDeleteHeader).toBe(true)
+    expect(items[0].header).toBeNull()
+  })
+
+  it('can delete existing standard headers before inserting replacements', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/合同.pdf'),
+        pages: 2,
+        header: 'new header',
+        existingHeaderText: 'old standard header',
+        existingHeaderArtifact: true,
+        removeExistingHeader: true,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, baseRules, '/out')
+
+    expect(items[0].cleanup.forceDeleteHeader).toBe(true)
+    expect(items[0].header.text).toBe('new header')
+  })
+
   it('keeps overlay task for standard artifact header and footer edits', () => {
     const files = [
       {

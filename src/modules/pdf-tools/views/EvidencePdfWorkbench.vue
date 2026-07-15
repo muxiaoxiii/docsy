@@ -69,6 +69,7 @@
         <div class="plan-actions">
           <el-button size="small" @click="selectSplitReplacementOutputDir">输出目录</el-button>
           <el-button size="small" @click="openHeaderFooterSettings">设置页眉页脚</el-button>
+          <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter">删除现有页眉页脚</el-button>
           <el-button
             size="small"
             type="primary"
@@ -221,6 +222,7 @@
         <el-button :disabled="!overlayFiles.length" @click="selectOverlayOutputDir">输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="openPlannedOutputDir">打开输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages">刷新页数</el-button>
+        <el-button :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter">删除现有页眉页脚</el-button>
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
           {{ processButtonText }}
         </el-button>
@@ -729,6 +731,9 @@ const processingNotes = computed(() => {
   if (outputMode.value === 'merge_only') {
     notes.push('只生成合并 PDF 时，中间单文件副本会在合并成功后清理')
   }
+  if (hasExistingRemovalRule.value) {
+    notes.push('删除现有页眉页脚不会使用白色遮盖；只能删除标准结构或已确认匹配的普通文本')
+  }
   return notes
 })
 const showProcessingControls = computed(() =>
@@ -752,15 +757,21 @@ const processButtonText = computed(() =>
   workflowMode.value === 'merge' ? '执行合并处理' : '执行证据处理'
 )
 const autoCleanupHeaderEnabled = computed(() =>
-  overlayFiles.value.some((file) => file.existingHeaderArtifact)
+  headerMode.value !== 'none' && overlayFiles.value.some((file) => file.existingHeaderArtifact)
 )
 const autoCleanupFooterEnabled = computed(() =>
-  overlayFiles.value.some((file) => file.existingFooterArtifact)
+  footerEnabled.value && overlayFiles.value.some((file) => file.existingFooterArtifact)
+)
+const hasDetectedExistingHeaderFooter = computed(() =>
+  overlayFiles.value.some((file) => hasExistingHeaderFooter(file))
+)
+const hasExistingRemovalRule = computed(() =>
+  overlayFiles.value.some((file) => file.removeExistingHeader || file.removeExistingFooter)
 )
 const canApplyOverlay = computed(() =>
   overlayFiles.value.length > 0 &&
   totalOverlayPages.value > 0 &&
-  (normalizeA4.value || removeAnnotations.value || autoCleanupHeaderEnabled.value || autoCleanupFooterEnabled.value || headerMode.value !== 'none' || footerEnabled.value)
+  (normalizeA4.value || removeAnnotations.value || autoCleanupHeaderEnabled.value || autoCleanupFooterEnabled.value || hasExistingRemovalRule.value || headerMode.value !== 'none' || footerEnabled.value)
 )
 const canApplySplitReplacement = computed(() =>
   showSplitResultActions.value &&
@@ -1354,7 +1365,8 @@ function applyReplacementPreset() {
 
 function hasReplacementRule() {
   return headerMode.value !== 'none' ||
-    footerEnabled.value
+    footerEnabled.value ||
+    hasExistingRemovalRule.value
 }
 
 function ensureReplacementPreset() {
@@ -1542,6 +1554,9 @@ async function detectAllHeaderFooter(options = {}) {
 }
 
 function fileExistingStatus(file) {
+  if (file.removeExistingHeader || file.removeExistingFooter) {
+    return { text: '删除待处理', type: 'warning' }
+  }
   if (file.convertPlainHeader || file.convertPlainFooter) {
     return { text: '转换待处理', type: 'warning' }
   }
@@ -1592,6 +1607,8 @@ function applyDetectionResultToFile(file, data) {
   file.existingFooterArtifact = Boolean(data.artifact?.hasFooter)
   if (!file.existingHeaderText || file.existingHeaderArtifact) file.convertPlainHeader = false
   if (!file.existingFooterText || file.existingFooterArtifact) file.convertPlainFooter = false
+  if (!hasExistingHeader(file)) file.removeExistingHeader = false
+  if (!hasExistingFooter(file)) file.removeExistingFooter = false
   if (header?.text && !file.headerEdited) {
     file.header = header.text
   }
@@ -1634,6 +1651,9 @@ async function startHeaderEdit(row, index) {
   if (!canWriteHeader(row)) {
     const confirmed = await confirmPlainTextConversion(row, 'header')
     if (!confirmed) return
+  } else if (row.existingHeaderArtifact && !row.removeExistingHeader) {
+    const confirmed = await confirmStandardArtifactEdit(row, 'header')
+    if (!confirmed) return
   }
   headerMode.value = 'per_file'
   if (row.header === null || row.header === undefined) {
@@ -1659,6 +1679,9 @@ async function startFooterEdit(row, index) {
   if (!canWriteFooter(row)) {
     const confirmed = await confirmPlainTextConversion(row, 'footer')
     if (!confirmed) return
+  } else if (row.existingFooterArtifact && !row.removeExistingFooter) {
+    const confirmed = await confirmStandardArtifactEdit(row, 'footer')
+    if (!confirmed) return
   }
   if (row.footer === null || row.footer === undefined) {
     row.footer = displayRowFooter(row, index)
@@ -1679,6 +1702,7 @@ function rowHeaderPreview(row, index) {
 }
 
 function displayRowHeader(row, index) {
+  if (row?.removeExistingHeader) return rowHeaderPreview(row, index)
   if (row?.existingHeaderText && !row?.headerEdited) return row.existingHeaderText
   if (workflowMode.value === 'split') {
     return row?.header ?? ''
@@ -1699,6 +1723,7 @@ function rowFooterPreview(row, index) {
 }
 
 function displayRowFooter(row, index) {
+  if (row?.removeExistingFooter) return rowFooterPreview(row, index)
   if (row?.existingFooterText && !row?.footerEdited) return row.existingFooterText
   if (row?.footer !== null && row?.footer !== undefined) return row.footer
   return rowFooterPreview(row, index)
@@ -1714,16 +1739,58 @@ function isPlainFooter(row) {
 
 function shouldShowLiveHeader(row) {
   if (!row) return false
-  if (row.existingHeaderArtifact) return false
-  if (isPlainHeader(row) && !row.convertPlainHeader) return false
+  if (row.existingHeaderArtifact && !row.removeExistingHeader) return false
+  if (isPlainHeader(row) && !row.convertPlainHeader && !row.removeExistingHeader) return false
   return true
 }
 
 function shouldShowLiveFooter(row) {
   if (!row) return false
-  if (row.existingFooterArtifact) return false
-  if (isPlainFooter(row) && !row.convertPlainFooter) return false
+  if (row.existingFooterArtifact && !row.removeExistingFooter) return false
+  if (isPlainFooter(row) && !row.convertPlainFooter && !row.removeExistingFooter) return false
   return true
+}
+
+function hasExistingHeader(row) {
+  return Boolean(row?.existingHeaderText || row?.existingHeaderArtifact)
+}
+
+function hasExistingFooter(row) {
+  return Boolean(row?.existingFooterText || row?.existingFooterArtifact)
+}
+
+function hasExistingHeaderFooter(row) {
+  return hasExistingHeader(row) || hasExistingFooter(row)
+}
+
+async function markRemoveExistingHeaderFooter() {
+  const targets = overlayFiles.value.filter(hasExistingHeaderFooter)
+  if (!targets.length) {
+    ElMessage.info('当前列表没有检测到现有页眉页脚')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '将标记删除检测到的现有页眉页脚。标准结构会直接删除；普通文本只删除页眉页脚区域内匹配内容，匹配不到的文本会保留。是否插入新页眉页脚由当前设置决定。',
+      '删除现有页眉页脚',
+      {
+        confirmButtonText: '标记删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  targets.forEach((file) => {
+    if (hasExistingHeader(file)) file.removeExistingHeader = true
+    if (hasExistingFooter(file)) file.removeExistingFooter = true
+    const status = fileExistingStatus(file)
+    file.statusText = status.text
+    file.statusType = status.type
+  })
+  truePreview.value = null
+  refreshPreview()
 }
 
 async function confirmPlainTextConversion(row, region) {
@@ -1755,13 +1822,33 @@ async function confirmPlainTextConversion(row, region) {
   }
 }
 
+async function confirmStandardArtifactEdit(row, region) {
+  const label = region === 'header' ? '页眉' : '页脚'
+  try {
+    await ElMessageBox.confirm(
+      `检测到现有标准${label}。继续编辑会尝试修改原有${label}对象；如果要删除旧${label}后重新插入，请取消并点击“删除现有页眉页脚”。`,
+      `编辑现有${label}`,
+      {
+        confirmButtonText: '继续编辑',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
 function headerFooterHandlingText(row) {
   const parts = []
-  if (row?.existingHeaderArtifact) parts.push('页眉可编辑')
+  if (row?.removeExistingHeader) parts.push('页眉删除')
+  else if (row?.existingHeaderArtifact) parts.push('页眉可编辑')
   else if (row?.existingHeaderText && row?.convertPlainHeader) parts.push('页眉转换')
   else if (row?.existingHeaderText) parts.push('页眉可转换')
   else parts.push('页眉新增')
-  if (row?.existingFooterArtifact) parts.push('页脚可编辑')
+  if (row?.removeExistingFooter) parts.push('页脚删除')
+  else if (row?.existingFooterArtifact) parts.push('页脚可编辑')
   else if (row?.existingFooterText && row?.convertPlainFooter) parts.push('页脚转换')
   else if (row?.existingFooterText) parts.push('页脚可转换')
   else parts.push('页脚新增')

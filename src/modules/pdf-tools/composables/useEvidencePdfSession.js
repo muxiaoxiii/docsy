@@ -29,6 +29,8 @@ export function createEvidenceFile(path) {
     existingFooterArtifact: false,
     convertPlainHeader: false,
     convertPlainFooter: false,
+    removeExistingHeader: false,
+    removeExistingFooter: false,
     statusText: '等待',
     statusType: 'info',
   }
@@ -67,11 +69,11 @@ export function buildHeaderText(file, index, rules) {
 }
 
 export function canWriteHeader(file) {
-  return !(file?.existingHeaderText && !file?.existingHeaderArtifact && !file?.convertPlainHeader)
+  return !(file?.existingHeaderText && !file?.existingHeaderArtifact && !file?.convertPlainHeader && !file?.removeExistingHeader)
 }
 
 export function canWriteFooter(file) {
-  return !(file?.existingFooterText && !file?.existingFooterArtifact && !file?.convertPlainFooter)
+  return !(file?.existingFooterText && !file?.existingFooterArtifact && !file?.convertPlainFooter && !file?.removeExistingFooter)
 }
 
 export function candidateTargetRange(candidate, pages = 0) {
@@ -119,8 +121,10 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       a4Orientation: rules.a4Orientation,
       rasterDpi: rules.rasterDpi,
       cleanup: {
-        headerEnabled: rules.cleanupHeaderEnabled,
-        footerEnabled: rules.cleanupFooterEnabled,
+        headerEnabled: rules.cleanupHeaderEnabled || Boolean(file.removeExistingHeader),
+        footerEnabled: rules.cleanupFooterEnabled || Boolean(file.removeExistingFooter),
+        forceDeleteHeader: Boolean(file.removeExistingHeader),
+        forceDeleteFooter: Boolean(file.removeExistingFooter),
         headerHeightMm: rules.cleanupHeaderHeightMm,
         footerHeightMm: rules.cleanupFooterHeightMm,
         plainHeaderTargets: buildPlainTextTargets(file, 'header'),
@@ -148,7 +152,9 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
 
 function buildPlainTextTargets(file, region) {
   const isHeader = region === 'header'
-  const enabled = isHeader ? file.convertPlainHeader : file.convertPlainFooter
+  const enabled = isHeader
+    ? file.convertPlainHeader || file.removeExistingHeader
+    : file.convertPlainFooter || file.removeExistingFooter
   if (!enabled) return []
   const text = isHeader ? file.existingHeaderText : file.existingFooterText
   if (!text) return []
