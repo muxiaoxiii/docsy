@@ -38,28 +38,13 @@ struct HeaderFooterJob {
     footer: Option<OverlayTextConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CleanupConfig {
     #[serde(default)]
     header_enabled: bool,
     #[serde(default)]
     footer_enabled: bool,
-    #[serde(default = "default_cleanup_height_mm")]
-    header_height_mm: f32,
-    #[serde(default = "default_cleanup_height_mm")]
-    footer_height_mm: f32,
-}
-
-impl Default for CleanupConfig {
-    fn default() -> Self {
-        Self {
-            header_enabled: false,
-            footer_enabled: false,
-            header_height_mm: default_cleanup_height_mm(),
-            footer_height_mm: default_cleanup_height_mm(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,10 +109,6 @@ fn default_font_size() -> f32 {
 
 fn default_margin_mm() -> f32 {
     10.0
-}
-
-fn default_cleanup_height_mm() -> f32 {
-    18.0
 }
 
 fn default_align() -> String {
@@ -273,7 +254,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
 
     let cleaned = args.cleanup.header_enabled || args.cleanup.footer_enabled;
-    if args.header.is_none() && args.footer.is_none() && !cleaned {
+    if args.header.is_none() && args.footer.is_none() {
         fs::copy(work_input, output).context("复制 PDF 失败")?;
         cleanup_temp(normalized_path);
         cleanup_semantic_temp(semantic_deleted_path);
@@ -288,7 +269,6 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
 
     let overlay_pdf = build_overlay_pdf(
-        &args.cleanup,
         args.header.as_ref(),
         args.footer.as_ref(),
         &page_infos,
@@ -355,11 +335,14 @@ fn delete_standard_artifacts_if_requested(
             footer: args.cleanup.footer_enabled,
         },
     )?;
-    Ok(result.map(|(path, result)| (path, result.removed_count())))
+    Ok(result.map(|(path, result)| {
+        let removed_by_region = result.removed_header_count() + result.removed_footer_count();
+        debug_assert_eq!(removed_by_region, result.removed_count());
+        (path, removed_by_region)
+    }))
 }
 
 fn build_overlay_pdf(
-    cleanup: &CleanupConfig,
     header: Option<&OverlayTextConfig>,
     footer: Option<&OverlayTextConfig>,
     pages: &[PageSize],
@@ -372,7 +355,7 @@ fn build_overlay_pdf(
 
     for (index, size) in pages.iter().enumerate() {
         let current_page = page_start + index as u32;
-        let mut ops = cleanup_ops(cleanup, size);
+        let mut ops = Vec::new();
 
         if let Some(config) = header {
             let text = expand_placeholders(&config.text, current_page, total_pages);
@@ -426,42 +409,6 @@ impl OverlayFontCache {
 
         PdfFontHandle::Builtin(BuiltinFont::Helvetica)
     }
-}
-
-fn cleanup_ops(cleanup: &CleanupConfig, size: &PageSize) -> Vec<Op> {
-    let mut ops = Vec::new();
-    if cleanup.header_enabled {
-        let height = mm_to_pt(cleanup.header_height_mm).min(size.height_pt);
-        ops.extend(white_rect_ops(
-            0.0,
-            size.height_pt - height,
-            size.width_pt,
-            height,
-        ));
-    }
-    if cleanup.footer_enabled {
-        let height = mm_to_pt(cleanup.footer_height_mm).min(size.height_pt);
-        ops.extend(white_rect_ops(0.0, 0.0, size.width_pt, height));
-    }
-    ops
-}
-
-fn white_rect_ops(x: f32, y: f32, width: f32, height: f32) -> Vec<Op> {
-    let mut rect = Rect::from_xywh(Pt(x), Pt(y), Pt(width), Pt(height));
-    rect.mode = Some(PaintMode::Fill);
-    vec![
-        Op::SetFillColor {
-            col: Color::Rgb(Rgb {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                icc_profile: None,
-            }),
-        },
-        Op::DrawPolygon {
-            polygon: rect.to_polygon(),
-        },
-    ]
 }
 
 fn text_ops(font: PdfFontHandle, font_size: f32, x: f32, y: f32, text: String) -> Vec<Op> {
@@ -650,7 +597,6 @@ fn cleanup_semantic_temp(path: Option<(PathBuf, usize)>) {
 
 #[cfg(test)]
 mod tests {
-    use super::super::page_info::{A4_HEIGHT_PT, A4_WIDTH_PT};
     use super::*;
 
     #[test]
@@ -659,26 +605,6 @@ mod tests {
             expand_placeholders("{page}/{total} {range}", 13, 30),
             "13/30 13/30"
         );
-    }
-
-    #[test]
-    fn creates_cleanup_rectangles_for_header_and_footer() {
-        let ops = cleanup_ops(
-            &CleanupConfig {
-                header_enabled: true,
-                footer_enabled: true,
-                header_height_mm: 20.0,
-                footer_height_mm: 12.0,
-            },
-            &PageSize {
-                width_pt: A4_WIDTH_PT,
-                height_pt: A4_HEIGHT_PT,
-                raw_width_pt: A4_WIDTH_PT,
-                raw_height_pt: A4_HEIGHT_PT,
-                rotate: 0,
-            },
-        );
-        assert_eq!(ops.len(), 4);
     }
 
     #[test]

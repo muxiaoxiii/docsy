@@ -105,20 +105,22 @@
         <div class="block-title">删除已有页眉页脚</div>
         <div class="rule-grid">
           <div class="rule-item">
-            <label>清除页眉区域</label>
-            <el-switch v-model="cleanupHeaderEnabled" active-text="启用" inactive-text="关闭" />
+            <label>删除标准页眉</label>
+            <el-switch v-model="cleanupHeaderEnabled" active-text="删除" inactive-text="保留" />
           </div>
           <div class="rule-item">
-            <label>页眉清除高度 mm</label>
+            <label>页眉识别范围 mm</label>
             <el-input-number v-model="cleanupHeaderHeightMm" :min="4" :max="60" :step="1" :disabled="!cleanupHeaderEnabled" />
+            <span class="field-hint">只用于检测和预览，不遮盖原文</span>
           </div>
           <div class="rule-item">
-            <label>清除页脚区域</label>
-            <el-switch v-model="cleanupFooterEnabled" active-text="启用" inactive-text="关闭" />
+            <label>删除标准页脚</label>
+            <el-switch v-model="cleanupFooterEnabled" active-text="删除" inactive-text="保留" />
           </div>
           <div class="rule-item">
-            <label>页脚清除高度 mm</label>
+            <label>页脚识别范围 mm</label>
             <el-input-number v-model="cleanupFooterHeightMm" :min="4" :max="60" :step="1" :disabled="!cleanupFooterEnabled" />
+            <span class="field-hint">只用于检测和预览，不遮盖原文</span>
           </div>
         </div>
       </div>
@@ -457,12 +459,12 @@
           <el-input-number v-model="headerMarginMm" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
         </div>
         <div class="rule-item">
-          <label>替换旧页眉页脚</label>
-          <el-switch v-model="cleanupHeaderEnabled" active-text="清页眉" inactive-text="不清" />
+          <label>删除旧页眉</label>
+          <el-switch v-model="cleanupHeaderEnabled" active-text="删除标准页眉" inactive-text="保留" />
         </div>
         <div class="rule-item">
-          <label>清除页脚</label>
-          <el-switch v-model="cleanupFooterEnabled" active-text="清页脚" inactive-text="不清" />
+          <label>删除旧页脚</label>
+          <el-switch v-model="cleanupFooterEnabled" active-text="删除标准页脚" inactive-text="保留" />
         </div>
         <div class="rule-item">
           <label>页脚页码</label>
@@ -498,16 +500,7 @@
       </div>
       <template #footer>
         <el-button @click="headerFooterSettingsVisible = false">关闭</el-button>
-        <el-button
-          v-if="workflowMode === 'split'"
-          type="primary"
-          :loading="overlaying"
-          :disabled="!canApplySplitReplacement"
-          @click="applySplitHeaderFooterReplacement"
-        >
-          全部替换页眉页码
-        </el-button>
-        <el-button v-else type="primary" @click="applyHeaderFooterSettings">应用设置</el-button>
+        <el-button type="primary" @click="applyHeaderFooterSettings">保存并预览</el-button>
       </template>
     </el-dialog>
 
@@ -575,8 +568,6 @@
         @error="handlePreviewError"
       >
         <template #default>
-          <div v-if="showRulePreviewOverlays && cleanupHeaderEnabled" class="cleanup-zone cleanup-top" :style="cleanupHeaderStyle" />
-          <div v-if="showRulePreviewOverlays && cleanupFooterEnabled" class="cleanup-zone cleanup-bottom" :style="cleanupFooterStyle" />
           <div v-if="showRulePreviewOverlays && previewHeaderText" class="preview-text preview-header-text" :style="previewHeaderStyle">
             {{ previewHeaderText }}
           </div>
@@ -597,7 +588,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
@@ -618,7 +609,6 @@ import {
 } from '../composables/useEvidencePdfSession.js'
 import {
   bboxOverlayStyle,
-  cleanupZoneStyle,
   ptToMm,
   textOverlayStyle,
 } from '../composables/pdfPreviewCoordinates.js'
@@ -839,14 +829,6 @@ const previewFooterText = computed(() => {
     : selectedOverlayFile.value.pages || 1
   return expandPlaceholders(footerText.value, page, total)
 })
-
-const cleanupHeaderStyle = computed(() => ({
-  ...cleanupZoneStyle(cleanupHeaderHeightMm.value, previewData.value),
-}))
-
-const cleanupFooterStyle = computed(() => ({
-  ...cleanupZoneStyle(cleanupFooterHeightMm.value, previewData.value),
-}))
 
 const previewHeaderStyle = computed(() => textOverlayStyle('header', previewData.value, {
   align: headerAlign.value,
@@ -1355,9 +1337,11 @@ function openHeaderFooterSettings() {
   headerFooterSettingsVisible.value = true
 }
 
-function applyHeaderFooterSettings() {
+async function applyHeaderFooterSettings() {
   headerFooterSettingsVisible.value = false
   refreshPreview()
+  await nextTick()
+  renderTruePreview()
 }
 
 function applyReplacementPreset() {
@@ -2192,22 +2176,6 @@ h3 {
   width: 100%;
   height: auto;
   object-fit: contain;
-}
-
-.cleanup-zone {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  background: rgba(255, 255, 255, 0.76);
-  border: 1px dashed rgba(230, 126, 34, 0.85);
-}
-
-.cleanup-top {
-  top: 0;
-}
-
-.cleanup-bottom {
-  bottom: 0;
 }
 
 .preview-text {

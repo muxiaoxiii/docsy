@@ -23,6 +23,8 @@ pub struct DeleteHeaderFooterArtifactsResult {
     input_path: String,
     output_path: String,
     removed: usize,
+    removed_header: usize,
+    removed_footer: usize,
     pages_touched: usize,
 }
 
@@ -30,12 +32,45 @@ impl DeleteHeaderFooterArtifactsResult {
     pub(crate) fn removed_count(&self) -> usize {
         self.removed
     }
+
+    pub(crate) fn removed_header_count(&self) -> usize {
+        self.removed_header
+    }
+
+    pub(crate) fn removed_footer_count(&self) -> usize {
+        self.removed_footer
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HeaderFooterArtifactTargets {
     pub header: bool,
     pub footer: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ArtifactRemovalStats {
+    pub header: usize,
+    pub footer: usize,
+}
+
+impl ArtifactRemovalStats {
+    fn total(self) -> usize {
+        self.header + self.footer
+    }
+
+    fn add_region(&mut self, region: ArtifactRegion) {
+        match region {
+            ArtifactRegion::Header => self.header += 1,
+            ArtifactRegion::Footer => self.footer += 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ArtifactRegion {
+    Header,
+    Footer,
 }
 
 pub fn delete_header_footer_artifacts(
@@ -68,6 +103,8 @@ pub fn delete_header_footer_artifacts_file(
             input_path: input_path.to_string(),
             output_path: output_path.to_string(),
             removed: 0,
+            removed_header: 0,
+            removed_footer: 0,
             pages_touched: 0,
         });
     }
@@ -83,7 +120,7 @@ pub fn delete_header_footer_artifacts_file(
 
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
     let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
-    let mut removed = 0_usize;
+    let mut removed = ArtifactRemovalStats::default();
     let mut pages_touched = 0_usize;
 
     for page_id in page_ids {
@@ -94,7 +131,7 @@ pub fn delete_header_footer_artifacts_file(
         let properties = page_properties(&doc, page_id);
         let (filtered, removed_on_page) =
             remove_target_artifact_ranges(&content.operations, targets, &properties);
-        if removed_on_page == 0 {
+        if removed_on_page.total() == 0 {
             continue;
         }
         let encoded = Content {
@@ -104,7 +141,8 @@ pub fn delete_header_footer_artifacts_file(
         .context("编码删除标准页眉页脚后的内容流失败")?;
         doc.change_page_content(page_id, encoded)
             .context("写回删除标准页眉页脚后的内容流失败")?;
-        removed += removed_on_page;
+        removed.header += removed_on_page.header;
+        removed.footer += removed_on_page.footer;
         pages_touched += 1;
     }
 
@@ -115,7 +153,9 @@ pub fn delete_header_footer_artifacts_file(
     Ok(DeleteHeaderFooterArtifactsResult {
         input_path: input_path.to_string(),
         output_path: output_path.to_string(),
-        removed,
+        removed: removed.total(),
+        removed_header: removed.header,
+        removed_footer: removed.footer,
         pages_touched,
     })
 }
@@ -141,15 +181,15 @@ fn remove_target_artifact_ranges(
     operations: &[Operation],
     targets: HeaderFooterArtifactTargets,
     properties: &Dictionary,
-) -> (Vec<Operation>, usize) {
+) -> (Vec<Operation>, ArtifactRemovalStats) {
     let mut filtered = Vec::with_capacity(operations.len());
-    let mut removed = 0_usize;
+    let mut removed = ArtifactRemovalStats::default();
     let mut index = 0_usize;
 
     while index < operations.len() {
-        if is_target_artifact_start(&operations[index], targets, properties) {
+        if let Some(region) = target_artifact_region(&operations[index], targets, properties) {
             if let Some(end) = matching_marked_content_end(operations, index) {
-                removed += 1;
+                removed.add_region(region);
                 index = end + 1;
                 continue;
             }
@@ -180,27 +220,27 @@ fn is_marked_content_start(operation: &Operation) -> bool {
     operation.operator == "BMC" || operation.operator == "BDC"
 }
 
-fn is_target_artifact_start(
+fn target_artifact_region(
     operation: &Operation,
     targets: HeaderFooterArtifactTargets,
     properties: &Dictionary,
-) -> bool {
+) -> Option<ArtifactRegion> {
     if operation.operator != "BDC" {
-        return false;
+        return None;
     }
-    let Some(tag) = operation.operands.first().and_then(name_bytes) else {
-        return false;
-    };
+    let tag = operation.operands.first().and_then(name_bytes)?;
     if tag != b"Artifact" {
-        return false;
+        return None;
     }
-    let Some(property) = operation.operands.get(1) else {
-        return false;
-    };
-    let Some(subtype) = artifact_subtype(property, properties) else {
-        return false;
-    };
-    (targets.header && subtype == b"Header") || (targets.footer && subtype == b"Footer")
+    let property = operation.operands.get(1)?;
+    let subtype = artifact_subtype(property, properties)?;
+    if targets.header && subtype == b"Header" {
+        Some(ArtifactRegion::Header)
+    } else if targets.footer && subtype == b"Footer" {
+        Some(ArtifactRegion::Footer)
+    } else {
+        None
+    }
 }
 
 fn artifact_subtype<'a>(property: &'a Object, properties: &'a Dictionary) -> Option<&'a [u8]> {
@@ -324,7 +364,8 @@ mod tests {
             },
             &Dictionary::new(),
         );
-        assert_eq!(removed, 1);
+        assert_eq!(removed.total(), 1);
+        assert_eq!(removed.header, 1);
         assert_eq!(
             filtered
                 .iter()
@@ -357,7 +398,7 @@ mod tests {
             },
             &Dictionary::new(),
         );
-        assert_eq!(removed, 0);
+        assert_eq!(removed.total(), 0);
         assert_eq!(filtered.len(), operations.len());
     }
 
@@ -377,14 +418,15 @@ mod tests {
                 Object::Name(b"HF1".to_vec()),
             ],
         );
-        assert!(is_target_artifact_start(
+        assert!(target_artifact_region(
             &operation,
             HeaderFooterArtifactTargets {
                 header: true,
                 footer: false,
             },
             &properties
-        ));
+        )
+        .is_some());
     }
 
     #[test]
@@ -406,7 +448,7 @@ mod tests {
             },
             &Dictionary::new(),
         );
-        assert_eq!(removed, 0);
+        assert_eq!(removed.total(), 0);
         assert_eq!(filtered.len(), operations.len());
     }
 
