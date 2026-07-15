@@ -105,6 +105,18 @@ jobs:
       - name: Build package
         run: ${{ matrix.command }}
 
+      - name: Verify macOS package
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)"
+          DMG_PATH="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$APP_PATH"
+          test -n "$DMG_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          hdiutil verify "$DMG_PATH"
+
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
