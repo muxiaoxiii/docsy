@@ -60,12 +60,15 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
   return rangedFiles.map((file, index) => {
     const header = buildHeaderText(file, index, rules)
     const outputPath = buildOverlayOutputPath(file.path, outputDir)
+    const continuousFooter = rules.footerContinuous !== false
+    const pageStart = continuousFooter ? file.pageStart : 1
+    const jobTotalPages = continuousFooter ? total : file.pages || 1
     file.outputPath = outputPath
     return {
       inputPath: file.path,
       outputPath,
-      pageStart: file.pageStart,
-      totalPages: total,
+      pageStart,
+      totalPages: jobTotalPages,
       normalizeA4: rules.normalizeA4,
       a4Orientation: rules.a4Orientation,
       rasterDpi: rules.rasterDpi,
@@ -124,6 +127,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
       footerRule: {
         enabled: rules.footerEnabled,
         text: rules.footerText,
+        continuous: rules.footerContinuous !== false,
         align: rules.footerAlign,
         fontSize: rules.footerFontSize,
         marginMm: rules.footerMarginMm,

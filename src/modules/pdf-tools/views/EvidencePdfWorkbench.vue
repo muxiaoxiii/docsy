@@ -34,7 +34,7 @@
         </div>
       </div>
 
-      <div v-if="overlayFiles.length && !mergedImportPlan" class="session-summary">
+      <div v-if="showSessionSummary" class="session-summary">
         <div class="summary-item">
           <span>证据文件</span>
           <strong>{{ overlayFiles.length }}</strong>
@@ -53,10 +53,29 @@
         </div>
       </div>
 
-      <div v-if="overlayFiles.length && !mergedImportPlan" class="preset-bar">
-        <el-button size="small" @click="applyStandardEvidencePreset">常规证据包</el-button>
-        <el-button size="small" @click="applyCleanupPreset">替换旧页眉页码</el-button>
-        <el-button size="small" @click="applySplitOnlyPreset">仅输出单独证据文件</el-button>
+      <div v-if="showPresetBar" class="preset-bar">
+        <el-button size="small" type="primary" @click="openHeaderFooterSettings">替换页眉页码</el-button>
+      </div>
+
+      <div v-if="showSplitResultActions" class="split-result-actions">
+        <div>
+          <div class="block-title">拆分后处理</div>
+          <p class="hint">批量替换页眉页码会输出到新文件夹，不覆盖原拆分文件。</p>
+          <p class="path-text">输出文件夹：{{ splitReplacementOutputDirValue }}</p>
+        </div>
+        <div class="plan-actions">
+          <el-button size="small" @click="selectSplitReplacementOutputDir">输出目录</el-button>
+          <el-button size="small" @click="openHeaderFooterSettings">设置页眉页码</el-button>
+          <el-button
+            size="small"
+            type="primary"
+            :loading="overlaying"
+            :disabled="!canApplySplitReplacement"
+            @click="applySplitHeaderFooterReplacement"
+          >
+            全部替换页眉页码
+          </el-button>
+        </div>
       </div>
 
       <div v-if="showProcessingControls" class="rule-block">
@@ -240,15 +259,11 @@
             </div>
             <div class="rule-item">
               <label>后缀</label>
-              <el-input v-model="splitNameSuffix" placeholder="可选" />
+              <el-input v-model="splitNameSuffix" placeholder="例如 [YYYYMMDD]" />
             </div>
             <div class="rule-item">
-              <label>日期</label>
-              <el-switch v-model="splitNameDateEnabled" active-text="加入" inactive-text="不加" />
-            </div>
-            <div class="rule-item" v-if="splitNameDateEnabled">
-              <label>日期文本</label>
-              <el-input v-model="splitNameDateText" placeholder="YYYYMMDD" />
+              <label>日期值</label>
+              <el-input v-model="splitNameDateValue" placeholder="YYYYMMDD" />
             </div>
             <div class="rule-item">
               <label>分隔符</label>
@@ -370,11 +385,17 @@
         @row-click="selectPreviewRow"
       >
         <el-table-column type="index" label="#" width="44" />
-        <el-table-column prop="name" label="文件" min-width="180" show-overflow-tooltip />
+        <el-table-column label="文件" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <button class="file-link" type="button" @click.stop="openEvidenceFile(row)">
+              {{ row.name }}
+            </button>
+          </template>
+        </el-table-column>
         <el-table-column label="页眉" min-width="170">
           <template #default="{ row, $index }">
-            <el-input v-if="headerMode === 'per_file'" v-model="row.header" size="small" @click.stop />
-            <span v-else class="table-text">{{ rowHeaderPreview(row, $index) || '-' }}</span>
+            <el-input v-if="workflowMode !== 'split' && headerMode === 'per_file'" v-model="row.header" size="small" @click.stop />
+            <span v-else class="table-text">{{ displayRowHeader(row, $index) || '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="页数" width="70">
@@ -401,6 +422,95 @@
       </el-table>
     </section>
 
+    <el-dialog v-model="headerFooterSettingsVisible" title="替换页眉页码" width="720px" destroy-on-close>
+      <div class="dialog-rule-grid">
+        <div class="rule-item">
+          <label>页眉来源</label>
+          <el-select v-model="headerMode">
+            <el-option label="不插入页眉" value="none" />
+            <el-option label="文件名" value="filename" />
+            <el-option label="按证据列表名称" value="per_file" />
+            <el-option label="自定义文本" value="custom" />
+            <el-option label="序号（证据1）" value="seq" />
+            <el-option label="中文序号（证据一）" value="seq_cn" />
+            <el-option label="固定前缀+序号" value="prefix_seq" />
+          </el-select>
+        </div>
+        <div class="rule-item" v-if="headerMode === 'custom' || headerMode === 'prefix_seq'">
+          <label>{{ headerMode === 'custom' ? '页眉文本' : '固定前缀' }}</label>
+          <el-input v-model="headerText" />
+        </div>
+        <div class="rule-item">
+          <label>页眉位置</label>
+          <el-select v-model="headerAlign" :disabled="headerMode === 'none'">
+            <el-option label="居中" value="center" />
+            <el-option label="左侧" value="left" />
+            <el-option label="右侧" value="right" />
+          </el-select>
+        </div>
+        <div class="rule-item">
+          <label>页眉字号</label>
+          <el-input-number v-model="headerFontSize" :min="6" :max="24" :step="1" :disabled="headerMode === 'none'" />
+        </div>
+        <div class="rule-item">
+          <label>页眉距顶 mm</label>
+          <el-input-number v-model="headerMarginMm" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
+        </div>
+        <div class="rule-item">
+          <label>替换旧页眉页脚</label>
+          <el-switch v-model="cleanupHeaderEnabled" active-text="清页眉" inactive-text="不清" />
+        </div>
+        <div class="rule-item">
+          <label>清除页脚</label>
+          <el-switch v-model="cleanupFooterEnabled" active-text="清页脚" inactive-text="不清" />
+        </div>
+        <div class="rule-item">
+          <label>页脚页码</label>
+          <el-switch v-model="footerEnabled" active-text="启用" inactive-text="关闭" />
+        </div>
+        <div class="rule-item">
+          <label>页码方式</label>
+          <el-select v-model="footerContinuous" :disabled="!footerEnabled">
+            <el-option :value="true" label="拼接连续页码" />
+            <el-option :value="false" label="每个文件单独页码" />
+          </el-select>
+        </div>
+        <div class="rule-item">
+          <label>页脚格式</label>
+          <el-input v-model="footerText" :disabled="!footerEnabled" />
+        </div>
+        <div class="rule-item">
+          <label>页脚位置</label>
+          <el-select v-model="footerAlign" :disabled="!footerEnabled">
+            <el-option label="居中" value="center" />
+            <el-option label="左侧" value="left" />
+            <el-option label="右侧" value="right" />
+          </el-select>
+        </div>
+        <div class="rule-item">
+          <label>页脚字号</label>
+          <el-input-number v-model="footerFontSize" :min="6" :max="24" :step="1" :disabled="!footerEnabled" />
+        </div>
+        <div class="rule-item">
+          <label>页脚距底 mm</label>
+          <el-input-number v-model="footerMarginMm" :min="3" :max="60" :step="1" :disabled="!footerEnabled" />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="headerFooterSettingsVisible = false">关闭</el-button>
+        <el-button
+          v-if="workflowMode === 'split'"
+          type="primary"
+          :loading="overlaying"
+          :disabled="!canApplySplitReplacement"
+          @click="applySplitHeaderFooterReplacement"
+        >
+          全部替换页眉页码
+        </el-button>
+        <el-button v-else type="primary" @click="applyHeaderFooterSettings">应用设置</el-button>
+      </template>
+    </el-dialog>
+
     <section class="preview-panel">
       <div class="preview-head">
         <div>
@@ -415,12 +525,12 @@
             <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd">设为结束页</el-button>
           </template>
           <el-input-number v-model="previewPage" :min="1" :max="previewMaxPage" :disabled="!activePreviewFilePath" size="small" />
-          <el-button size="small" :disabled="!activePreviewFilePath" @click="refreshPreview">刷新底图</el-button>
+          <el-button size="small" :disabled="!activePreviewFilePath" @click="refreshPreview">重新渲染当前页</el-button>
           <el-button size="small" :loading="detectingHeaderFooter" :disabled="!selectedOverlayFile || Boolean(mergedImportPlan)" @click="detectHeaderFooter">
             检测
           </el-button>
           <el-button size="small" type="primary" :loading="truePreviewLoading" :disabled="!selectedOverlayFile || Boolean(mergedImportPlan)" @click="renderTruePreview">
-            真实预览
+            预览替换效果
           </el-button>
         </div>
       </div>
@@ -544,11 +654,12 @@ const selectedOverlayIndex = ref(0)
 const selectedMergedImportIndex = ref(0)
 const mergedImportPlan = ref(null)
 const splitNamePrefix = ref('')
-const splitNameSuffix = ref('')
-const splitNameDateEnabled = ref(false)
-const splitNameDateText = ref(todayCompact())
+const splitNameSuffix = ref('[YYYYMMDD]')
+const splitNameDateValue = ref(todayCompact())
 const splitNameSeparator = ref('-')
 const splitNameCustomSeparator = ref('')
+const headerFooterSettingsVisible = ref(false)
+const splitReplacementOutputDir = ref('')
 
 const normalizeA4 = ref(false)
 const a4Orientation = ref('auto')
@@ -580,6 +691,7 @@ const headerFontSize = ref(10)
 const headerMarginMm = ref(10)
 const footerEnabled = ref(true)
 const footerText = ref('{page}/{total}')
+const footerContinuous = ref(true)
 const footerAlign = ref('center')
 const footerFontSize = ref(9)
 const footerMarginMm = ref(10)
@@ -624,7 +736,11 @@ const firstHeaderPreview = computed(() => {
 const firstFooterPreview = computed(() => {
   const first = overlayRows.value[0]
   if (!first || !footerEnabled.value || !footerText.value || !totalOverlayPages.value) return ''
-  return expandPlaceholders(footerText.value, first.pageStart || 1, totalOverlayPages.value)
+  return expandPlaceholders(
+    footerText.value,
+    footerContinuous.value ? first.pageStart || 1 : 1,
+    footerContinuous.value ? totalOverlayPages.value : first.pages || 1,
+  )
 })
 const processingNotes = computed(() => {
   const notes = []
@@ -646,6 +762,24 @@ const showProcessingControls = computed(() =>
   !mergedImportPlan.value &&
   workflowMode.value !== 'split'
 )
+const showSessionSummary = computed(() =>
+  overlayFiles.value.length > 0 &&
+  !mergedImportPlan.value &&
+  workflowMode.value !== 'split'
+)
+const showPresetBar = computed(() =>
+  overlayFiles.value.length > 0 &&
+  !mergedImportPlan.value &&
+  workflowMode.value !== 'split'
+)
+const showSplitResultActions = computed(() =>
+  workflowMode.value === 'split' &&
+  overlayFiles.value.length > 0 &&
+  !mergedImportPlan.value
+)
+const splitReplacementOutputDirValue = computed(() =>
+  splitReplacementOutputDir.value || defaultSplitReplacementOutputDir()
+)
 const processButtonText = computed(() =>
   workflowMode.value === 'merge' ? '执行合并处理' : '执行证据处理'
 )
@@ -653,6 +787,11 @@ const canApplyOverlay = computed(() =>
   overlayFiles.value.length > 0 &&
   totalOverlayPages.value > 0 &&
   (normalizeA4.value || removeAnnotations.value || cleanupHeaderEnabled.value || cleanupFooterEnabled.value || headerMode.value !== 'none' || footerEnabled.value)
+)
+const canApplySplitReplacement = computed(() =>
+  showSplitResultActions.value &&
+  totalOverlayPages.value > 0 &&
+  !overlaying.value
 )
 
 const currentRules = computed(() => ({
@@ -672,6 +811,7 @@ const currentRules = computed(() => ({
   headerMarginMm: headerMarginMm.value,
   footerEnabled: footerEnabled.value,
   footerText: footerText.value,
+  footerContinuous: footerContinuous.value,
   footerAlign: footerAlign.value,
   footerFontSize: footerFontSize.value,
   footerMarginMm: footerMarginMm.value,
@@ -687,8 +827,13 @@ const previewHeaderText = computed(() => {
 
 const previewFooterText = computed(() => {
   if (!selectedOverlayFile.value || !footerEnabled.value || !footerText.value) return ''
-  const page = selectedOverlayFile.value.pageStart + previewPage.value - 1
-  return expandPlaceholders(footerText.value, page, totalOverlayPages.value)
+  const page = footerContinuous.value
+    ? selectedOverlayFile.value.pageStart + previewPage.value - 1
+    : previewPage.value
+  const total = footerContinuous.value
+    ? totalOverlayPages.value
+    : selectedOverlayFile.value.pages || 1
+  return expandPlaceholders(footerText.value, page, total)
 })
 
 const cleanupHeaderStyle = computed(() => ({
@@ -756,12 +901,14 @@ function applyWorkflowDefaults() {
   if (workflowMode.value === 'split') {
     headerMode.value = 'none'
     footerEnabled.value = false
+    footerContinuous.value = true
     outputMode.value = 'files_only'
     mergeFileName.value = 'split_evidence.pdf'
     return
   }
   headerMode.value = 'filename'
   footerEnabled.value = true
+  footerContinuous.value = true
   outputMode.value = 'files_and_merge'
   mergeFileName.value = 'merged_evidence.pdf'
 }
@@ -919,14 +1066,14 @@ async function executeMergedImportPlan() {
       ElMessage.warning('没有生成可导入的拆分文件')
       return
     }
-    const itemByRange = new Map(items.map((item) => [sourceRangeKey(item), item]))
+    const rawItemByRange = new Map((mergedImportPlan.value.items || []).map((item) => [sourcePageRangeKey(item), item]))
     overlayFiles.value = outputs.map((output) => {
-      const sourceItem = itemByRange.get(sourceRangeKey(output)) || {}
+      const sourceItem = rawItemByRange.get(sourcePageRangeKey(output)) || {}
       const pages = Math.max(0, Number(output.pageEnd || 0) - Number(output.pageStart || 0) + 1)
       const needsReview = sourceItem.source === 'fallback' || sourceItem.source === 'manual' || hasSplitWarning(split.data.warnings || [], output)
       return {
         ...createEvidenceFile(output.outputPath),
-        header: output.name,
+        header: sourceItem.name || output.name,
         pages,
         sourcePageStart: Number(output.pageStart || sourceItem.pageStart || 0),
         sourcePageEnd: Number(output.pageEnd || sourceItem.pageEnd || 0),
@@ -937,7 +1084,9 @@ async function executeMergedImportPlan() {
       }
     })
     overlayOutputDir.value = mergedImportPlan.value.outputDir
+    splitReplacementOutputDir.value = ''
     selectedOverlayIndex.value = 0
+    previewPage.value = 1
     applyWorkflowDefaults()
     mergedImportPlan.value = null
     refreshPreview()
@@ -1007,10 +1156,9 @@ function splitOutputNamePreview(row, index) {
 function formatSplitOutputName(row, index) {
   const base = String(row?.name || defaultMergedImportName('', index)).trim() || defaultMergedImportName('', index)
   const parts = [
-    splitNamePrefix.value,
-    splitNameDateEnabled.value ? splitNameDateText.value : '',
+    expandDateTokens(splitNamePrefix.value),
     base,
-    splitNameSuffix.value,
+    expandDateTokens(splitNameSuffix.value),
   ]
     .map((part) => String(part || '').trim())
     .filter(Boolean)
@@ -1027,6 +1175,33 @@ function todayCompact() {
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   const dd = String(date.getDate()).padStart(2, '0')
   return `${yyyy}${mm}${dd}`
+}
+
+function expandDateTokens(value) {
+  return String(value || '').replace(/\[([^\]]+)\]/g, (match, token) => {
+    if (token !== '日期' && !/[YMDymd]/.test(token)) return match
+    const pattern = token === '日期' ? 'YYYYMMDD' : token
+    return formatDateToken(pattern, splitNameDateValue.value)
+  })
+}
+
+function formatDateToken(pattern, value) {
+  const digits = String(value || '').replace(/\D/g, '')
+  const fallback = todayCompact()
+  const normalized = digits.length >= 8 ? digits.slice(0, 8) : fallback
+  const yyyy = normalized.slice(0, 4)
+  const yy = yyyy.slice(2)
+  const mm = normalized.slice(4, 6)
+  const dd = normalized.slice(6, 8)
+  return String(pattern || 'YYYYMMDD')
+    .replaceAll('YYYY', yyyy)
+    .replaceAll('yyyy', yyyy)
+    .replaceAll('YY', yy)
+    .replaceAll('yy', yy)
+    .replaceAll('MM', mm)
+    .replaceAll('mm', mm)
+    .replaceAll('DD', dd)
+    .replaceAll('dd', dd)
 }
 
 function buildManualMergedImportPlan(inputPath, outputDir, total, warnings = []) {
@@ -1143,8 +1318,8 @@ function mergedImportScanZoneMm(value) {
   return Math.max(25, Math.min(60, Number(value || 0) || 25))
 }
 
-function sourceRangeKey(item) {
-  return `${Number(item.pageStart || 0)}-${Number(item.pageEnd || 0)}-${item.name || ''}`
+function sourcePageRangeKey(item) {
+  return `${Number(item.pageStart || 0)}-${Number(item.pageEnd || 0)}`
 }
 
 function hasSplitWarning(warnings, output) {
@@ -1164,6 +1339,25 @@ async function openPlannedOutputDir() {
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开输出文件夹')
   }
+}
+
+async function openEvidenceFile(row) {
+  const path = row?.outputPath || row?.path
+  if (!path) return
+  const result = await tauriCallSafe('open_path', { path })
+  if (!result.ok) {
+    ElMessage.error(result.error || '无法打开 PDF 文件')
+  }
+}
+
+async function selectSplitReplacementOutputDir() {
+  const selected = await open({ directory: true })
+  if (selected) splitReplacementOutputDir.value = selected
+}
+
+function defaultSplitReplacementOutputDir() {
+  const base = overlayOutputDir.value || parentDir(overlayFiles.value[0]?.path || '.')
+  return `${base}/页眉页码替换`
 }
 
 async function refreshOverlayPageCounts() {
@@ -1190,16 +1384,29 @@ function refreshPreview() {
   previewReloadKey.value += 1
 }
 
-function applyStandardEvidencePreset() {
+function openHeaderFooterSettings() {
+  ensureReplacementPreset()
+  headerFooterSettingsVisible.value = true
+}
+
+function applyHeaderFooterSettings() {
+  headerFooterSettingsVisible.value = false
+  refreshPreview()
+}
+
+function applyReplacementPreset() {
   normalizeA4.value = false
   removeAnnotations.value = false
-  cleanupHeaderEnabled.value = false
-  cleanupFooterEnabled.value = false
-  headerMode.value = 'filename'
+  cleanupHeaderEnabled.value = true
+  cleanupFooterEnabled.value = true
+  cleanupHeaderHeightMm.value = 18
+  cleanupFooterHeightMm.value = 18
+  headerMode.value = workflowMode.value === 'split' ? 'per_file' : 'filename'
   headerAlign.value = 'right'
   headerFontSize.value = 10
   headerMarginMm.value = 10
   footerEnabled.value = true
+  footerContinuous.value = true
   footerText.value = '{page}/{total}'
   footerAlign.value = 'center'
   footerFontSize.value = 9
@@ -1208,25 +1415,77 @@ function applyStandardEvidencePreset() {
   refreshPreview()
 }
 
-function applyCleanupPreset() {
-  cleanupHeaderEnabled.value = true
-  cleanupFooterEnabled.value = true
-  cleanupHeaderHeightMm.value = 18
-  cleanupFooterHeightMm.value = 18
-  headerMode.value = 'filename'
-  headerAlign.value = 'right'
-  footerEnabled.value = true
-  footerText.value = '{page}/{total}'
-  outputMode.value = 'files_and_merge'
-  refreshPreview()
+function hasReplacementRule() {
+  return cleanupHeaderEnabled.value ||
+    cleanupFooterEnabled.value ||
+    headerMode.value !== 'none' ||
+    footerEnabled.value
 }
 
-function applySplitOnlyPreset() {
-  outputMode.value = 'files_only'
-  headerMode.value = 'filename'
-  footerEnabled.value = true
-  footerText.value = '{page}/{total}'
+function ensureReplacementPreset() {
+  if (!hasReplacementRule()) {
+    applyReplacementPreset()
+  }
+}
+
+async function applySplitHeaderFooterReplacement() {
+  if (!canApplySplitReplacement.value) return
+  ensureReplacementPreset()
+  headerFooterSettingsVisible.value = false
+  overlaying.value = true
+  const outputDir = splitReplacementOutputDirValue.value
+  const rules = {
+    ...currentRules.value,
+    outputMode: 'files_only',
+    mergeAfterProcessing: false,
+  }
+  const payload = buildEvidencePdfRulePayload(overlayRows.value, rules, outputDir)
+  overlayRows.value.forEach((file) => {
+    file.statusText = '替换中'
+    file.statusType = 'warning'
+  })
+
+  const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+  if (!result.ok) {
+    ElMessage.error(result.error || '页眉页码替换失败')
+    overlayFiles.value.forEach((file) => {
+      file.statusText = '失败'
+      file.statusType = 'danger'
+    })
+    overlaying.value = false
+    return
+  }
+
+  const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
+  const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
+  overlayFiles.value.forEach((file) => {
+    const success = successByInput.get(file.path)
+    const failed = failedByInput.get(file.path)
+    if (success) {
+      file.path = success.outputPath
+      file.outputPath = success.outputPath
+      file.name = fileName(success.outputPath)
+      file.statusText = '已替换'
+      file.statusType = 'success'
+    } else if (failed) {
+      file.statusText = '失败'
+      file.statusType = 'danger'
+    }
+  })
+  overlayOutputDir.value = outputDir
+  splitReplacementOutputDir.value = outputDir
+  selectedOverlayIndex.value = 0
+  previewPage.value = 1
   refreshPreview()
+
+  const failedCount = result.data.failed?.length || 0
+  const successCount = result.data.results?.length || 0
+  if (failedCount) {
+    ElMessage.warning(`已替换 ${successCount} 个，失败 ${failedCount} 个`)
+  } else {
+    ElMessage.success(`已替换 ${successCount} 个 PDF`)
+  }
+  overlaying.value = false
 }
 
 function handlePreviewLoaded(info) {
@@ -1603,11 +1862,23 @@ function detectionBoxStyle(candidate) {
 
 function selectPreviewRow(row) {
   const index = overlayRows.value.findIndex((item) => item.path === row.path)
-  if (index >= 0) selectedOverlayIndex.value = index
+  if (index >= 0) {
+    selectedOverlayIndex.value = index
+    previewPage.value = 1
+    truePreview.value = null
+    previewReloadKey.value += 1
+  }
 }
 
 function rowHeaderPreview(row, index) {
   return buildSessionHeaderText(row, index, currentRules.value)
+}
+
+function displayRowHeader(row, index) {
+  if (workflowMode.value === 'split') {
+    return row?.header || ''
+  }
+  return rowHeaderPreview(row, index)
 }
 
 function sourceRangeText(row) {
@@ -1815,6 +2086,10 @@ h3 {
   margin: 8px 0 12px;
 }
 
+.split-name-options {
+  margin-bottom: 10px;
+}
+
 .detection-plan,
 .merged-import-plan {
   border: 1px solid #dcdfe6;
@@ -1850,6 +2125,28 @@ h3 {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.file-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  color: #2563eb;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.file-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.dialog-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .table-text {

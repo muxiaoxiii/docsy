@@ -70,6 +70,23 @@ describe('Evidence PDF session helpers', () => {
     expect(items[1].outputPath).toBe('/out/付款_processed.pdf')
   })
 
+  it('can number footers per file instead of continuously', () => {
+    const files = [
+      { ...createEvidenceFile('/case/合同.pdf'), pages: 2, header: '证据1 合同' },
+      { ...createEvidenceFile('/case/付款.pdf'), pages: 4, header: '证据2 付款' },
+    ]
+
+    const items = buildHeaderFooterItems(files, {
+      ...baseRules,
+      footerContinuous: false,
+    }, '/out')
+
+    expect(items[0].pageStart).toBe(1)
+    expect(items[0].totalPages).toBe(2)
+    expect(items[1].pageStart).toBe(1)
+    expect(items[1].totalPages).toBe(4)
+  })
+
   it('builds a business-level evidence PDF rules payload', () => {
     const files = [
       { ...createEvidenceFile('/case/合同.pdf'), pages: 2, header: '证据1 合同' },
