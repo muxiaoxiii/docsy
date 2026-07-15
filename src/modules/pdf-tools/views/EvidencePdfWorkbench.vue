@@ -259,7 +259,7 @@
             </div>
             <div class="rule-item">
               <label>后缀</label>
-              <el-input v-model="splitNameSuffix" placeholder="例如 [YYYYMMDD]" />
+              <el-input v-model="splitNameSuffix" placeholder="例如 [YYYYMMDD]、-[YYYYMMDD]、[##]" />
             </div>
             <div class="rule-item">
               <label>日期值</label>
@@ -622,6 +622,10 @@ import {
   ptToMm,
   textOverlayStyle,
 } from '../composables/pdfPreviewCoordinates.js'
+import {
+  formatSplitFileName,
+  todayCompact,
+} from '../composables/splitFileName.js'
 import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 
@@ -1155,53 +1159,15 @@ function splitOutputNamePreview(row, index) {
 
 function formatSplitOutputName(row, index) {
   const base = String(row?.name || defaultMergedImportName('', index)).trim() || defaultMergedImportName('', index)
-  const parts = [
-    expandDateTokens(splitNamePrefix.value),
+  return formatSplitFileName({
     base,
-    expandDateTokens(splitNameSuffix.value),
-  ]
-    .map((part) => String(part || '').trim())
-    .filter(Boolean)
-  return parts.join(splitFileNameSeparator()) || base
-}
-
-function splitFileNameSeparator() {
-  return splitNameSeparator.value === 'custom' ? splitNameCustomSeparator.value : splitNameSeparator.value
-}
-
-function todayCompact() {
-  const date = new Date()
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
-  return `${yyyy}${mm}${dd}`
-}
-
-function expandDateTokens(value) {
-  return String(value || '').replace(/\[([^\]]+)\]/g, (match, token) => {
-    if (token !== '日期' && !/[YMDymd]/.test(token)) return match
-    const pattern = token === '日期' ? 'YYYYMMDD' : token
-    return formatDateToken(pattern, splitNameDateValue.value)
+    index,
+    prefix: splitNamePrefix.value,
+    suffix: splitNameSuffix.value,
+    dateValue: splitNameDateValue.value,
+    separator: splitNameSeparator.value,
+    customSeparator: splitNameCustomSeparator.value,
   })
-}
-
-function formatDateToken(pattern, value) {
-  const digits = String(value || '').replace(/\D/g, '')
-  const fallback = todayCompact()
-  const normalized = digits.length >= 8 ? digits.slice(0, 8) : fallback
-  const yyyy = normalized.slice(0, 4)
-  const yy = yyyy.slice(2)
-  const mm = normalized.slice(4, 6)
-  const dd = normalized.slice(6, 8)
-  return String(pattern || 'YYYYMMDD')
-    .replaceAll('YYYY', yyyy)
-    .replaceAll('yyyy', yyyy)
-    .replaceAll('YY', yy)
-    .replaceAll('yy', yy)
-    .replaceAll('MM', mm)
-    .replaceAll('mm', mm)
-    .replaceAll('DD', dd)
-    .replaceAll('dd', dd)
 }
 
 function buildManualMergedImportPlan(inputPath, outputDir, total, warnings = []) {
