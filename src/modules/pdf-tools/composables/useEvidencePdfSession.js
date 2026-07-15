@@ -21,6 +21,8 @@ export function createEvidenceFile(path) {
     existingFooterText: '',
     existingHeaderNormalizedText: '',
     existingFooterNormalizedText: '',
+    existingHeaderBBox: null,
+    existingFooterBBox: null,
     existingHeaderPageStart: 1,
     existingHeaderPageEnd: 0,
     existingFooterPageStart: 1,

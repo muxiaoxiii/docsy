@@ -560,10 +560,28 @@
         @error="handlePreviewError"
       >
         <template #default>
-          <div v-if="showRulePreviewOverlays && previewHeaderText" class="preview-text preview-header-text" :style="previewHeaderStyle">
+          <div
+            v-for="marker in deletionPreviewMarkers"
+            :key="marker.key"
+            class="delete-preview-marker"
+            :style="marker.style"
+          >
+            <span>{{ marker.label }}</span>
+          </div>
+          <div
+            v-if="showRulePreviewOverlays && previewHeaderText"
+            class="preview-text preview-header-text"
+            :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
+            :style="previewHeaderStyle"
+          >
             {{ previewHeaderText }}
           </div>
-          <div v-if="showRulePreviewOverlays && previewFooterText" class="preview-text preview-footer-text" :style="previewFooterStyle">
+          <div
+            v-if="showRulePreviewOverlays && previewFooterText"
+            class="preview-text preview-footer-text"
+            :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
+            :style="previewFooterStyle"
+          >
             {{ previewFooterText }}
           </div>
         </template>
@@ -596,7 +614,7 @@ import {
   stripPdf,
   totalPages,
 } from '../composables/useEvidencePdfSession.js'
-import { textOverlayStyle } from '../composables/pdfPreviewCoordinates.js'
+import { bboxOverlayStyle, textOverlayStyle } from '../composables/pdfPreviewCoordinates.js'
 import {
   formatSplitFileName,
   todayCompact,
@@ -853,6 +871,18 @@ const truePreviewFrameStyle = computed(() => ({
     ? `${truePreview.value.widthPx} / ${truePreview.value.heightPx}`
     : `${truePreview.value?.widthPt || 595.28} / ${truePreview.value?.heightPt || 841.89}`,
 }))
+const deletionPreviewMarkers = computed(() => {
+  if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value) return []
+  const file = selectedOverlayFile.value
+  const markers = []
+  if (file.removeExistingHeader && isPageInDetectedRange(previewPage.value, file.existingHeaderPageStart, file.existingHeaderPageEnd)) {
+    markers.push(buildDeletionPreviewMarker(file.existingHeaderBBox, 'header', '删除旧页眉'))
+  }
+  if (file.removeExistingFooter && isPageInDetectedRange(previewPage.value, file.existingFooterPageStart, file.existingFooterPageEnd)) {
+    markers.push(buildDeletionPreviewMarker(file.existingFooterBBox, 'footer', '删除旧页脚'))
+  }
+  return markers.filter(Boolean)
+})
 const headerFooterOverflowWarnings = computed(() => {
   const warnings = []
   const widthPt = previewData.value?.widthPt || 595.28
@@ -1622,6 +1652,8 @@ function applyDetectionResultToFile(file, data) {
   file.existingFooterText = footer?.text || footer?.normalizedText || ''
   file.existingHeaderNormalizedText = header?.normalizedText || header?.text || ''
   file.existingFooterNormalizedText = footer?.normalizedText || footer?.text || ''
+  file.existingHeaderBBox = header?.bbox || null
+  file.existingFooterBBox = footer?.bbox || null
   const headerTargetRange = candidateTargetRange(header, file.pages)
   const footerTargetRange = candidateTargetRange(footer, file.pages)
   file.existingHeaderPageStart = headerTargetRange.start
@@ -1648,6 +1680,36 @@ function estimateTextWidthPt(text, fontSize) {
   return String(text || '')
     .split('')
     .reduce((sum, ch) => sum + estimatePreviewCharWidth(ch) * Number(fontSize || 10), 0)
+}
+
+function isPageInDetectedRange(page, start, end) {
+  const current = Number(page || 1)
+  const rangeStart = Number(start || 1)
+  const rangeEnd = Number(end || rangeStart)
+  return current >= rangeStart && current <= rangeEnd
+}
+
+function buildDeletionPreviewMarker(bbox, kind, label) {
+  const style = bbox
+    ? bboxOverlayStyle(bbox)
+    : fallbackDeletionMarkerStyle(kind)
+  return {
+    key: `${kind}-${label}`,
+    label,
+    style,
+  }
+}
+
+function fallbackDeletionMarkerStyle(kind) {
+  const top = kind === 'header'
+    ? `${Math.max(1, cleanupHeaderHeightMm.value / 3)}%`
+    : `${100 - Math.max(4, cleanupFooterHeightMm.value / 3)}%`
+  return {
+    left: '8%',
+    top,
+    width: '84%',
+    height: '20px',
+  }
 }
 
 function estimatePreviewCharWidth(ch) {
@@ -2248,6 +2310,44 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.preview-text.with-delete-background {
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.delete-preview-marker {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  min-width: 56px;
+  min-height: 16px;
+  padding: 1px 4px;
+  border: 1px dashed #d93025;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #b42318;
+  font-size: 11px;
+  line-height: 1.2;
+  text-decoration: line-through;
+  pointer-events: none;
+}
+
+.delete-preview-marker::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 50%;
+  border-top: 2px solid rgba(217, 48, 37, 0.72);
+  transform: translateY(-50%);
+}
+
+.delete-preview-marker span {
+  position: relative;
+  z-index: 1;
 }
 
 .preview-error {
