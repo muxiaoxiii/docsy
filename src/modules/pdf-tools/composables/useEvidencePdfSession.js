@@ -8,6 +8,9 @@ export function createEvidenceFile(path) {
     path,
     name,
     header: stripPdf(name),
+    footer: null,
+    headerEdited: false,
+    footerEdited: false,
     pages: 0,
     pageStart: 1,
     pageEnd: 0,
@@ -46,7 +49,7 @@ export function pageRangeText(file) {
 export function buildHeaderText(file, index, rules) {
   if (rules.headerMode === 'none') return ''
   let base = ''
-  if (rules.headerMode === 'per_file') base = file.header || stripPdf(file.name)
+  if (rules.headerMode === 'per_file') base = file.header ?? stripPdf(file.name)
   else if (rules.headerMode === 'custom') base = rules.headerText || stripPdf(file.name)
   else if (rules.headerMode === 'seq') base = `证据${index + 1}`
   else if (rules.headerMode === 'seq_cn') base = `证据${toChineseNumber(index + 1)}`
@@ -80,6 +83,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const continuousFooter = rules.footerContinuous !== false
     const pageStart = continuousFooter ? file.pageStart : 1
     const jobTotalPages = continuousFooter ? total : file.pages || 1
+    const footerText = file.footer ?? rules.footerText
     file.outputPath = outputPath
     return {
       inputPath: file.path,
@@ -103,8 +107,8 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         offsetXMm: rules.headerOffsetXMm || 0,
         color: rules.headerColor || '#000000',
       } : null,
-      footer: rules.footerEnabled && rules.footerText ? {
-        text: rules.footerText,
+      footer: rules.footerEnabled && footerText ? {
+        text: footerText,
         fontSize: rules.footerFontSize,
         marginMm: rules.footerMarginMm,
         align: rules.footerAlign,

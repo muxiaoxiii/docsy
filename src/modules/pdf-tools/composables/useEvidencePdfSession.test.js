@@ -70,6 +70,24 @@ describe('Evidence PDF session helpers', () => {
     expect(items[1].outputPath).toBe('/out/付款_processed.pdf')
   })
 
+  it('keeps an intentionally blank per-file header', () => {
+    const file = { ...createEvidenceFile('/case/合同.pdf'), header: '' }
+
+    expect(buildHeaderText(file, 0, baseRules)).toBe('')
+  })
+
+  it('supports per-file footer overrides including blank values', () => {
+    const files = [
+      { ...createEvidenceFile('/case/合同.pdf'), pages: 2, footer: '第{page}页' },
+      { ...createEvidenceFile('/case/付款.pdf'), pages: 4, footer: '' },
+    ]
+
+    const items = buildHeaderFooterItems(files, baseRules, '/out')
+
+    expect(items[0].footer.text).toBe('第{page}页')
+    expect(items[1].footer).toBeNull()
+  })
+
   it('can number footers per file instead of continuously', () => {
     const files = [
       { ...createEvidenceFile('/case/合同.pdf'), pages: 2, header: '证据1 合同' },
