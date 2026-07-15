@@ -19,8 +19,16 @@ export function createEvidenceFile(path) {
     detectionCandidates: [],
     existingHeaderText: '',
     existingFooterText: '',
+    existingHeaderNormalizedText: '',
+    existingFooterNormalizedText: '',
+    existingHeaderPageStart: 1,
+    existingHeaderPageEnd: 0,
+    existingFooterPageStart: 1,
+    existingFooterPageEnd: 0,
     existingHeaderArtifact: false,
     existingFooterArtifact: false,
+    convertPlainHeader: false,
+    convertPlainFooter: false,
     statusText: '等待',
     statusType: 'info',
   }
@@ -59,11 +67,11 @@ export function buildHeaderText(file, index, rules) {
 }
 
 export function canWriteHeader(file) {
-  return !(file?.existingHeaderText && !file?.existingHeaderArtifact)
+  return !(file?.existingHeaderText && !file?.existingHeaderArtifact && !file?.convertPlainHeader)
 }
 
 export function canWriteFooter(file) {
-  return !(file?.existingFooterText && !file?.existingFooterArtifact)
+  return !(file?.existingFooterText && !file?.existingFooterArtifact && !file?.convertPlainFooter)
 }
 
 function decorateHeaderText(base, file, index, rules) {
@@ -106,6 +114,8 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         footerEnabled: rules.cleanupFooterEnabled,
         headerHeightMm: rules.cleanupHeaderHeightMm,
         footerHeightMm: rules.cleanupFooterHeightMm,
+        plainHeaderTargets: buildPlainTextTargets(file, 'header'),
+        plainFooterTargets: buildPlainTextTargets(file, 'footer'),
       },
       header: canWriteHeader(file) && header ? {
         text: header,
@@ -125,6 +135,23 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       } : null,
     }
   })
+}
+
+function buildPlainTextTargets(file, region) {
+  const isHeader = region === 'header'
+  const enabled = isHeader ? file.convertPlainHeader : file.convertPlainFooter
+  if (!enabled) return []
+  const text = isHeader ? file.existingHeaderText : file.existingFooterText
+  if (!text) return []
+  const normalizedText = isHeader ? file.existingHeaderNormalizedText : file.existingFooterNormalizedText
+  const pageStart = isHeader ? file.existingHeaderPageStart : file.existingFooterPageStart
+  const pageEnd = isHeader ? file.existingHeaderPageEnd : file.existingFooterPageEnd
+  return [{
+    text,
+    normalizedText: normalizedText || text,
+    pageStart: pageStart || 1,
+    pageEnd: pageEnd || file.pages || 1,
+  }]
 }
 
 export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {

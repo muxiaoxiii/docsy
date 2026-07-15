@@ -802,14 +802,14 @@ const currentRules = computed(() => ({
 
 const previewHeaderText = computed(() => {
   if (!selectedOverlayFile.value || headerMode.value === 'none') return ''
-  if (hasExistingHeader(selectedOverlayFile.value)) return ''
+  if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
   return buildSessionHeaderText(selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value)
 })
 
 const previewFooterText = computed(() => {
   const footerTemplate = selectedOverlayFile.value?.footer ?? footerText.value
   if (!selectedOverlayFile.value || !footerEnabled.value || !footerTemplate) return ''
-  if (hasExistingFooter(selectedOverlayFile.value)) return ''
+  if (!shouldShowLiveFooter(selectedOverlayFile.value)) return ''
   const page = footerContinuous.value
     ? selectedOverlayFile.value.pageStart + previewPage.value - 1
     : previewPage.value
@@ -1541,11 +1541,14 @@ async function detectAllHeaderFooter(options = {}) {
 }
 
 function fileExistingStatus(file) {
+  if (file.convertPlainHeader || file.convertPlainFooter) {
+    return { text: '转换待处理', type: 'warning' }
+  }
   if (file.existingHeaderArtifact || file.existingFooterArtifact) {
     return { text: '现有可编辑', type: 'warning' }
   }
   if (file.existingHeaderText || file.existingFooterText) {
-    return { text: '普通文本保留', type: 'warning' }
+    return { text: '普通文本可转换', type: 'warning' }
   }
   return { text: '无旧页眉页码', type: 'success' }
 }
@@ -1575,9 +1578,17 @@ function applyDetectionResultToFile(file, data) {
   if (footer) parts.push(`页脚候选：${footer.text}`)
   if (candidates.length) parts.push(`候选 ${candidates.length} 个`)
   file.existingHeaderText = header?.text || ''
-  file.existingFooterText = footer?.normalizedText || footer?.text || ''
+  file.existingFooterText = footer?.text || footer?.normalizedText || ''
+  file.existingHeaderNormalizedText = header?.normalizedText || header?.text || ''
+  file.existingFooterNormalizedText = footer?.normalizedText || footer?.text || ''
+  file.existingHeaderPageStart = header?.pageRange?.start || 1
+  file.existingHeaderPageEnd = header?.pageRange?.end || file.pages || 0
+  file.existingFooterPageStart = footer?.pageRange?.start || 1
+  file.existingFooterPageEnd = footer?.pageRange?.end || file.pages || 0
   file.existingHeaderArtifact = Boolean(data.artifact?.hasHeader)
   file.existingFooterArtifact = Boolean(data.artifact?.hasFooter)
+  if (!file.existingHeaderText || file.existingHeaderArtifact) file.convertPlainHeader = false
+  if (!file.existingFooterText || file.existingFooterArtifact) file.convertPlainFooter = false
   if (header?.text && !file.headerEdited) {
     file.header = header.text
   }
@@ -1615,11 +1626,11 @@ function isEditingHeader(row) {
   return editingHeaderPath.value && editingHeaderPath.value === row.path
 }
 
-function startHeaderEdit(row, index) {
+async function startHeaderEdit(row, index) {
   if (!row) return
   if (!canWriteHeader(row)) {
-    ElMessage.warning('检测到的是普通文本页眉，暂不能无损编辑；为避免重叠，不会新增覆盖层')
-    return
+    const confirmed = await confirmPlainTextConversion(row, 'header')
+    if (!confirmed) return
   }
   headerMode.value = 'per_file'
   if (row.header === null || row.header === undefined) {
@@ -1640,11 +1651,11 @@ function isEditingFooter(row) {
   return editingFooterPath.value && editingFooterPath.value === row.path
 }
 
-function startFooterEdit(row, index) {
+async function startFooterEdit(row, index) {
   if (!row) return
   if (!canWriteFooter(row)) {
-    ElMessage.warning('检测到的是普通文本页脚，暂不能无损编辑；为避免重叠，不会新增覆盖层')
-    return
+    const confirmed = await confirmPlainTextConversion(row, 'footer')
+    if (!confirmed) return
   }
   if (row.footer === null || row.footer === undefined) {
     row.footer = displayRowFooter(row, index)
@@ -1690,21 +1701,66 @@ function displayRowFooter(row, index) {
   return rowFooterPreview(row, index)
 }
 
-function hasExistingHeader(row) {
-  return Boolean(row?.existingHeaderText || row?.existingHeaderArtifact)
+function isPlainHeader(row) {
+  return Boolean(row?.existingHeaderText && !row?.existingHeaderArtifact)
 }
 
-function hasExistingFooter(row) {
-  return Boolean(row?.existingFooterText || row?.existingFooterArtifact)
+function isPlainFooter(row) {
+  return Boolean(row?.existingFooterText && !row?.existingFooterArtifact)
+}
+
+function shouldShowLiveHeader(row) {
+  if (!row) return false
+  if (row.existingHeaderArtifact) return false
+  if (isPlainHeader(row) && !row.convertPlainHeader) return false
+  return true
+}
+
+function shouldShowLiveFooter(row) {
+  if (!row) return false
+  if (row.existingFooterArtifact) return false
+  if (isPlainFooter(row) && !row.convertPlainFooter) return false
+  return true
+}
+
+async function confirmPlainTextConversion(row, region) {
+  const isHeader = region === 'header'
+  const text = isHeader ? row.existingHeaderText : row.existingFooterText
+  const start = isHeader ? row.existingHeaderPageStart : row.existingFooterPageStart
+  const end = isHeader ? row.existingHeaderPageEnd : row.existingFooterPageEnd
+  const label = isHeader ? '页眉' : '页脚'
+  const range = `${start || 1}-${end || row.pages || 1}`
+  try {
+    await ElMessageBox.confirm(
+      `将删除第 ${range} 页${label}区域内匹配的普通文本“${text}”，并转换为 Docsy 标准${label}。匹配不到的文本会保留，不会遮盖原文。`,
+      `转换普通文本${label}`,
+      {
+        confirmButtonText: '确认转换',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+    if (isHeader) row.convertPlainHeader = true
+    else row.convertPlainFooter = true
+    const status = fileExistingStatus(row)
+    row.statusText = status.text
+    row.statusType = status.type
+    truePreview.value = null
+    return true
+  } catch {
+    return false
+  }
 }
 
 function headerFooterHandlingText(row) {
   const parts = []
   if (row?.existingHeaderArtifact) parts.push('页眉可编辑')
-  else if (row?.existingHeaderText) parts.push('页眉普通保留')
+  else if (row?.existingHeaderText && row?.convertPlainHeader) parts.push('页眉转换')
+  else if (row?.existingHeaderText) parts.push('页眉可转换')
   else parts.push('页眉新增')
   if (row?.existingFooterArtifact) parts.push('页脚可编辑')
-  else if (row?.existingFooterText) parts.push('页脚普通保留')
+  else if (row?.existingFooterText && row?.convertPlainFooter) parts.push('页脚转换')
+  else if (row?.existingFooterText) parts.push('页脚可转换')
   else parts.push('页脚新增')
   return parts.join(' / ')
 }

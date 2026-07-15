@@ -1,5 +1,6 @@
 pub mod annotations;
 pub mod artifacts;
+pub mod content_text;
 pub mod detection;
 pub mod evidence;
 pub mod evidence_session;

@@ -112,6 +112,65 @@ describe('Evidence PDF session helpers', () => {
     expect(items[0].footer).toBeNull()
   })
 
+  it('converts confirmed plain text headers and footers into cleanup targets plus overlay', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/合同.pdf'),
+        pages: 3,
+        header: 'new header',
+        footer: 'new footer',
+        existingHeaderText: 'old plain header',
+        existingHeaderNormalizedText: 'oldplainheader',
+        existingHeaderPageStart: 1,
+        existingHeaderPageEnd: 3,
+        existingFooterText: '1/3',
+        existingFooterNormalizedText: '{page}/{total}',
+        existingFooterPageStart: 1,
+        existingFooterPageEnd: 3,
+        convertPlainHeader: true,
+        convertPlainFooter: true,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, baseRules, '/out')
+
+    expect(canWriteHeader(files[0])).toBe(true)
+    expect(canWriteFooter(files[0])).toBe(true)
+    expect(items[0].header.text).toBe('new header')
+    expect(items[0].footer.text).toBe('new footer')
+    expect(items[0].cleanup.plainHeaderTargets[0]).toMatchObject({
+      text: 'old plain header',
+      normalizedText: 'oldplainheader',
+      pageStart: 1,
+      pageEnd: 3,
+    })
+    expect(items[0].cleanup.plainFooterTargets[0]).toMatchObject({
+      text: '1/3',
+      normalizedText: '{page}/{total}',
+      pageStart: 1,
+      pageEnd: 3,
+    })
+  })
+
+  it('can delete a confirmed plain text header without inserting a replacement', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/合同.pdf'),
+        pages: 2,
+        header: '',
+        existingHeaderText: 'old plain header',
+        existingHeaderPageStart: 1,
+        existingHeaderPageEnd: 2,
+        convertPlainHeader: true,
+      },
+    ]
+
+    const items = buildHeaderFooterItems(files, baseRules, '/out')
+
+    expect(items[0].cleanup.plainHeaderTargets).toHaveLength(1)
+    expect(items[0].header).toBeNull()
+  })
+
   it('keeps overlay task for standard artifact header and footer edits', () => {
     const files = [
       {

@@ -9,6 +9,7 @@ use crate::external::ExternalTool;
 
 use super::annotations;
 use super::artifacts;
+use super::content_text;
 use super::normalize::normalize_pdf_to_a4;
 use super::page_info::{get_page_infos, PageSize};
 use super::preview::{render_preview, PreviewResult};
@@ -46,6 +47,26 @@ struct CleanupConfig {
     header_enabled: bool,
     #[serde(default)]
     footer_enabled: bool,
+    #[serde(default = "default_cleanup_zone_mm")]
+    header_height_mm: f32,
+    #[serde(default = "default_cleanup_zone_mm")]
+    footer_height_mm: f32,
+    #[serde(default)]
+    plain_header_targets: Vec<PlainTextCleanupTargetConfig>,
+    #[serde(default)]
+    plain_footer_targets: Vec<PlainTextCleanupTargetConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlainTextCleanupTargetConfig {
+    text: String,
+    #[serde(default)]
+    normalized_text: String,
+    #[serde(default = "default_page_start")]
+    page_start: u32,
+    #[serde(default)]
+    page_end: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,6 +133,10 @@ fn default_font_size() -> f32 {
 
 fn default_margin_mm() -> f32 {
     10.0
+}
+
+fn default_cleanup_zone_mm() -> f32 {
+    18.0
 }
 
 fn default_align() -> String {
@@ -231,7 +256,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
 
     let semantic_deleted_path = edit_or_delete_standard_artifacts_if_requested(args)?;
-    let semantic_removed = semantic_deleted_path
+    let artifact_removed = semantic_deleted_path
         .as_ref()
         .map(|artifact_result| artifact_result.changed_count())
         .unwrap_or(0);
@@ -239,17 +264,28 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         .as_ref()
         .map(|artifact_result| artifact_result.path.as_path())
         .unwrap_or(input);
+    let plain_deleted_path =
+        delete_confirmed_plain_text_header_footer_if_requested(args, semantic_input)?;
+    let plain_removed = plain_deleted_path
+        .as_ref()
+        .map(|(_, result)| result.removed())
+        .unwrap_or(0);
+    let cleanup_input = plain_deleted_path
+        .as_ref()
+        .map(|(path, _)| path.as_path())
+        .unwrap_or(semantic_input);
+    let semantic_removed = artifact_removed + plain_removed;
 
     let normalized_path = if args.normalize_a4 {
         Some(normalize_pdf_to_a4(
-            semantic_input,
+            cleanup_input,
             args.raster_dpi,
             &args.a4_orientation,
         )?)
     } else {
         None
     };
-    let work_input = normalized_path.as_deref().unwrap_or(semantic_input);
+    let work_input = normalized_path.as_deref().unwrap_or(cleanup_input);
     let work_input_str = work_input.to_string_lossy().to_string();
     let page_infos = get_page_infos(&work_input_str)?;
     let pages = page_infos.len() as u32;
@@ -264,6 +300,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     if args.header.is_none() && args.footer.is_none() {
         fs::copy(work_input, output).context("复制 PDF 失败")?;
         cleanup_temp(normalized_path);
+        cleanup_plain_text_temp(plain_deleted_path);
         cleanup_semantic_temp(semantic_deleted_path);
         return Ok(HeaderFooterResult {
             input_path: args.input_path.clone(),
@@ -307,6 +344,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
 
     let _ = fs::remove_file(&overlay_path);
     cleanup_temp(normalized_path);
+    cleanup_plain_text_temp(plain_deleted_path);
     cleanup_semantic_temp(semantic_deleted_path);
 
     if !command_output.status.success() {
@@ -325,6 +363,49 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         cleaned,
         semantic_removed,
     })
+}
+
+fn delete_confirmed_plain_text_header_footer_if_requested(
+    args: &HeaderFooterJob,
+    input: &Path,
+) -> Result<Option<(PathBuf, content_text::PlainTextCleanupResult)>> {
+    if args.cleanup.plain_header_targets.is_empty() && args.cleanup.plain_footer_targets.is_empty()
+    {
+        return Ok(None);
+    }
+    let plan = content_text::PlainTextCleanupPlan {
+        header_targets: args
+            .cleanup
+            .plain_header_targets
+            .iter()
+            .map(plain_text_target_from_config)
+            .collect(),
+        footer_targets: args
+            .cleanup
+            .plain_footer_targets
+            .iter()
+            .map(plain_text_target_from_config)
+            .collect(),
+        header_zone_mm: args.cleanup.header_height_mm,
+        footer_zone_mm: args.cleanup.footer_height_mm,
+    };
+    content_text::delete_plain_header_footer_to_temp(&input.to_string_lossy(), &plan)
+}
+
+fn plain_text_target_from_config(
+    config: &PlainTextCleanupTargetConfig,
+) -> content_text::PlainTextTarget {
+    let page_start = config.page_start.max(1);
+    content_text::PlainTextTarget {
+        text: config.text.clone(),
+        normalized_text: if config.normalized_text.is_empty() {
+            config.text.clone()
+        } else {
+            config.normalized_text.clone()
+        },
+        page_start,
+        page_end: config.page_end.max(page_start),
+    }
 }
 
 fn write_optimized_or_copy(input: &Path, output: &Path) -> Result<()> {
@@ -677,6 +758,12 @@ fn cleanup_temp(path: Option<PathBuf>) {
 fn cleanup_semantic_temp(result: Option<StandardArtifactProcessingResult>) {
     if let Some(result) = result {
         let _ = fs::remove_file(result.path);
+    }
+}
+
+fn cleanup_plain_text_temp(result: Option<(PathBuf, content_text::PlainTextCleanupResult)>) {
+    if let Some((path, _)) = result {
+        let _ = fs::remove_file(path);
     }
 }
 
