@@ -65,7 +65,11 @@
             <div class="filename-panel">
               <div class="filename-panel-row">
                 <el-switch v-model="settings.show_filename" active-text="显示" inactive-text="隐藏" />
-                <el-switch v-model="settings.filename_without_ext" active-text="隐藏扩展名" inactive-text="保留扩展名" />
+                <el-switch
+                  v-model="settings.filename_without_ext"
+                  active-text="隐藏扩展名"
+                  inactive-text="保留扩展名"
+                />
               </div>
               <div class="filename-rules">
                 <div
@@ -130,9 +134,7 @@
           </el-form-item>
 
           <el-form-item>
-            <el-button type="success" @click="run" :loading="generating" :disabled="!analysis">
-              生成文档
-            </el-button>
+            <el-button type="success" @click="run" :loading="generating" :disabled="!analysis"> 生成文档 </el-button>
             <span v-if="analyzing" class="analyze-hint">正在分析...</span>
           </el-form-item>
         </el-form>
@@ -153,12 +155,20 @@
             <el-descriptions :column="2" border size="small">
               <el-descriptions-item label="图片数量">{{ analysis.images.length }}</el-descriptions-item>
               <el-descriptions-item label="分组数">{{ analysis.groups.length }}</el-descriptions-item>
-              <el-descriptions-item label="推荐方向">{{ orientationLabel(analysis.recommended.orientation) }}</el-descriptions-item>
-              <el-descriptions-item label="推荐布局">{{ layoutLabel(analysis.recommended.layout) }}</el-descriptions-item>
-              <el-descriptions-item label="推荐缩放">{{ scaleModeLabel(analysis.recommended.scale_mode) }}</el-descriptions-item>
+              <el-descriptions-item label="推荐方向">{{
+                orientationLabel(analysis.recommended.orientation)
+              }}</el-descriptions-item>
+              <el-descriptions-item label="推荐布局">{{
+                layoutLabel(analysis.recommended.layout)
+              }}</el-descriptions-item>
+              <el-descriptions-item label="推荐缩放">{{
+                scaleModeLabel(analysis.recommended.scale_mode)
+              }}</el-descriptions-item>
               <el-descriptions-item label="推荐边距">{{ analysis.recommended.margin_mm }} mm</el-descriptions-item>
               <el-descriptions-item label="当前方向">{{ resolvedOrientationLabel }}</el-descriptions-item>
-              <el-descriptions-item label="当前布局">{{ layoutGrid.rows }} 行 × {{ layoutGrid.cols }} 列</el-descriptions-item>
+              <el-descriptions-item label="当前布局"
+                >{{ layoutGrid.rows }} 行 × {{ layoutGrid.cols }} 列</el-descriptions-item
+              >
             </el-descriptions>
             <div class="recommendation-bar">
               <span>{{ analysis.recommended.reason }}</span>
@@ -196,7 +206,9 @@
                         <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :style="previewImageStyle(img)" />
                       </div>
                       <div v-if="settings.show_filename" class="preview-name" :style="previewNameStyle">
-                        <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{ line }}</span>
+                        <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
+                          line
+                        }}</span>
                       </div>
                     </template>
                   </div>
@@ -235,11 +247,12 @@
 
 <script setup>
 import { computed, ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { ElMessage } from 'element-plus'
 import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
+import { fileName as baseFileName } from '../../../core/filePath.js'
 
 const folder = ref('')
 const folders = ref([])
@@ -251,6 +264,26 @@ const previewSources = reactive({})
 const pageZoom = ref(100)
 let unlistenDragDrop = null
 let analyzeTimer = null
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
+const KNOWN_NON_IMAGE_EXTENSIONS = new Set([
+  'pdf',
+  'doc',
+  'docx',
+  'docm',
+  'xls',
+  'xlsx',
+  'ppt',
+  'pptx',
+  'txt',
+  'csv',
+  'mp4',
+  'mov',
+  'avi',
+  'mkv',
+  'zip',
+  'rar',
+  '7z',
+])
 
 const settings = reactive({
   output_format: 'pdf',
@@ -264,9 +297,7 @@ const settings = reactive({
   show_filename: true,
   filename_without_ext: true,
   filename_remove_text: '',
-  filename_rules: [
-    createFilenameRule('remove'),
-  ],
+  filename_rules: [createFilenameRule('remove')],
   order_mode: 'z',
   border_enabled: false,
   border_color: 'black',
@@ -277,7 +308,7 @@ const resolvedOrientation = computed(() => {
   if (settings.orientation !== 'auto') return settings.orientation
   return analysis.value?.recommended?.orientation || 'portrait'
 })
-const resolvedOrientationLabel = computed(() => resolvedOrientation.value === 'landscape' ? '横向' : '竖向')
+const resolvedOrientationLabel = computed(() => (resolvedOrientation.value === 'landscape' ? '横向' : '竖向'))
 const orderedImages = computed(() => reorderImages(analysis.value?.images || [], layoutGrid.value, settings.order_mode))
 const previewImages = computed(() => orderedImages.value.slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
 const previewSlots = computed(() => {
@@ -302,9 +333,7 @@ const previewCellStyle = computed(() => {
   }
 })
 const layoutMetrics = computed(() => {
-  const page = resolvedOrientation.value === 'landscape'
-    ? { width: 297, height: 210 }
-    : { width: 210, height: 297 }
+  const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
   const margin = Math.max(0, Number(settings.margin_mm) || 0)
   const usableWidth = Math.max(1, page.width - margin * 2)
   const docxTrailingGap = settings.output_format === 'docx' ? 2 : 0
@@ -322,13 +351,13 @@ const layoutMetrics = computed(() => {
 const previewImageAreaStyle = computed(() => {
   const metrics = layoutMetrics.value
   return {
-    height: `${Math.min(100, metrics.imageCellHeight / metrics.cellHeight * 100)}%`,
+    height: `${Math.min(100, (metrics.imageCellHeight / metrics.cellHeight) * 100)}%`,
   }
 })
 const previewNameStyle = computed(() => {
   const metrics = layoutMetrics.value
   return {
-    height: `${Math.min(100, metrics.filenameReserve / metrics.cellHeight * 100)}%`,
+    height: `${Math.min(100, (metrics.filenameReserve / metrics.cellHeight) * 100)}%`,
   }
 })
 
@@ -377,7 +406,7 @@ async function run() {
 
 async function openGeneratedOutput() {
   if (!generatedResult.value?.output_path) return
-  const result = await tauriCallSafe('open_path', { path: generatedResult.value.output_path })
+  const result = await openPath(generatedResult.value.output_path)
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开生成文件')
   }
@@ -417,7 +446,7 @@ function imageSrc(path) {
 }
 
 function fileName(path) {
-  let name = String(path || '').split(/[\\/]/).pop() || path
+  let name = baseFileName(path)
   if (settings.filename_without_ext) {
     name = name.replace(/\.[^.]+$/, '')
   }
@@ -479,7 +508,7 @@ function extractTextParts(value) {
   return value
     .split(/[-_\s]+/)
     .filter(Boolean)
-    .filter(part => !/^\d+$/.test(part))
+    .filter((part) => !/^\d+$/.test(part))
 }
 
 function fileNameLines(path) {
@@ -487,7 +516,7 @@ function fileNameLines(path) {
 }
 
 function wrapFilenameLines(name, cellWidthMm, maxLines) {
-  const maxUnits = Math.max(6, Math.floor((cellWidthMm * 72 / 25.4) / (8 * 0.56)))
+  const maxUnits = Math.max(6, Math.floor((cellWidthMm * 72) / 25.4 / (8 * 0.56)))
   const lines = []
   let current = ''
   let units = 0
@@ -518,15 +547,15 @@ function nameUnits(value) {
 
 function previewImageStyle(img) {
   const metrics = layoutMetrics.value
-  const nativeWidth = img.width * 25.4 / settings.dpi
-  const nativeHeight = img.height * 25.4 / settings.dpi
+  const nativeWidth = (img.width * 25.4) / settings.dpi
+  const nativeHeight = (img.height * 25.4) / settings.dpi
   const fitScale = Math.min(metrics.cellWidth / nativeWidth, metrics.imageCellHeight / nativeHeight)
   const scale = settings.scale_mode === 'original' ? Math.min(fitScale, 1) : fitScale
   const drawWidth = nativeWidth * scale
   const drawHeight = nativeHeight * scale
   return {
-    width: `${Math.min(100, drawWidth / metrics.cellWidth * 100)}%`,
-    height: `${Math.min(100, drawHeight / metrics.imageCellHeight * 100)}%`,
+    width: `${Math.min(100, (drawWidth / metrics.cellWidth) * 100)}%`,
+    height: `${Math.min(100, (drawHeight / metrics.imageCellHeight) * 100)}%`,
     maxWidth: '100%',
     maxHeight: '100%',
     objectFit: 'contain',
@@ -534,15 +563,17 @@ function previewImageStyle(img) {
 }
 
 function borderColorCss(color) {
-  return {
-    white: '#ffffff',
-    dark_gray: '#4b5563',
-    light_gray: '#d1d5db',
-    red: '#dc2626',
-    yellow: '#d97706',
-    blue: '#2563eb',
-    black: '#000000',
-  }[color] || '#000000'
+  return (
+    {
+      white: '#ffffff',
+      dark_gray: '#4b5563',
+      light_gray: '#d1d5db',
+      red: '#dc2626',
+      yellow: '#d97706',
+      blue: '#2563eb',
+      black: '#000000',
+    }[color] || '#000000'
+  )
 }
 
 function createFilenameRule(kind = 'remove') {
@@ -582,13 +613,15 @@ function scheduleAnalyze() {
 }
 
 async function preloadImages(paths) {
-  await Promise.all(paths.map(async (path) => {
-    if (previewSources[path]) return
-    const result = await tauriCallSafe('read_image_data_url', { path })
-    if (result.ok) {
-      previewSources[path] = result.data
-    }
-  }))
+  await Promise.all(
+    paths.map(async (path) => {
+      if (previewSources[path]) return
+      const result = await tauriCallSafe('read_image_data_url', { path })
+      if (result.ok) {
+        previewSources[path] = result.data
+      }
+    }),
+  )
 }
 
 function reorderImages(images, grid, mode) {
@@ -637,7 +670,7 @@ function adjustPageZoom(delta) {
 }
 
 async function preloadVisibleImages() {
-  const paths = previewImages.value.map(img => img.path)
+  const paths = previewImages.value.map((img) => img.path)
   await preloadImages([...new Set(paths)])
 }
 
@@ -653,8 +686,16 @@ onMounted(async () => {
     if (event.payload.type === 'drop') {
       const paths = event.payload.paths || []
       if (paths.length) {
-        folders.value = paths
-        folder.value = paths[0]
+        const accepted = paths.filter(isImageOrFolderCandidate)
+        if (!accepted.length) {
+          ElMessage.warning('请拖入图片文件或文件夹')
+          return
+        }
+        if (accepted.length < paths.length) {
+          ElMessage.warning('已忽略不支持的文件类型')
+        }
+        folders.value = accepted
+        folder.value = accepted[0]
         scheduleAnalyze()
       }
     }
@@ -670,6 +711,15 @@ function orientationLabel(value) {
   if (value === 'landscape') return '横向'
   if (value === 'portrait') return '竖向'
   return '自动'
+}
+
+function isImageOrFolderCandidate(path) {
+  const name = baseFileName(path)
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0) return true
+  const ext = name.slice(dot + 1).toLowerCase()
+  if (IMAGE_EXTENSIONS.has(ext)) return true
+  return !KNOWN_NON_IMAGE_EXTENSIONS.has(ext)
 }
 
 function layoutLabel(value) {
@@ -845,7 +895,7 @@ function scaleModeLabel(value) {
 .page-preview {
   background: #fff;
   border: 1px solid #dcdfe6;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.10);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   margin: 0 auto;
 }
 

@@ -48,15 +48,16 @@ const pageInfo = ref({
 })
 
 const frameStyle = computed(() => ({
-  aspectRatio: pageInfo.value.widthPx && pageInfo.value.heightPx
-    ? `${pageInfo.value.widthPx} / ${pageInfo.value.heightPx}`
-    : `${pageInfo.value.widthPt} / ${pageInfo.value.heightPt}`,
+  aspectRatio:
+    pageInfo.value.widthPx && pageInfo.value.heightPx
+      ? `${pageInfo.value.widthPx} / ${pageInfo.value.heightPx}`
+      : `${pageInfo.value.widthPt} / ${pageInfo.value.heightPt}`,
 }))
 
 watch(
   () => [props.filePath, props.page, props.scale, props.reloadKey, props.engine],
   () => renderCurrentPage(),
-  { immediate: true }
+  { immediate: true },
 )
 
 onBeforeUnmount(() => {
@@ -126,7 +127,7 @@ async function tryRenderWithBackend(requestId) {
   try {
     await renderWithBackend(requestId)
     return true
-  } catch (err) {
+  } catch {
     imageDataUrl.value = ''
     return false
   }

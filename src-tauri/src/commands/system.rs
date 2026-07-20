@@ -37,6 +37,8 @@ pub fn open_log_dir() -> Result<(), String> {
 pub fn read_image_data_url(path: String) -> Result<String, String> {
     use base64::Engine;
 
+    const MAX_IMAGE_PREVIEW_BYTES: u64 = 100 * 1024 * 1024;
+
     let path = std::path::PathBuf::from(&path);
     let ext = path
         .extension()
@@ -49,8 +51,12 @@ pub fn read_image_data_url(path: String) -> Result<String, String> {
         "webp" => "image/webp",
         "bmp" => "image/bmp",
         "gif" => "image/gif",
-        _ => "application/octet-stream",
+        _ => return Err("不支持的图片格式".to_string()),
     };
+    let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if metadata.len() > MAX_IMAGE_PREVIEW_BYTES {
+        return Err("图片过大，无法直接预览".to_string());
+    }
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
     Ok(format!("data:{mime};base64,{encoded}"))

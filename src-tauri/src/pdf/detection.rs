@@ -1,10 +1,14 @@
 use anyhow::{Context, Result};
+use lopdf::content::{Content, Operation};
+use lopdf::decode_text_string;
+use lopdf::{Document, Object};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::LazyLock;
 
 use crate::external::ExternalTool;
 
@@ -97,6 +101,8 @@ pub struct TextLineDetection {
     text: String,
     normalized_text: String,
     bbox: BBox,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font_size: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +117,8 @@ pub struct HeaderFooterCandidate {
     labels: Vec<String>,
     confidence: f32,
     bbox: BBox,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font_size: Option<f32>,
     source: String,
 }
 
@@ -146,6 +154,7 @@ struct WordBox {
 struct LineBox {
     text: String,
     bbox: BBox,
+    font_size: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -153,6 +162,15 @@ struct ParsedPageSize {
     page: u32,
     width: f32,
     height: f32,
+}
+
+#[derive(Debug, Clone)]
+struct ContentFontSample {
+    page: u32,
+    normalized_text: String,
+    x: f32,
+    y_top: f32,
+    font_size: f32,
 }
 
 fn default_max_pages() -> u32 {
@@ -187,7 +205,10 @@ pub fn detect(args: &serde_json::Value) -> Result<DetectionResult> {
     let xml = run_pdftotext_bbox(input, args.max_pages)?;
     let words = parse_pdftotext_bbox(&xml)?;
     let page_sizes = parse_pdftotext_page_sizes(&xml)?;
-    let pages = build_page_detections(&words, &page_sizes, &args);
+    let mut pages = build_page_detections(&words, &page_sizes, &args);
+    if let Ok(samples) = inspect_content_font_samples(input, &page_sizes) {
+        attach_content_font_sizes(&mut pages, &samples);
+    }
     let pages_analyzed = pages.len() as u32;
     let header_candidates = build_candidates(&pages, "header", pages_analyzed);
     let footer_candidates = build_candidates(&pages, "footer", pages_analyzed);
@@ -471,7 +492,11 @@ fn group_words_into_lines(words: &[&WordBox]) -> Vec<LineBox> {
                 last_x = word.bbox.x1;
             }
 
-            Some(LineBox { text, bbox })
+            Some(LineBox {
+                text,
+                bbox,
+                font_size: None,
+            })
         })
         .collect()
 }
@@ -481,7 +506,317 @@ fn line_to_detection(line: LineBox) -> TextLineDetection {
         text: line.text.clone(),
         normalized_text: normalize_header_footer_text(&line.text),
         bbox: line.bbox,
+        font_size: line.font_size,
     }
+}
+
+fn attach_content_font_sizes(pages: &mut [PageDetection], samples: &[ContentFontSample]) {
+    for page in pages {
+        for line in page.headers.iter_mut().chain(page.footers.iter_mut()) {
+            if line.font_size.is_some() {
+                continue;
+            }
+            line.font_size = samples
+                .iter()
+                .filter(|sample| sample.page == line.bbox.page)
+                .filter(|sample| content_sample_matches_line(sample, line))
+                .map(|sample| sample.font_size)
+                .next();
+        }
+    }
+}
+
+fn content_sample_matches_line(sample: &ContentFontSample, line: &TextLineDetection) -> bool {
+    let sample_norm = normalize_for_content_match(&sample.normalized_text);
+    let line_norm = normalize_for_content_match(&line.normalized_text);
+    let line_text = normalize_for_content_match(&line.text);
+    if sample_norm.is_empty() {
+        return false;
+    }
+    let text_matches = sample_norm == line_norm
+        || sample_norm == line_text
+        || line_norm.contains(&sample_norm)
+        || sample_norm.contains(&line_norm);
+    if !text_matches {
+        return false;
+    }
+    let y_matches = sample.y_top >= line.bbox.y0 - 24.0 && sample.y_top <= line.bbox.y1 + 24.0;
+    let x_matches = sample.x >= line.bbox.x0 - 36.0 && sample.x <= line.bbox.x1 + 36.0;
+    y_matches && x_matches
+}
+
+fn inspect_content_font_samples(
+    input: &Path,
+    page_sizes: &[ParsedPageSize],
+) -> Result<Vec<ContentFontSample>> {
+    let doc = Document::load(input).context("读取 PDF 内容流失败")?;
+    let pages = doc.get_pages();
+    let mut samples = Vec::new();
+    for (page_index, page_id) in pages.into_values().enumerate() {
+        let page_number = page_index as u32 + 1;
+        let Some(size) = page_sizes
+            .iter()
+            .find(|size| size.page == page_number)
+            .or_else(|| page_sizes.get(page_index))
+        else {
+            continue;
+        };
+        let content_bytes = match doc.get_page_content(page_id) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let content = match Content::decode(&content_bytes) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        samples.extend(content_font_samples_from_operations(
+            page_number,
+            size.height,
+            &content.operations,
+        ));
+    }
+    Ok(samples)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ContentTextState {
+    in_text: bool,
+    x: f32,
+    y: f32,
+    leading: f32,
+    font_size: f32,
+    scale_y: f32,
+}
+
+impl Default for ContentTextState {
+    fn default() -> Self {
+        Self {
+            in_text: false,
+            x: 0.0,
+            y: 0.0,
+            leading: 0.0,
+            font_size: 0.0,
+            scale_y: 1.0,
+        }
+    }
+}
+
+fn content_font_samples_from_operations(
+    page: u32,
+    page_height: f32,
+    operations: &[Operation],
+) -> Vec<ContentFontSample> {
+    let mut state = ContentTextState::default();
+    let mut samples = Vec::new();
+    for operation in operations {
+        update_content_text_state_before_show(&mut state, operation);
+        if state.in_text {
+            if let Some(text) = shown_content_text(operation) {
+                let font_size = (state.font_size * state.scale_y.abs()).abs();
+                if font_size > 0.0 && !text.trim().is_empty() {
+                    samples.push(ContentFontSample {
+                        page,
+                        normalized_text: normalize_header_footer_text(&text),
+                        x: state.x,
+                        y_top: page_height - state.y,
+                        font_size,
+                    });
+                }
+            }
+        }
+    }
+    samples
+}
+
+fn update_content_text_state_before_show(state: &mut ContentTextState, operation: &Operation) {
+    match operation.operator.as_str() {
+        "BT" => {
+            state.in_text = true;
+            state.x = 0.0;
+            state.y = 0.0;
+            state.scale_y = 1.0;
+        }
+        "ET" => {
+            state.in_text = false;
+        }
+        "Tf" => {
+            if let Some(size) = number_operand(operation, 1) {
+                state.font_size = size;
+            }
+        }
+        "Td" => {
+            if let (Some(tx), Some(ty)) =
+                (number_operand(operation, 0), number_operand(operation, 1))
+            {
+                state.x += tx;
+                state.y += ty;
+            }
+        }
+        "TD" => {
+            if let (Some(tx), Some(ty)) =
+                (number_operand(operation, 0), number_operand(operation, 1))
+            {
+                state.leading = -ty;
+                state.x += tx;
+                state.y += ty;
+            }
+        }
+        "Tm" => {
+            if let (Some(c), Some(d), Some(x), Some(y)) = (
+                number_operand(operation, 2),
+                number_operand(operation, 3),
+                number_operand(operation, 4),
+                number_operand(operation, 5),
+            ) {
+                state.x = x;
+                state.y = y;
+                let scale = (c * c + d * d).sqrt();
+                state.scale_y = if scale > 0.0 { scale } else { 1.0 };
+            }
+        }
+        "TL" => {
+            if let Some(leading) = number_operand(operation, 0) {
+                state.leading = leading;
+            }
+        }
+        "T*" | "'" | "\"" => {
+            state.y -= state.leading;
+        }
+        _ => {}
+    }
+}
+
+fn shown_content_text(operation: &Operation) -> Option<String> {
+    match operation.operator.as_str() {
+        "Tj" | "'" => operation.operands.first().and_then(content_object_text),
+        "\"" => operation.operands.get(2).and_then(content_object_text),
+        "TJ" => {
+            let Object::Array(items) = operation.operands.first()? else {
+                return None;
+            };
+            let mut text = String::new();
+            for item in items {
+                if let Some(part) = content_object_text(item) {
+                    text.push_str(&part);
+                }
+            }
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn number_operand(operation: &Operation, index: usize) -> Option<f32> {
+    match operation.operands.get(index)? {
+        Object::Integer(value) => Some(*value as f32),
+        Object::Real(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn content_object_text(object: &Object) -> Option<String> {
+    let Object::String(bytes, _) = object else {
+        return None;
+    };
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let units = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        return String::from_utf16(&units).ok();
+    }
+    String::from_utf8(bytes.clone())
+        .ok()
+        .or_else(|| decode_text_string(object).ok())
+}
+
+static RE_PAGE_TOTAL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\d+\s*[/／∕]\s*\d+").unwrap());
+static RE_CN_TOTAL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"第\s*\d+\s*页\s*[，,]\s*共\s*\d+\s*页").unwrap());
+static RE_CN_PAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"第\s*\d+\s*页").unwrap());
+static RE_CN_NUMERIC_PAGE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"第\s*[一二三四五六七八九十百千〇零两]+\s*页").unwrap());
+static RE_PAGE_WORD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)page\s+\d+\s+of\s+\d+").unwrap());
+static RE_STANDALONE_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}$").unwrap());
+
+fn is_roman_page_marker(value: &str) -> bool {
+    let upper = value.trim().to_ascii_uppercase();
+    if upper.is_empty()
+        || upper.len() > 8
+        || !upper
+            .chars()
+            .all(|ch| matches!(ch, 'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M'))
+    {
+        return false;
+    }
+    parse_roman_page_number(&upper).is_some()
+}
+
+fn parse_roman_page_number(value: &str) -> Option<u32> {
+    let mut total = 0_i32;
+    let mut previous = 0_i32;
+    for ch in value.chars().rev() {
+        let current = match ch {
+            'I' => 1,
+            'V' => 5,
+            'X' => 10,
+            'L' => 50,
+            'C' => 100,
+            'D' => 500,
+            'M' => 1000,
+            _ => return None,
+        };
+        if current < previous {
+            total -= current;
+        } else {
+            total += current;
+            previous = current;
+        }
+    }
+    if total <= 0 {
+        return None;
+    }
+    let canonical = roman_page_number(total as u32)?;
+    (canonical == value).then_some(total as u32)
+}
+
+fn roman_page_number(mut value: u32) -> Option<String> {
+    if value == 0 || value > 3999 {
+        return None;
+    }
+    let tokens = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut out = String::new();
+    for (amount, token) in tokens {
+        while value >= amount {
+            out.push_str(token);
+            value -= amount;
+        }
+    }
+    Some(out)
+}
+
+fn normalize_for_content_match(text: &str) -> String {
+    text.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
 
 fn build_candidates(
@@ -552,6 +887,7 @@ fn build_candidates(
                 labels,
                 confidence,
                 bbox: first.bbox,
+                font_size: lines.iter().find_map(|line| line.font_size),
                 source: "content-text".to_string(),
             })
         })
@@ -578,32 +914,34 @@ fn normalize_header_footer_text(text: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ");
 
-    let re_page_total = Regex::new(r"\d+\s*/\s*\d+").unwrap();
-    let re_cn_total = Regex::new(r"第\s*\d+\s*页\s*[，,]\s*共\s*\d+\s*页").unwrap();
-    let re_cn_page = Regex::new(r"第\s*\d+\s*页").unwrap();
-    let re_page_word = Regex::new(r"(?i)page\s+\d+\s+of\s+\d+").unwrap();
-    let re_standalone_number = Regex::new(r"^\d{1,4}$").unwrap();
-
     let mut value = collapsed;
-    value = re_cn_total
+    value = RE_CN_TOTAL
         .replace_all(&value, "第{page}页，共{total}页")
         .to_string();
-    value = re_page_word
+    value = RE_PAGE_WORD
         .replace_all(&value, "Page {page} of {total}")
         .to_string();
-    value = re_page_total
+    value = RE_PAGE_TOTAL
         .replace_all(&value, "{page}/{total}")
         .to_string();
-    value = re_cn_page.replace_all(&value, "第{page}页").to_string();
-    if re_standalone_number.is_match(&value) {
+    value = RE_CN_PAGE.replace_all(&value, "第{page}页").to_string();
+    value = RE_CN_NUMERIC_PAGE
+        .replace_all(&value, "第{page}页")
+        .to_string();
+    if RE_STANDALONE_NUMBER.is_match(&value) {
         value = "{page}".to_string();
+    } else if is_roman_page_marker(value.trim()) {
+        value = "{roman-page}".to_string();
     }
     value
 }
 
 fn labels_for(normalized_text: &str) -> Vec<String> {
     let mut labels = Vec::new();
-    if normalized_text.contains("{page}") || normalized_text.contains("{total}") {
+    if normalized_text.contains("{page}")
+        || normalized_text.contains("{total}")
+        || normalized_text.contains("{roman-page}")
+    {
         labels.push("page-number".to_string());
     }
     if normalized_text.contains("证据") {
@@ -623,7 +961,8 @@ fn is_noise(text: &str, normalized_text: &str) -> bool {
         return false;
     }
     let value = text.trim();
-    value.len() < 2 || value.len() > 120
+    let char_count = value.chars().count();
+    char_count < 2 || char_count > 120
 }
 
 fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSuggestionItem> {
@@ -831,14 +1170,37 @@ mod tests {
     #[test]
     fn normalizes_common_page_number_formats() {
         assert_eq!(normalize_header_footer_text("１ / ２０"), "{page}/{total}");
+        assert_eq!(normalize_header_footer_text("1／7"), "{page}/{total}");
         assert_eq!(
             normalize_header_footer_text("第 3 页，共 20 页"),
             "第{page}页，共{total}页"
         );
+        assert_eq!(normalize_header_footer_text("第四页"), "第{page}页");
         assert_eq!(
             normalize_header_footer_text("Page 3 of 20"),
             "Page {page} of {total}"
         );
+        assert_eq!(normalize_header_footer_text("15"), "{page}");
+        assert_eq!(normalize_header_footer_text("III"), "{roman-page}");
+        assert_eq!(normalize_header_footer_text("mid"), "mid");
+        assert_eq!(normalize_header_footer_text("IC"), "IC");
+    }
+
+    #[test]
+    fn decodes_pdf_doc_encoded_content_strings() {
+        let text = content_object_text(&Object::String(
+            b"Header \x8dQuoted\x8e".to_vec(),
+            lopdf::StringFormat::Literal,
+        ))
+        .unwrap();
+
+        assert_eq!(text, "Header “Quoted”");
+    }
+
+    #[test]
+    fn noise_filter_counts_characters_not_bytes() {
+        assert!(is_noise("证", "证"));
+        assert!(!is_noise("证据", "证据"));
     }
 
     #[test]
@@ -860,6 +1222,7 @@ mod tests {
                     width: 595.0,
                     height: 842.0,
                 },
+                font_size: None,
             }],
         };
         let pages = vec![page(1, "1"), page(2, "2"), page(3, "3")];
@@ -890,11 +1253,96 @@ mod tests {
                     width: 595.0,
                     height: 842.0,
                 },
+                font_size: None,
             }],
         }];
         let candidates = build_candidates(&pages, "footer", pages.len() as u32);
 
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn attaches_font_size_from_content_stream_when_available() {
+        let mut pages = vec![PageDetection {
+            page: 1,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![TextLineDetection {
+                text: "测试页眉".to_string(),
+                normalized_text: "测试页眉".to_string(),
+                bbox: BBox {
+                    x0: 500.0,
+                    y0: 20.0,
+                    x1: 570.0,
+                    y1: 38.0,
+                    page: 1,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+            }],
+            footers: vec![],
+        }];
+        let operations = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 10.into()]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    505.into(),
+                    812.into(),
+                ],
+            ),
+            Operation::new(
+                "Tj",
+                vec![Object::String(
+                    encode_utf16be_pdf_string_for_test("测试页眉"),
+                    lopdf::StringFormat::Hexadecimal,
+                )],
+            ),
+            Operation::new("ET", vec![]),
+        ];
+        let samples = content_font_samples_from_operations(1, 842.0, &operations);
+        attach_content_font_sizes(&mut pages, &samples);
+
+        assert_eq!(pages[0].headers[0].font_size, Some(10.0));
+    }
+
+    #[test]
+    fn tm_font_size_uses_vertical_matrix_scale() {
+        let operations = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 10.into()]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    9.into(),
+                    0.into(),
+                    2.into(),
+                    505.into(),
+                    812.into(),
+                ],
+            ),
+            Operation::new("Tj", vec![Object::string_literal("Scaled")]),
+            Operation::new("ET", vec![]),
+        ];
+
+        let samples = content_font_samples_from_operations(1, 842.0, &operations);
+
+        assert_eq!(samples[0].font_size, 20.0);
+    }
+
+    fn encode_utf16be_pdf_string_for_test(value: &str) -> Vec<u8> {
+        let mut encoded = vec![0xFE, 0xFF];
+        for unit in value.encode_utf16() {
+            encoded.extend(unit.to_be_bytes());
+        }
+        encoded
     }
 
     #[test]
@@ -924,6 +1372,7 @@ mod tests {
                     width: 595.0,
                     height: 842.0,
                 },
+                font_size: None,
             }],
             footers: vec![],
         };
@@ -971,6 +1420,7 @@ mod tests {
                             width: 595.0,
                             height: 842.0,
                         },
+                        font_size: None,
                     }]
                 })
                 .unwrap_or_default(),
@@ -1008,6 +1458,7 @@ mod tests {
                             width: 595.0,
                             height: 842.0,
                         },
+                        font_size: None,
                     }]
                 })
                 .unwrap_or_default(),
@@ -1025,6 +1476,7 @@ mod tests {
                             width: 595.0,
                             height: 842.0,
                         },
+                        font_size: None,
                     }]
                 })
                 .unwrap_or_default(),

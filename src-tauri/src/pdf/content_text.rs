@@ -527,7 +527,14 @@ mod tests {
             Operation::new("BT", vec![]),
             Operation::new(
                 "Tm",
-                vec![1.into(), 0.into(), 0.into(), 1.into(), 90.into(), 700.into()],
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    90.into(),
+                    700.into(),
+                ],
             ),
             Operation::new("Tj", vec![Object::string_literal("body text")]),
             Operation::new("ET", vec![]),

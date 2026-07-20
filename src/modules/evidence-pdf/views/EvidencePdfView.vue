@@ -25,6 +25,22 @@
             </div>
             <el-button type="success" @click="buildEvidence" :loading="building">生成合并 PDF</el-button>
           </div>
+          <el-alert
+            v-if="conversionFailures.length"
+            class="conversion-alert"
+            type="warning"
+            :closable="false"
+            show-icon
+            title="部分 Word 文件未能转换"
+          >
+            <div class="conversion-failures">
+              <div v-for="item in conversionFailures" :key="item.path" class="conversion-failure">
+                <strong>{{ item.name }}</strong>
+                <span>{{ item.groupName }}</span>
+                <p>{{ item.reason }}</p>
+              </div>
+            </div>
+          </el-alert>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -43,6 +59,7 @@ const evidenceFolder = ref('')
 const evidenceGroups = ref([])
 const scanning = ref(false)
 const building = ref(false)
+const conversionFailures = ref([])
 
 async function selectEvidenceFolder() {
   const selected = await open({ directory: true })
@@ -52,6 +69,7 @@ async function selectEvidenceFolder() {
 async function scanEvidence() {
   if (!evidenceFolder.value) return
   scanning.value = true
+  conversionFailures.value = []
   const result = await tauriCallSafe('scan_evidence_folder', { root: evidenceFolder.value })
   if (result.ok) {
     evidenceGroups.value = result.data.groups || []
@@ -67,7 +85,16 @@ async function buildEvidence() {
     root: evidenceFolder.value,
     groups: evidenceGroups.value,
   })
-  result.ok ? ElMessage.success('证据 PDF 生成完成') : ElMessage.error(result.error || '证据 PDF 生成失败')
+  if (result.ok) {
+    conversionFailures.value = result.data.failedConversions || []
+    if (conversionFailures.value.length) {
+      ElMessage.warning(`证据 PDF 已生成，${conversionFailures.value.length} 个 Word 文件未能转换`)
+    } else {
+      ElMessage.success('证据 PDF 生成完成')
+    }
+  } else {
+    ElMessage.error(result.error || '证据 PDF 生成失败')
+  }
   building.value = false
 }
 </script>
@@ -125,5 +152,33 @@ h3 {
 .group-file {
   font-size: 12px;
   color: #909399;
+}
+
+.conversion-alert {
+  margin-top: 16px;
+}
+
+.conversion-failures {
+  display: grid;
+  gap: 8px;
+}
+
+.conversion-failure {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.conversion-failure strong {
+  display: block;
+  color: #303133;
+}
+
+.conversion-failure span {
+  color: #909399;
+}
+
+.conversion-failure p {
+  margin: 2px 0 0;
+  word-break: break-all;
 }
 </style>

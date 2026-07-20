@@ -1,46 +1,44 @@
 const modules = import.meta.glob('../modules/*/index.js', { eager: true })
 
 export const moduleRegistry = Object.values(modules)
-  .map(m => m.default)
+  .map((m) => m.default)
   .filter(Boolean)
   .sort((a, b) => (a.order ?? 1000) - (b.order ?? 1000))
 
 export function getRoutes() {
-  return moduleRegistry.flatMap(m => m.routes || [])
+  return moduleRegistry.flatMap((m) => m.routes || [])
 }
 
 export function getMenuItems(settings = {}) {
   return orderedModules(settings)
-    .filter(m => m.menuItems)
-    .flatMap(m =>
-      m.menuItems.map(item => ({
+    .filter((m) => m.menuItems)
+    .flatMap((m) =>
+      m.menuItems.map((item) => ({
         ...item,
         moduleId: m.id,
-      }))
+      })),
     )
-    .filter(item => isModuleVisible(item.moduleId, settings) && isModuleVisible(item.route, settings))
+    .filter((item) => isModuleVisible(item.moduleId, settings) && isModuleVisible(item.route, settings))
 }
 
 export function getHomeCards(settings = {}) {
   return orderedModules(settings)
-    .filter(m => isModuleVisible(m.id, settings))
-    .flatMap(m => (m.homeCards || []).map(card => ({ ...card, moduleId: m.id })))
+    .filter((m) => isModuleVisible(m.id, settings))
+    .flatMap((m) => (m.homeCards || []).map((card) => ({ ...card, moduleId: m.id })))
 }
 
 export function getModule(id) {
-  return moduleRegistry.find(m => m.id === id)
+  return moduleRegistry.find((m) => m.id === id)
 }
 
 export function getModuleSettings() {
-  return moduleRegistry
-    .filter(m => m.settings)
-    .map(m => ({ moduleId: m.id, ...m.settings }))
+  return moduleRegistry.filter((m) => m.settings).map((m) => ({ moduleId: m.id, ...m.settings }))
 }
 
 export function getMenuModules() {
   return moduleRegistry
-    .filter(m => m.menuItems?.length)
-    .map(m => ({
+    .filter((m) => m.menuItems?.length)
+    .map((m) => ({
       id: m.id,
       name: m.name,
       icon: m.icon,
@@ -49,7 +47,7 @@ export function getMenuModules() {
 }
 
 export function defaultMenuOrder() {
-  return getMenuModules().map(m => m.id)
+  return getMenuModules().map((m) => m.id)
 }
 
 function orderedModules(settings = {}) {

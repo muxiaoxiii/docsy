@@ -42,14 +42,16 @@ describe('PDF preview coordinate helpers', () => {
   })
 
   it('maps detected text bbox to page-relative overlay style', () => {
-    expect(bboxOverlayStyle({
-      x0: 60,
-      y0: 20,
-      x1: 180,
-      y1: 40,
-      width: 600,
-      height: 800,
-    })).toEqual({
+    expect(
+      bboxOverlayStyle({
+        x0: 60,
+        y0: 20,
+        x1: 180,
+        y1: 40,
+        width: 600,
+        height: 800,
+      }),
+    ).toEqual({
       left: '10%',
       top: '2.5%',
       width: '20%',

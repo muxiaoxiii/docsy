@@ -7,8 +7,12 @@
           <p class="hint">{{ workflowHint }}</p>
         </div>
         <div class="section-actions">
-          <el-button v-if="workflowMode !== 'split'" type="primary" @click="selectOverlayFiles">{{ splitImportButtonText }}</el-button>
-          <el-button v-if="workflowMode !== 'merge'" :loading="importingMergedPdf" @click="importMergedPdfAsEvidence">{{ mergedImportButtonText }}</el-button>
+          <el-button v-if="workflowMode !== 'split'" type="primary" @click="selectOverlayFiles">{{
+            splitImportButtonText
+          }}</el-button>
+          <el-button v-if="workflowMode !== 'merge'" :loading="importingMergedPdf" @click="importMergedPdfAsEvidence">{{
+            mergedImportButtonText
+          }}</el-button>
         </div>
       </div>
 
@@ -85,9 +89,15 @@
         <div class="block-title-row">
           <div class="block-title">原页眉页脚</div>
           <div class="block-actions">
-            <el-button size="small" :loading="detectingAllHeaderFooter" @click="detectAllHeaderFooter">重新检测</el-button>
-            <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter">删除现有</el-button>
-            <el-button size="small" :disabled="!hasExistingRemovalRule" @click="restoreExistingHeaderFooterMarks">恢复删除标记</el-button>
+            <el-button size="small" :loading="detectingAllHeaderFooter" @click="detectAllHeaderFooter"
+              >重新检测</el-button
+            >
+            <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter"
+              >删除现有</el-button
+            >
+            <el-button size="small" :disabled="!hasExistingRemovalRule" @click="restoreExistingHeaderFooterMarks"
+              >恢复删除标记</el-button
+            >
           </div>
         </div>
         <div class="existing-summary-grid">
@@ -142,114 +152,30 @@
           <div class="block-title">插入新页眉页脚</div>
           <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
         </div>
-        <div v-if="insertHeaderFooterEnabled" class="rule-grid">
-          <div class="rule-item">
-            <label>页眉来源</label>
-            <el-select v-model="headerMode">
-              <el-option label="不插入页眉" value="none" />
-              <el-option label="文件名" value="filename" />
-              <el-option label="按证据列表名称" value="per_file" />
-              <el-option label="固定文本" value="custom" />
-            </el-select>
-          </div>
-          <div class="rule-item" v-if="headerMode === 'custom'">
-            <label>页眉文本</label>
-            <el-input
-              v-model="headerText"
-              placeholder="可写固定文字，也可用 [##]、[序号]、[文件名]、[YYYYMMDD]"
-            />
-          </div>
-          <div class="rule-item">
-            <label>页眉前缀</label>
-            <el-input v-model="headerPrefix" placeholder="例如 证据[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
-          </div>
-          <div class="rule-item">
-            <label>页眉后缀</label>
-            <el-input v-model="headerSuffix" placeholder="例如 -[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
-          </div>
-          <div class="rule-item">
-            <label>页眉位置</label>
-            <el-select v-model="headerAlign" :disabled="headerMode === 'none'">
-              <el-option label="居中" value="center" />
-              <el-option label="左侧" value="left" />
-              <el-option label="右侧" value="right" />
-            </el-select>
-          </div>
-          <div class="rule-item">
-            <label>页眉字号</label>
-            <el-input-number v-model="headerFontSize" :min="6" :max="24" :step="1" :disabled="headerMode === 'none'" />
-          </div>
-          <div class="rule-item">
-            <label>页眉字体</label>
-            <el-select v-model="headerFontFamily" :disabled="headerMode === 'none'">
-              <el-option label="自动" value="auto" />
-              <el-option label="宋体" value="songti" />
-              <el-option label="黑体" value="heiti" />
-              <el-option label="楷体" value="kaiti" />
-              <el-option label="仿宋" value="fangsong" />
-              <el-option label="Helvetica" value="helvetica" />
-              <el-option label="Times" value="times" />
-              <el-option label="Courier" value="courier" />
-            </el-select>
-          </div>
-          <div class="rule-item">
-            <label>页眉距顶 mm</label>
-            <el-input-number v-model="headerMarginMm" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
-          </div>
-          <div class="rule-item">
-            <label>页眉水平偏移 mm</label>
-            <el-input-number v-model="headerOffsetXMm" :min="-120" :max="120" :step="1" :disabled="headerMode === 'none'" />
-          </div>
-          <div class="rule-item">
-            <label>页眉颜色</label>
-            <el-color-picker v-model="headerColor" :disabled="headerMode === 'none'" />
-          </div>
-          <div class="rule-item">
-            <label>页脚页码</label>
-            <el-switch v-model="footerEnabled" active-text="启用" inactive-text="关闭" />
-          </div>
-          <div class="rule-item">
-            <label>页脚格式</label>
-            <el-input v-model="footerText" :disabled="!footerEnabled" />
-          </div>
-          <div class="rule-item">
-            <label>页脚位置</label>
-            <el-select v-model="footerAlign" :disabled="!footerEnabled">
-              <el-option label="居中" value="center" />
-              <el-option label="左侧" value="left" />
-              <el-option label="右侧" value="right" />
-            </el-select>
-          </div>
-          <div class="rule-item">
-            <label>页脚字号</label>
-            <el-input-number v-model="footerFontSize" :min="6" :max="24" :step="1" :disabled="!footerEnabled" />
-          </div>
-          <div class="rule-item">
-            <label>页脚字体</label>
-            <el-select v-model="footerFontFamily" :disabled="!footerEnabled">
-              <el-option label="自动" value="auto" />
-              <el-option label="宋体" value="songti" />
-              <el-option label="黑体" value="heiti" />
-              <el-option label="楷体" value="kaiti" />
-              <el-option label="仿宋" value="fangsong" />
-              <el-option label="Helvetica" value="helvetica" />
-              <el-option label="Times" value="times" />
-              <el-option label="Courier" value="courier" />
-            </el-select>
-          </div>
-          <div class="rule-item">
-            <label>页脚距底 mm</label>
-            <el-input-number v-model="footerMarginMm" :min="3" :max="60" :step="1" :disabled="!footerEnabled" />
-          </div>
-          <div class="rule-item">
-            <label>页脚水平偏移 mm</label>
-            <el-input-number v-model="footerOffsetXMm" :min="-120" :max="120" :step="1" :disabled="!footerEnabled" />
-          </div>
-          <div class="rule-item">
-            <label>页脚颜色</label>
-            <el-color-picker v-model="footerColor" :disabled="!footerEnabled" />
-          </div>
-        </div>
+        <HeaderFooterRuleFields
+          v-if="insertHeaderFooterEnabled"
+          class="rule-grid"
+          v-model:header-mode="headerMode"
+          v-model:header-text="headerText"
+          v-model:header-prefix="headerPrefix"
+          v-model:header-suffix="headerSuffix"
+          v-model:header-align="headerAlign"
+          v-model:header-font-size="headerFontSize"
+          v-model:header-font-family="headerFontFamily"
+          v-model:header-margin-mm="headerMarginMm"
+          v-model:header-offset-x-mm="headerOffsetXMm"
+          v-model:header-color="headerColor"
+          v-model:footer-enabled="footerEnabled"
+          v-model:footer-continuous="footerContinuous"
+          v-model:footer-text="footerText"
+          v-model:footer-align="footerAlign"
+          v-model:footer-font-size="footerFontSize"
+          v-model:footer-font-family="footerFontFamily"
+          v-model:footer-margin-mm="footerMarginMm"
+          v-model:footer-offset-x-mm="footerOffsetXMm"
+          v-model:footer-color="footerColor"
+          :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
+        />
         <el-alert
           v-if="insertHeaderFooterEnabled && headerFooterOverflowWarnings.length"
           type="warning"
@@ -282,7 +208,9 @@
       <div v-if="showProcessingControls" class="toolbar">
         <el-button :disabled="!overlayFiles.length" @click="selectOverlayOutputDir">输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="openPlannedOutputDir">打开输出文件夹</el-button>
-        <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages">刷新页数</el-button>
+        <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages"
+          >刷新页数</el-button
+        >
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
           {{ processButtonText }}
         </el-button>
@@ -293,13 +221,7 @@
         <span v-if="outputMode !== 'files_only'">合并输出：{{ plannedMergeOutputPath }}</span>
         <span v-if="outputMode === 'merge_only'">合并完成后会清理中间单文件副本</span>
       </div>
-      <el-alert
-        v-if="showRuleActionNotes"
-        type="warning"
-        :closable="false"
-        show-icon
-        class="processing-notes"
-      >
+      <el-alert v-if="showRuleActionNotes" type="warning" :closable="false" show-icon class="processing-notes">
         <template #title>{{ processingNotes.join('；') }}</template>
       </el-alert>
 
@@ -356,6 +278,12 @@
             </div>
           </div>
         </div>
+        <div class="split-cleanup-options">
+          <div class="block-title">拆分后处理</div>
+          <el-checkbox v-model="splitCleanupHeader">删除页眉区内容</el-checkbox>
+          <el-checkbox v-model="splitCleanupFooter">删除原页码/页脚区内容</el-checkbox>
+          <span class="split-cleanup-note">仅在拆分输出文件时执行，不修改导入的合并 PDF。</span>
+        </div>
         <el-alert
           v-if="mergedImportWarnings.length"
           type="warning"
@@ -384,12 +312,22 @@
           </el-table-column>
           <el-table-column label="起始页" prop="pageStart" sortable="custom" width="108">
             <template #default="{ row }">
-              <el-input-number v-model="row.pageStart" :min="1" :max="mergedImportPlan.totalPages || 999999" size="small" />
+              <el-input-number
+                v-model="row.pageStart"
+                :min="1"
+                :max="mergedImportPlan.totalPages || 999999"
+                size="small"
+              />
             </template>
           </el-table-column>
           <el-table-column label="结束页" prop="pageEnd" sortable="custom" width="108">
             <template #default="{ row }">
-              <el-input-number v-model="row.pageEnd" :min="1" :max="mergedImportPlan.totalPages || 999999" size="small" />
+              <el-input-number
+                v-model="row.pageEnd"
+                :min="1"
+                :max="mergedImportPlan.totalPages || 999999"
+                size="small"
+              />
             </template>
           </el-table-column>
           <el-table-column label="页数" prop="pageCount" sortable="custom" width="64">
@@ -405,7 +343,9 @@
           <el-table-column label="操作" width="148">
             <template #default="{ row, $index }">
               <el-button link type="primary" size="small" @click.stop="selectMergedImportRange(row)">跳转</el-button>
-              <el-button link type="primary" size="small" @click.stop="insertMergedImportRangeAfter($index)">续段</el-button>
+              <el-button link type="primary" size="small" @click.stop="insertMergedImportRangeAfter($index)"
+                >续段</el-button
+              >
               <el-button link type="danger" size="small" @click.stop="removeMergedImportRange($index)">删除</el-button>
             </template>
           </el-table-column>
@@ -418,11 +358,11 @@
         size="small"
         border
         class="overlay-table"
-          highlight-current-row
-          @row-click="selectPreviewRow"
-          @sort-change="sortOverlayFiles"
-        >
-          <el-table-column type="index" label="#" width="44" />
+        highlight-current-row
+        @row-click="selectPreviewRow"
+        @sort-change="sortOverlayFiles"
+      >
+        <el-table-column type="index" label="#" width="44" />
         <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <button class="file-link" type="button" @click.stop="openEvidenceFile(row)">
@@ -470,7 +410,13 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="原页码" prop="existingPageNumber" sortable="custom" min-width="120" show-overflow-tooltip>
+        <el-table-column
+          label="原页码"
+          prop="existingPageNumber"
+          sortable="custom"
+          min-width="120"
+          show-overflow-tooltip
+        >
           <template #default="{ row }">
             <el-input
               v-if="isEditingExistingPageNumber(row)"
@@ -531,7 +477,13 @@
             <span class="table-text">{{ headerFooterHandlingText(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="workflowMode === 'split'" label="来源页段" prop="sourceRange" sortable="custom" width="105">
+        <el-table-column
+          v-if="workflowMode === 'split'"
+          label="来源页段"
+          prop="sourceRange"
+          sortable="custom"
+          width="105"
+        >
           <template #default="{ row }">{{ sourceRangeText(row) }}</template>
         </el-table-column>
         <el-table-column label="状态" prop="status" sortable="custom" width="92">
@@ -541,8 +493,16 @@
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ $index }">
-            <el-button link size="small" :disabled="$index === 0" @click.stop="moveOverlayFile($index, -1)">上移</el-button>
-            <el-button link size="small" :disabled="$index === overlayRows.length - 1" @click.stop="moveOverlayFile($index, 1)">下移</el-button>
+            <el-button link size="small" :disabled="$index === 0" @click.stop="moveOverlayFile($index, -1)"
+              >上移</el-button
+            >
+            <el-button
+              link
+              size="small"
+              :disabled="$index === overlayRows.length - 1"
+              @click.stop="moveOverlayFile($index, 1)"
+              >下移</el-button
+            >
             <el-button link type="danger" size="small" @click.stop="removeOverlayFile($index)">删除</el-button>
           </template>
         </el-table-column>
@@ -556,121 +516,31 @@
           <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
         </div>
       </template>
-      <div v-if="insertHeaderFooterEnabled" class="dialog-rule-grid">
-        <div class="rule-item">
-          <label>页眉来源</label>
-          <el-select v-model="headerMode">
-            <el-option label="不插入页眉" value="none" />
-            <el-option label="文件名" value="filename" />
-            <el-option label="按证据列表名称" value="per_file" />
-            <el-option label="固定文本" value="custom" />
-          </el-select>
-        </div>
-        <div class="rule-item" v-if="headerMode === 'custom'">
-          <label>页眉文本</label>
-          <el-input
-            v-model="headerText"
-            placeholder="可写固定文字，也可用 [##]、[序号]、[文件名]、[YYYYMMDD]"
-          />
-        </div>
-        <div class="rule-item">
-          <label>页眉前缀</label>
-          <el-input v-model="headerPrefix" placeholder="例如 证据[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
-        </div>
-        <div class="rule-item">
-          <label>页眉后缀</label>
-          <el-input v-model="headerSuffix" placeholder="例如 -[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
-        </div>
-        <div class="rule-item">
-          <label>页眉位置</label>
-          <el-select v-model="headerAlign" :disabled="headerMode === 'none'">
-            <el-option label="居中" value="center" />
-            <el-option label="左侧" value="left" />
-            <el-option label="右侧" value="right" />
-          </el-select>
-        </div>
-        <div class="rule-item">
-          <label>页眉字号</label>
-          <el-input-number v-model="headerFontSize" :min="6" :max="24" :step="1" :disabled="headerMode === 'none'" />
-        </div>
-        <div class="rule-item">
-          <label>页眉字体</label>
-          <el-select v-model="headerFontFamily" :disabled="headerMode === 'none'">
-            <el-option label="自动" value="auto" />
-            <el-option label="宋体" value="songti" />
-            <el-option label="黑体" value="heiti" />
-            <el-option label="楷体" value="kaiti" />
-            <el-option label="仿宋" value="fangsong" />
-            <el-option label="Helvetica" value="helvetica" />
-            <el-option label="Times" value="times" />
-            <el-option label="Courier" value="courier" />
-          </el-select>
-        </div>
-        <div class="rule-item">
-          <label>页眉距顶 mm</label>
-          <el-input-number v-model="headerMarginMm" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
-        </div>
-        <div class="rule-item">
-          <label>页眉水平偏移 mm</label>
-          <el-input-number v-model="headerOffsetXMm" :min="-120" :max="120" :step="1" :disabled="headerMode === 'none'" />
-        </div>
-        <div class="rule-item">
-          <label>页眉颜色</label>
-          <el-color-picker v-model="headerColor" :disabled="headerMode === 'none'" />
-        </div>
-        <div class="rule-item">
-          <label>页脚页码</label>
-          <el-switch v-model="footerEnabled" active-text="启用" inactive-text="关闭" />
-        </div>
-        <div class="rule-item">
-          <label>页码方式</label>
-          <el-select v-model="footerContinuous" :disabled="!footerEnabled">
-            <el-option :value="true" label="拼接连续页码" />
-            <el-option :value="false" label="每个文件单独页码" />
-          </el-select>
-        </div>
-        <div class="rule-item">
-          <label>页脚格式</label>
-          <el-input v-model="footerText" :disabled="!footerEnabled" />
-        </div>
-        <div class="rule-item">
-          <label>页脚位置</label>
-          <el-select v-model="footerAlign" :disabled="!footerEnabled">
-            <el-option label="居中" value="center" />
-            <el-option label="左侧" value="left" />
-            <el-option label="右侧" value="right" />
-          </el-select>
-        </div>
-        <div class="rule-item">
-          <label>页脚字号</label>
-          <el-input-number v-model="footerFontSize" :min="6" :max="24" :step="1" :disabled="!footerEnabled" />
-        </div>
-        <div class="rule-item">
-          <label>页脚字体</label>
-          <el-select v-model="footerFontFamily" :disabled="!footerEnabled">
-            <el-option label="自动" value="auto" />
-            <el-option label="宋体" value="songti" />
-            <el-option label="黑体" value="heiti" />
-            <el-option label="楷体" value="kaiti" />
-            <el-option label="仿宋" value="fangsong" />
-            <el-option label="Helvetica" value="helvetica" />
-            <el-option label="Times" value="times" />
-            <el-option label="Courier" value="courier" />
-          </el-select>
-        </div>
-        <div class="rule-item">
-          <label>页脚距底 mm</label>
-          <el-input-number v-model="footerMarginMm" :min="3" :max="60" :step="1" :disabled="!footerEnabled" />
-        </div>
-        <div class="rule-item">
-          <label>页脚水平偏移 mm</label>
-          <el-input-number v-model="footerOffsetXMm" :min="-120" :max="120" :step="1" :disabled="!footerEnabled" />
-        </div>
-        <div class="rule-item">
-          <label>页脚颜色</label>
-          <el-color-picker v-model="footerColor" :disabled="!footerEnabled" />
-        </div>
-      </div>
+      <HeaderFooterRuleFields
+        v-if="insertHeaderFooterEnabled"
+        class="dialog-rule-grid"
+        v-model:header-mode="headerMode"
+        v-model:header-text="headerText"
+        v-model:header-prefix="headerPrefix"
+        v-model:header-suffix="headerSuffix"
+        v-model:header-align="headerAlign"
+        v-model:header-font-size="headerFontSize"
+        v-model:header-font-family="headerFontFamily"
+        v-model:header-margin-mm="headerMarginMm"
+        v-model:header-offset-x-mm="headerOffsetXMm"
+        v-model:header-color="headerColor"
+        v-model:footer-enabled="footerEnabled"
+        v-model:footer-continuous="footerContinuous"
+        v-model:footer-text="footerText"
+        v-model:footer-align="footerAlign"
+        v-model:footer-font-size="footerFontSize"
+        v-model:footer-font-family="footerFontFamily"
+        v-model:footer-margin-mm="footerMarginMm"
+        v-model:footer-offset-x-mm="footerOffsetXMm"
+        v-model:footer-color="footerColor"
+        :show-footer-continuous="true"
+        :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
+      />
       <template #footer>
         <el-button @click="headerFooterSettingsVisible = false">关闭</el-button>
         <el-button type="primary" @click="applyHeaderFooterSettings">应用到预览</el-button>
@@ -686,15 +556,65 @@
         <div class="preview-controls">
           <template v-if="mergedImportPlan">
             <el-button size="small" :disabled="previewPage <= 1" @click="movePreviewPage(-1)">上一页</el-button>
-            <el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)">下一页</el-button>
-            <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeStart">设为起始页</el-button>
-            <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd">设为结束页</el-button>
+            <el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)"
+              >下一页</el-button
+            >
+            <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeStart"
+              >设为起始页</el-button
+            >
+            <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd"
+              >设为结束页</el-button
+            >
           </template>
-          <el-input-number v-model="previewPage" :min="1" :max="previewMaxPage" :disabled="!activePreviewFilePath" size="small" />
+          <el-input-number
+            v-model="previewPage"
+            :min="1"
+            :max="previewMaxPage"
+            :disabled="!activePreviewFilePath"
+            size="small"
+          />
           <el-button size="small" :disabled="!activePreviewFilePath" @click="refreshPreview">重新渲染当前页</el-button>
-          <el-button size="small" type="primary" :loading="truePreviewLoading" :disabled="!selectedOverlayFile || Boolean(mergedImportPlan)" @click="renderTruePreview">
+          <el-button
+            size="small"
+            type="primary"
+            :loading="truePreviewLoading"
+            :disabled="!selectedOverlayFile || Boolean(mergedImportPlan)"
+            @click="renderTruePreview"
+          >
             生成真实预览
           </el-button>
+        </div>
+      </div>
+
+      <div v-if="footerCandidatePanelVisible" class="footer-candidate-panel">
+        <div class="candidate-panel-head">
+          <div>
+            <div class="block-title">页脚候选确认</div>
+            <p class="hint">检测到多个底部文本候选，请指定它是页脚、页码或忽略</p>
+          </div>
+        </div>
+        <div class="footer-candidate-list">
+          <div
+            v-for="candidate in selectedFooterCandidates"
+            :key="candidateKey(candidate)"
+            class="footer-candidate-item"
+            :class="{ active: selectedFooterCandidateKey === candidateKey(candidate) }"
+          >
+            <button class="candidate-main" type="button" @click="previewFooterCandidate(candidate)">
+              <strong>{{ candidate.text || candidate.normalizedText }}</strong>
+              <span>{{ footerCandidateMeta(candidate) }}</span>
+            </button>
+            <el-tag size="small" :type="footerCandidateRoleType(candidate)">{{
+              footerCandidateRoleText(candidate)
+            }}</el-tag>
+            <el-button link size="small" type="primary" @click="assignFooterCandidate(candidate, 'footer')"
+              >设为页脚</el-button
+            >
+            <el-button link size="small" type="primary" @click="assignFooterCandidate(candidate, 'pageNumber')"
+              >设为页码</el-button
+            >
+            <el-button link size="small" @click="assignFooterCandidate(candidate, 'ignore')">忽略</el-button>
+          </div>
         </div>
       </div>
 
@@ -719,6 +639,13 @@
             :style="marker.style"
           >
             <span>{{ marker.label }}</span>
+          </div>
+          <div
+            v-if="footerCandidatePreviewMarker"
+            class="footer-candidate-marker"
+            :style="footerCandidatePreviewMarker.style"
+          >
+            <span>{{ footerCandidatePreviewMarker.label }}</span>
           </div>
           <div
             v-for="overlay in convertedExistingPreviewOverlays"
@@ -756,30 +683,26 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
+import HeaderFooterRuleFields from '../components/HeaderFooterRuleFields.vue'
 import {
-  assignPageRanges,
   buildEvidencePdfRulePayload,
-  buildHeaderFooterItems,
-  buildHeaderText as buildSessionHeaderText,
   buildMergeOutputPath,
   buildOutputDir,
-  candidateTargetRange,
   createEvidenceFile,
   expandPlaceholders,
   fileName,
   pageRangeText,
   parentDir,
   sortByNatural,
-  stripPdf,
   totalPages,
+  updatePageRanges,
 } from '../composables/useEvidencePdfSession.js'
-import { bboxOverlayStyle, textOverlayStyle } from '../composables/pdfPreviewCoordinates.js'
-import {
-  formatSplitFileName,
-  todayCompact,
-} from '../composables/splitFileName.js'
-import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { todayCompact } from '../composables/splitFileName.js'
+import { useEvidencePdfDetection } from '../composables/useEvidencePdfDetection.js'
+import { useEvidencePdfPreview } from '../composables/useEvidencePdfPreview.js'
+import { useEvidencePdfMergedImport } from '../composables/useEvidencePdfMergedImport.js'
+import { useEvidencePdfExistingEditing } from '../composables/useEvidencePdfExistingEditing.js'
+import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 
 const props = defineProps({
   workflow: {
@@ -801,10 +724,11 @@ const workflowHint = computed(() => {
 })
 const splitImportButtonText = computed(() => '导入分项证据 PDF')
 const mergedImportButtonText = computed(() => '导入合并证据 PDF')
-const splitResultActionTitle = computed(() => hasSourceSplitRanges.value ? '分项文件后处理' : '合并证据批量处理')
-const splitResultActionHint = computed(() => hasSourceSplitRanges.value
-  ? '处理后文件会输出到新文件夹，不覆盖原分项文件。'
-  : '多个合并证据 PDF 会按同一规则批量输出到新文件夹，不覆盖原文件。'
+const splitResultActionTitle = computed(() => (hasSourceSplitRanges.value ? '分项文件后处理' : '合并证据批量处理'))
+const splitResultActionHint = computed(() =>
+  hasSourceSplitRanges.value
+    ? '处理后文件会输出到新文件夹，不覆盖原分项文件。'
+    : '多个合并证据 PDF 会按同一规则批量输出到新文件夹，不覆盖原文件。',
 )
 
 const overlayFiles = ref([])
@@ -823,10 +747,15 @@ const splitNameSeparator = ref('-')
 const splitNameCustomSeparator = ref('')
 const headerFooterSettingsVisible = ref(false)
 const splitReplacementOutputDir = ref('')
+const splitCleanupHeader = ref(false)
+const splitCleanupFooter = ref(false)
+
+const DEFAULT_RASTER_DPI = 200
+const HORIZONTAL_OFFSET_LIMIT_MM = 120
 
 const normalizeA4 = ref(false)
 const a4Orientation = ref('auto')
-const rasterDpi = ref(200)
+const rasterDpi = ref(DEFAULT_RASTER_DPI)
 const removeAnnotations = ref(false)
 const annotationKinds = ref([
   'Text',
@@ -850,7 +779,7 @@ const headerMode = ref('filename')
 const headerText = ref('')
 const headerPrefix = ref('')
 const headerSuffix = ref('')
-const headerAlign = ref('center')
+const headerAlign = ref('right')
 const headerFontSize = ref(10)
 const headerFontFamily = ref('auto')
 const headerMarginMm = ref(10)
@@ -878,33 +807,35 @@ const editingFooterPath = ref('')
 const editingExistingHeaderPath = ref('')
 const editingExistingFooterPath = ref('')
 const editingExistingPageNumberPath = ref('')
-const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
+const selectedFooterCandidateKey = ref('')
 
-watch(headerMode, (mode) => {
-  if (mode === 'template') {
-    headerMode.value = 'custom'
-  } else if (mode === 'seq') {
-    headerText.value = '证据[序号]'
-    headerMode.value = 'custom'
-  } else if (mode === 'seq_cn') {
-    headerText.value = '证据[中文序号]'
-    headerMode.value = 'custom'
-  } else if (mode === 'prefix_seq') {
-    headerText.value = `${headerText.value || ''}证据[序号]`
-    headerMode.value = 'custom'
-  }
-}, { immediate: true })
+watch(
+  headerMode,
+  (mode) => {
+    if (mode === 'template') {
+      headerMode.value = 'custom'
+    } else if (mode === 'seq') {
+      headerText.value = '证据[序号]'
+      headerMode.value = 'custom'
+    } else if (mode === 'seq_cn') {
+      headerText.value = '证据[中文序号]'
+      headerMode.value = 'custom'
+    } else if (mode === 'prefix_seq') {
+      headerText.value = `${headerText.value || ''}证据[序号]`
+      headerMode.value = 'custom'
+    }
+  },
+  { immediate: true },
+)
 
 applyWorkflowDefaults()
 
 const overlayRows = computed(() => {
-  return assignPageRanges(overlayFiles.value)
+  return updatePageRanges(overlayFiles.value)
 })
-const hasSourceSplitRanges = computed(() => overlayFiles.value.some(file => Number(file.sourcePageStart || 0) > 0))
-const hasMergedBatchImports = computed(() =>
-  workflowMode.value === 'split' &&
-  overlayFiles.value.length > 0 &&
-  !hasSourceSplitRanges.value
+const hasSourceSplitRanges = computed(() => overlayFiles.value.some((file) => Number(file.sourcePageStart || 0) > 0))
+const hasMergedBatchImports = computed(
+  () => workflowMode.value === 'split' && overlayFiles.value.length > 0 && !hasSourceSplitRanges.value,
 )
 
 const selectedOverlayFile = computed(() => overlayRows.value[selectedOverlayIndex.value] || null)
@@ -913,14 +844,12 @@ const previewMaxPage = computed(() => {
   if (mergedImportPlan.value) return Math.max(1, Number(mergedImportPlan.value.totalPages || 1))
   return selectedOverlayFile.value?.pages || 1
 })
-const previewHint = computed(() => mergedImportPlan.value
-  ? '合并 PDF 原文预览'
-  : '实时位置；真实预览需手动生成'
-)
-const showRulePreviewOverlays = computed(() => !mergedImportPlan.value)
+const previewHint = computed(() => (mergedImportPlan.value ? '合并 PDF 原文预览' : '实时位置；真实预览需手动生成'))
 const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
 const plannedOutputDir = computed(() => buildOutputDir(overlayRows.value, overlayOutputDir.value))
-const plannedMergeOutputPath = computed(() => buildMergeOutputPath(overlayRows.value, overlayOutputDir.value, mergeFileName.value))
+const plannedMergeOutputPath = computed(() =>
+  buildMergeOutputPath(overlayRows.value, overlayOutputDir.value, mergeFileName.value),
+)
 const firstHeaderPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
@@ -961,119 +890,121 @@ const processingNotes = computed(() => {
   }
   return notes
 })
-const showProcessingControls = computed(() =>
-  !mergedImportPlan.value &&
-  (workflowMode.value !== 'split' || hasMergedBatchImports.value)
+const showProcessingControls = computed(
+  () => !mergedImportPlan.value && (workflowMode.value !== 'split' || hasMergedBatchImports.value),
 )
-const showSessionSummary = computed(() =>
-  overlayFiles.value.length > 0 &&
-  !mergedImportPlan.value &&
-  (workflowMode.value !== 'split' || hasMergedBatchImports.value)
+const showSessionSummary = computed(
+  () =>
+    overlayFiles.value.length > 0 &&
+    !mergedImportPlan.value &&
+    (workflowMode.value !== 'split' || hasMergedBatchImports.value),
 )
-const showSplitResultActions = computed(() =>
-  workflowMode.value === 'split' &&
-  overlayFiles.value.length > 0 &&
-  !mergedImportPlan.value &&
-  hasSourceSplitRanges.value
+const showSplitResultActions = computed(
+  () =>
+    workflowMode.value === 'split' &&
+    overlayFiles.value.length > 0 &&
+    !mergedImportPlan.value &&
+    hasSourceSplitRanges.value,
 )
-const showExistingHeaderFooterControls = computed(() =>
-  overlayFiles.value.length > 0 &&
-  !mergedImportPlan.value
+const showExistingHeaderFooterControls = computed(() => overlayFiles.value.length > 0 && !mergedImportPlan.value)
+const showRuleActionNotes = computed(
+  () => (showProcessingControls.value || showSplitResultActions.value) && processingNotes.value.length > 0,
 )
-const showRuleActionNotes = computed(() =>
-  (showProcessingControls.value || showSplitResultActions.value) &&
-  processingNotes.value.length > 0
+const splitReplacementOutputDirValue = computed(
+  () => splitReplacementOutputDir.value || defaultSplitReplacementOutputDir(),
 )
-const splitReplacementOutputDirValue = computed(() =>
-  splitReplacementOutputDir.value || defaultSplitReplacementOutputDir()
-)
-const processButtonText = computed(() =>
-  workflowMode.value === 'merge' ? '执行分项证据处理' : '执行合并证据处理'
-)
+const processButtonText = computed(() => (workflowMode.value === 'merge' ? '执行分项证据处理' : '执行合并证据处理'))
 const autoCleanupHeaderEnabled = computed(() =>
-  overlayFiles.value.some((file) => file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader)
+  overlayFiles.value.some(
+    (file) => file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader,
+  ),
 )
 const autoCleanupFooterEnabled = computed(() =>
-  overlayFiles.value.some((file) => file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter)
+  overlayFiles.value.some(
+    (file) => file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter,
+  ),
 )
-const hasDetectedExistingHeaderFooter = computed(() =>
-  overlayFiles.value.some((file) => hasExistingHeaderFooter(file))
-)
-const existingHeaderCount = computed(() =>
-  overlayFiles.value.filter((file) => hasExistingHeader(file)).length
-)
-const existingFooterCount = computed(() =>
-  overlayFiles.value.filter((file) => hasExistingFooter(file)).length
-)
-const existingPageNumberCount = computed(() =>
-  overlayFiles.value.filter((file) => hasExistingPageNumber(file)).length
-)
+const hasDetectedExistingHeaderFooter = computed(() => overlayFiles.value.some((file) => hasExistingHeaderFooter(file)))
+const existingHeaderCount = computed(() => overlayFiles.value.filter((file) => hasExistingHeader(file)).length)
+const existingFooterCount = computed(() => overlayFiles.value.filter((file) => hasExistingFooter(file)).length)
+const existingPageNumberCount = computed(() => overlayFiles.value.filter((file) => hasExistingPageNumber(file)).length)
 const hasExistingRemovalRule = computed(() =>
-  overlayFiles.value.some((file) => file.removeExistingHeader || file.removeExistingFooter || file.removeExistingPageNumber)
+  overlayFiles.value.some(
+    (file) => file.removeExistingHeader || file.removeExistingFooter || file.removeExistingPageNumber,
+  ),
 )
 const existingRemovalCount = computed(() =>
-  overlayFiles.value.reduce((sum, file) =>
-    sum +
-    Number(Boolean(file.removeExistingHeader)) +
-    Number(Boolean(file.removeExistingFooter)) +
-    Number(Boolean(file.removeExistingPageNumber)),
-  0)
+  overlayFiles.value.reduce(
+    (sum, file) =>
+      sum +
+      Number(Boolean(file.removeExistingHeader)) +
+      Number(Boolean(file.removeExistingFooter)) +
+      Number(Boolean(file.removeExistingPageNumber)),
+    0,
+  ),
 )
 const hasExistingEditRule = computed(() =>
-  overlayFiles.value.some((file) =>
-    (file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader) ||
-    (file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter),
-  )
+  overlayFiles.value.some(
+    (file) =>
+      (file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader) ||
+      (file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter),
+  ),
 )
 const hasExistingConvertRule = computed(() =>
-  overlayFiles.value.some((file) =>
-    (file.convertPlainHeader && !file.removeExistingHeader) ||
-    (file.convertPlainFooter && !file.removeExistingFooter) ||
-    (file.convertPlainPageNumber && !file.removeExistingPageNumber),
-  )
+  overlayFiles.value.some(
+    (file) =>
+      (file.convertPlainHeader && !file.removeExistingHeader) ||
+      (file.convertPlainFooter && !file.removeExistingFooter) ||
+      (file.convertPlainPageNumber && !file.removeExistingPageNumber),
+  ),
 )
 const existingEditCount = computed(() =>
-  overlayFiles.value.reduce((sum, file) =>
-    sum +
-    Number(Boolean(file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader)) +
-    Number(Boolean(file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter)),
-  0)
+  overlayFiles.value.reduce(
+    (sum, file) =>
+      sum +
+      Number(Boolean(file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader)) +
+      Number(Boolean(file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter)),
+    0,
+  ),
 )
 const existingConvertCount = computed(() =>
-  overlayFiles.value.reduce((sum, file) =>
-    sum +
-    Number(Boolean(file.convertPlainHeader && !file.removeExistingHeader)) +
-    Number(Boolean(file.convertPlainFooter && !file.removeExistingFooter)) +
-    Number(Boolean(file.convertPlainPageNumber && !file.removeExistingPageNumber)),
-  0)
+  overlayFiles.value.reduce(
+    (sum, file) =>
+      sum +
+      Number(Boolean(file.convertPlainHeader && !file.removeExistingHeader)) +
+      Number(Boolean(file.convertPlainFooter && !file.removeExistingFooter)) +
+      Number(Boolean(file.convertPlainPageNumber && !file.removeExistingPageNumber)),
+    0,
+  ),
 )
 const hasUnresolvedExistingOverlapRisk = computed(() => {
   const insertsHeader = insertHeaderFooterEnabled.value && headerMode.value !== 'none'
   const insertsFooter = insertHeaderFooterEnabled.value && footerEnabled.value
-  return overlayFiles.value.some((file) =>
-    (insertsHeader && hasExistingHeader(file) && !file.removeExistingHeader && !file.convertPlainHeader) ||
-    (insertsFooter && hasExistingFooter(file) && !file.removeExistingFooter && !file.convertPlainFooter) ||
-    (insertsFooter && hasExistingPageNumber(file) && !file.removeExistingPageNumber && !file.convertPlainPageNumber),
+  return overlayFiles.value.some(
+    (file) =>
+      (insertsHeader && hasExistingHeader(file) && !file.removeExistingHeader && !file.convertPlainHeader) ||
+      (insertsFooter && hasExistingFooter(file) && !file.removeExistingFooter && !file.convertPlainFooter) ||
+      (insertsFooter && hasExistingPageNumber(file) && !file.removeExistingPageNumber && !file.convertPlainPageNumber),
   )
 })
-const canApplyOverlay = computed(() =>
-  overlayFiles.value.length > 0 &&
-  totalOverlayPages.value > 0 &&
-  hasApplicableProcessingRule.value
+const canApplyOverlay = computed(
+  () => overlayFiles.value.length > 0 && totalOverlayPages.value > 0 && hasApplicableProcessingRule.value,
 )
-const canApplySplitReplacement = computed(() =>
-  showSplitResultActions.value &&
-  totalOverlayPages.value > 0 &&
-  !overlaying.value &&
-  hasApplicableProcessingRule.value
+const canApplySplitReplacement = computed(
+  () =>
+    showSplitResultActions.value &&
+    totalOverlayPages.value > 0 &&
+    !overlaying.value &&
+    hasApplicableProcessingRule.value,
 )
-const hasApplicableProcessingRule = computed(() =>
-  normalizeA4.value ||
-  removeAnnotations.value ||
-  hasExistingEditRule.value ||
-  hasExistingConvertRule.value ||
-  hasExistingRemovalRule.value ||
-  (insertHeaderFooterEnabled.value && (headerMode.value !== 'none' || footerEnabled.value))
+const hasApplicableProcessingRule = computed(
+  () =>
+    normalizeA4.value ||
+    removeAnnotations.value ||
+    hasExistingEditRule.value ||
+    hasExistingConvertRule.value ||
+    hasExistingRemovalRule.value ||
+    (insertHeaderFooterEnabled.value && (headerMode.value !== 'none' || footerEnabled.value)),
 )
 
 const currentRules = computed(() => ({
@@ -1111,118 +1042,170 @@ const currentRules = computed(() => ({
   mergeFileName: mergeFileName.value,
 }))
 
-const previewHeaderText = computed(() => {
-  if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
-  if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
-  return buildSessionHeaderText(selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value)
+const {
+  detectAllHeaderFooter,
+  candidateKey,
+  footerCandidateMeta,
+  footerCandidateRoleText: detectionFooterCandidateRoleText,
+  footerCandidateRoleType: detectionFooterCandidateRoleType,
+  previewFooterCandidate: detectionPreviewFooterCandidate,
+  assignFooterCandidate: detectionAssignFooterCandidate,
+  fileExistingStatus,
+  hasExistingHeader,
+  hasExistingFooter,
+  hasExistingPageNumber,
+} = useEvidencePdfDetection({
+  overlayRows,
+  detectingAllHeaderFooter,
+  cleanupHeaderHeightMm,
+  cleanupFooterHeightMm,
 })
 
-const previewFooterText = computed(() => {
-  const footerTemplate = selectedOverlayFile.value?.footer ?? footerText.value
-  if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || !footerEnabled.value || !footerTemplate) return ''
-  if (!shouldShowLiveFooter(selectedOverlayFile.value)) return ''
-  const page = footerContinuous.value
-    ? selectedOverlayFile.value.pageStart + previewPage.value - 1
-    : previewPage.value
-  const total = footerContinuous.value
-    ? totalOverlayPages.value
-    : selectedOverlayFile.value.pages || 1
-  return expandPlaceholders(footerTemplate, page, total)
+const {
+  showRulePreviewOverlays,
+  previewHeaderText,
+  previewFooterText,
+  previewHeaderStyle,
+  previewFooterStyle,
+  truePreviewFrameStyle,
+  selectedFooterCandidates,
+  footerCandidatePanelVisible,
+  footerCandidatePreviewMarker,
+  deletionPreviewMarkers,
+  convertedExistingPreviewOverlays,
+  headerFooterOverflowWarnings,
+  refreshPreview,
+  safeRefreshPreview,
+  movePreviewPage,
+  selectPreviewRow,
+  renderTruePreview,
+  handlePreviewLoaded,
+  handlePreviewError,
+} = useEvidencePdfPreview({
+  selectedOverlayFile,
+  selectedOverlayIndex,
+  previewPage,
+  previewReloadKey,
+  previewData,
+  truePreview,
+  truePreviewLoading,
+  previewMaxPage,
+  mergedImportPlan,
+  overlayRows,
+  currentRules,
+  overlayOutputDir,
+  insertHeaderFooterEnabled,
+  headerMode,
+  footerEnabled,
+  footerContinuous,
+  totalOverlayPages,
+  headerAlign,
+  headerMarginMm,
+  headerFontSize,
+  headerFontFamily,
+  headerOffsetXMm,
+  headerColor,
+  footerAlign,
+  footerMarginMm,
+  footerFontSize,
+  footerFontFamily,
+  footerOffsetXMm,
+  footerColor,
+  footerText,
+  removeAnnotations,
+  annotationKinds,
+  cleanupHeaderHeightMm,
+  cleanupFooterHeightMm,
+  selectedFooterCandidateKey,
 })
 
-const previewHeaderStyle = computed(() => textOverlayStyle('header', previewData.value, {
-  align: headerAlign.value,
-  marginMm: headerMarginMm.value,
-  fontSize: headerFontSize.value,
-  fontFamily: headerFontFamily.value,
-  offsetXMm: headerOffsetXMm.value,
-  color: headerColor.value,
-}))
-const previewFooterStyle = computed(() => textOverlayStyle('footer', previewData.value, {
-  align: footerAlign.value,
-  marginMm: footerMarginMm.value,
-  fontSize: footerFontSize.value,
-  fontFamily: footerFontFamily.value,
-  offsetXMm: footerOffsetXMm.value,
-  color: footerColor.value,
-}))
-const truePreviewFrameStyle = computed(() => ({
-  aspectRatio: truePreview.value?.widthPx && truePreview.value?.heightPx
-    ? `${truePreview.value.widthPx} / ${truePreview.value.heightPx}`
-    : `${truePreview.value?.widthPt || 595.28} / ${truePreview.value?.heightPt || 841.89}`,
-}))
-const deletionPreviewMarkers = computed(() => {
-  if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value) return []
-  const file = selectedOverlayFile.value
-  const markers = []
-  if ((file.removeExistingHeader || file.convertPlainHeader) && isPageInDetectedRange(previewPage.value, file.existingHeaderPageStart, file.existingHeaderPageEnd)) {
-    markers.push(buildDeletionPreviewMarker(file.existingHeaderBBox, 'header', file.removeExistingHeader ? '删除旧页眉' : '替换旧页眉'))
-  }
-  if ((file.removeExistingFooter || file.convertPlainFooter) && isPageInDetectedRange(previewPage.value, file.existingFooterPageStart, file.existingFooterPageEnd)) {
-    markers.push(buildDeletionPreviewMarker(file.existingFooterBBox, 'footer', file.removeExistingFooter ? '删除旧页脚' : '替换旧页脚'))
-  }
-  if ((file.removeExistingPageNumber || file.convertPlainPageNumber) && isPageInDetectedRange(previewPage.value, file.existingPageNumberPageStart, file.existingPageNumberPageEnd)) {
-    markers.push(buildDeletionPreviewMarker(file.existingPageNumberBBox, 'footer', file.removeExistingPageNumber ? '删除旧页码' : '替换旧页码'))
-  }
-  return markers.filter(Boolean)
+function footerCandidateRoleText(candidate) {
+  return detectionFooterCandidateRoleText(candidate, selectedOverlayFile)
+}
+
+function footerCandidateRoleType(candidate) {
+  return detectionFooterCandidateRoleType(candidate, selectedOverlayFile)
+}
+
+function previewFooterCandidate(candidate) {
+  selectedFooterCandidateKey.value = candidateKey(candidate)
+  detectionPreviewFooterCandidate(candidate, selectedOverlayFile, previewMaxPage, previewPage, truePreview)
+}
+
+function assignFooterCandidate(candidate, role) {
+  detectionAssignFooterCandidate(
+    candidate,
+    role,
+    selectedOverlayFile,
+    selectedFooterCandidateKey,
+    truePreview,
+    refreshPreview,
+  )
+}
+
+const {
+  mergedImportWarnings,
+  selectedMergedImportRange,
+  importMergedPdfAsEvidence,
+  executeMergedImportPlan,
+  selectMergedImportOutputDir,
+  cancelMergedImportPlan,
+  splitOutputNamePreview,
+  selectMergedImportRange,
+  setSelectedMergedRangeStart,
+  setSelectedMergedRangeEnd,
+  addMergedImportRange,
+  insertMergedImportRangeAfter,
+  removeMergedImportRange,
+  sortMergedImportItems,
+  mergedImportRangePageCount,
+  mergedImportSourceType,
+  mergedImportSourceText,
+} = useEvidencePdfMergedImport({
+  overlayFiles,
+  overlayOutputDir,
+  importingMergedPdf,
+  splittingMergedImport,
+  mergedImportPlan,
+  selectedMergedImportIndex,
+  selectedOverlayIndex,
+  previewPage,
+  truePreview,
+  splitNamePrefix,
+  splitNameSuffix,
+  splitNameDateValue,
+  splitNameSeparator,
+  splitNameCustomSeparator,
+  splitReplacementOutputDir,
+  splitCleanupHeader,
+  splitCleanupFooter,
+  previewMaxPage,
+  cleanupHeaderHeightMm,
+  cleanupFooterHeightMm,
+  detectAllHeaderFooter,
+  refreshPreview,
+  safeRefreshPreview,
+  applyWorkflowDefaults,
+  refreshOverlayPageCounts,
 })
-const convertedExistingPreviewOverlays = computed(() => {
-  if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value) return []
-  const items = buildHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value)
-  const item = items.find((candidate) => candidate.inputPath === selectedOverlayFile.value.path)
-  return (item?.extraOverlays || []).map((overlay, index) => {
-    const region = overlay.region === 'header' ? 'header' : 'footer'
-    return {
-      key: `${selectedOverlayFile.value.path}-converted-${index}`,
-      region,
-      text: expandPlaceholders(
-        overlay.text,
-        footerContinuous.value ? selectedOverlayFile.value.pageStart + previewPage.value - 1 : previewPage.value,
-        footerContinuous.value ? totalOverlayPages.value || selectedOverlayFile.value.pages || 1 : selectedOverlayFile.value.pages || 1,
-      ),
-      style: textOverlayStyle(region, previewData.value, {
-        align: overlay.align,
-        marginMm: overlay.marginMm,
-        fontSize: overlay.fontSize,
-        fontFamily: overlay.fontFamily,
-        offsetXMm: overlay.offsetXMm,
-        color: overlay.color,
-      }),
-    }
-  })
-})
-const headerFooterOverflowWarnings = computed(() => {
-  const warnings = []
-  const widthPt = previewData.value?.widthPt || 595.28
-  if (previewHeaderText.value && estimateTextWidthPt(previewHeaderText.value, headerFontSize.value) > widthPt * 0.92) {
-    warnings.push('当前页眉可能超出页面宽度，请缩短文本、调整位置或减小字号')
-  }
-  if (previewFooterText.value && estimateTextWidthPt(previewFooterText.value, footerFontSize.value) > widthPt * 0.92) {
-    warnings.push('当前页脚可能超出页面宽度，请缩短文本、调整位置或减小字号')
-  }
-  return warnings
-})
-const mergedImportWarnings = computed(() => {
-  if (!mergedImportPlan.value) return []
-  return [
-    ...(mergedImportPlan.value.warnings || []),
-    ...splitRangeWarnings(mergedImportPlan.value.items || [], mergedImportPlan.value.totalPages),
-  ]
-})
-const selectedMergedImportRange = computed(() =>
-  mergedImportPlan.value?.items?.[selectedMergedImportIndex.value] || null
-)
 
 watch(selectedOverlayFile, () => {
   previewPage.value = 1
   truePreview.value = null
+  selectedFooterCandidateKey.value = selectedOverlayFile.value?.footerCandidateChoices?.[0]
+    ? candidateKey(selectedOverlayFile.value.footerCandidateChoices[0])
+    : ''
 })
 
-watch([previewPage, currentRules], () => {
-  truePreview.value = null
-}, {
-  deep: true,
-})
+watch(
+  [previewPage, currentRules],
+  () => {
+    truePreview.value = null
+  },
+  {
+    deep: true,
+  },
+)
 
 function applyWorkflowDefaults() {
   if (workflowMode.value === 'split') {
@@ -1255,434 +1238,6 @@ async function selectOverlayFiles() {
   await refreshOverlayPageCounts()
   await detectAllHeaderFooter({ silent: true })
 }
-
-async function importMergedPdfAsEvidence() {
-  if (importingMergedPdf.value) return
-  const selected = await open({
-    multiple: true,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
-  })
-  if (!selected) return
-  const paths = Array.isArray(selected) ? selected : [selected]
-  if (!paths.length) return
-  if (paths.length > 1) {
-    await importMergedPdfsForBatch(paths)
-    return
-  }
-  const input = paths[0]
-  const outputDir = defaultMergedImportOutputDir(input)
-
-  importingMergedPdf.value = true
-  let knownTotalPages = 1
-  try {
-    const countResult = await tauriCallSafe('get_pdf_page_count', { input })
-    const totalPages = countResult.ok ? Number(countResult.data || 0) : 0
-    knownTotalPages = Math.max(1, totalPages || 1)
-    if (totalPages > MERGED_IMPORT_AUTO_SCAN_PAGES) {
-      ElMessage.warning(`该 PDF 共 ${totalPages} 页，为避免卡顿，先自动识别前 ${MERGED_IMPORT_AUTO_SCAN_PAGES} 页；后续页段可手动补充。`)
-    }
-    const headerScanMm = mergedImportScanZoneMm(cleanupHeaderHeightMm.value)
-    const footerScanMm = mergedImportScanZoneMm(cleanupFooterHeightMm.value)
-    const inspect = await tauriCallSafe('inspect_merged_evidence_pdf', {
-      args: {
-        inputPath: input,
-        maxPages: MERGED_IMPORT_AUTO_SCAN_PAGES,
-        headerZoneMm: headerScanMm,
-        footerZoneMm: footerScanMm,
-      },
-    })
-    const detectedItems = inspect.ok ? (inspect.data.items || []) : []
-    const detectedTotalPages = inspect.ok ? Number(inspect.data.totalPages || 0) : 0
-    const detectedPagesAnalyzed = inspect.ok ? Number(inspect.data.pagesAnalyzed || 0) : 0
-    const detectedHeaderPages = inspect.ok ? Number(inspect.data.headerPages || 0) : 0
-    const detectedPageNumberFooterPages = inspect.ok ? Number(inspect.data.pageNumberFooterPages || 0) : 0
-    const warnings = inspect.ok
-      ? [...(inspect.data.warnings || [])]
-      : [inspect.error || '合并 PDF 页眉分析失败，已保留手动拆分页段']
-    const planTotalPages = Math.max(1, detectedTotalPages || totalPages || 1)
-    const items = detectedItems
-      .filter((item) => Number(item.pageStart) > 0 && Number(item.pageEnd) >= Number(item.pageStart))
-      .map((item, index) => ({
-        name: String(item.name || '').trim() || defaultMergedImportName(input, index),
-        pageStart: Number(item.pageStart),
-        pageEnd: Number(item.pageEnd),
-        source: item.source || 'unknown',
-      }))
-    if (!items.length) {
-      items.push(defaultMergedImportRange(input, planTotalPages))
-      warnings.push('未识别到可用页眉页段，已生成一个覆盖全文的手动页段')
-    }
-
-    mergedImportPlan.value = {
-      inputPath: input,
-      outputDir,
-      totalPages: planTotalPages,
-      pagesAnalyzed: detectedPagesAnalyzed,
-      headerPages: detectedHeaderPages,
-      pageNumberFooterPages: detectedPageNumberFooterPages,
-      warnings,
-      items,
-    }
-    selectedMergedImportIndex.value = 0
-    previewPage.value = items[0]?.pageStart || 1
-    truePreview.value = null
-    safeRefreshPreview()
-    if (!inspect.ok) {
-      ElMessage.warning('自动分析失败，已进入手动拆分页段确认')
-    } else if (items.some(item => item.source === 'manual')) {
-      ElMessage.warning('未识别到页眉页段，请手动调整拆分范围')
-    } else {
-      ElMessage.success(`已识别 ${items.length} 个页段，请核对后确认拆分`)
-    }
-  } catch (err) {
-    mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages, [
-      `分析流程中断：${String(err?.message || err || '未知错误')}`,
-      '已生成一个覆盖全文的手动页段',
-    ])
-    selectedMergedImportIndex.value = 0
-    previewPage.value = 1
-    truePreview.value = null
-    safeRefreshPreview()
-    ElMessage.warning('分析中断，已进入手动拆分页段确认')
-  } finally {
-    importingMergedPdf.value = false
-  }
-}
-
-async function importMergedPdfsForBatch(paths) {
-  importingMergedPdf.value = true
-  try {
-    mergedImportPlan.value = null
-    overlayFiles.value = paths.map((path) => ({
-      ...createEvidenceFile(path),
-      header: stripPdf(fileName(path)),
-      sourceDetectionSource: 'merged_pdf',
-      detectionSummary: '作为合并证据 PDF 批量处理',
-      statusText: '等待',
-      statusType: 'info',
-    }))
-    overlayOutputDir.value = defaultMergedBatchOutputDir(paths)
-    splitReplacementOutputDir.value = overlayOutputDir.value
-    selectedOverlayIndex.value = 0
-    selectedMergedImportIndex.value = 0
-    previewPage.value = 1
-    truePreview.value = null
-    applyWorkflowDefaults()
-    await refreshOverlayPageCounts()
-    await detectAllHeaderFooter({ silent: true })
-    refreshPreview()
-    ElMessage.success(`已导入 ${paths.length} 个合并证据 PDF，可按统一规则批量处理`)
-  } finally {
-    importingMergedPdf.value = false
-  }
-}
-
-async function executeMergedImportPlan() {
-  if (!mergedImportPlan.value || splittingMergedImport.value) return
-  const items = normalizedMergedImportItems()
-  if (!items.length) {
-    ElMessage.warning('没有可拆分的页段')
-    return
-  }
-  const invalid = items.find((item) => !item.name || item.pageStart < 1 || item.pageEnd < item.pageStart)
-  if (invalid) {
-    ElMessage.warning('请先修正文件名或页码范围')
-    return
-  }
-  const blockingWarnings = splitRangeWarnings(items, mergedImportPlan.value.totalPages)
-  if (blockingWarnings.length) {
-    ElMessage.warning(`请先核对页段：${blockingWarnings[0]}`)
-    return
-  }
-  if (overlayFiles.value.length) {
-    try {
-      await ElMessageBox.confirm('确认拆分后会替换当前证据列表。', '替换当前列表', {
-        confirmButtonText: '替换并拆分',
-        cancelButtonText: '取消',
-        type: 'warning',
-      })
-    } catch {
-      return
-    }
-  }
-
-  splittingMergedImport.value = true
-  try {
-    const split = await tauriCallSafe('split_merged_evidence_pdf', {
-      args: {
-        inputPath: mergedImportPlan.value.inputPath,
-        outputDir: mergedImportPlan.value.outputDir,
-        items,
-        cleanup: {
-          headerEnabled: false,
-          footerEnabled: false,
-          headerHeightMm: cleanupHeaderHeightMm.value,
-          footerHeightMm: cleanupFooterHeightMm.value,
-        },
-      },
-    })
-    if (!split.ok) {
-      ElMessage.error(split.error || '拆分合并 PDF 失败')
-      return
-    }
-
-    const outputs = split.data.outputs || []
-    if (!outputs.length) {
-      ElMessage.warning('没有生成可导入的拆分文件')
-      return
-    }
-    const rawItemByRange = new Map((mergedImportPlan.value.items || []).map((item) => [sourcePageRangeKey(item), item]))
-    overlayFiles.value = outputs.map((output) => {
-      const sourceItem = rawItemByRange.get(sourcePageRangeKey(output)) || {}
-      const pages = Math.max(0, Number(output.pageEnd || 0) - Number(output.pageStart || 0) + 1)
-      const needsReview = sourceItem.source === 'fallback' || sourceItem.source === 'manual' || hasSplitWarning(split.data.warnings || [], output)
-      return {
-        ...createEvidenceFile(output.outputPath),
-        header: sourceItem.name || output.name,
-        pages,
-        sourcePageStart: Number(output.pageStart || sourceItem.pageStart || 0),
-        sourcePageEnd: Number(output.pageEnd || sourceItem.pageEnd || 0),
-        sourceDetectionSource: sourceItem.source || 'unknown',
-        detectionSummary: `来自合并 PDF 第 ${output.pageStart}-${output.pageEnd} 页`,
-        statusText: needsReview ? '需核对' : '就绪',
-        statusType: needsReview ? 'warning' : 'success',
-      }
-    })
-    overlayOutputDir.value = mergedImportPlan.value.outputDir
-    splitReplacementOutputDir.value = ''
-    selectedOverlayIndex.value = 0
-    previewPage.value = 1
-    applyWorkflowDefaults()
-    mergedImportPlan.value = null
-    refreshPreview()
-    await detectAllHeaderFooter({ silent: true })
-
-    const failed = split.data.failed?.length || 0
-    const warnings = split.data.warnings || []
-    if (failed) {
-      ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个`)
-    } else if (warnings.length) {
-      ElMessage.warning(`已生成 ${outputs.length} 个证据，需核对页段提示`)
-    } else {
-      ElMessage.success(`已生成 ${outputs.length} 个证据`)
-    }
-  } finally {
-    splittingMergedImport.value = false
-  }
-}
-
-async function selectMergedImportOutputDir() {
-  if (!mergedImportPlan.value) return
-  const selected = await open({ directory: true })
-  if (!selected) return
-  mergedImportPlan.value.outputDir = selected
-}
-
-function cancelMergedImportPlan() {
-  mergedImportPlan.value = null
-  selectedMergedImportIndex.value = 0
-  previewPage.value = 1
-  refreshPreview()
-}
-
-function normalizedMergedImportItems() {
-  return (mergedImportPlan.value?.items || []).map((item, index) => ({
-    name: formatSplitOutputName(item, index),
-    pageStart: Number(item.pageStart || 0),
-    pageEnd: Number(item.pageEnd || 0),
-    source: item.source || 'unknown',
-  }))
-}
-
-function defaultMergedImportName(inputPath, index) {
-  if (index === 0) {
-    return '目录'
-  }
-  return `文件${index + 1}`
-}
-
-function defaultMergedImportOutputDir(inputPath) {
-  const stem = stripPdf(fileName(inputPath)) || '合并PDF'
-  return `${parentDir(inputPath)}/${stem}-分项`
-}
-
-function defaultMergedBatchOutputDir(paths = []) {
-  const first = Array.isArray(paths) ? paths[0] : ''
-  return `${parentDir(first || '.')}/合并证据处理`
-}
-
-function defaultMergedImportRange(inputPath, total) {
-  return {
-    name: defaultMergedImportName(inputPath, 0),
-    pageStart: 1,
-    pageEnd: Math.max(1, Number(total || 1)),
-    source: 'manual',
-  }
-}
-
-function splitOutputNamePreview(row, index) {
-  return formatSplitOutputName(row, index)
-}
-
-function formatSplitOutputName(row, index) {
-  const base = String(row?.name || defaultMergedImportName('', index)).trim() || defaultMergedImportName('', index)
-  return formatSplitFileName({
-    base,
-    index,
-    prefix: splitNamePrefix.value,
-    suffix: splitNameSuffix.value,
-    dateValue: splitNameDateValue.value,
-    separator: splitNameSeparator.value,
-    customSeparator: splitNameCustomSeparator.value,
-  })
-}
-
-function buildManualMergedImportPlan(inputPath, outputDir, total, warnings = []) {
-  return {
-    inputPath,
-    outputDir,
-    totalPages: Math.max(1, Number(total || 1)),
-    pagesAnalyzed: 0,
-    headerPages: 0,
-    pageNumberFooterPages: 0,
-    warnings,
-    items: [defaultMergedImportRange(inputPath, total)],
-  }
-}
-
-function safeRefreshPreview() {
-  try {
-    refreshPreview()
-  } catch (err) {
-    console.warn('刷新拆分预览失败', err)
-  }
-}
-
-function selectMergedImportRange(row) {
-  if (!row) return
-  const index = mergedImportPlan.value?.items?.indexOf(row) ?? -1
-  if (index >= 0) selectedMergedImportIndex.value = index
-  previewPage.value = Math.min(previewMaxPage.value, Math.max(1, Number(row.pageStart || 1)))
-  truePreview.value = null
-  refreshPreview()
-}
-
-function movePreviewPage(delta) {
-  previewPage.value = Math.min(previewMaxPage.value, Math.max(1, Number(previewPage.value || 1) + delta))
-  truePreview.value = null
-  refreshPreview()
-}
-
-function setSelectedMergedRangeStart() {
-  const range = selectedMergedImportRange.value
-  if (!range) return
-  range.pageStart = Number(previewPage.value || 1)
-  if (Number(range.pageEnd || 0) < range.pageStart) {
-    range.pageEnd = range.pageStart
-  }
-}
-
-function setSelectedMergedRangeEnd() {
-  const range = selectedMergedImportRange.value
-  if (!range) return
-  range.pageEnd = Number(previewPage.value || 1)
-  if (Number(range.pageStart || 0) > range.pageEnd) {
-    range.pageStart = range.pageEnd
-  }
-}
-
-function addMergedImportRange() {
-  if (!mergedImportPlan.value) return
-  const items = mergedImportPlan.value.items
-  const previous = items[items.length - 1]
-  const start = Math.min(previewMaxPage.value, Math.max(1, Number(previous?.pageEnd || 0) + 1))
-  items.push({
-    name: `文件${items.length + 1}`,
-    pageStart: start,
-    pageEnd: start,
-    source: 'manual',
-  })
-  selectMergedImportRange(items[items.length - 1])
-}
-
-function insertMergedImportRangeAfter(index) {
-  if (!mergedImportPlan.value) return
-  const items = mergedImportPlan.value.items
-  const previous = items[index]
-  const next = items[index + 1]
-  const start = Math.min(previewMaxPage.value, Math.max(1, Number(previous?.pageEnd || 0) + 1))
-  const endLimit = next ? Math.max(start, Number(next.pageStart || start) - 1) : start
-  const item = {
-    name: `文件${items.length + 1}`,
-    pageStart: start,
-    pageEnd: endLimit,
-    source: 'manual',
-  }
-  items.splice(index + 1, 0, item)
-  selectMergedImportRange(item)
-}
-
-function removeMergedImportRange(index) {
-  if (!mergedImportPlan.value) return
-  mergedImportPlan.value.items.splice(index, 1)
-  selectedMergedImportIndex.value = Math.min(
-    selectedMergedImportIndex.value,
-    Math.max(0, mergedImportPlan.value.items.length - 1),
-  )
-}
-
-function sortMergedImportItems({ prop, order }) {
-  if (!mergedImportPlan.value || !prop || !order) return
-  const selected = selectedMergedImportRange.value
-  mergedImportPlan.value.items = sortByNatural(
-    mergedImportPlan.value.items,
-    (row, index) => mergedImportSortValue(row, prop, index),
-    order,
-  )
-  if (selected) {
-    selectedMergedImportIndex.value = Math.max(0, mergedImportPlan.value.items.indexOf(selected))
-  }
-}
-
-function mergedImportSortValue(row, prop, index) {
-  if (prop === 'outputName') return splitOutputNamePreview(row, index)
-  if (prop === 'pageStart') return Number(row?.pageStart || 0)
-  if (prop === 'pageEnd') return Number(row?.pageEnd || 0)
-  if (prop === 'pageCount') return mergedImportRangePageCount(row)
-  if (prop === 'source') return mergedImportSourceText(row)
-  return row?.[prop] ?? ''
-}
-
-function mergedImportRangePageCount(row) {
-  const pageStart = Number(row?.pageStart || 0)
-  const pageEnd = Number(row?.pageEnd || 0)
-  return pageStart > 0 && pageEnd >= pageStart ? pageEnd - pageStart + 1 : 0
-}
-
-function mergedImportSourceType(row) {
-  return row?.source === 'fallback' || row?.source === 'manual' ? 'warning' : 'success'
-}
-
-function mergedImportSourceText(row) {
-  if (row?.source === 'fallback') return '需核对'
-  if (row?.source === 'manual') return '手动'
-  return '页眉'
-}
-
-function mergedImportScanZoneMm(value) {
-  return Math.max(25, Math.min(60, Number(value || 0) || 25))
-}
-
-function sourcePageRangeKey(item) {
-  return `${Number(item.pageStart || 0)}-${Number(item.pageEnd || 0)}`
-}
-
-function hasSplitWarning(warnings, output) {
-  const name = String(output.name || '').trim()
-  if (!name) return false
-  return warnings.some((warning) => String(warning || '').includes(name))
-}
-
 async function selectOverlayOutputDir() {
   const selected = await open({ directory: true })
   if (selected) overlayOutputDir.value = selected
@@ -1690,7 +1245,7 @@ async function selectOverlayOutputDir() {
 
 async function openPlannedOutputDir() {
   if (!overlayFiles.value.length) return
-  const result = await tauriCallSafe('open_path', { path: plannedOutputDir.value })
+  const result = await openPath(plannedOutputDir.value)
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开输出文件夹')
   }
@@ -1699,7 +1254,7 @@ async function openPlannedOutputDir() {
 async function openEvidenceFile(row) {
   const path = row?.outputPath || row?.path
   if (!path) return
-  const result = await tauriCallSafe('open_path', { path })
+  const result = await openPath(path)
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开 PDF 文件')
   }
@@ -1716,27 +1271,26 @@ function defaultSplitReplacementOutputDir() {
 }
 
 async function refreshOverlayPageCounts() {
+  if (checkingOverlayPages.value) return
   checkingOverlayPages.value = true
-  for (const file of overlayFiles.value) {
-    file.statusText = '读取页数'
-    file.statusType = 'warning'
-    const result = await tauriCallSafe('get_pdf_page_count', { input: file.path })
-    if (result.ok) {
-      file.pages = result.data
-      file.statusText = '就绪'
-      file.statusType = 'success'
-    } else {
-      file.pages = 0
-      file.statusText = '页数失败'
-      file.statusType = 'danger'
+  try {
+    for (const file of overlayFiles.value) {
+      file.statusText = '读取页数'
+      file.statusType = 'warning'
+      const result = await tauriCallSafe('get_pdf_page_count', { input: file.path })
+      if (result.ok) {
+        file.pages = result.data
+        file.statusText = '就绪'
+        file.statusType = 'success'
+      } else {
+        file.pages = 0
+        file.statusText = '页数失败'
+        file.statusType = 'danger'
+      }
     }
+  } finally {
+    checkingOverlayPages.value = false
   }
-  checkingOverlayPages.value = false
-}
-
-function refreshPreview() {
-  truePreview.value = null
-  previewReloadKey.value += 1
 }
 
 function openHeaderFooterSettings() {
@@ -1772,10 +1326,12 @@ function applyReplacementPreset() {
 }
 
 function hasReplacementRule() {
-  return (insertHeaderFooterEnabled.value && (headerMode.value !== 'none' || footerEnabled.value)) ||
+  return (
+    (insertHeaderFooterEnabled.value && (headerMode.value !== 'none' || footerEnabled.value)) ||
     hasExistingEditRule.value ||
     hasExistingConvertRule.value ||
     hasExistingRemovalRule.value
+  )
 }
 
 function ensureReplacementPreset() {
@@ -1789,556 +1345,176 @@ async function applySplitHeaderFooterReplacement() {
   ensureReplacementPreset()
   headerFooterSettingsVisible.value = false
   overlaying.value = true
-  const outputDir = splitReplacementOutputDirValue.value
-  const rules = {
-    ...currentRules.value,
-    outputMode: 'files_only',
-    mergeAfterProcessing: false,
-  }
-  const payload = buildEvidencePdfRulePayload(overlayRows.value, rules, outputDir)
-  overlayRows.value.forEach((file) => {
-    file.statusText = '替换中'
-    file.statusType = 'warning'
-  })
-
-  const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
-  if (!result.ok) {
-    ElMessage.error(result.error || '页眉页码替换失败')
-    overlayFiles.value.forEach((file) => {
-      file.statusText = '失败'
-      file.statusType = 'danger'
-    })
-    overlaying.value = false
-    return
-  }
-
-  const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
-  const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
-  overlayFiles.value.forEach((file) => {
-    const success = successByInput.get(file.path)
-    const failed = failedByInput.get(file.path)
-    if (success) {
-      file.path = success.outputPath
-      file.outputPath = success.outputPath
-      file.name = fileName(success.outputPath)
-      file.statusText = '已替换'
-      file.statusType = 'success'
-    } else if (failed) {
-      file.statusText = '失败'
-      file.statusType = 'danger'
+  try {
+    const outputDir = splitReplacementOutputDirValue.value
+    const rules = {
+      ...currentRules.value,
+      outputMode: 'files_only',
+      mergeAfterProcessing: false,
     }
-  })
-  overlayOutputDir.value = outputDir
-  splitReplacementOutputDir.value = outputDir
-  selectedOverlayIndex.value = 0
-  previewPage.value = 1
-  refreshPreview()
+    const payload = buildEvidencePdfRulePayload(overlayRows.value, rules, outputDir)
+    overlayRows.value.forEach((file) => {
+      file.statusText = '替换中'
+      file.statusType = 'warning'
+    })
 
-  const failedCount = result.data.failed?.length || 0
-  const successCount = result.data.results?.length || 0
-  if (failedCount) {
-    ElMessage.warning(`已替换 ${successCount} 个，失败 ${failedCount} 个`)
-  } else {
-    ElMessage.success(`已替换 ${successCount} 个 PDF`)
+    const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    if (!result.ok) {
+      ElMessage.error(result.error || '页眉页码替换失败')
+      overlayFiles.value.forEach((file) => {
+        file.statusText = '失败'
+        file.statusType = 'danger'
+      })
+      return
+    }
+
+    const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
+    const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
+    overlayFiles.value.forEach((file) => {
+      const success = successByInput.get(file.path)
+      const failed = failedByInput.get(file.path)
+      if (success) {
+        file.path = success.outputPath
+        file.outputPath = success.outputPath
+        file.name = fileName(success.outputPath)
+        const warnings = success.warnings || []
+        file.statusText = warnings.length ? '已替换，需注意' : '已替换'
+        file.statusType = warnings.length ? 'warning' : 'success'
+      } else if (failed) {
+        file.statusText = '失败'
+        file.statusType = 'danger'
+      }
+    })
+    overlayOutputDir.value = outputDir
+    splitReplacementOutputDir.value = outputDir
+    selectedOverlayIndex.value = 0
+    previewPage.value = 1
+    refreshPreview()
+
+    const failedCount = result.data.failed?.length || 0
+    const successCount = result.data.results?.length || 0
+    const warningCount = (result.data.results || []).filter((item) => item.warnings?.length).length
+    if (failedCount) {
+      ElMessage.warning(`已替换 ${successCount} 个，失败 ${failedCount} 个`)
+    } else if (warningCount) {
+      ElMessage.warning(`已替换 ${successCount} 个 PDF，其中 ${warningCount} 个有字体降级提示`)
+    } else {
+      ElMessage.success(`已替换 ${successCount} 个 PDF`)
+    }
+  } catch (err) {
+    ElMessage.error(`页眉页码替换失败：${String(err?.message || err || '未知错误')}`)
+  } finally {
+    overlaying.value = false
   }
-  overlaying.value = false
-}
-
-function handlePreviewLoaded(info) {
-  previewData.value = info
-}
-
-function handlePreviewError(message) {
-  previewData.value = {}
-  ElMessage.error(message)
 }
 
 async function applyHeaderFooter() {
   if (!canApplyOverlay.value) return
   overlaying.value = true
-  const payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
-  overlayRows.value.forEach((file) => {
-    file.statusText = '处理中'
-    file.statusType = 'warning'
-  })
+  try {
+    const payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
+    overlayRows.value.forEach((file) => {
+      file.statusText = '处理中'
+      file.statusType = 'warning'
+    })
 
-  const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
-  if (!result.ok) {
-    ElMessage.error(result.error || 'PDF 处理失败')
+    const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    if (!result.ok) {
+      ElMessage.error(result.error || 'PDF 处理失败')
+      overlayFiles.value.forEach((file) => {
+        file.statusText = '失败'
+        file.statusType = 'danger'
+      })
+      return
+    }
+
+    const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
+    const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
+    overlayFiles.value.forEach((file) => {
+      const success = successByInput.get(file.path)
+      const failed = failedByInput.get(file.path)
+      if (success) {
+        file.outputPath = success.outputPath
+        const warnings = success.warnings || []
+        file.statusText = warnings.length ? '完成，需注意' : '完成'
+        file.statusType = warnings.length ? 'warning' : 'success'
+      } else if (failed) {
+        file.statusText = '失败'
+        file.statusType = 'danger'
+      }
+    })
+
+    const failedCount = result.data.failed?.length || 0
+    const successCount = result.data.results?.length || 0
+    const warningCount = (result.data.results || []).filter((item) => item.warnings?.length).length
+    const merge = result.data.merge
+    if (merge?.status === 'done') {
+      const cleanupText =
+        merge.outputMode === 'merge_only' ? `，已清理 ${merge.removedIntermediates || 0} 个中间副本` : ''
+      const warningText = warningCount ? `，其中 ${warningCount} 个有字体降级提示` : ''
+      ElMessage.success(`已完成 ${successCount} 个 PDF，并已合并${cleanupText}${warningText}`)
+    } else if (failedCount) {
+      ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个`)
+    } else if (warningCount) {
+      ElMessage.warning(`已完成 ${successCount} 个 PDF，其中 ${warningCount} 个有字体降级提示`)
+    } else if (merge?.status === 'skipped') {
+      ElMessage.warning(`已完成 ${successCount} 个 PDF，${merge.message || '未合并'}`)
+    } else {
+      ElMessage.success(`已完成 ${successCount} 个 PDF`)
+    }
+  } catch (err) {
+    ElMessage.error(`PDF 处理失败：${String(err?.message || err || '未知错误')}`)
     overlayFiles.value.forEach((file) => {
       file.statusText = '失败'
       file.statusType = 'danger'
     })
+  } finally {
     overlaying.value = false
-    return
-  }
-
-  const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
-  const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
-  overlayFiles.value.forEach((file) => {
-    const success = successByInput.get(file.path)
-    const failed = failedByInput.get(file.path)
-    if (success) {
-      file.outputPath = success.outputPath
-      file.statusText = '完成'
-      file.statusType = 'success'
-    } else if (failed) {
-      file.statusText = '失败'
-      file.statusType = 'danger'
-    }
-  })
-
-  const failedCount = result.data.failed?.length || 0
-  const successCount = result.data.results?.length || 0
-  const merge = result.data.merge
-  if (merge?.status === 'done') {
-    const cleanupText = merge.outputMode === 'merge_only' ? `，已清理 ${merge.removedIntermediates || 0} 个中间副本` : ''
-    ElMessage.success(`已完成 ${successCount} 个 PDF，并已合并${cleanupText}`)
-  } else if (failedCount) {
-    ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个`)
-  } else if (merge?.status === 'skipped') {
-    ElMessage.warning(`已完成 ${successCount} 个 PDF，${merge.message || '未合并'}`)
-  } else {
-    ElMessage.success(`已完成 ${successCount} 个 PDF`)
-  }
-  overlaying.value = false
-}
-
-async function renderTruePreview() {
-  if (!selectedOverlayFile.value || truePreviewLoading.value) return
-  truePreviewLoading.value = true
-  const items = buildHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value)
-  const item = items.find((candidate) => candidate.inputPath === selectedOverlayFile.value.path)
-  if (!item) {
-    truePreviewLoading.value = false
-    return
-  }
-
-  const result = await tauriCallSafe('preview_pdf_header_footer', {
-    args: {
-      job: item,
-      page: previewPage.value,
-      dpi: 120,
-      annotationRule: {
-        removeAnnotations: removeAnnotations.value,
-        kinds: annotationKinds.value,
-      },
-    },
-  })
-  if (result.ok) {
-    truePreview.value = result.data
-    previewData.value = result.data
-  } else {
-    ElMessage.error(result.error || '真实预览生成失败')
-  }
-  truePreviewLoading.value = false
-}
-
-async function detectAllHeaderFooter(options = {}) {
-  const silent = Boolean(options.silent)
-  if (!overlayRows.value.length || detectingAllHeaderFooter.value) return
-  detectingAllHeaderFooter.value = true
-  let success = 0
-  let failed = 0
-  for (const file of overlayRows.value) {
-    file.statusText = '检测中'
-    file.statusType = 'warning'
-    const result = await detectFileHeaderFooter(file)
-    if (result.ok) {
-      applyDetectionResultToFile(file, result.data)
-      const status = fileExistingStatus(file)
-      file.statusText = status.text
-      file.statusType = status.type
-      success += 1
-    } else {
-      file.statusText = '检测失败'
-      file.statusType = 'danger'
-      failed += 1
-    }
-  }
-  if (!silent) {
-    failed ? ElMessage.warning(`已检测 ${success} 个，失败 ${failed} 个`) : ElMessage.success(`已检测 ${success} 个 PDF`)
-  }
-  detectingAllHeaderFooter.value = false
-}
-
-function fileExistingStatus(file) {
-  if (file.removeExistingHeader || file.removeExistingFooter || file.removeExistingPageNumber) {
-    return { text: '删除待处理', type: 'warning' }
-  }
-  if (file.existingHeaderEdited || file.existingFooterEdited || file.existingPageNumberEdited) {
-    return { text: '旧内容已编辑', type: 'warning' }
-  }
-  if (file.convertPlainHeader || file.convertPlainFooter || file.convertPlainPageNumber) {
-    return { text: '转换待处理', type: 'warning' }
-  }
-  if (file.existingHeaderArtifact || file.existingFooterArtifact) {
-    return { text: '现有可编辑', type: 'warning' }
-  }
-  if (file.existingHeaderText || file.existingFooterText) {
-    return { text: '普通文本可转换', type: 'warning' }
-  }
-  return { text: '无旧页眉页码', type: 'success' }
-}
-
-async function detectFileHeaderFooter(file) {
-  return tauriCallSafe('detect_pdf_header_footer', {
-    args: {
-      inputPath: file.path,
-      maxPages: 20,
-      headerZoneMm: cleanupHeaderHeightMm.value,
-      footerZoneMm: cleanupFooterHeightMm.value,
-    },
-  })
-}
-
-function applyDetectionResultToFile(file, data) {
-  const header = data.headerCandidates?.[0]
-  const footerCandidates = data.footerCandidates || []
-  const pageNumber = footerCandidates.find(isPageNumberCandidate) || null
-  const footer = footerCandidates.find((candidate) => !isPageNumberCandidate(candidate)) || null
-  const candidates = [
-    ...(data.headerCandidates || []).slice(0, 6),
-    ...(data.footerCandidates || []).slice(0, 6),
-  ]
-  const parts = []
-  if (data.artifact?.hasHeader) parts.push(`发现结构化页眉 ${data.artifact.headerCount} 处`)
-  if (data.artifact?.hasFooter) parts.push(`发现结构化页脚 ${data.artifact.footerCount} 处`)
-  if (header) parts.push(`页眉候选：${header.text}`)
-  if (footer) parts.push(`页脚候选：${footer.text}`)
-  if (pageNumber) parts.push(`页码候选：${pageNumber.text}`)
-  if (candidates.length) parts.push(`候选 ${candidates.length} 个`)
-  file.existingHeaderText = header?.text || ''
-  file.existingFooterText = footer?.text || footer?.normalizedText || ''
-  file.existingPageNumberText = pageNumber?.text || pageNumber?.normalizedText || ''
-  file.existingHeaderTargetText = header?.text || ''
-  file.existingFooterTargetText = footer?.text || footer?.normalizedText || ''
-  file.existingPageNumberTargetText = pageNumber?.text || pageNumber?.normalizedText || ''
-  file.existingHeaderNormalizedText = header?.normalizedText || header?.text || ''
-  file.existingFooterNormalizedText = footer?.normalizedText || footer?.text || ''
-  file.existingPageNumberNormalizedText = pageNumber?.normalizedText || pageNumber?.text || ''
-  file.existingHeaderBBox = header?.bbox || null
-  file.existingFooterBBox = footer?.bbox || null
-  file.existingPageNumberBBox = pageNumber?.bbox || null
-  const headerTargetRange = candidateTargetRange(header, file.pages)
-  const footerTargetRange = candidateTargetRange(footer, file.pages)
-  const pageNumberTargetRange = candidateTargetRange(pageNumber, file.pages)
-  file.existingHeaderPageStart = headerTargetRange.start
-  file.existingHeaderPageEnd = headerTargetRange.end
-  file.existingFooterPageStart = footerTargetRange.start
-  file.existingFooterPageEnd = footerTargetRange.end
-  file.existingPageNumberPageStart = pageNumberTargetRange.start
-  file.existingPageNumberPageEnd = pageNumberTargetRange.end
-  file.existingHeaderArtifact = Boolean(data.artifact?.hasHeader)
-  file.existingFooterArtifact = Boolean(data.artifact?.hasFooter)
-  file.existingHeaderEdited = false
-  file.existingFooterEdited = false
-  file.existingPageNumberEdited = false
-  if (!file.existingHeaderText || file.existingHeaderArtifact) file.convertPlainHeader = false
-  if (!file.existingFooterText || file.existingFooterArtifact) file.convertPlainFooter = false
-  if (!file.existingPageNumberText) file.convertPlainPageNumber = false
-  if (!hasExistingHeader(file)) file.removeExistingHeader = false
-  if (!hasExistingFooter(file)) file.removeExistingFooter = false
-  if (!hasExistingPageNumber(file)) file.removeExistingPageNumber = false
-  file.detectionSummary = parts.length ? parts.join('；') : '未发现稳定的文本型页眉页脚候选'
-  file.detectionCandidates = candidates
-}
-
-function isPageNumberCandidate(candidate) {
-  return Boolean(candidate?.labels?.includes?.('page-number') || String(candidate?.normalizedText || '').includes('{page}'))
-}
-
-function estimateTextWidthPt(text, fontSize) {
-  return String(text || '')
-    .split('')
-    .reduce((sum, ch) => sum + estimatePreviewCharWidth(ch) * Number(fontSize || 10), 0)
-}
-
-function isPageInDetectedRange(page, start, end) {
-  const current = Number(page || 1)
-  const rangeStart = Number(start || 1)
-  const rangeEnd = Number(end || rangeStart)
-  return current >= rangeStart && current <= rangeEnd
-}
-
-function buildDeletionPreviewMarker(bbox, kind, label) {
-  const style = bbox
-    ? bboxOverlayStyle(bbox)
-    : fallbackDeletionMarkerStyle(kind)
-  return {
-    key: `${kind}-${label}`,
-    label,
-    style,
   }
 }
 
-function fallbackDeletionMarkerStyle(kind) {
-  const top = kind === 'header'
-    ? `${Math.max(1, cleanupHeaderHeightMm.value / 3)}%`
-    : `${100 - Math.max(4, cleanupFooterHeightMm.value / 3)}%`
-  return {
-    left: '8%',
-    top,
-    width: '84%',
-    height: '20px',
-  }
-}
-
-function estimatePreviewCharWidth(ch) {
-  if (/[\u3400-\u9fff\uf900-\ufaff]/.test(ch)) return 1
-  if (/\s/.test(ch)) return 0.28
-  if (/[0-9A-Za-z]/.test(ch)) return 0.56
-  return 0.5
-}
-
-function selectPreviewRow(row) {
-  const index = overlayRows.value.findIndex((item) => item.path === row.path)
-  if (index >= 0) {
-    selectedOverlayIndex.value = index
-    previewPage.value = 1
-    truePreview.value = null
-    previewReloadKey.value += 1
-  }
-}
-
-function isEditingHeader(row) {
-  return editingHeaderPath.value && editingHeaderPath.value === row.path
-}
-
-async function startHeaderEdit(row, index) {
-  if (!row) return
-  insertHeaderFooterEnabled.value = true
-  headerMode.value = 'per_file'
-  if (row.header === null || row.header === undefined) {
-    row.header = rowHeaderPreview(row, index) || stripPdf(row.name)
-  }
-  editingHeaderPath.value = row.path
-}
-
-function finishHeaderEdit(row) {
-  if (row) {
-    row.header = String(row.header ?? '').trim()
-    row.headerEdited = true
-  }
-  editingHeaderPath.value = ''
-}
-
-function isEditingFooter(row) {
-  return editingFooterPath.value && editingFooterPath.value === row.path
-}
-
-async function startFooterEdit(row, index) {
-  if (!row) return
-  insertHeaderFooterEnabled.value = true
-  footerEnabled.value = true
-  if (row.footer === null || row.footer === undefined) {
-    row.footer = rowFooterPreview(row, index)
-  }
-  editingFooterPath.value = row.path
-}
-
-function finishFooterEdit(row) {
-  if (row) {
-    row.footer = String(row.footer ?? '').trim()
-    row.footerEdited = true
-  }
-  editingFooterPath.value = ''
-}
-
-function isEditingExistingHeader(row) {
-  return editingExistingHeaderPath.value && editingExistingHeaderPath.value === row.path
-}
-
-function startExistingHeaderEdit(row) {
-  if (!hasExistingHeader(row)) return
-  if (row.removeExistingHeader) {
-    row.removeExistingHeader = false
-  }
-  if (!row.existingHeaderText) {
-    row.existingHeaderText = row.existingHeaderTargetText || ''
-  }
-  editingExistingHeaderPath.value = row.path
-}
-
-function finishExistingHeaderEdit(row) {
-  if (!row) {
-    editingExistingHeaderPath.value = ''
-    return
-  }
-  const next = String(row.existingHeaderText ?? '').trim()
-  const original = row.existingHeaderTargetText || row.existingHeaderText || ''
-  if (!next) {
-    row.existingHeaderText = original
-    row.existingHeaderEdited = false
-    row.convertPlainHeader = false
-    row.removeExistingHeader = false
-  } else if (row.existingHeaderArtifact) {
-    row.existingHeaderText = next
-    row.existingHeaderEdited = next !== original
-    row.removeExistingHeader = false
-  } else if (next !== original) {
-    row.existingHeaderText = next
-    row.convertPlainHeader = true
-    row.removeExistingHeader = false
-    ElMessage.info('普通文本型旧页眉会删除匹配旧文本，并在检测到的位置重建')
-  }
-  const status = fileExistingStatus(row)
-  row.statusText = status.text
-  row.statusType = status.type
-  editingExistingHeaderPath.value = ''
-  refreshPreview()
-}
-
-function isEditingExistingFooter(row) {
-  return editingExistingFooterPath.value && editingExistingFooterPath.value === row.path
-}
-
-function startExistingFooterEdit(row) {
-  if (!hasExistingFooter(row)) return
-  if (row.removeExistingFooter) {
-    row.removeExistingFooter = false
-  }
-  if (!row.existingFooterText) {
-    row.existingFooterText = row.existingFooterTargetText || ''
-  }
-  editingExistingFooterPath.value = row.path
-}
-
-function finishExistingFooterEdit(row) {
-  if (!row) {
-    editingExistingFooterPath.value = ''
-    return
-  }
-  const next = String(row.existingFooterText ?? '').trim()
-  const original = row.existingFooterTargetText || row.existingFooterText || ''
-  if (!next) {
-    row.existingFooterText = original
-    row.existingFooterEdited = false
-    row.convertPlainFooter = false
-    row.removeExistingFooter = false
-  } else if (row.existingFooterArtifact) {
-    row.existingFooterText = next
-    row.existingFooterEdited = next !== original
-    row.removeExistingFooter = false
-  } else if (next !== original) {
-    row.existingFooterText = next
-    row.convertPlainFooter = true
-    row.removeExistingFooter = false
-    ElMessage.info('普通文本型旧页脚会删除匹配旧文本，并在检测到的位置重建')
-  }
-  const status = fileExistingStatus(row)
-  row.statusText = status.text
-  row.statusType = status.type
-  editingExistingFooterPath.value = ''
-  refreshPreview()
-}
-
-function isEditingExistingPageNumber(row) {
-  return editingExistingPageNumberPath.value && editingExistingPageNumberPath.value === row.path
-}
-
-function startExistingPageNumberEdit(row) {
-  if (!hasExistingPageNumber(row)) return
-  if (row.removeExistingPageNumber) {
-    row.removeExistingPageNumber = false
-  }
-  if (!row.existingPageNumberText) {
-    row.existingPageNumberText = row.existingPageNumberTargetText || ''
-  }
-  editingExistingPageNumberPath.value = row.path
-}
-
-function finishExistingPageNumberEdit(row) {
-  if (!row) {
-    editingExistingPageNumberPath.value = ''
-    return
-  }
-  const next = String(row.existingPageNumberText ?? '').trim()
-  const original = row.existingPageNumberTargetText || row.existingPageNumberText || ''
-  if (!next) {
-    row.existingPageNumberText = original
-    row.existingPageNumberEdited = false
-    row.convertPlainPageNumber = false
-    row.removeExistingPageNumber = false
-  } else if (next !== original) {
-    row.existingPageNumberText = next
-    row.existingPageNumberEdited = true
-    row.convertPlainPageNumber = true
-    row.removeExistingPageNumber = false
-    ElMessage.info('旧页码会删除匹配旧文本，并在检测到的位置重建')
-  } else {
-    row.existingPageNumberEdited = false
-    row.convertPlainPageNumber = false
-    row.removeExistingPageNumber = false
-  }
-  const status = fileExistingStatus(row)
-  row.statusText = status.text
-  row.statusType = status.type
-  editingExistingPageNumberPath.value = ''
-  refreshPreview()
-}
-
-function rowHeaderPreview(row, index) {
-  return buildSessionHeaderText(row, index, currentRules.value)
-}
-
-function displayRowHeader(row, index) {
-  if (!insertHeaderFooterEnabled.value) return ''
-  if (workflowMode.value === 'split' && headerMode.value === 'per_file') {
-    return row?.header ?? rowHeaderPreview(row, index)
-  }
-  return rowHeaderPreview(row, index)
-}
-
-function rowFooterPreview(row, index) {
-  const footerTemplate = row?.footer ?? footerText.value
-  if (!insertHeaderFooterEnabled.value || !footerEnabled.value || !footerTemplate || !row) return ''
-  const page = footerContinuous.value
-    ? row.pageStart || 1
-    : 1
-  const total = footerContinuous.value
-    ? totalOverlayPages.value || row.pages || 1
-    : row.pages || 1
-  return expandPlaceholders(footerTemplate, page, total)
-}
-
-function displayRowFooter(row, index) {
-  if (row?.footer !== null && row?.footer !== undefined) return row.footer
-  return rowFooterPreview(row, index)
-}
-
-function displayExistingHeader(row) {
-  return row?.existingHeaderText || row?.existingHeaderTargetText || ''
-}
-
-function displayExistingFooter(row) {
-  return row?.existingFooterText || row?.existingFooterTargetText || ''
-}
-
-function displayExistingPageNumber(row) {
-  return row?.existingPageNumberText || row?.existingPageNumberTargetText || ''
-}
-
-function shouldShowLiveHeader(row) {
-  return Boolean(row)
-}
-
-function shouldShowLiveFooter(row) {
-  return Boolean(row)
-}
-
-function hasExistingHeader(row) {
-  return Boolean(row?.existingHeaderText || row?.existingHeaderArtifact)
-}
-
-function hasExistingFooter(row) {
-  return Boolean(row?.existingFooterText || row?.existingFooterArtifact)
-}
-
-function hasExistingPageNumber(row) {
-  return Boolean(row?.existingPageNumberText || row?.existingPageNumberTargetText)
-}
-
+const {
+  isEditingHeader,
+  startHeaderEdit,
+  finishHeaderEdit,
+  isEditingFooter,
+  startFooterEdit,
+  finishFooterEdit,
+  isEditingExistingHeader,
+  startExistingHeaderEdit,
+  finishExistingHeaderEdit,
+  isEditingExistingFooter,
+  startExistingFooterEdit,
+  finishExistingFooterEdit,
+  isEditingExistingPageNumber,
+  startExistingPageNumberEdit,
+  finishExistingPageNumberEdit,
+  rowHeaderPreview,
+  displayRowHeader,
+  displayRowFooter,
+  displayExistingHeader,
+  displayExistingFooter,
+  displayExistingPageNumber,
+} = useEvidencePdfExistingEditing({
+  editingHeaderPath,
+  editingFooterPath,
+  editingExistingHeaderPath,
+  editingExistingFooterPath,
+  editingExistingPageNumberPath,
+  insertHeaderFooterEnabled,
+  headerMode,
+  footerEnabled,
+  footerContinuous,
+  totalOverlayPages,
+  currentRules,
+  workflowMode,
+  footerText,
+  hasExistingHeader,
+  hasExistingFooter,
+  hasExistingPageNumber,
+  fileExistingStatus,
+  refreshPreview,
+})
 function hasExistingHeaderFooter(row) {
   return hasExistingHeader(row) || hasExistingFooter(row) || hasExistingPageNumber(row)
 }
@@ -2425,13 +1601,12 @@ function sourceRangeText(row) {
 function sortOverlayFiles({ prop, order }) {
   if (!prop || !order) return
   const selectedPath = selectedOverlayFile.value?.path
-  overlayFiles.value = sortByNatural(
-    overlayFiles.value,
-    (row, index) => overlaySortValue(row, prop, index),
-    order,
-  )
+  overlayFiles.value = sortByNatural(overlayFiles.value, (row, index) => overlaySortValue(row, prop, index), order)
   if (selectedPath) {
-    selectedOverlayIndex.value = Math.max(0, overlayFiles.value.findIndex((file) => file.path === selectedPath))
+    selectedOverlayIndex.value = Math.max(
+      0,
+      overlayFiles.value.findIndex((file) => file.path === selectedPath),
+    )
   } else {
     selectedOverlayIndex.value = 0
   }
@@ -2468,7 +1643,6 @@ function removeOverlayFile(index) {
   selectedOverlayIndex.value = Math.min(selectedOverlayIndex.value, Math.max(0, overlayFiles.value.length - 1))
   refreshPreview()
 }
-
 </script>
 
 <style scoped>
@@ -2717,6 +1891,23 @@ h3 {
   margin-bottom: 10px;
 }
 
+.split-cleanup-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.split-cleanup-note {
+  color: #909399;
+  font-size: 12px;
+}
+
 .detection-plan,
 .merged-import-plan {
   border: 1px solid #dcdfe6;
@@ -2819,6 +2010,67 @@ h3 {
   align-items: center;
 }
 
+.footer-candidate-panel {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.candidate-panel-head {
+  margin-bottom: 8px;
+}
+
+.footer-candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.footer-candidate-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.footer-candidate-item.active {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.candidate-main {
+  appearance: none;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.candidate-main strong {
+  display: block;
+  overflow: hidden;
+  color: #303133;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-main span {
+  display: block;
+  margin-top: 2px;
+  color: #909399;
+  font-size: 12px;
+}
+
 .preview-stage {
   display: flex;
   justify-content: center;
@@ -2872,7 +2124,7 @@ h3 {
   max-width: 90%;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .preview-text.with-delete-background {
@@ -2899,7 +2151,7 @@ h3 {
 }
 
 .delete-preview-marker::after {
-  content: "";
+  content: '';
   position: absolute;
   left: 4px;
   right: 4px;
@@ -2911,6 +2163,30 @@ h3 {
 .delete-preview-marker span {
   position: relative;
   z-index: 1;
+}
+
+.footer-candidate-marker {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  min-width: 56px;
+  min-height: 16px;
+  padding: 1px 4px;
+  border: 2px solid #2563eb;
+  border-radius: 2px;
+  background: rgba(219, 234, 254, 0.42);
+  color: #1d4ed8;
+  font-size: 11px;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.footer-candidate-marker span {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .preview-error {

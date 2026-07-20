@@ -22,12 +22,7 @@
           @click="openPreview(item)"
         >
           <span class="image-preview-thumb-wrap" :style="thumbWrapStyle">
-            <img
-              v-if="imageSrc(item)"
-              :src="imageSrc(item)"
-              :alt="itemName(item)"
-              class="image-preview-thumb"
-            />
+            <img v-if="imageSrc(item)" :src="imageSrc(item)" :alt="itemName(item)" class="image-preview-thumb" />
             <span v-else class="image-preview-placeholder">预览中</span>
           </span>
           <span class="image-preview-name" :title="itemName(item)">{{ itemName(item) }}</span>
@@ -55,6 +50,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { tauriCallSafe } from '../../core/tauriBridge.js'
+import { fileName } from '../../core/filePath.js'
 
 const props = defineProps({
   items: {
@@ -114,8 +110,8 @@ const rangeLabel = computed(() => {
   if (!props.items.length) return '0 / 0'
   return `${pageStart.value + 1}-${pageEnd.value} / ${props.items.length}`
 })
-const cardSize = computed(() => Math.round(112 * zoom.value / 100))
-const thumbSize = computed(() => Math.round(72 * zoom.value / 100))
+const cardSize = computed(() => Math.round((112 * zoom.value) / 100))
+const thumbSize = computed(() => Math.round((72 * zoom.value) / 100))
 const gridStyle = computed(() => ({
   gridTemplateColumns: `repeat(auto-fill, minmax(${cardSize.value}px, 1fr))`,
 }))
@@ -136,7 +132,7 @@ function itemPath(item) {
 function itemName(item) {
   if (props.nameResolver) return props.nameResolver(item)
   const path = itemPath(item)
-  return String(path || '').split(/[\\/]/).pop() || path
+  return fileName(path)
 }
 
 function itemMeta(item) {
@@ -158,14 +154,16 @@ function adjustZoom(delta) {
 }
 
 async function preloadVisibleImages() {
-  await Promise.all(pagedItems.value.map(async (item) => {
-    const path = itemPath(item)
-    if (!path || sources[path]) return
-    const result = await tauriCallSafe('read_image_data_url', { path })
-    if (result.ok) {
-      sources[path] = result.data
-    }
-  }))
+  await Promise.all(
+    pagedItems.value.map(async (item) => {
+      const path = itemPath(item)
+      if (!path || sources[path]) return
+      const result = await tauriCallSafe('read_image_data_url', { path })
+      if (result.ok) {
+        sources[path] = result.data
+      }
+    }),
+  )
 }
 
 function openPreview(item) {
@@ -175,9 +173,13 @@ function openPreview(item) {
   previewVisible.value = true
 }
 
-watch([pagedItems, pageSize], () => {
-  preloadVisibleImages()
-}, { immediate: true })
+watch(
+  [pagedItems, pageSize],
+  () => {
+    preloadVisibleImages()
+  },
+  { immediate: true },
+)
 
 watch([pageSize, () => props.items.length], () => {
   if (page.value > pageCount.value) page.value = pageCount.value

@@ -74,6 +74,8 @@ pub(crate) struct HeaderFooterArtifactEditResult {
     pub removed_footer: usize,
     pub edited_header: usize,
     pub edited_footer: usize,
+    pub removed_header_pages: BTreeSet<usize>,
+    pub removed_footer_pages: BTreeSet<usize>,
     pub edited_header_pages: BTreeSet<usize>,
     pub edited_footer_pages: BTreeSet<usize>,
 }
@@ -231,6 +233,12 @@ fn merge_edit_result(
     target.edited_header += source.edited_header;
     target.edited_footer += source.edited_footer;
     target
+        .removed_header_pages
+        .extend(source.removed_header_pages);
+    target
+        .removed_footer_pages
+        .extend(source.removed_footer_pages);
+    target
         .edited_header_pages
         .extend(source.edited_header_pages);
     target
@@ -278,8 +286,14 @@ fn edit_target_artifact_ranges(
                     }
                 }
                 match region {
-                    ArtifactRegion::Header => result.removed_header += 1,
-                    ArtifactRegion::Footer => result.removed_footer += 1,
+                    ArtifactRegion::Header => {
+                        result.removed_header += 1;
+                        result.removed_header_pages.insert(page_index);
+                    }
+                    ArtifactRegion::Footer => {
+                        result.removed_footer += 1;
+                        result.removed_footer_pages.insert(page_index);
+                    }
                 }
                 index = end + 1;
                 continue;

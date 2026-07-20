@@ -24,9 +24,7 @@
             <el-button size="small" type="primary" @click="installFfmpeg" :loading="installing">
               下载安装到 Docsy
             </el-button>
-            <el-button size="small" @click="openFfmpegDownload">
-              下载页
-            </el-button>
+            <el-button size="small" @click="openFfmpegDownload"> 下载页 </el-button>
           </div>
         </div>
 
@@ -44,7 +42,7 @@
             <template v-if="videoPath">
               <div class="selected-file">
                 <el-icon><VideoCamera /></el-icon>
-                <span class="file-name">{{ baseName(videoPath) }}</span>
+                <span class="file-name">{{ fileName(videoPath) }}</span>
                 <el-button text type="danger" size="small" @click.stop="clearVideo">清除</el-button>
               </div>
             </template>
@@ -89,13 +87,18 @@
             <el-form-item label="输出目录">
               <div class="path-picker">
                 <el-button @click="selectOutputDir">选择</el-button>
-                <el-button v-if="settings.outputDir" text type="danger" @click="settings.outputDir = ''">清除</el-button>
+                <el-button v-if="settings.outputDir" text type="danger" @click="settings.outputDir = ''"
+                  >清除</el-button
+                >
               </div>
               <div class="path-hint">{{ settings.outputDir || '默认保存到视频所在文件夹' }}</div>
             </el-form-item>
 
             <el-form-item label="文件名前缀">
-              <el-input v-model="settings.filenamePrefix" placeholder="留空则使用视频名，输出为 视频名_时间_frame_序号" />
+              <el-input
+                v-model="settings.filenamePrefix"
+                placeholder="留空则使用视频名，输出为 视频名_时间_frame_序号"
+              />
             </el-form-item>
 
             <el-form-item label="抽帧模式">
@@ -111,6 +114,15 @@
 
             <el-form-item v-else label="间隔(秒)">
               <el-input-number v-model="settings.interval" :min="0.1" :max="3600" :step="1" :precision="1" />
+            </el-form-item>
+
+            <el-form-item label="时间范围">
+              <div class="time-range-inputs">
+                <el-input v-model="settings.startTime" placeholder="开始，如 01:30:00" clearable />
+                <span>至</span>
+                <el-input v-model="settings.endTime" placeholder="结束，如 01:35:00" clearable />
+              </div>
+              <div class="path-hint">留空则处理全片；也可直接输入秒数。</div>
             </el-form-item>
 
             <el-form-item label="输出格式">
@@ -196,18 +208,13 @@
 
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
-import {
-  Loading,
-  CircleCheckFilled,
-  WarningFilled,
-  VideoCamera,
-  UploadFilled,
-} from '@element-plus/icons-vue'
+import { Loading, CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
+import { fileName } from '../../../core/filePath.js'
 
 const ffmpegLoading = ref(true)
 const ffmpegStatus = reactive({ available: false, path: null, version: null, has_drawtext: false })
@@ -223,6 +230,8 @@ const settings = reactive({
   mode: 'fps',
   fps: 1.0,
   interval: 1.0,
+  startTime: '',
+  endTime: '',
   format: 'jpg',
   quality: 90,
   timestamp: {
@@ -236,6 +245,7 @@ const extracting = ref(false)
 const extractResult = ref(null)
 const resultImages = ref([])
 let unlistenDragDrop = null
+const VIDEO_EXTENSIONS = new Set(['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'])
 
 async function checkFfmpeg() {
   ffmpegLoading.value = true
@@ -259,7 +269,7 @@ async function installFfmpeg() {
 }
 
 async function openFfmpegDownload() {
-  const res = await tauriCallSafe('open_path', { path: 'https://www.gyan.dev/ffmpeg/builds/' })
+  const res = await openPath('https://www.gyan.dev/ffmpeg/builds/')
   if (!res.ok) {
     ElMessage.error('无法打开 FFmpeg 下载页: ' + res.error)
   }
@@ -268,9 +278,7 @@ async function openFfmpegDownload() {
 async function selectFile() {
   const file = await open({
     multiple: false,
-    filters: [
-      { name: '视频文件', extensions: ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'] },
-    ],
+    filters: [{ name: '视频文件', extensions: ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'] }],
   })
   if (file) {
     await loadVideo(normalizeSelectedPath(file))
@@ -288,14 +296,22 @@ async function onDrop(e) {
   dragging.value = false
   const files = e.dataTransfer?.files
   if (files?.length && files[0].path) {
-    await loadVideo(files[0].path)
+    await loadVideoIfSupported(files[0].path)
   }
 }
 
 async function handleDroppedPaths(paths) {
   const first = Array.isArray(paths) ? paths[0] : null
   if (!first) return
-  await loadVideo(first)
+  await loadVideoIfSupported(first)
+}
+
+async function loadVideoIfSupported(path) {
+  if (!isVideoPath(path)) {
+    ElMessage.warning('请拖入支持的视频文件')
+    return
+  }
+  await loadVideo(path)
 }
 
 async function loadVideo(path) {
@@ -331,6 +347,8 @@ async function extractFrames() {
     output_dir: settings.outputDir,
     filename_prefix: settings.filenamePrefix,
     fps: settings.mode === 'fps' ? settings.fps : 1.0 / settings.interval,
+    startTime: settings.startTime,
+    endTime: settings.endTime,
     format: settings.format,
     quality: settings.quality,
     timestamp: settings.timestamp.enabled
@@ -350,7 +368,7 @@ async function extractFrames() {
     ElMessage.success(`抽帧完成，共 ${res.data.count} 帧`)
 
     if (Array.isArray(res.data.frames)) {
-      resultImages.value = res.data.frames.map(path => ({ path }))
+      resultImages.value = res.data.frames.map((path) => ({ path }))
     } else if (res.data.output_dir) {
       await loadResultImages(res.data.output_dir)
     }
@@ -362,20 +380,26 @@ async function extractFrames() {
 async function loadResultImages(dir) {
   const res = await tauriCallSafe('list_output_frames', { dir })
   if (res.ok && Array.isArray(res.data)) {
-    resultImages.value = res.data.map(path => ({ path }))
+    resultImages.value = res.data.map((path) => ({ path }))
   }
 }
 
 function frameName(img) {
-  return baseName(img?.path || '')
+  return fileName(img?.path || '')
 }
 
 function normalizeSelectedPath(value) {
   return Array.isArray(value) ? value[0] : value
 }
 
-function baseName(path) {
-  return String(path || '').split(/[\\/]/).pop() || path
+function isVideoPath(path) {
+  const ext = String(path || '')
+    .split(/[\\/]/)
+    .pop()
+    ?.split('.')
+    .pop()
+    ?.toLowerCase()
+  return Boolean(ext && VIDEO_EXTENSIONS.has(ext))
 }
 
 function formatDuration(seconds) {
@@ -523,7 +547,9 @@ onBeforeUnmount(() => {
   padding: 24px 16px;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
   color: #909399;
   font-size: 13px;
 }
@@ -586,6 +612,14 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.time-range-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .path-hint {

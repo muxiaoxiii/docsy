@@ -1,10 +1,13 @@
 mod app_log;
 mod commands;
+mod docx_template;
 mod external;
 mod ffmpeg;
 mod image_paddler;
 mod pdf;
 mod services;
+mod sort_utils;
+mod template_history;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

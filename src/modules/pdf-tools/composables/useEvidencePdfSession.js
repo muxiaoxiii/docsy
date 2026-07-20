@@ -1,6 +1,9 @@
 import { expandSplitNameTokens } from './splitFileName.js'
+import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
+import { toChineseNumber } from '../../../core/numberFormat.js'
+import { ptToMm } from '../../../core/unitConversion.js'
 
-const CN_DIGITS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+export { fileName, parentDir, stripPdf, toChineseNumber }
 
 export function createEvidenceFile(path) {
   const name = fileName(path)
@@ -26,9 +29,16 @@ export function createEvidenceFile(path) {
     existingHeaderNormalizedText: '',
     existingFooterNormalizedText: '',
     existingPageNumberNormalizedText: '',
+    existingFooterCandidateKey: '',
+    existingPageNumberCandidateKey: '',
+    footerCandidateChoices: [],
+    ignoredFooterCandidateKeys: [],
     existingHeaderBBox: null,
     existingFooterBBox: null,
     existingPageNumberBBox: null,
+    existingHeaderFontSize: null,
+    existingFooterFontSize: null,
+    existingPageNumberFontSize: null,
     existingHeaderPageStart: 1,
     existingHeaderPageEnd: 0,
     existingFooterPageStart: 1,
@@ -54,9 +64,24 @@ export function createEvidenceFile(path) {
 export function assignPageRanges(files) {
   let start = 1
   return files.map((file) => {
+    const pages = Number(file.pages || 0)
+    const pageStart = start
+    const pageEnd = pages ? start + pages - 1 : start - 1
+    start += pages
+    return {
+      ...file,
+      pageStart,
+      pageEnd,
+    }
+  })
+}
+
+export function updatePageRanges(files) {
+  let start = 1
+  return files.map((file) => {
     file.pageStart = start
-    file.pageEnd = file.pages ? start + file.pages - 1 : start - 1
-    start += file.pages || 0
+    file.pageEnd = file.pages ? start + Number(file.pages || 0) - 1 : start - 1
+    start += Number(file.pages || 0)
     return file
   })
 }
@@ -76,31 +101,31 @@ export function buildHeaderText(file, index, rules) {
     return decorateHeaderText(file.header ?? '', file, index, rules)
   }
   if (rules.headerMode === 'none') return ''
-  let base = ''
-  if (rules.headerMode === 'per_file') base = file.header ?? stripPdf(file.name)
-  else if (rules.headerMode === 'custom') base = rules.headerText || ''
-  else if (rules.headerMode === 'template') base = rules.headerText || ''
-  else if (rules.headerMode === 'seq') base = `证据${index + 1}`
-  else if (rules.headerMode === 'seq_cn') base = `证据${toChineseNumber(index + 1)}`
-  else if (rules.headerMode === 'prefix_seq') base = `${rules.headerText || ''}证据${index + 1}`
-  else base = stripPdf(file.name)
+  const base = headerBaseText(file, index, rules)
   return decorateHeaderText(base, file, index, rules)
 }
 
+function headerBaseText(file, index, rules) {
+  if (rules.headerMode === 'per_file') return file.header ?? stripPdf(file.name)
+  if (rules.headerMode === 'custom' || rules.headerMode === 'template') return rules.headerText || ''
+  if (rules.headerMode === 'seq') return `证据${index + 1}`
+  if (rules.headerMode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`
+  if (rules.headerMode === 'prefix_seq') return `${rules.headerText || ''}证据${index + 1}`
+  return stripPdf(file.name)
+}
+
 export function canWriteHeader(file) {
-  return true
+  return Boolean(file?.path)
 }
 
 export function canWriteFooter(file) {
-  return true
+  return Boolean(file?.path)
 }
 
 export function candidateTargetRange(candidate, pages = 0) {
   if (!candidate) return { start: 1, end: 0 }
   const start = candidate.pageRange?.start || 1
-  const end = candidate.repeating && pages
-    ? pages
-    : candidate.pageRange?.end || pages || start
+  const end = candidate.repeating && pages ? pages : candidate.pageRange?.end || pages || start
   return { start, end: Math.max(start, end) }
 }
 
@@ -193,18 +218,16 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
 
 function buildPlainTextTargets(file, region) {
   if (region === 'header') return [plainTextTarget(file, 'header')].filter(Boolean)
-  return [
-    plainTextTarget(file, 'footer'),
-    plainTextTarget(file, 'pageNumber'),
-  ].filter(Boolean)
+  return [plainTextTarget(file, 'footer'), plainTextTarget(file, 'pageNumber')].filter(Boolean)
 }
 
 function plainTextTarget(file, region) {
-  const enabled = region === 'header'
-    ? file.convertPlainHeader || file.removeExistingHeader
-    : region === 'footer'
-      ? file.convertPlainFooter || file.removeExistingFooter
-      : file.convertPlainPageNumber || file.removeExistingPageNumber
+  const enabled =
+    region === 'header'
+      ? file.convertPlainHeader || file.removeExistingHeader
+      : region === 'footer'
+        ? file.convertPlainFooter || file.removeExistingFooter
+        : file.convertPlainPageNumber || file.removeExistingPageNumber
   if (!enabled) return null
   const text = existingTargetText(file, region)
   if (!text) return null
@@ -223,11 +246,12 @@ function plainTextTarget(file, region) {
 function overlayConfigForFile(file, region, text, rules) {
   const isHeader = region === 'header'
   const bbox = existingBBox(file, region)
-  const useDetectedPlacement = region === 'header'
-    ? file.convertPlainHeader
-    : region === 'footer'
-      ? file.convertPlainFooter
-      : file.convertPlainPageNumber
+  const useDetectedPlacement =
+    region === 'header'
+      ? file.convertPlainHeader
+      : region === 'footer'
+        ? file.convertPlainFooter
+        : file.convertPlainPageNumber
   const base = isHeader
     ? {
         region: 'header',
@@ -249,24 +273,39 @@ function overlayConfigForFile(file, region, text, rules) {
         offsetXMm: rules.footerOffsetXMm || 0,
         color: rules.footerColor || '#000000',
       }
-  if (!useDetectedPlacement || !bbox || !bbox.width || !bbox.height) return base
+  const scopedBase = useDetectedPlacement
+    ? {
+        ...base,
+        pageStart: existingPageStart(file, region) || 1,
+        pageEnd: existingPageEnd(file, region) || file.pages || 1,
+      }
+    : base
+  if (!useDetectedPlacement || !bbox || !bbox.width || !bbox.height) return scopedBase
   const centerX = (Number(bbox.x0) + Number(bbox.x1)) / 2
   const pageWidth = Number(bbox.width)
   const pageHeight = Number(bbox.height)
   const align = centerX < pageWidth * 0.36 ? 'left' : centerX > pageWidth * 0.64 ? 'right' : 'center'
   const anchorX = align === 'left' ? Number(bbox.x0) : align === 'right' ? Number(bbox.x1) : centerX
   const baseX = align === 'left' ? 0 : align === 'right' ? pageWidth : pageWidth / 2
-  const yTop = Number(bbox.y0)
   const yBottom = Number(bbox.y1)
-  const fontSize = Math.max(6, Math.min(24, yBottom - yTop || base.fontSize))
+  const fontSize = existingFontSize(file, region) || inferDetectedFontSize(bbox, base.fontSize, text)
   return {
-    ...base,
+    ...scopedBase,
     region: isHeader ? 'header' : 'footer',
     fontSize,
     align,
     offsetXMm: ptToMm(anchorX - baseX),
     marginMm: isHeader ? ptToMm(yBottom) : ptToMm(pageHeight - yBottom),
   }
+}
+
+function inferDetectedFontSize(bbox, fallback, text = '') {
+  const height = Math.abs(Number(bbox?.y1 || 0) - Number(bbox?.y0 || 0))
+  if (!Number.isFinite(height) || height <= 0) return fallback
+  const cjk = /[\u3400-\u9fff\uf900-\ufaff]/.test(String(text || ''))
+  const ratio = cjk && height > 16 ? 0.58 : 0.72
+  const inferred = height * ratio
+  return Math.max(6, Math.min(18, Number(inferred.toFixed(2))))
 }
 
 function convertedExistingOverlays(file, rules) {
@@ -304,6 +343,17 @@ function existingBBox(file, region) {
   return file.existingPageNumberBBox
 }
 
+function existingFontSize(file, region) {
+  const value =
+    region === 'header'
+      ? file.existingHeaderFontSize
+      : region === 'footer'
+        ? file.existingFooterFontSize
+        : file.existingPageNumberFontSize
+  const size = Number(value || 0)
+  return Number.isFinite(size) && size > 0 ? Math.max(6, Math.min(18, size)) : null
+}
+
 function existingPageStart(file, region) {
   if (region === 'header') return file.existingHeaderPageStart
   if (region === 'footer') return file.existingFooterPageStart
@@ -314,10 +364,6 @@ function existingPageEnd(file, region) {
   if (region === 'header') return file.existingHeaderPageEnd
   if (region === 'footer') return file.existingFooterPageEnd
   return file.existingPageNumberPageEnd
-}
-
-function ptToMm(value) {
-  return Number(value || 0) * 25.4 / 72
 }
 
 function standardArtifactReplacementConfig(file, region, rules) {
@@ -431,7 +477,6 @@ export function buildOverlayOutputPath(inputPath, outputDir = '') {
 }
 
 export function buildMergeOutputPath(files, outputDir = '', fileName = '') {
-  const first = files[0]
   const dir = buildOutputDir(files, outputDir)
   const name = ensurePdfFileName(fileName || 'merged_evidence.pdf')
   return `${dir}/${name}`
@@ -446,32 +491,4 @@ export function buildOutputDir(files, outputDir = '') {
 function ensurePdfFileName(name) {
   const value = String(name || '').trim() || 'merged_evidence.pdf'
   return /\.pdf$/i.test(value) ? value : `${value}.pdf`
-}
-
-export function fileName(path) {
-  return String(path || '').split(/[\\/]/).pop() || path
-}
-
-export function parentDir(path) {
-  const value = String(path || '')
-  const idx = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\'))
-  return idx >= 0 ? value.slice(0, idx) : '.'
-}
-
-export function stripPdf(name) {
-  return String(name || '').replace(/\.pdf$/i, '')
-}
-
-export function toChineseNumber(value) {
-  const num = Number(value)
-  if (!Number.isInteger(num) || num <= 0) return String(value)
-  if (num < 10) return CN_DIGITS[num]
-  if (num === 10) return '十'
-  if (num < 20) return `十${CN_DIGITS[num % 10]}`
-  if (num < 100) {
-    const tens = Math.floor(num / 10)
-    const ones = num % 10
-    return `${CN_DIGITS[tens]}十${CN_DIGITS[ones]}`
-  }
-  return String(value)
 }

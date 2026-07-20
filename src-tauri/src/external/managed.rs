@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -10,6 +10,8 @@ const DEFAULT_MANIFEST_URL: &str =
     "https://github.com/muxiaoxiii/docsy/releases/download/toolchain-v1/tools-manifest.json";
 const DEFAULT_RELEASE_BASE: &str =
     "https://github.com/muxiaoxiii/docsy/releases/download/toolchain-v1";
+const MAX_TOOL_MANIFEST_BYTES: u64 = 10 * 1024 * 1024;
+const MIB: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Deserialize)]
 struct ToolManifest {
@@ -23,6 +25,8 @@ struct ToolPackage {
     url: String,
     #[serde(default)]
     sha256: String,
+    #[serde(default)]
+    max_bytes: Option<u64>,
     binaries: Vec<String>,
 }
 
@@ -37,10 +41,13 @@ struct InstallRecord {
 }
 
 pub fn tools_root() -> PathBuf {
+    app_data_dir().join("Docsy").join("tools")
+}
+
+fn app_data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Docsy")
-        .join("tools")
+        .or_else(|| dirs::home_dir().map(|dir| dir.join(".local").join("share")))
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 pub fn open_tools_root() -> Result<()> {
@@ -57,7 +64,8 @@ pub fn managed_binary_path(tool: &str, binary: &str) -> Option<PathBuf> {
 pub fn install_tool(name: &str) -> Result<String> {
     let platform = platform_key()?;
     let package = load_package_spec(name, &platform)?;
-    let bytes = download_package(&package.url)?;
+    let max_bytes = package_download_limit(name, &package);
+    let bytes = download_package(&package.url, max_bytes)?;
     verify_sha256_if_present(&bytes, &package.sha256)?;
     install_package_bytes(name, &platform, package, &bytes)
 }
@@ -67,12 +75,17 @@ pub fn install_tool_from_package(name: &str, package_path: &str) -> Result<Strin
     let path = PathBuf::from(package_path);
     let bytes =
         fs::read(&path).with_context(|| format!("读取本地工具包失败: {}", path.display()))?;
+    let max_bytes = default_package_download_limit(name);
     let package = ToolPackage {
         version: "local".into(),
         url: path.display().to_string(),
         sha256: String::new(),
+        max_bytes: Some(max_bytes),
         binaries: required_binaries(name)?,
     };
+    if bytes.len() as u64 > max_bytes {
+        anyhow::bail!("本地工具包超过当前工具的合理体积上限");
+    }
     install_package_bytes(name, &platform, package, &bytes)
 }
 
@@ -90,7 +103,7 @@ fn install_package_bytes(
     }
     fs::create_dir_all(&staging).context("创建临时工具目录失败")?;
 
-    if let Err(err) = extract_zip(bytes, &staging) {
+    if let Err(err) = extract_zip(bytes, &staging, package_extract_limit(name)) {
         fs::remove_dir_all(&staging).ok();
         return Err(err);
     }
@@ -165,7 +178,7 @@ fn load_package_spec(name: &str, platform: &str) -> Result<ToolPackage> {
 }
 
 fn fetch_manifest_package(url: &str, name: &str, platform: &str) -> Result<ToolPackage> {
-    let bytes = download_package(url)?;
+    let bytes = download_package(url, MAX_TOOL_MANIFEST_BYTES)?;
     let manifest: ToolManifest = serde_json::from_slice(&bytes).context("解析工具清单失败")?;
     manifest
         .tools
@@ -190,6 +203,7 @@ fn embedded_package_spec(name: &str, platform: &str) -> Option<ToolPackage> {
         version: version.to_string(),
         url: format!("{DEFAULT_RELEASE_BASE}/{name}-{version}-{platform}.zip"),
         sha256: String::new(),
+        max_bytes: None,
         binaries,
     })
 }
@@ -202,12 +216,14 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
                 .into(),
             sha256: "8941870a604e7c87ed24566b038d46c24ce76616254d2383c578f60c0677f202"
                 .into(),
+            max_bytes: None,
             binaries: vec![binary_name("qpdf")],
         }),
         "ffmpeg" => Some(ToolPackage {
             version: "release-essentials".into(),
             url: "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip".into(),
             sha256: String::new(),
+            max_bytes: None,
             binaries: vec![binary_name("ffmpeg"), binary_name("ffprobe")],
         }),
         "poppler" => Some(ToolPackage {
@@ -215,15 +231,18 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
             url: "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip"
                 .into(),
             sha256: String::new(),
+            max_bytes: None,
             binaries: vec![binary_name("pdftoppm"), binary_name("pdftotext")],
         }),
         _ => None,
     }
 }
 
-fn download_package(url: &str) -> Result<Vec<u8>> {
+fn download_package(url: &str, max_bytes: u64) -> Result<Vec<u8>> {
+    validate_download_url(url)?;
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("初始化下载客户端失败")?;
     let response = client
@@ -231,12 +250,63 @@ fn download_package(url: &str) -> Result<Vec<u8>> {
         .send()
         .with_context(|| format!("下载失败: {url}"))?;
     let status = response.status();
+    if status.is_redirection() {
+        anyhow::bail!(
+            "工具下载地址发生重定向。为避免降级到不安全地址，请在设置中使用最终 HTTPS 下载地址。"
+        );
+    }
     if !status.is_success() {
         anyhow::bail!(
             "下载失败: {url} 返回 {status}。可在设置中改用国内镜像清单，或从本地 zip 工具包安装。"
         );
     }
-    Ok(response.bytes()?.to_vec())
+    if let Some(length) = response.content_length() {
+        if length > max_bytes {
+            anyhow::bail!("工具包过大，已拒绝下载");
+        }
+    }
+    let mut reader = response.take(max_bytes + 1);
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).context("读取下载内容失败")?;
+    if bytes.len() as u64 > max_bytes {
+        anyhow::bail!("工具包过大，已中止下载");
+    }
+    Ok(bytes)
+}
+
+fn validate_download_url(url: &str) -> Result<()> {
+    let parsed = reqwest::Url::parse(url).with_context(|| format!("工具下载地址无效: {url}"))?;
+    if parsed.scheme() != "https" {
+        anyhow::bail!("工具下载地址必须使用 HTTPS");
+    }
+    if parsed.host_str().is_none() {
+        anyhow::bail!("工具下载地址缺少主机名");
+    }
+    Ok(())
+}
+
+fn package_download_limit(name: &str, package: &ToolPackage) -> u64 {
+    package
+        .max_bytes
+        .unwrap_or_else(|| default_package_download_limit(name))
+}
+
+fn default_package_download_limit(name: &str) -> u64 {
+    match name {
+        "ffmpeg" => 2048 * MIB,
+        "poppler" => 1536 * MIB,
+        "qpdf" => 512 * MIB,
+        _ => 1024 * MIB,
+    }
+}
+
+fn package_extract_limit(name: &str) -> u64 {
+    match name {
+        "ffmpeg" => 4096 * MIB,
+        "poppler" => 3072 * MIB,
+        "qpdf" => 1024 * MIB,
+        _ => 2048 * MIB,
+    }
 }
 
 fn required_binaries(name: &str) -> Result<Vec<String>> {
@@ -262,9 +332,10 @@ fn verify_sha256_if_present(bytes: &[u8], expected: &str) -> Result<()> {
     Ok(())
 }
 
-fn extract_zip(bytes: &[u8], output_dir: &Path) -> Result<()> {
+fn extract_zip(bytes: &[u8], output_dir: &Path, max_total_uncompressed: u64) -> Result<()> {
     let reader = Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader).context("读取工具 zip 失败")?;
+    let mut total_uncompressed = 0_u64;
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).context("读取 zip 条目失败")?;
         let Some(enclosed) = file.enclosed_name().map(Path::to_path_buf) else {
@@ -278,10 +349,16 @@ fn extract_zip(bytes: &[u8], output_dir: &Path) -> Result<()> {
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).context("创建 zip 输出目录失败")?;
         }
+        let entry_size = file.size();
+        if entry_size > max_total_uncompressed {
+            anyhow::bail!("工具包内文件过大，已拒绝解压");
+        }
+        total_uncompressed = total_uncompressed.saturating_add(entry_size);
+        if total_uncompressed > max_total_uncompressed {
+            anyhow::bail!("工具包解压后体积过大，已拒绝解压");
+        }
         let mut output = fs::File::create(&output_path).context("创建解压文件失败")?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).context("读取 zip 文件失败")?;
-        output.write_all(&buffer).context("写入解压文件失败")?;
+        std::io::copy(&mut file, &mut output).context("解压 zip 文件失败")?;
     }
     Ok(())
 }
@@ -398,5 +475,33 @@ mod tests {
     #[test]
     fn hex_encodes_lowercase() {
         assert_eq!(hex_lower(&[0, 15, 255]), "000fff");
+    }
+
+    #[test]
+    fn download_url_must_be_https() {
+        assert!(validate_download_url("https://example.com/tools.zip").is_ok());
+        assert!(validate_download_url("http://example.com/tools.zip").is_err());
+        assert!(validate_download_url("file:///tmp/tools.zip").is_err());
+    }
+
+    #[test]
+    fn package_limits_are_tool_aware_and_manifest_overridable() {
+        let package = ToolPackage {
+            version: "test".into(),
+            url: "https://example.com/tool.zip".into(),
+            sha256: String::new(),
+            max_bytes: Some(123),
+            binaries: vec![],
+        };
+
+        assert_eq!(package_download_limit("ffmpeg", &package), 123);
+        let default_package = ToolPackage {
+            max_bytes: None,
+            ..package
+        };
+        assert!(package_download_limit("ffmpeg", &default_package) > 512 * MIB);
+        assert!(
+            package_extract_limit("ffmpeg") > package_download_limit("ffmpeg", &default_package)
+        );
     }
 }

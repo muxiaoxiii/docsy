@@ -16,9 +16,7 @@ export default {
     },
   ],
 
-  menuItems: [
-    { label: '视频抽帧', route: 'video-extract', icon: 'VideoCamera' },
-  ],
+  menuItems: [{ label: '视频抽帧', route: 'video-extract', icon: 'VideoCamera' }],
 
   homeCards: [
     {

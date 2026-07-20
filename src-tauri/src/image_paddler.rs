@@ -3,6 +3,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
+
+use crate::sort_utils::natural_cmp;
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"];
 
@@ -12,6 +15,14 @@ const FILENAME_FONT_PT: f64 = 8.0;
 const FILENAME_MAX_LINES: usize = 2;
 const FILENAME_LINE_HEIGHT_MM: f64 = 4.2;
 const DOCX_TRAILING_GAP_MM: f64 = 2.0;
+
+static TRAILING_NUMBER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[-_]\d+$").unwrap());
+static TIME_PART_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s").unwrap()
+});
+static NUMBER_PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+").unwrap());
+static OUTPUT_STEM_SUFFIX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:[_-]?(?:frame|img|image)?[_-]?\d+)$").unwrap());
 
 #[derive(Debug, Deserialize)]
 pub struct AnalyzeArgs {
@@ -135,7 +146,7 @@ fn parse_layout(
     }
     match layout {
         "1" => LayoutGrid { rows: 1, cols: 1 },
-        "2" => LayoutGrid { rows: 1, cols: 2 },
+        "2" => LayoutGrid { rows: 2, cols: 1 },
         "3" => LayoutGrid { rows: 1, cols: 3 },
         "4" => LayoutGrid { rows: 2, cols: 2 },
         _ => {
@@ -147,38 +158,12 @@ fn parse_layout(
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum NatPart<'a> {
-    Text(&'a str),
-    Num(u64),
-}
-
-fn natural_sort_key(s: &str) -> Vec<NatPart<'_>> {
-    let re = Regex::new(r"(\d+)").unwrap();
-    let mut result = Vec::new();
-    let mut last = 0;
-    for m in re.find_iter(s) {
-        if m.start() > last {
-            result.push(NatPart::Text(&s[last..m.start()]));
-        }
-        if let Ok(n) = m.as_str().parse::<u64>() {
-            result.push(NatPart::Num(n));
-        }
-        last = m.end();
-    }
-    if last < s.len() {
-        result.push(NatPart::Text(&s[last..]));
-    }
-    result
-}
-
 fn extract_prefix(filename: &str) -> String {
     let stem = Path::new(filename)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(filename);
-    let re = Regex::new(r"[-_]\d+$").unwrap();
-    re.replace(stem, "").to_string()
+    TRAILING_NUMBER_RE.replace(stem, "").to_string()
 }
 
 fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
@@ -195,8 +180,8 @@ fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
             let ext_lower = ext.to_lowercase();
             if IMAGE_EXTENSIONS.contains(&ext_lower.as_str()) {
                 let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let (width, height) = match image::open(&path) {
-                    Ok(img) => (img.width(), img.height()),
+                let (width, height) = match image::image_dimensions(&path) {
+                    Ok(dimensions) => dimensions,
                     Err(_) => continue,
                 };
                 images.push(ImageInfo {
@@ -209,11 +194,7 @@ fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
         }
     }
 
-    images.sort_by(|a, b| {
-        let ka = natural_sort_key(&a.path);
-        let kb = natural_sort_key(&b.path);
-        ka.cmp(&kb)
-    });
+    images.sort_by(|a, b| natural_cmp(&a.path, &b.path));
 
     Ok(images)
 }
@@ -247,11 +228,7 @@ fn scan_image_folders(folder: &str, folders: &Option<Vec<String>>) -> Result<Vec
             }
         }
     }
-    all.sort_by(|a, b| {
-        let ka = natural_sort_key(&a.path);
-        let kb = natural_sort_key(&b.path);
-        ka.cmp(&kb)
-    });
+    all.sort_by(|a, b| natural_cmp(&a.path, &b.path));
     Ok(all)
 }
 
@@ -265,14 +242,14 @@ fn image_info_from_path(path: &Path) -> Result<Option<ImageInfo>> {
         return Ok(None);
     }
     let metadata = std::fs::metadata(path)?;
-    let img = match image::open(path) {
-        Ok(img) => img,
+    let (width, height) = match image::image_dimensions(path) {
+        Ok(dimensions) => dimensions,
         Err(_) => return Ok(None),
     };
     Ok(Some(ImageInfo {
         path: path.display().to_string(),
-        width: img.width(),
-        height: img.height(),
+        width,
+        height,
         file_size: metadata.len(),
     }))
 }
@@ -291,7 +268,7 @@ fn build_groups(images: &[ImageInfo]) -> Vec<ImageGroup> {
         .into_iter()
         .map(|(prefix, count)| ImageGroup { prefix, count })
         .collect();
-    groups.sort_by(|a, b| a.prefix.cmp(&b.prefix));
+    groups.sort_by(|a, b| natural_cmp(&a.prefix, &b.prefix));
     groups
 }
 
@@ -629,25 +606,21 @@ fn keep_filename_parts(input: &str, rule: &FilenameRule) -> String {
 }
 
 fn extract_time_parts(input: &str) -> Vec<String> {
-    Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s")
-        .unwrap()
+    TIME_PART_RE
         .find_iter(input)
         .map(|m| m.as_str().to_string())
         .collect()
 }
 
 fn extract_number_parts(input: &str) -> Vec<String> {
-    Regex::new(r"\d+")
-        .unwrap()
+    NUMBER_PART_RE
         .find_iter(input)
         .map(|m| m.as_str().to_string())
         .collect()
 }
 
 fn extract_number_parts_without_times(input: &str) -> Vec<String> {
-    let time_re =
-        Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s").unwrap();
-    let cleaned = time_re.replace_all(input, " ");
+    let cleaned = TIME_PART_RE.replace_all(input, " ");
     extract_number_parts(&cleaned)
 }
 
@@ -735,8 +708,7 @@ fn output_file_stem(images: &[ImageInfo]) -> String {
         .and_then(|img| Path::new(&img.path).file_stem())
         .and_then(|s| s.to_str())
         .unwrap_or("images");
-    let re = Regex::new(r"(?i)(?:[_-]?(?:frame|img|image)?[_-]?\d+)$").unwrap();
-    let cleaned = re.replace(first_name, "");
+    let cleaned = OUTPUT_STEM_SUFFIX_RE.replace(first_name, "");
     let stem = cleaned.trim_matches(['_', '-', ' ']);
     let fallback = if stem.is_empty() { first_name } else { stem };
     sanitize_output_name(fallback)
@@ -1180,6 +1152,13 @@ mod tests {
     }
 
     #[test]
+    fn legacy_two_image_layout_matches_preview_stacked_order() {
+        let g = parse_layout("2", None, None);
+        assert_eq!(g.rows, 2);
+        assert_eq!(g.cols, 1);
+    }
+
+    #[test]
     fn test_parse_custom_layout() {
         let g = parse_layout("custom", Some(3), Some(2));
         assert_eq!(g.rows, 3);
@@ -1252,7 +1231,7 @@ mod tests {
     #[test]
     fn test_natural_sort() {
         let mut v = vec!["img_10.jpg", "img_2.jpg", "img_1.jpg"];
-        v.sort_by(|a, b| natural_sort_key(a).cmp(&natural_sort_key(b)));
+        v.sort_by(|a, b| natural_cmp(a, b));
         assert_eq!(v, vec!["img_1.jpg", "img_2.jpg", "img_10.jpg"]);
     }
 

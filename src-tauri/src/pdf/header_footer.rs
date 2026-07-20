@@ -1,7 +1,16 @@
+use allsorts::binary::read::ReadScope;
+use allsorts::font::{Font, MatchingPresentation};
+use allsorts::font_data::FontData;
+use allsorts::subset::{subset as subset_font_bytes, CmapTarget, SubsetProfile};
 use anyhow::{Context, Result};
-use printpdf::*;
+use lopdf::content::{Content, Operation};
+use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, Stream, StringFormat};
+use printpdf::{
+    generate_cmap_string, generate_gid_to_cid_map, get_normalized_widths_cff,
+    get_normalized_widths_ttf, FontId, FontType, ParsedFont,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -111,6 +120,10 @@ struct OverlayTextConfig {
     offset_x_mm: f32,
     #[serde(default = "default_text_color")]
     color: String,
+    #[serde(default)]
+    page_start: Option<u32>,
+    #[serde(default)]
+    page_end: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -131,6 +144,7 @@ struct HeaderFooterResult {
     normalized: bool,
     cleaned: bool,
     semantic_removed: usize,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -286,25 +300,37 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
 
     let semantic_deleted_path = edit_or_delete_standard_artifacts_if_requested(args)?;
+    let _semantic_temp_guard = semantic_deleted_path
+        .as_ref()
+        .map(|result| TempPathGuard::new(result.path.clone()));
     let artifact_removed = semantic_deleted_path
         .as_ref()
         .map(|artifact_result| artifact_result.changed_count())
         .unwrap_or(0);
+    let mut warnings = standard_artifact_processing_warnings(args, semantic_deleted_path.as_ref());
     let semantic_input = semantic_deleted_path
         .as_ref()
         .map(|artifact_result| artifact_result.path.as_path())
         .unwrap_or(input);
     let plain_deleted_path =
         delete_confirmed_plain_text_header_footer_if_requested(args, semantic_input)?;
+    let _plain_text_temp_guard = plain_deleted_path
+        .as_ref()
+        .map(|(path, _)| TempPathGuard::new(path.clone()));
     let plain_removed = plain_deleted_path
         .as_ref()
         .map(|(_, result)| result.removed())
         .unwrap_or(0);
+    warnings.extend(plain_text_processing_warnings(
+        args,
+        plain_deleted_path.as_ref().map(|(_, result)| result),
+    ));
     let cleanup_input = plain_deleted_path
         .as_ref()
         .map(|(path, _)| path.as_path())
         .unwrap_or(semantic_input);
     let semantic_removed = artifact_removed + plain_removed;
+    let semantic_rebuild_overlays = artifact_rebuild_overlays(args, semantic_deleted_path.as_ref());
 
     let normalized_path = if args.normalize_a4 {
         Some(normalize_pdf_to_a4(
@@ -315,6 +341,9 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     } else {
         None
     };
+    let _normalized_temp_guard = normalized_path
+        .as_ref()
+        .map(|path| TempPathGuard::new(path.clone()));
     let work_input = normalized_path.as_deref().unwrap_or(cleanup_input);
     let work_input_str = work_input.to_string_lossy().to_string();
     let page_infos = get_page_infos(&work_input_str)?;
@@ -325,9 +354,21 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     if total_pages < end_page {
         anyhow::bail!("全局总页数 {total_pages} 小于当前 PDF 的结束页码 {end_page}");
     }
+    let skip_header_pages = semantic_deleted_path
+        .as_ref()
+        .map(|result| result.removed_header_pages.clone())
+        .unwrap_or_default();
+    let skip_footer_pages = semantic_deleted_path
+        .as_ref()
+        .map(|result| result.removed_footer_pages.clone())
+        .unwrap_or_default();
 
     let cleaned = args.cleanup.header_enabled || args.cleanup.footer_enabled;
-    if args.header.is_none() && args.footer.is_none() && args.extra_overlays.is_empty() {
+    if args.header.is_none()
+        && args.footer.is_none()
+        && args.extra_overlays.is_empty()
+        && semantic_rebuild_overlays.is_empty()
+    {
         fs::copy(work_input, output).context("复制 PDF 失败")?;
         cleanup_temp(normalized_path);
         cleanup_plain_text_temp(plain_deleted_path);
@@ -339,46 +380,46 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
             normalized: args.normalize_a4,
             cleaned,
             semantic_removed,
+            warnings,
         });
     }
 
-    let overlay_pdf = build_overlay_pdf(
+    let extra_overlays = combined_extra_overlays(args, &semantic_rebuild_overlays);
+    let (overlay_pdf, mut overlay_warnings) = build_overlay_pdf(
         args.header.as_ref(),
         args.footer.as_ref(),
-        &args.extra_overlays,
+        &extra_overlays,
         &page_infos,
         page_start,
         total_pages,
-        &BTreeSet::new(),
-        &BTreeSet::new(),
+        &skip_header_pages,
+        &skip_footer_pages,
     )?;
-    let overlay_path = temp_named_path("docsy_overlay", "pdf");
-    fs::write(&overlay_path, &overlay_pdf).context("写入临时页眉页脚层失败")?;
+    warnings.append(&mut overlay_warnings);
+    let overlay_path = TempPathGuard::new(temp_named_path("docsy_overlay", "pdf"));
+    fs::write(overlay_path.path(), &overlay_pdf).context("写入临时页眉页脚层失败")?;
 
     let qpdf_tool = crate::external::QpdfTool;
     let bin = qpdf_tool.binary_path()?;
-    let overlay_output = temp_named_path("docsy_overlay_result", "pdf");
+    let overlay_output = TempPathGuard::new(temp_named_path("docsy_overlay_result", "pdf"));
     let command_output = std::process::Command::new(&bin)
         .arg(work_input)
         .arg("--overlay")
-        .arg(&overlay_path)
+        .arg(overlay_path.path())
         .arg("--")
-        .arg(&overlay_output)
+        .arg(overlay_output.path())
         .output()
         .context("执行 qpdf overlay 失败")?;
 
-    let _ = fs::remove_file(&overlay_path);
     cleanup_temp(normalized_path);
     cleanup_plain_text_temp(plain_deleted_path);
     cleanup_semantic_temp(semantic_deleted_path);
 
     if !command_output.status.success() {
-        let _ = fs::remove_file(&overlay_output);
         let stderr = String::from_utf8_lossy(&command_output.stderr);
         anyhow::bail!("qpdf overlay 失败: {}", stderr.trim());
     }
-    write_optimized_or_copy(&overlay_output, output).context("写入页眉页脚处理结果失败")?;
-    let _ = fs::remove_file(&overlay_output);
+    write_optimized_or_copy(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
 
     Ok(HeaderFooterResult {
         input_path: args.input_path.clone(),
@@ -387,6 +428,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         normalized: args.normalize_a4,
         cleaned,
         semantic_removed,
+        warnings: std::mem::take(&mut warnings),
     })
 }
 
@@ -485,13 +527,17 @@ fn unique_output_path(path: &Path) -> PathBuf {
 
 struct StandardArtifactProcessingResult {
     path: PathBuf,
-    removed: usize,
-    edited: usize,
+    removed_header: usize,
+    removed_footer: usize,
+    edited_header: usize,
+    edited_footer: usize,
+    removed_header_pages: BTreeSet<usize>,
+    removed_footer_pages: BTreeSet<usize>,
 }
 
 impl StandardArtifactProcessingResult {
     fn changed_count(&self) -> usize {
-        self.removed + self.edited
+        self.removed_header + self.removed_footer + self.edited_header + self.edited_footer
     }
 }
 
@@ -533,10 +579,143 @@ fn edit_or_delete_standard_artifacts_if_requested(
     Ok(
         edit_result.map(|(path, result)| StandardArtifactProcessingResult {
             path,
-            removed: result.removed_header + result.removed_footer,
-            edited: result.edited_header + result.edited_footer,
+            removed_header: result.removed_header,
+            removed_footer: result.removed_footer,
+            edited_header: result.edited_header,
+            edited_footer: result.edited_footer,
+            removed_header_pages: result.removed_header_pages,
+            removed_footer_pages: result.removed_footer_pages,
         }),
     )
+}
+
+fn combined_extra_overlays(
+    args: &HeaderFooterJob,
+    semantic_rebuild_overlays: &[OverlayTextConfig],
+) -> Vec<OverlayTextConfig> {
+    let mut overlays =
+        Vec::with_capacity(args.extra_overlays.len() + semantic_rebuild_overlays.len());
+    overlays.extend(args.extra_overlays.iter().cloned());
+    overlays.extend(semantic_rebuild_overlays.iter().cloned());
+    overlays
+}
+
+fn artifact_rebuild_overlays(
+    args: &HeaderFooterJob,
+    result: Option<&StandardArtifactProcessingResult>,
+) -> Vec<OverlayTextConfig> {
+    let Some(result) = result else {
+        return Vec::new();
+    };
+    let mut overlays = Vec::new();
+    if !args.cleanup.force_delete_header {
+        if let Some(config) = args.cleanup.header_replacement.as_ref() {
+            overlays.extend(artifact_rebuild_overlays_for_region(
+                config,
+                "header",
+                &result.removed_header_pages,
+            ));
+        }
+    }
+    if !args.cleanup.force_delete_footer {
+        if let Some(config) = args.cleanup.footer_replacement.as_ref() {
+            overlays.extend(artifact_rebuild_overlays_for_region(
+                config,
+                "footer",
+                &result.removed_footer_pages,
+            ));
+        }
+    }
+    overlays
+}
+
+fn artifact_rebuild_overlays_for_region(
+    config: &OverlayTextConfig,
+    region: &str,
+    zero_based_pages: &BTreeSet<usize>,
+) -> Vec<OverlayTextConfig> {
+    contiguous_page_ranges(zero_based_pages)
+        .into_iter()
+        .map(|(start, end)| {
+            let mut overlay = config.clone();
+            overlay.region = region.to_string();
+            overlay.page_start = Some(start);
+            overlay.page_end = Some(end);
+            overlay
+        })
+        .collect()
+}
+
+fn contiguous_page_ranges(zero_based_pages: &BTreeSet<usize>) -> Vec<(u32, u32)> {
+    let mut ranges = Vec::new();
+    let mut start: Option<u32> = None;
+    let mut previous: Option<u32> = None;
+    for page in zero_based_pages {
+        let page = (*page as u32).saturating_add(1);
+        match (start, previous) {
+            (Some(range_start), Some(prev)) if page == prev + 1 => {
+                start = Some(range_start);
+                previous = Some(page);
+            }
+            (Some(range_start), Some(prev)) => {
+                ranges.push((range_start, prev));
+                start = Some(page);
+                previous = Some(page);
+            }
+            _ => {
+                start = Some(page);
+                previous = Some(page);
+            }
+        }
+    }
+    if let (Some(range_start), Some(prev)) = (start, previous) {
+        ranges.push((range_start, prev));
+    }
+    ranges
+}
+
+fn standard_artifact_processing_warnings(
+    args: &HeaderFooterJob,
+    result: Option<&StandardArtifactProcessingResult>,
+) -> Vec<String> {
+    let Some(result) = result else {
+        return Vec::new();
+    };
+    let mut warnings = Vec::new();
+    if args.cleanup.header_replacement.is_some()
+        && !args.cleanup.force_delete_header
+        && result.removed_header > 0
+    {
+        warnings.push("部分标准页眉无法原位编辑，已删除后按当前页眉设置重建".to_string());
+    }
+    if args.cleanup.footer_replacement.is_some()
+        && !args.cleanup.force_delete_footer
+        && result.removed_footer > 0
+    {
+        warnings.push("部分标准页脚无法原位编辑，已删除后按当前页脚设置重建".to_string());
+    }
+    warnings
+}
+
+fn plain_text_processing_warnings(
+    args: &HeaderFooterJob,
+    result: Option<&content_text::PlainTextCleanupResult>,
+) -> Vec<String> {
+    let Some(result) = result else {
+        return Vec::new();
+    };
+    let mut warnings = Vec::new();
+    if result.removed_header > 0
+        && (args.header.is_some() || args.cleanup.header_replacement.is_some())
+    {
+        warnings.push("普通文本型页眉已转换为 Docsy 页眉，原字体格式无法无损保留".to_string());
+    }
+    if result.removed_footer > 0
+        && (args.footer.is_some() || args.cleanup.footer_replacement.is_some())
+    {
+        warnings.push("普通文本型页脚已转换为 Docsy 页脚，原字体格式无法无损保留".to_string());
+    }
+    warnings
 }
 
 fn artifact_replacement_texts(
@@ -561,71 +740,166 @@ fn build_overlay_pdf(
     total_pages: u32,
     skip_header_pages: &BTreeSet<usize>,
     skip_footer_pages: &BTreeSet<usize>,
-) -> Result<Vec<u8>> {
-    let mut doc = PdfDocument::new("Docsy Header Footer Processor");
-    let mut font_cache = OverlayFontCache::default();
-    let mut pdf_pages = Vec::new();
+) -> Result<(Vec<u8>, Vec<String>)> {
+    let mut doc = Document::with_version("1.6");
+    let mut warnings = Vec::new();
+    let pages_id = doc.new_object_id();
+    let helvetica_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Helvetica",
+    });
+    let times_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Times-Roman",
+    });
+    let courier_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Courier",
+    });
+    let cjk_fallback_id = add_standard_cjk_font(&mut doc);
+    let embedded_fonts = prepare_embedded_overlay_fonts(
+        &mut doc,
+        header,
+        footer,
+        extra_overlays,
+        pages.len(),
+        page_start,
+        total_pages,
+        &mut warnings,
+    );
+    let mut font_resources = Dictionary::new();
+    font_resources.set("F1", helvetica_id);
+    font_resources.set("FTimes", times_id);
+    font_resources.set("FCourier", courier_id);
+    font_resources.set("FCJKFallback", cjk_fallback_id);
+    for font in embedded_fonts.values() {
+        font_resources.set(font.resource_name.as_str(), font.object_id);
+    }
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => font_resources,
+    });
+    let mut page_ids = Vec::new();
 
     for (index, size) in pages.iter().enumerate() {
         let current_page = page_start + index as u32;
-        let mut ops = Vec::new();
+        let local_page = index as u32 + 1;
+        let mut operations = Vec::new();
 
-        if let Some(config) = header.filter(|_| !skip_header_pages.contains(&index)) {
+        if let Some(config) = header.filter(|config| {
+            !skip_header_pages.contains(&index) && overlay_applies_to_page(config, local_page)
+        }) {
             append_overlay_text_ops(
-                &mut ops,
+                &mut operations,
                 config,
                 OverlayRegion::Header,
                 size,
                 current_page,
                 total_pages,
-                &mut font_cache,
-                &mut doc,
+                &embedded_fonts,
             );
         }
 
-        if let Some(config) = footer.filter(|_| !skip_footer_pages.contains(&index)) {
+        if let Some(config) = footer.filter(|config| {
+            !skip_footer_pages.contains(&index) && overlay_applies_to_page(config, local_page)
+        }) {
             append_overlay_text_ops(
-                &mut ops,
+                &mut operations,
                 config,
                 OverlayRegion::Footer,
                 size,
                 current_page,
                 total_pages,
-                &mut font_cache,
-                &mut doc,
+                &embedded_fonts,
             );
         }
 
         for config in extra_overlays {
+            if !overlay_applies_to_page(config, local_page) {
+                continue;
+            }
             let region = overlay_region(&config.region);
             append_overlay_text_ops(
-                &mut ops,
+                &mut operations,
                 config,
                 region,
                 size,
                 current_page,
                 total_pages,
-                &mut font_cache,
-                &mut doc,
+                &embedded_fonts,
             );
         }
 
-        pdf_pages.push(PdfPage::new(
-            Mm(pt_to_mm(size.width_pt)),
-            Mm(pt_to_mm(size.height_pt)),
-            ops,
-        ));
+        let content = Content { operations };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode()?));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), size.width_pt.into(), size.height_pt.into()],
+        });
+        page_ids.push(page_id);
     }
 
-    Ok(doc
-        .with_pages(pdf_pages)
-        .save(&PdfSaveOptions::default(), &mut Vec::new()))
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => page_ids.iter().map(|id| Object::Reference(*id)).collect::<Vec<_>>(),
+            "Count" => page_ids.len() as i64,
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    doc.trailer.set("Root", catalog_id);
+
+    let mut output = Vec::new();
+    doc.save_to(&mut output)
+        .context("生成轻量页眉页脚 PDF 失败")?;
+    Ok((output, warnings))
+}
+
+fn overlay_applies_to_page(config: &OverlayTextConfig, local_page: u32) -> bool {
+    let start = config.page_start.unwrap_or(1).max(1);
+    let end = config.page_end.unwrap_or(u32::MAX).max(start);
+    local_page >= start && local_page <= end
 }
 
 #[derive(Debug, Clone, Copy)]
 enum OverlayRegion {
     Header,
     Footer,
+}
+
+#[derive(Debug, Clone)]
+struct EmbeddedOverlayFont {
+    resource_name: String,
+    object_id: ObjectId,
+    char_to_gid: BTreeMap<char, u16>,
+}
+
+#[derive(Debug, Clone)]
+struct EmbeddedFontChoice {
+    font: EmbeddedOverlayFont,
+    family: String,
+}
+
+#[derive(Debug, Clone)]
+struct FontCandidate {
+    family: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+enum OverlayFontRef<'a> {
+    Builtin(&'static str),
+    Embedded(&'a EmbeddedOverlayFont),
+    StandardCjk,
 }
 
 fn overlay_region(value: &str) -> OverlayRegion {
@@ -636,151 +910,512 @@ fn overlay_region(value: &str) -> OverlayRegion {
     }
 }
 
+fn add_standard_cjk_font(doc: &mut Document) -> ObjectId {
+    let descendant_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "CIDFontType0",
+        "BaseFont" => "STSong-Light",
+        "CIDSystemInfo" => dictionary! {
+            "Registry" => Object::string_literal("Adobe"),
+            "Ordering" => Object::string_literal("GB1"),
+            "Supplement" => 2,
+        },
+        "DW" => 1000,
+    });
+    doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type0",
+        "BaseFont" => "STSong-Light",
+        "Encoding" => "UniGB-UCS2-H",
+        "DescendantFonts" => vec![descendant_id.into()],
+    })
+}
+
+fn prepare_embedded_overlay_fonts(
+    doc: &mut Document,
+    header: Option<&OverlayTextConfig>,
+    footer: Option<&OverlayTextConfig>,
+    extra_overlays: &[OverlayTextConfig],
+    page_count: usize,
+    page_start: u32,
+    total_pages: u32,
+    warnings: &mut Vec<String>,
+) -> BTreeMap<String, EmbeddedOverlayFont> {
+    let mut texts_by_family: BTreeMap<String, String> = BTreeMap::new();
+    for page_index in 0..page_count {
+        let current_page = page_start + page_index as u32;
+        for config in header
+            .into_iter()
+            .chain(footer)
+            .chain(extra_overlays.iter())
+        {
+            let text = expand_placeholders(&config.text, current_page, total_pages);
+            if requires_embedded_font(&text) {
+                texts_by_family
+                    .entry(font_family_key(&config.font_family))
+                    .or_default()
+                    .push_str(&text);
+            }
+        }
+    }
+
+    let mut fonts = BTreeMap::new();
+    for (index, (family, text)) in texts_by_family.into_iter().enumerate() {
+        let resource_name = format!("FEmbed{}", index + 1);
+        match create_embedded_overlay_font(doc, &resource_name, &family, &text) {
+            Ok(choice) => {
+                if choice.family != family {
+                    warnings.push(format!(
+                        "字体「{}」无法嵌入，已改用相近字体「{}」",
+                        display_font_family(&family),
+                        display_font_family(&choice.family)
+                    ));
+                }
+                fonts.insert(family, choice.font);
+            }
+            Err(err) => warnings.push(format!(
+                "字体「{}」及相近字体均无法按子集嵌入，已降级为 PDF 标准中文字体：{}",
+                display_font_family(&family),
+                err
+            )),
+        }
+    }
+    fonts
+}
+
+fn create_embedded_overlay_font(
+    doc: &mut Document,
+    resource_name: &str,
+    family: &str,
+    text: &str,
+) -> Result<EmbeddedFontChoice> {
+    let mut last_error = None;
+    for candidate in font_candidate_sequence(family) {
+        if !candidate.path.exists() {
+            continue;
+        }
+        match try_create_embedded_overlay_font(doc, resource_name, &candidate.path, text) {
+            Ok(font) => {
+                return Ok(EmbeddedFontChoice {
+                    font,
+                    family: candidate.family,
+                })
+            }
+            Err(err) => last_error = Some(err),
+        }
+    }
+    match last_error {
+        Some(err) => Err(err),
+        None => anyhow::bail!("未找到可用系统字体"),
+    }
+}
+
+fn try_create_embedded_overlay_font(
+    doc: &mut Document,
+    resource_name: &str,
+    path: &Path,
+    text: &str,
+) -> Result<EmbeddedOverlayFont> {
+    let bytes = fs::read(path).with_context(|| format!("读取字体失败: {}", path.display()))?;
+    let scope = ReadScope::new(&bytes);
+    let font_data = scope
+        .read::<FontData<'_>>()
+        .with_context(|| format!("解析字体失败: {}", path.display()))?;
+    let provider_for_lookup = font_data
+        .table_provider(0)
+        .with_context(|| format!("读取字体表失败: {}", path.display()))?;
+    let mut font = Font::new(provider_for_lookup)
+        .with_context(|| format!("初始化字体失败: {}", path.display()))?;
+
+    let mut glyph_ids = vec![0_u16];
+    let mut char_to_original_gid = BTreeMap::new();
+    for ch in text.chars().filter(|ch| !ch.is_control()) {
+        let (gid, _) = font.lookup_glyph_index(ch, MatchingPresentation::NotRequired, None);
+        if gid == 0 && !ch.is_whitespace() {
+            anyhow::bail!("字体缺少字符「{}」", ch);
+        }
+        if gid != 0 {
+            char_to_original_gid.entry(ch).or_insert(gid);
+            glyph_ids.push(gid);
+        }
+    }
+    glyph_ids.sort_unstable();
+    glyph_ids.dedup();
+    if glyph_ids.first().copied() != Some(0) {
+        glyph_ids.insert(0, 0);
+    }
+
+    let provider_for_subset = font_data
+        .table_provider(0)
+        .with_context(|| format!("读取字体子集表失败: {}", path.display()))?;
+    let subset_bytes = subset_font_bytes(
+        &provider_for_subset,
+        &glyph_ids,
+        &SubsetProfile::Pdf,
+        CmapTarget::Unicode,
+    )
+    .with_context(|| format!("生成字体子集失败: {}", path.display()))?;
+
+    let mut parsed_warnings = Vec::new();
+    let parsed_subset = ParsedFont::from_bytes(&subset_bytes, 0, &mut parsed_warnings)
+        .ok_or_else(|| anyhow::anyhow!("解析字体子集失败: {}", path.display()))?;
+    let char_to_subset_gid = char_to_original_gid
+        .into_iter()
+        .filter_map(|(ch, original_gid)| {
+            glyph_ids
+                .iter()
+                .position(|gid| *gid == original_gid)
+                .map(|position| (ch, position as u16))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let new_glyph_ids = char_to_subset_gid
+        .iter()
+        .map(|(ch, gid)| (*gid, *ch))
+        .collect::<Vec<_>>();
+    let font_id = FontId(resource_name.to_string());
+    let to_unicode = generate_cmap_string(&parsed_subset, &font_id, &new_glyph_ids);
+    let widths = match parsed_subset.font_type {
+        FontType::TrueType => get_normalized_widths_ttf(&parsed_subset, &new_glyph_ids),
+        _ => {
+            let gid_to_cid_map = generate_gid_to_cid_map(&parsed_subset, &new_glyph_ids);
+            get_normalized_widths_cff(&parsed_subset, &gid_to_cid_map)
+        }
+    };
+    let object_id = add_subset_font_to_doc(
+        doc,
+        resource_name,
+        &parsed_subset,
+        subset_bytes,
+        to_unicode,
+        widths,
+    );
+    Ok(EmbeddedOverlayFont {
+        resource_name: resource_name.to_string(),
+        object_id,
+        char_to_gid: char_to_subset_gid,
+    })
+}
+
+fn add_subset_font_to_doc(
+    doc: &mut Document,
+    resource_name: &str,
+    font: &ParsedFont,
+    font_bytes: Vec<u8>,
+    to_unicode: String,
+    widths: Vec<Object>,
+) -> ObjectId {
+    let font_name = font
+        .font_name
+        .clone()
+        .unwrap_or_else(|| resource_name.to_string())
+        .replace(' ', "");
+    let face_name = format!("DOCSY+{font_name}");
+    let (subtype, font_file_key, font_stream) = match &font.font_type {
+        FontType::OpenTypeCFF(_) => (
+            "CIDFontType0",
+            "FontFile3",
+            Stream::new(
+                dictionary! {
+                    "Subtype" => "CIDFontType0C",
+                },
+                font_bytes,
+            )
+            .with_compression(false),
+        ),
+        FontType::TrueType => (
+            "CIDFontType2",
+            "FontFile2",
+            Stream::new(Dictionary::new(), font_bytes).with_compression(false),
+        ),
+    };
+    let font_file_id = doc.add_object(font_stream);
+    let to_unicode_id = doc.add_object(Stream::new(Dictionary::new(), to_unicode.into_bytes()));
+    let descriptor_id = doc.add_object(dictionary! {
+        "Type" => "FontDescriptor",
+        "FontName" => Object::Name(face_name.as_bytes().to_vec()),
+        "Ascent" => font.font_metrics.ascent as i64,
+        "Descent" => font.font_metrics.descent as i64,
+        "CapHeight" => font.font_metrics.ascent as i64,
+        "ItalicAngle" => 0,
+        "Flags" => 32,
+        "StemV" => 80,
+        font_file_key => font_file_id,
+        "FontBBox" => vec![
+            (font.pdf_font_metrics.x_min as i64).into(),
+            (font.pdf_font_metrics.y_min as i64).into(),
+            (font.pdf_font_metrics.x_max as i64).into(),
+            (font.pdf_font_metrics.y_max as i64).into(),
+        ],
+    });
+    let descendant = Object::Dictionary(dictionary! {
+        "Type" => "Font",
+        "Subtype" => subtype,
+        "BaseFont" => Object::Name(face_name.as_bytes().to_vec()),
+        "CIDSystemInfo" => dictionary! {
+            "Registry" => Object::string_literal("Adobe"),
+            "Ordering" => Object::string_literal("Identity"),
+            "Supplement" => 0,
+        },
+        "W" => Object::Array(widths),
+        "DW" => 1000,
+        "FontDescriptor" => descriptor_id,
+    });
+    doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type0",
+        "BaseFont" => Object::Name(face_name.as_bytes().to_vec()),
+        "Encoding" => "Identity-H",
+        "ToUnicode" => to_unicode_id,
+        "DescendantFonts" => vec![descendant],
+    })
+}
+
 fn append_overlay_text_ops(
-    ops: &mut Vec<Op>,
+    ops: &mut Vec<Operation>,
     config: &OverlayTextConfig,
     region: OverlayRegion,
     size: &PageSize,
     current_page: u32,
     total_pages: u32,
-    font_cache: &mut OverlayFontCache,
-    doc: &mut PdfDocument,
+    embedded_fonts: &BTreeMap<String, EmbeddedOverlayFont>,
 ) {
     let text = expand_placeholders(&config.text, current_page, total_pages);
     if text.is_empty() {
         return;
     }
-    let font = font_cache.select_font(&text, &config.font_family, doc);
     let y = match region {
         OverlayRegion::Header => size.height_pt - mm_to_pt(config.margin_mm),
         OverlayRegion::Footer => mm_to_pt(config.margin_mm),
     };
-    let x = compute_x(config, &text, font.clone(), size.width_pt);
-    ops.extend(text_ops(font, config.font_size, x, y, &config.color, text));
+    let font_ref = overlay_font_ref(config, &text, embedded_fonts);
+    let use_embedded = matches!(
+        font_ref,
+        OverlayFontRef::Embedded(_) | OverlayFontRef::StandardCjk
+    );
+    let x = compute_x(config, &text, use_embedded, size.width_pt);
+    ops.extend(text_ops(
+        &font_ref,
+        config.font_size,
+        x,
+        y,
+        &config.color,
+        text,
+    ));
 }
 
-#[derive(Default)]
-struct OverlayFontCache {
-    cjk: Option<PdfFontHandle>,
-    songti: Option<PdfFontHandle>,
-    heiti: Option<PdfFontHandle>,
-    kaiti: Option<PdfFontHandle>,
-    fangsong: Option<PdfFontHandle>,
-}
-
-impl OverlayFontCache {
-    fn select_font(
-        &mut self,
-        text: &str,
-        font_family: &str,
-        doc: &mut PdfDocument,
-    ) -> PdfFontHandle {
-        match normalized_font_family(font_family).as_str() {
-            "helvetica" => return PdfFontHandle::Builtin(BuiltinFont::Helvetica),
-            "times" => return PdfFontHandle::Builtin(BuiltinFont::TimesRoman),
-            "courier" => return PdfFontHandle::Builtin(BuiltinFont::Courier),
-            "songti" => {
-                if let Some(font) = load_named_cjk_font(&mut self.songti, "songti", doc) {
-                    return font;
-                }
-            }
-            "heiti" => {
-                if let Some(font) = load_named_cjk_font(&mut self.heiti, "heiti", doc) {
-                    return font;
-                }
-            }
-            "kaiti" => {
-                if let Some(font) = load_named_cjk_font(&mut self.kaiti, "kaiti", doc) {
-                    return font;
-                }
-            }
-            "fangsong" => {
-                if let Some(font) = load_named_cjk_font(&mut self.fangsong, "fangsong", doc) {
-                    return font;
-                }
-            }
-            _ => {}
+fn overlay_font_ref<'a>(
+    config: &OverlayTextConfig,
+    text: &str,
+    embedded_fonts: &'a BTreeMap<String, EmbeddedOverlayFont>,
+) -> OverlayFontRef<'a> {
+    if requires_embedded_font(text) {
+        let key = font_family_key(&config.font_family);
+        if let Some(font) = embedded_fonts.get(&key) {
+            return OverlayFontRef::Embedded(font);
         }
-        if has_cjk(text) {
-            if let Some(font) = &self.cjk {
-                return font.clone();
-            }
-            if let Some(font_path) = find_cjk_font_path() {
-                if let Ok(bytes) = fs::read(&font_path) {
-                    if let Some(parsed) = ParsedFont::from_bytes(&bytes, 0, &mut Vec::new()) {
-                        let font = PdfFontHandle::External(doc.add_font(&parsed));
-                        self.cjk = Some(font.clone());
-                        return font;
-                    }
-                }
-            }
-        }
-
-        PdfFontHandle::Builtin(BuiltinFont::Helvetica)
+        return OverlayFontRef::StandardCjk;
     }
-}
-
-fn normalized_font_family(value: &str) -> String {
-    match value.trim().to_lowercase().as_str() {
-        "宋体" | "simsun" | "songti" | "song" => "songti".to_string(),
-        "黑体" | "simhei" | "heiti" | "hei" => "heiti".to_string(),
-        "楷体" | "kaiti" | "kai" => "kaiti".to_string(),
-        "仿宋" | "fangsong" | "fang song" => "fangsong".to_string(),
-        "times" | "times new roman" | "times-roman" => "times".to_string(),
-        "courier" | "courier new" => "courier".to_string(),
-        "helvetica" | "arial" => "helvetica".to_string(),
-        _ => "auto".to_string(),
+    match config.font_family.trim().to_lowercase().as_str() {
+        "times" | "times new roman" | "times-roman" => OverlayFontRef::Builtin("FTimes"),
+        "courier" | "courier new" => OverlayFontRef::Builtin("FCourier"),
+        _ => OverlayFontRef::Builtin("F1"),
     }
-}
-
-fn load_named_cjk_font(
-    cache: &mut Option<PdfFontHandle>,
-    family: &str,
-    doc: &mut PdfDocument,
-) -> Option<PdfFontHandle> {
-    if let Some(font) = cache {
-        return Some(font.clone());
-    }
-    let path = find_named_cjk_font_path(family)?;
-    let bytes = fs::read(path).ok()?;
-    let parsed = ParsedFont::from_bytes(&bytes, 0, &mut Vec::new())?;
-    let font = PdfFontHandle::External(doc.add_font(&parsed));
-    *cache = Some(font.clone());
-    Some(font)
 }
 
 fn text_ops(
-    font: PdfFontHandle,
+    font_ref: &OverlayFontRef<'_>,
     font_size: f32,
     x: f32,
     y: f32,
     color: &str,
     text: String,
-) -> Vec<Op> {
+) -> Vec<Operation> {
     let (r, g, b) = parse_hex_color(color).unwrap_or((0.0, 0.0, 0.0));
+    let (font_name, text_object) = match font_ref {
+        OverlayFontRef::Builtin(name) => (*name, Object::string_literal(text)),
+        OverlayFontRef::Embedded(font) => (
+            font.resource_name.as_str(),
+            Object::String(
+                encode_subset_glyph_text(&text, &font.char_to_gid),
+                StringFormat::Hexadecimal,
+            ),
+        ),
+        OverlayFontRef::StandardCjk => (
+            "FCJKFallback",
+            Object::String(encode_utf16be_text(&text), StringFormat::Hexadecimal),
+        ),
+    };
     vec![
-        Op::StartTextSection,
-        Op::SetTextCursor {
-            pos: Point { x: Pt(x), y: Pt(y) },
-        },
-        Op::SetFont {
-            font,
-            size: Pt(font_size),
-        },
-        Op::SetLineHeight { lh: Pt(font_size) },
-        Op::SetFillColor {
-            col: Color::Rgb(Rgb {
-                r,
-                g,
-                b,
-                icc_profile: None,
-            }),
-        },
-        Op::ShowText {
-            items: vec![TextItem::Text(text)],
-        },
-        Op::EndTextSection,
+        Operation::new("q", vec![]),
+        Operation::new("BT", vec![]),
+        Operation::new(
+            "Tf",
+            vec![
+                Object::Name(font_name.as_bytes().to_vec()),
+                font_size.into(),
+            ],
+        ),
+        Operation::new("rg", vec![r.into(), g.into(), b.into()]),
+        Operation::new(
+            "Tm",
+            vec![1.into(), 0.into(), 0.into(), 1.into(), x.into(), y.into()],
+        ),
+        Operation::new("Tj", vec![text_object]),
+        Operation::new("ET", vec![]),
+        Operation::new("Q", vec![]),
     ]
+}
+
+fn encode_utf16be_text(text: &str) -> Vec<u8> {
+    text.encode_utf16()
+        .flat_map(|unit| unit.to_be_bytes())
+        .collect()
+}
+
+fn encode_subset_glyph_text(text: &str, char_to_gid: &BTreeMap<char, u16>) -> Vec<u8> {
+    text.chars()
+        .flat_map(|ch| {
+            let gid = if ch.is_whitespace() {
+                char_to_gid.get(&ch).copied().unwrap_or(0)
+            } else {
+                char_to_gid.get(&ch).copied().unwrap_or(0)
+            };
+            gid.to_be_bytes()
+        })
+        .collect()
+}
+
+fn requires_embedded_font(text: &str) -> bool {
+    text.chars().any(|ch| {
+        let cp = ch as u32;
+        cp > 0x7E || cp < 0x20
+    })
+}
+
+fn font_family_key(value: &str) -> String {
+    match value.trim().to_lowercase().as_str() {
+        "heiti" | "黑体" | "simhei" | "microsoft yahei" | "微软雅黑" | "pingfang" | "苹方" => {
+            "heiti".to_string()
+        }
+        "kaiti" | "楷体" | "simkai" => "kaiti".to_string(),
+        "fangsong" | "仿宋" | "simfang" => "fangsong".to_string(),
+        "songti" | "宋体" | "simsun" | "serif" => "songti".to_string(),
+        _ => "songti".to_string(),
+    }
+}
+
+fn display_font_family(key: &str) -> &'static str {
+    match key {
+        "heiti" => "黑体",
+        "kaiti" => "楷体",
+        "fangsong" => "仿宋",
+        _ => "宋体",
+    }
+}
+
+fn font_candidate_sequence(family: &str) -> Vec<FontCandidate> {
+    let mut candidates = Vec::new();
+    for fallback_family in fallback_font_families(family) {
+        for path in font_paths_for_family(fallback_family) {
+            candidates.push(FontCandidate {
+                family: fallback_family.to_string(),
+                path,
+            });
+        }
+    }
+    candidates
+}
+
+fn fallback_font_families(family: &str) -> Vec<&'static str> {
+    match family {
+        "heiti" => vec!["heiti", "songti", "fangsong", "kaiti"],
+        "kaiti" => vec!["kaiti", "songti", "fangsong", "heiti"],
+        "fangsong" => vec!["fangsong", "songti", "kaiti", "heiti"],
+        _ => vec!["songti", "fangsong", "kaiti", "heiti"],
+    }
+}
+
+fn font_paths_for_family(family: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        match family {
+            "heiti" => {
+                paths.push(PathBuf::from("/System/Library/Fonts/STHeiti Medium.ttc"));
+                paths.push(PathBuf::from("/System/Library/Fonts/STHeiti Light.ttc"));
+                paths.push(PathBuf::from("/System/Library/Fonts/PingFang.ttc"));
+            }
+            "kaiti" => {
+                paths.push(PathBuf::from(
+                    "/System/Library/Fonts/Supplemental/Kaiti.ttc",
+                ));
+                paths.push(PathBuf::from(
+                    "/System/Library/Fonts/Supplemental/Kaiti.ttf",
+                ));
+            }
+            "fangsong" => {
+                paths.push(PathBuf::from(
+                    "/System/Library/Fonts/Supplemental/STFangsong.ttf",
+                ));
+                paths.push(PathBuf::from(
+                    "/System/Library/Fonts/Supplemental/Fangsong.ttf",
+                ));
+            }
+            _ => {
+                paths.push(PathBuf::from(
+                    "/System/Library/Fonts/Supplemental/Songti.ttc",
+                ));
+                paths.push(PathBuf::from(
+                    "/System/Library/Fonts/Supplemental/Songti.ttf",
+                ));
+                paths.push(PathBuf::from("/System/Library/Fonts/PingFang.ttc"));
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let win = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let fonts = PathBuf::from(win).join("Fonts");
+        match family {
+            "heiti" => {
+                paths.push(fonts.join("simhei.ttf"));
+                paths.push(fonts.join("msyh.ttc"));
+                paths.push(fonts.join("msyh.ttf"));
+            }
+            "kaiti" => paths.push(fonts.join("simkai.ttf")),
+            "fangsong" => paths.push(fonts.join("simfang.ttf")),
+            _ => {
+                paths.push(fonts.join("simsun.ttc"));
+                paths.push(fonts.join("simsun.ttf"));
+                paths.push(fonts.join("msyh.ttc"));
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        match family {
+            "heiti" => {
+                paths.push(PathBuf::from(
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                ));
+                paths.push(PathBuf::from(
+                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                ));
+            }
+            _ => {
+                paths.push(PathBuf::from(
+                    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+                ));
+                paths.push(PathBuf::from(
+                    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc",
+                ));
+                paths.push(PathBuf::from(
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                ));
+            }
+        }
+    }
+    paths
 }
 
 fn parse_hex_color(value: &str) -> Option<(f32, f32, f32)> {
@@ -801,127 +1436,21 @@ fn expand_placeholders(template: &str, page: u32, total: u32) -> String {
         .replace("{range}", &format!("{page}/{total}"))
 }
 
-fn has_cjk(text: &str) -> bool {
-    text.chars().any(|c| {
-        let cp = c as u32;
-        (0x4E00..=0x9FFF).contains(&cp)
-            || (0x3400..=0x4DBF).contains(&cp)
-            || (0x20000..=0x2A6DF).contains(&cp)
-            || (0xF900..=0xFAFF).contains(&cp)
-            || (0x2F800..=0x2FA1F).contains(&cp)
-            || (0x3000..=0x303F).contains(&cp)
-            || (0xFF00..=0xFFEF).contains(&cp)
-            || (0x3040..=0x309F).contains(&cp)
-            || (0x30A0..=0x30FF).contains(&cp)
-            || (0xAC00..=0xD7AF).contains(&cp)
-    })
-}
-
-fn find_cjk_font_path() -> Option<PathBuf> {
-    let candidates = if cfg!(target_os = "macos") {
-        vec![
-            "/System/Library/Fonts/STHeiti Medium.ttc",
-            "/System/Library/Fonts/STHeiti Light.ttc",
-            "/System/Library/Fonts/Supplemental/Songti.ttc",
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-            "/Library/Fonts/Arial Unicode.ttf",
-        ]
-    } else if cfg!(target_os = "windows") {
-        vec![
-            "C:\\Windows\\Fonts\\msyh.ttc",
-            "C:\\Windows\\Fonts\\simsun.ttc",
-            "C:\\Windows\\Fonts\\simhei.ttf",
-            "C:\\Windows\\Fonts\\msyhbd.ttc",
-        ]
-    } else {
-        vec![
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-            "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
-        ]
-    };
-
-    candidates
-        .iter()
-        .map(Path::new)
-        .find(|path| path.exists())
-        .map(Path::to_path_buf)
-}
-
-fn find_named_cjk_font_path(family: &str) -> Option<PathBuf> {
-    let candidates = if cfg!(target_os = "macos") {
-        match family {
-            "songti" => vec![
-                "/System/Library/Fonts/Supplemental/Songti.ttc",
-                "/System/Library/Fonts/Supplemental/Songti.ttf",
-            ],
-            "heiti" => vec![
-                "/System/Library/Fonts/STHeiti Medium.ttc",
-                "/System/Library/Fonts/STHeiti Light.ttc",
-                "/System/Library/Fonts/PingFang.ttc",
-            ],
-            "kaiti" => vec![
-                "/System/Library/Fonts/Supplemental/Kaiti.ttc",
-                "/System/Library/Fonts/Supplemental/Kaiti.ttf",
-            ],
-            "fangsong" => vec![
-                "/System/Library/Fonts/Supplemental/STFangsong.ttf",
-                "/System/Library/Fonts/Supplemental/Fangsong.ttf",
-            ],
-            _ => vec![],
-        }
-    } else if cfg!(target_os = "windows") {
-        match family {
-            "songti" => vec!["C:\\Windows\\Fonts\\simsun.ttc"],
-            "heiti" => vec![
-                "C:\\Windows\\Fonts\\simhei.ttf",
-                "C:\\Windows\\Fonts\\msyh.ttc",
-            ],
-            "kaiti" => vec!["C:\\Windows\\Fonts\\simkai.ttf"],
-            "fangsong" => vec!["C:\\Windows\\Fonts\\simfang.ttf"],
-            _ => vec![],
-        }
-    } else {
-        match family {
-            "songti" => vec![
-                "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
-                "/usr/share/fonts/truetype/arphic/uming.ttc",
-            ],
-            "heiti" => vec![
-                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-            ],
-            "kaiti" => vec!["/usr/share/fonts/truetype/arphic/ukai.ttc"],
-            "fangsong" => vec!["/usr/share/fonts/truetype/arphic/uming.ttc"],
-            _ => vec![],
-        }
-    };
-
-    candidates
-        .iter()
-        .map(Path::new)
-        .find(|path| path.exists())
-        .map(Path::to_path_buf)
-}
-
-fn compute_x(config: &OverlayTextConfig, text: &str, font: PdfFontHandle, page_width: f32) -> f32 {
-    let text_width = estimate_text_width(text, font, config.font_size);
+fn compute_x(config: &OverlayTextConfig, text: &str, use_cjk: bool, page_width: f32) -> f32 {
+    let text_width = estimate_text_width(text, use_cjk, config.font_size);
     let offset = mm_to_pt(config.offset_x_mm);
+    let margin = mm_to_pt(config.margin_mm);
 
     match config.align.as_str() {
-        "left" => 36.0 + offset,
-        "right" => (page_width - 36.0 - text_width + offset).max(36.0),
+        "left" => (margin + offset).max(0.0),
+        "right" => (page_width - margin - text_width + offset).max(0.0),
         _ => ((page_width - text_width) / 2.0 + offset).max(0.0),
     }
 }
 
-fn estimate_text_width(text: &str, font: PdfFontHandle, font_size: f32) -> f32 {
-    let is_builtin = matches!(font, PdfFontHandle::Builtin(_));
+fn estimate_text_width(text: &str, use_cjk: bool, font_size: f32) -> f32 {
     text.chars()
-        .map(|c| estimate_char_width(c, is_builtin) * font_size)
+        .map(|c| estimate_char_width(c, !use_cjk) * font_size)
         .sum()
 }
 
@@ -949,10 +1478,6 @@ fn estimate_char_width(c: char, is_builtin: bool) -> f32 {
 
 fn mm_to_pt(mm: f32) -> f32 {
     mm * 72.0 / 25.4
-}
-
-fn pt_to_mm(pt: f32) -> f32 {
-    pt * 25.4 / 72.0
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
@@ -994,6 +1519,26 @@ fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
         .as_millis();
     let pid = std::process::id();
     std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
+}
+
+struct TempPathGuard {
+    path: PathBuf,
+}
+
+impl TempPathGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempPathGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 fn cleanup_temp(path: Option<PathBuf>) {
@@ -1042,5 +1587,232 @@ mod tests {
         assert!((g - 0.4).abs() < 0.01);
         assert!((b - 0.6).abs() < 0.01);
         assert!(parse_hex_color("not-a-color").is_none());
+    }
+
+    #[test]
+    fn compute_x_uses_configured_margin_for_left_and_right_alignment() {
+        let mut config = OverlayTextConfig {
+            text: String::new(),
+            region: "header".to_string(),
+            font_family: "auto".to_string(),
+            font_size: 10.0,
+            margin_mm: 10.0,
+            align: "left".to_string(),
+            offset_x_mm: 0.0,
+            color: "#000000".to_string(),
+            page_start: None,
+            page_end: None,
+        };
+
+        assert!((compute_x(&config, "abc", false, 200.0) - mm_to_pt(10.0)).abs() < 0.01);
+        config.align = "right".to_string();
+        let expected = 200.0 - mm_to_pt(10.0) - estimate_text_width("abc", false, 10.0);
+        assert!((compute_x(&config, "abc", false, 200.0) - expected).abs() < 0.01);
+    }
+
+    #[test]
+    fn cjk_overlay_embeds_only_subset_font() {
+        let pages = vec![PageSize {
+            width_pt: 595.0,
+            height_pt: 842.0,
+            raw_width_pt: 595.0,
+            raw_height_pt: 842.0,
+            rotate: 0,
+        }];
+        let header = OverlayTextConfig {
+            text: "测试页眉3".to_string(),
+            region: "header".to_string(),
+            font_family: "songti".to_string(),
+            font_size: 10.0,
+            margin_mm: 10.0,
+            align: "right".to_string(),
+            offset_x_mm: 0.0,
+            color: "#000000".to_string(),
+            page_start: None,
+            page_end: None,
+        };
+        let (bytes, _warnings) = build_overlay_pdf(
+            Some(&header),
+            None,
+            &[],
+            &pages,
+            1,
+            1,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+
+        assert!(
+            bytes.len() < 500_000,
+            "overlay PDF too large: {}",
+            bytes.len()
+        );
+    }
+
+    #[test]
+    fn overlay_page_range_limits_rebuilt_text_to_detected_pages() {
+        let config = OverlayTextConfig {
+            text: "新页脚".to_string(),
+            region: "footer".to_string(),
+            font_family: "songti".to_string(),
+            font_size: 10.0,
+            margin_mm: 10.0,
+            align: "right".to_string(),
+            offset_x_mm: 0.0,
+            color: "#000000".to_string(),
+            page_start: Some(2),
+            page_end: Some(3),
+        };
+
+        assert!(!overlay_applies_to_page(&config, 1));
+        assert!(overlay_applies_to_page(&config, 2));
+        assert!(overlay_applies_to_page(&config, 3));
+        assert!(!overlay_applies_to_page(&config, 4));
+    }
+
+    #[test]
+    fn artifact_rebuild_overlays_keep_only_removed_page_ranges() {
+        let config = OverlayTextConfig {
+            text: "替代页眉".to_string(),
+            region: "header".to_string(),
+            font_family: "songti".to_string(),
+            font_size: 10.0,
+            margin_mm: 10.0,
+            align: "right".to_string(),
+            offset_x_mm: 0.0,
+            color: "#000000".to_string(),
+            page_start: None,
+            page_end: None,
+        };
+        let pages = BTreeSet::from([0_usize, 2, 3]);
+
+        let overlays = artifact_rebuild_overlays_for_region(&config, "header", &pages);
+
+        assert_eq!(overlays.len(), 2);
+        assert_eq!(overlays[0].page_start, Some(1));
+        assert_eq!(overlays[0].page_end, Some(1));
+        assert_eq!(overlays[1].page_start, Some(3));
+        assert_eq!(overlays[1].page_end, Some(4));
+    }
+
+    #[test]
+    fn font_fallback_sequence_tries_similar_families_before_standard_cjk() {
+        let families = font_candidate_sequence("songti")
+            .into_iter()
+            .map(|candidate| candidate.family)
+            .collect::<Vec<_>>();
+
+        assert!(families.iter().any(|family| family == "songti"));
+        assert!(families.iter().any(|family| family == "fangsong"));
+        assert!(families.iter().any(|family| family == "kaiti"));
+        assert!(families.iter().any(|family| family == "heiti"));
+        assert_eq!(families.first().map(String::as_str), Some("songti"));
+    }
+
+    #[test]
+    fn processing_cjk_header_does_not_embed_full_font() {
+        if crate::external::QpdfTool.binary_path().is_err() {
+            return;
+        }
+        let input = temp_named_path("docsy_hf_process_input", "pdf");
+        let output = temp_named_path("docsy_hf_process_output", "pdf");
+        create_simple_test_pdf(&input);
+
+        let result = process_job(&HeaderFooterJob {
+            input_path: input.to_string_lossy().to_string(),
+            output_path: output.to_string_lossy().to_string(),
+            page_start: 1,
+            total_pages: Some(1),
+            normalize_a4: false,
+            a4_orientation: default_a4_orientation(),
+            raster_dpi: default_raster_dpi(),
+            cleanup: CleanupConfig::default(),
+            header: Some(OverlayTextConfig {
+                text: "测试页眉3".to_string(),
+                region: "header".to_string(),
+                font_family: "songti".to_string(),
+                font_size: 10.0,
+                margin_mm: 10.0,
+                align: "right".to_string(),
+                offset_x_mm: 0.0,
+                color: "#000000".to_string(),
+                page_start: None,
+                page_end: None,
+            }),
+            footer: None,
+            extra_overlays: Vec::new(),
+        })
+        .unwrap();
+
+        let output_size = fs::metadata(&result.output_path).unwrap().len();
+        assert!(
+            output_size < 1_000_000,
+            "processed PDF too large: {}",
+            output_size
+        );
+        if let Ok(text_output) = std::process::Command::new("pdftotext")
+            .arg(&result.output_path)
+            .arg("-")
+            .output()
+        {
+            if text_output.status.success() {
+                let extracted = String::from_utf8_lossy(&text_output.stdout);
+                assert!(
+                    extracted.contains("测试页眉3"),
+                    "processed PDF text missing inserted header: {}",
+                    extracted
+                );
+            }
+        }
+        let _ = fs::remove_file(input);
+        let _ = fs::remove_file(result.output_path);
+        let _ = fs::remove_file(output);
+    }
+
+    fn create_simple_test_pdf(path: &Path) {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! {
+                "F1" => font_id,
+            },
+        });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 12.into()]),
+                Operation::new("Td", vec![80.into(), 500.into()]),
+                Operation::new("Tj", vec![Object::string_literal("body text")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.save(path).unwrap();
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "docsy"
-version = "0.6.0"
+version = "0.7.5"
 description = "Docsy - 轻量文档处理工具箱"
 authors = ["only"]
 edition = "2021"
@@ -33,6 +33,9 @@ lopdf = { version = "0.39.0", default-features = false }
 base64 = "0.22"
 open = "5"
 log = "0.4"
+allsorts = { version = "0.16.1", default-features = false }
+rusqlite = { version = "0.32", features = ["bundled"] }
+office_oxide = "0.1"
 
 [features]
 default = ["custom-protocol"]

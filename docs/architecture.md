@@ -4,11 +4,12 @@
 
 ## 当前边界
 
-模板生成、内置模板、模板编辑、模板管理、字典推荐和生成记录已从当前应用移除。当前应用只保留可独立运行的工具模块：
+旧模板生成、内置模板、模板编辑、模板管理、字典推荐和生成记录已从当前应用移除。当前应用只保留可独立运行的工具模块，并重新引入了基于 Word 标黄的新文书模板模块：
 
 - PDF 工具
 - 图片排版
 - 视频抽帧
+- 文书模板
 - 设置与诊断
 
 ## 前端结构
@@ -23,6 +24,7 @@ src/modules/
 ├── pdf-tools/
 ├── image-paddler/
 ├── video-extract/
+├── template/
 └── settings/
 ```
 
@@ -48,11 +50,21 @@ Tauri 命令集中注册在 `src-tauri/src/commands/mod.rs`。
 
 业务实现放在 `src-tauri/src/services/`、`src-tauri/src/pdf/`、`src-tauri/src/ffmpeg/`、`src-tauri/src/external/` 等目录。`services/history.rs` 现在只负责应用设置读写，不再维护模板生成历史。
 
+## 新文书模板设计
+
+新文书模板模块以 `docs/template-system-design.md` 为依据。它不复用旧系统的 Docsy 内部选区映射、字典编辑器和手写推理规则。
+
+P0 边界：
+
+- Word 中黄色高亮作为字段制作入口
+- 保存 `.docsytpl` zip 包，包含 `manifest.json + template.docx`
+- 普通字段和勾选 marker 都写入带 `w:tag` 的内容控件
+- 打开 `.docsytpl` 填表并生成 docx
+
 ## 已移除的旧边界
 
 以下内容不应被新代码继续引用：
 
-- `.docsytpl`
 - `doc-gen`
 - `template-editor`
 - `template-mgmt`
@@ -63,4 +75,4 @@ Tauri 命令集中注册在 `src-tauri/src/commands/mod.rs`。
 - `query_dictionary`
 - `generation_records`
 
-后续模板模块要从新的设计文档开始，不应在现有工具模块中渐进复活旧逻辑。
+后续模板能力应围绕 `template` 模块和 `docs/template-system-design.md` 扩展，不应在现有工具模块中渐进复活旧逻辑。

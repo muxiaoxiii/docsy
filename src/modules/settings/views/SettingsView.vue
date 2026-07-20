@@ -11,7 +11,8 @@
         </div>
       </template>
       <p class="section-desc">
-        qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；DOC/DOCX 转 PDF 在 Windows 优先使用 Word，否则使用 LibreOffice。
+        qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；Word 文件转 PDF 会优先使用 Microsoft
+        Word，失败后使用 LibreOffice。
       </p>
       <div v-if="managedToolsDir" class="managed-dir">{{ managedToolsDir }}</div>
       <div class="tool-list">
@@ -49,12 +50,7 @@
             >
               本地 zip 安装
             </el-button>
-            <el-button
-              size="small"
-              @click="openToolDownload(tool)"
-            >
-              下载页
-            </el-button>
+            <el-button size="small" @click="openToolDownload(tool)"> 下载页 </el-button>
           </div>
         </div>
       </div>
@@ -69,18 +65,43 @@
       </template>
       <div class="menu-order-list">
         <div v-for="(item, index) in menuSettingsItems" :key="item.id" class="menu-order-item">
-          <el-checkbox
-            :model-value="isMenuVisible(item.id)"
-            @change="value => setMenuVisible(item.id, value)"
-          >
+          <el-checkbox :model-value="isMenuVisible(item.id)" @change="(value) => setMenuVisible(item.id, value)">
             {{ item.name }}
           </el-checkbox>
           <div class="menu-order-actions">
             <el-button size="small" :disabled="index === 0" @click="moveMenuItem(index, -1)">上移</el-button>
-            <el-button size="small" :disabled="index === menuSettingsItems.length - 1" @click="moveMenuItem(index, 1)">下移</el-button>
+            <el-button size="small" :disabled="index === menuSettingsItems.length - 1" @click="moveMenuItem(index, 1)"
+              >下移</el-button
+            >
           </div>
         </div>
       </div>
+    </el-card>
+
+    <el-card class="settings-section" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>模板回收站</span>
+          <el-button size="small" :loading="templateTrashLoading" @click="loadTemplateTrash">刷新</el-button>
+        </div>
+      </template>
+      <p class="section-desc">删除的模板先进入回收站；彻底删除会同时删除该模板的内部填写数据。</p>
+      <el-table v-if="templateTrash.length" :data="templateTrash" size="small" border>
+        <el-table-column prop="name" label="模板" min-width="180" />
+        <el-table-column label="字段" width="80">
+          <template #default="{ row }">{{ row.fieldCount }}</template>
+        </el-table-column>
+        <el-table-column prop="updated" label="更新时间" min-width="140">
+          <template #default="{ row }">{{ shortDate(row.updated) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" link type="primary" @click="restoreTemplate(row)">恢复</el-button>
+            <el-button size="small" link type="danger" @click="permanentlyDeleteTemplate(row)">彻底删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else description="回收站为空" />
     </el-card>
 
     <!-- App Settings -->
@@ -128,9 +149,9 @@
 
 <script setup>
 import { computed, ref, reactive, onMounted } from 'vue'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.js'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 
 const settings = ref({
@@ -141,9 +162,11 @@ const settings = ref({
 })
 const managedToolsDir = ref('')
 const menuModules = getMenuModules()
-const menuSettingsItems = computed(() => normalizedMenuOrder()
-  .map(id => menuModules.find(item => item.id === id))
-  .filter(Boolean))
+const menuSettingsItems = computed(() =>
+  normalizedMenuOrder()
+    .map((id) => menuModules.find((item) => item.id === id))
+    .filter(Boolean),
+)
 
 const tools = reactive([
   {
@@ -180,9 +203,31 @@ const tools = reactive([
     downloadUrl: 'https://www.gyan.dev/ffmpeg/builds/',
   },
   {
+    name: 'word',
+    label: 'Microsoft Word',
+    description: 'Word 文件转 PDF 的首选引擎；Windows 使用 COM，macOS 使用 AppleScript',
+    status: defaultToolStatus(),
+    checking: false,
+    installing: false,
+    installingLocal: false,
+    autoInstall: false,
+    downloadUrl: 'https://www.microsoft.com/microsoft-365/word',
+  },
+  {
+    name: 'wps',
+    label: 'WPS Writer',
+    description: 'Windows 下 Word 不可用时的第二转换引擎，使用 WPS COM 导出 PDF',
+    status: defaultToolStatus(),
+    checking: false,
+    installing: false,
+    installingLocal: false,
+    autoInstall: false,
+    downloadUrl: 'https://www.wps.cn/',
+  },
+  {
     name: 'libreoffice',
     label: 'LibreOffice',
-    description: 'DOC/DOCX 转 PDF 的备用引擎；Windows 有 Word 时优先使用 Word',
+    description: 'Word 文件转 PDF 的备用引擎；没有 Word 或 Word 转换失败时使用',
     status: defaultToolStatus(),
     checking: false,
     installing: false,
@@ -200,6 +245,8 @@ const diagnostic = ref({
   poppler: null,
   ffmpeg: null,
 })
+const templateTrash = ref([])
+const templateTrashLoading = ref(false)
 
 function defaultToolStatus() {
   return {
@@ -240,10 +287,66 @@ async function saveSettings() {
   }
 }
 
+async function loadTemplateTrash() {
+  templateTrashLoading.value = true
+  const result = await tauriCallSafe('list_template_trash')
+  templateTrashLoading.value = false
+  if (result.ok) {
+    templateTrash.value = result.data || []
+  } else {
+    ElMessage.error(result.error || '读取模板回收站失败')
+  }
+}
+
+async function restoreTemplate(row) {
+  const result = await tauriCallSafe('restore_template_from_trash', { args: { path: row.path } })
+  if (!result.ok) {
+    ElMessage.error(result.error || '恢复失败')
+    return
+  }
+  ElMessage.success('模板已恢复')
+  await loadTemplateTrash()
+}
+
+async function permanentlyDeleteTemplate(row) {
+  let migrateToCommon = false
+  try {
+    await ElMessageBox.confirm(
+      `彻底删除“${row.name}”？可以先把该模板的内部填写数据迁移为模板通用数据，供其他模板按通用字段名继续检索。`,
+      '彻底删除模板',
+      {
+        confirmButtonText: '迁移数据并删除',
+        cancelButtonText: '直接删除数据',
+        distinguishCancelAndClose: true,
+        type: 'warning',
+      },
+    )
+    migrateToCommon = true
+  } catch (action) {
+    if (action !== 'cancel') return
+  }
+  const result = await tauriCallSafe('permanently_delete_template', {
+    args: { path: row.path, migrateToCommon },
+  })
+  if (!result.ok) {
+    ElMessage.error(result.error || '彻底删除失败')
+    return
+  }
+  ElMessage.success(migrateToCommon ? '模板已删除，数据已迁移为模板通用数据' : '模板和内部数据已删除')
+  await loadTemplateTrash()
+}
+
+function shortDate(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 function normalizedMenuOrder() {
-  const knownIds = new Set(menuModules.map(item => item.id))
+  const knownIds = new Set(menuModules.map((item) => item.id))
   const current = Array.isArray(settings.value.menu_order) ? settings.value.menu_order : []
-  const ordered = current.filter(id => knownIds.has(id))
+  const ordered = current.filter((id) => knownIds.has(id))
   for (const id of defaultMenuOrder()) {
     if (!ordered.includes(id)) ordered.push(id)
   }
@@ -275,14 +378,16 @@ function setMenuVisible(id, value) {
 }
 
 async function checkTools() {
-  await Promise.all(tools.map(async (tool) => {
-    tool.checking = true
-    const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
-    if (result.ok) {
-      tool.status = result.data
-    }
-    tool.checking = false
-  }))
+  await Promise.all(
+    tools.map(async (tool) => {
+      tool.checking = true
+      const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
+      if (result.ok) {
+        tool.status = result.data
+      }
+      tool.checking = false
+    }),
+  )
   syncDiagnosticToolStatus()
 }
 
@@ -302,7 +407,7 @@ async function loadDiagnostic() {
 
 function syncDiagnosticToolStatus() {
   for (const name of ['qpdf', 'poppler', 'ffmpeg']) {
-    const tool = tools.find(t => t.name === name)
+    const tool = tools.find((t) => t.name === name)
     if (tool) {
       diagnostic.value[name] = {
         available: tool.status.available,
@@ -313,7 +418,7 @@ function syncDiagnosticToolStatus() {
 }
 
 async function installTool(name) {
-  const tool = tools.find(t => t.name === name)
+  const tool = tools.find((t) => t.name === name)
   if (tool) tool.installing = true
   const result = await tauriCallSafe('install_external_tool', { toolName: name })
   if (result.ok) {
@@ -333,7 +438,7 @@ async function installToolFromPackage(name) {
   })
   if (!selected) return
 
-  const tool = tools.find(t => t.name === name)
+  const tool = tools.find((t) => t.name === name)
   if (tool) tool.installingLocal = true
   const result = await tauriCallSafe('install_external_tool_from_package', {
     toolName: name,
@@ -350,11 +455,17 @@ async function installToolFromPackage(name) {
 }
 
 async function openLogDir() {
-  await tauriCallSafe('open_log_dir')
+  const result = await tauriCallSafe('open_log_dir')
+  if (!result.ok) {
+    ElMessage.error(result.error || '无法打开日志目录')
+  }
 }
 
 async function openLogFile() {
-  await tauriCallSafe('open_log_file')
+  const result = await tauriCallSafe('open_log_file')
+  if (!result.ok) {
+    ElMessage.error(result.error || '无法打开日志文件')
+  }
 }
 
 async function openManagedToolsDir() {
@@ -365,7 +476,7 @@ async function openManagedToolsDir() {
 }
 
 async function openToolDownload(tool) {
-  const result = await tauriCallSafe('open_path', { path: tool.downloadUrl })
+  const result = await openPath(tool.downloadUrl)
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开下载页')
   }
@@ -375,6 +486,7 @@ onMounted(() => {
   loadSettings()
   loadManagedToolsDir()
   loadDiagnostic()
+  loadTemplateTrash()
   checkTools()
 })
 </script>

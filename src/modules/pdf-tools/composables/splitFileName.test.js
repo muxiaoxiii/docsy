@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  expandSplitNameTokens,
-  formatDateToken,
-  formatSequenceToken,
-  formatSplitFileName,
-} from './splitFileName.js'
+import { expandSplitNameTokens, formatDateToken, formatSequenceToken, formatSplitFileName } from './splitFileName.js'
 
 describe('split file name helpers', () => {
   it('formats date tokens without overlapping replacements', () => {
@@ -25,22 +20,26 @@ describe('split file name helpers', () => {
   })
 
   it('uses the selected separator consistently for all parts', () => {
-    expect(formatSplitFileName({
-      base: '证据9-1',
-      index: 1,
-      prefix: '405案',
-      suffix: '[YYYYMMDD]',
-      dateValue: '20260420',
-      separator: '',
-    })).toBe('405案证据9-120260420')
+    expect(
+      formatSplitFileName({
+        base: '证据9-1',
+        index: 1,
+        prefix: '405案',
+        suffix: '[YYYYMMDD]',
+        dateValue: '20260420',
+        separator: '',
+      }),
+    ).toBe('405案证据9-120260420')
 
-    expect(formatSplitFileName({
-      base: '证据9-1',
-      index: 1,
-      prefix: '405案',
-      suffix: '[YYYYMMDD]',
-      dateValue: '20260420',
-      separator: '-',
-    })).toBe('405案-证据9-1-20260420')
+    expect(
+      formatSplitFileName({
+        base: '证据9-1',
+        index: 1,
+        prefix: '405案',
+        suffix: '[YYYYMMDD]',
+        dateValue: '20260420',
+        separator: '-',
+      }),
+    ).toBe('405案-证据9-1-20260420')
   })
 })

@@ -28,13 +28,19 @@ fn build_ffmpeg_status() -> FfmpegStatus {
 }
 
 #[tauri::command]
-pub fn probe_video(path: String) -> Result<serde_json::Value, String> {
-    crate::ffmpeg::probe::probe_video(&path).map_err(|e| e.to_string())
+pub async fn probe_video(path: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::ffmpeg::probe::probe_video(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn extract_frames(args: serde_json::Value) -> Result<serde_json::Value, String> {
-    crate::ffmpeg::extract::extract(&args).map_err(|e| e.to_string())
+pub async fn extract_frames(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::ffmpeg::extract::extract(&args))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

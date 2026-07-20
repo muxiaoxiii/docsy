@@ -27,7 +27,6 @@
         </el-card>
       </div>
     </div>
-
   </div>
 </template>
 
@@ -43,7 +42,7 @@ const settings = ref({
   menu_order: [],
 })
 const homeCards = computed(() => getHomeCards(settings.value))
-const version = ref('0.5.3')
+const version = ref(import.meta.env.PACKAGE_VERSION || '')
 
 async function loadData() {
   const appSettings = await tauriCallSafe('get_app_settings')
@@ -128,7 +127,9 @@ onBeforeUnmount(() => {
 .home-card {
   cursor: pointer;
   text-align: center;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
 }
 
 .home-card:hover {

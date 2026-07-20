@@ -2,7 +2,19 @@ pub mod image_paddler;
 pub mod pdf;
 pub mod settings;
 pub mod system;
+pub mod template;
 pub mod video;
+
+pub async fn run_blocking<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> anyhow::Result<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
 
 pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
     tauri::generate_handler![
@@ -12,6 +24,8 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         pdf::unlock_pdf,
         pdf::merge_pdfs,
         pdf::split_pdf,
+        pdf::extract_pdf_pages,
+        pdf::compress_pdf,
         pdf::split_merged_evidence_pdf,
         pdf::scan_evidence_folder,
         pdf::build_evidence_group_pdfs,
@@ -52,5 +66,19 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         system::open_log_dir,
         system::get_diagnostic_info,
         system::list_system_fonts,
+        // template
+        template::inspect_docx_template,
+        template::save_docx_template,
+        template::save_docx_template_to_library,
+        template::list_template_library,
+        template::list_template_trash,
+        template::move_template_to_trash,
+        template::restore_template_from_trash,
+        template::permanently_delete_template,
+        template::inspect_docsytpl,
+        template::render_docx_template,
+        template::get_template_history_context,
+        template::list_template_generation_runs,
+        template::seed_template_history,
     ]
 }

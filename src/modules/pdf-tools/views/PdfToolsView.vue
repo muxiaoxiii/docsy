@@ -36,6 +36,49 @@
         </div>
       </el-tab-pane>
 
+      <el-tab-pane label="提取页面" name="extract" lazy>
+        <div class="tab-content">
+          <h3>快速提取页面</h3>
+          <p class="hint">从一个 PDF 中挑选若干页，导出为新的 PDF。支持输入 3,7,12-15 这样的页码。</p>
+          <div class="toolbar-row">
+            <el-button type="primary" @click="selectExtractFile">选择 PDF</el-button>
+            <el-button :disabled="!extractFile" @click="selectExtractOutputDir">输出文件夹</el-button>
+          </div>
+          <div v-if="extractFile" class="path-line">{{ extractFile }}</div>
+          <div v-if="extractOutputDir" class="path-line">{{ extractOutputDir }}</div>
+          <div v-if="extractFile" class="simple-tool-form">
+            <el-input v-model="extractPageText" placeholder="例如：3,7,12-15" clearable @keyup.enter="doExtractPages">
+              <template #prepend>页码</template>
+            </el-input>
+            <div class="path-hint">共 {{ extractTotalPages || '-' }} 页；重复页会自动忽略。</div>
+            <el-button
+              type="success"
+              :loading="extractingPages"
+              :disabled="!extractFile || !extractPageText.trim()"
+              @click="doExtractPages"
+            >
+              导出选中页面
+            </el-button>
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="压缩" name="compress" lazy>
+        <div class="tab-content">
+          <h3>PDF 压缩整理</h3>
+          <p class="hint">使用 qpdf 重新压缩流、整理对象并移除未引用资源，不改变页面内容。</p>
+          <div class="toolbar-row">
+            <el-button type="primary" @click="selectCompressFile">选择 PDF</el-button>
+            <el-button :disabled="!compressFile" @click="selectCompressOutputDir">输出文件夹</el-button>
+          </div>
+          <div v-if="compressFile" class="path-line">{{ compressFile }}</div>
+          <div v-if="compressOutputDir" class="path-line">{{ compressOutputDir }}</div>
+          <el-button type="success" :loading="compressing" :disabled="!compressFile" @click="doCompressPdf">
+            压缩 PDF
+          </el-button>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane label="拆分" name="split" lazy>
         <div class="tab-content split-workspace">
           <h3>PDF 拆分</h3>
@@ -50,13 +93,32 @@
 
           <div v-if="splitFile" class="split-main">
             <section class="split-list-panel">
-              <el-alert
-                v-if="splitWarnings.length"
-                type="warning"
-                :closable="false"
-                show-icon
-                class="split-warning"
-              >
+              <div class="split-cleanup-panel">
+                <div class="split-cleanup-title">拆分后处理</div>
+                <el-checkbox v-model="splitCleanupHeader">删除页眉区内容</el-checkbox>
+                <el-checkbox v-model="splitCleanupFooter">删除原页码/页脚区内容</el-checkbox>
+                <div v-if="splitCleanupHeader || splitCleanupFooter" class="split-cleanup-zones">
+                  <el-input-number
+                    v-if="splitCleanupHeader"
+                    v-model="splitCleanupHeaderHeightMm"
+                    :min="6"
+                    :max="60"
+                    :step="1"
+                    size="small"
+                  />
+                  <span v-if="splitCleanupHeader">页眉区 mm</span>
+                  <el-input-number
+                    v-if="splitCleanupFooter"
+                    v-model="splitCleanupFooterHeightMm"
+                    :min="6"
+                    :max="60"
+                    :step="1"
+                    size="small"
+                  />
+                  <span v-if="splitCleanupFooter">页脚区 mm</span>
+                </div>
+              </div>
+              <el-alert v-if="splitWarnings.length" type="warning" :closable="false" show-icon class="split-warning">
                 <template #title>页段需要核对（{{ splitWarnings.length }}）</template>
                 <ul class="warning-list">
                   <li v-for="warning in splitWarnings" :key="warning">{{ warning }}</li>
@@ -98,7 +160,9 @@
                 <el-table-column label="操作" width="148">
                   <template #default="{ row, $index }">
                     <el-button link type="primary" size="small" @click.stop="previewSplitRange(row)">预览</el-button>
-                    <el-button link type="primary" size="small" @click.stop="insertSplitRangeAfter($index)">续段</el-button>
+                    <el-button link type="primary" size="small" @click.stop="insertSplitRangeAfter($index)"
+                      >续段</el-button
+                    >
                     <el-button link type="danger" size="small" @click.stop="removeSplitRange($index)">删除</el-button>
                   </template>
                 </el-table-column>
@@ -120,15 +184,30 @@
                   <span>页面预览</span>
                   <div class="split-preview-status">
                     当前页 {{ splitPreviewPage }} / {{ splitPreviewMaxPage }}
-                    <span v-if="selectedSplitRange">；选中 {{ selectedSplitRange.name || '未命名' }} {{ selectedSplitRange.pageStart }}-{{ selectedSplitRange.pageEnd }}</span>
+                    <span v-if="selectedSplitRange"
+                      >；选中 {{ selectedSplitRange.name || '未命名' }} {{ selectedSplitRange.pageStart }}-{{
+                        selectedSplitRange.pageEnd
+                      }}</span
+                    >
                   </div>
                 </div>
                 <div class="split-preview-actions">
-                  <el-button size="small" :disabled="splitPreviewPage <= 1" @click="moveSplitPreviewPage(-1)">上一页</el-button>
+                  <el-button size="small" :disabled="splitPreviewPage <= 1" @click="moveSplitPreviewPage(-1)"
+                    >上一页</el-button
+                  >
                   <el-input-number v-model="splitPreviewPage" :min="1" :max="splitPreviewMaxPage" size="small" />
-                  <el-button size="small" :disabled="splitPreviewPage >= splitPreviewMaxPage" @click="moveSplitPreviewPage(1)">下一页</el-button>
-                  <el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitStart">设为起始页</el-button>
-                  <el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitEnd">设为结束页</el-button>
+                  <el-button
+                    size="small"
+                    :disabled="splitPreviewPage >= splitPreviewMaxPage"
+                    @click="moveSplitPreviewPage(1)"
+                    >下一页</el-button
+                  >
+                  <el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitStart"
+                    >设为起始页</el-button
+                  >
+                  <el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitEnd"
+                    >设为结束页</el-button
+                  >
                 </div>
               </div>
               <PdfJsPreview
@@ -136,7 +215,7 @@
                 :file-path="splitFile"
                 :page="splitPreviewPage"
                 :scale="0.9"
-                @error="message => ElMessage.error(message)"
+                @error="(message) => ElMessage.error(message)"
               />
             </section>
           </div>
@@ -155,7 +234,17 @@ import { ElMessage } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
 import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { getPdfPageCount, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { fileName, stripPdf } from '../../../core/filePath.js'
+import {
+  buildRangeAfter,
+  insertRangeAfter,
+  navigatePage,
+  parsePageSelection,
+  removeRangeAt,
+  setRangeEnd,
+  setRangeStart,
+} from '../../../core/pdfUtils.js'
 
 const activeTab = ref('unlock')
 
@@ -169,7 +258,7 @@ async function selectUnlockFiles() {
   })
   if (selected) {
     const paths = Array.isArray(selected) ? selected : [selected]
-    unlockFiles.value = paths.map(p => ({
+    unlockFiles.value = paths.map((p) => ({
       path: p,
       name: fileName(p),
       statusText: '等待',
@@ -192,6 +281,14 @@ async function batchUnlock() {
 
 const mergeFiles = ref([])
 const merging = ref(false)
+const extractFile = ref('')
+const extractOutputDir = ref('')
+const extractPageText = ref('')
+const extractTotalPages = ref(0)
+const extractingPages = ref(false)
+const compressFile = ref('')
+const compressOutputDir = ref('')
+const compressing = ref(false)
 const splitFile = ref('')
 const splitOutputDir = ref('')
 const splitRanges = ref([])
@@ -200,6 +297,10 @@ const splittingMerged = ref(false)
 const splitPreviewPage = ref(1)
 const splitTotalPages = ref(1)
 const splitRunWarnings = ref([])
+const splitCleanupHeader = ref(false)
+const splitCleanupFooter = ref(false)
+const splitCleanupHeaderHeightMm = ref(18)
+const splitCleanupFooterHeightMm = ref(18)
 const splitWarnings = computed(() => [
   ...splitRangeWarnings(splitRanges.value, splitTotalPages.value),
   ...splitRunWarnings.value,
@@ -229,6 +330,77 @@ async function doMerge() {
   merging.value = false
 }
 
+async function selectExtractFile() {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (!selected) return
+  extractFile.value = normalizeSelectedPath(selected)
+  extractPageText.value = ''
+  extractTotalPages.value = 0
+  const pageCount = await getPdfPageCount(extractFile.value)
+  if (pageCount.ok) {
+    extractTotalPages.value = pageCount.data || 0
+  } else {
+    ElMessage.error(pageCount.error || '读取页数失败')
+  }
+}
+
+async function selectExtractOutputDir() {
+  const selected = await open({ directory: true })
+  if (selected) extractOutputDir.value = normalizeSelectedPath(selected)
+}
+
+async function doExtractPages() {
+  if (!extractFile.value) return
+  const pages = parsePageSelection(extractPageText.value, extractTotalPages.value)
+  if (!pages.length) {
+    ElMessage.warning('请输入有效页码，例如：3,7,12-15')
+    return
+  }
+  extractingPages.value = true
+  const result = await tauriCallSafe('extract_pdf_pages', {
+    input: extractFile.value,
+    pages,
+    output_dir: extractOutputDir.value || null,
+  })
+  extractingPages.value = false
+  if (result.ok) {
+    ElMessage.success(`已导出：${result.data.output_path}`)
+  } else {
+    ElMessage.error(result.error || '页面提取失败')
+  }
+}
+
+async function selectCompressFile() {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (selected) compressFile.value = normalizeSelectedPath(selected)
+}
+
+async function selectCompressOutputDir() {
+  const selected = await open({ directory: true })
+  if (selected) compressOutputDir.value = normalizeSelectedPath(selected)
+}
+
+async function doCompressPdf() {
+  if (!compressFile.value) return
+  compressing.value = true
+  const result = await tauriCallSafe('compress_pdf', {
+    input: compressFile.value,
+    output_dir: compressOutputDir.value || null,
+  })
+  compressing.value = false
+  if (result.ok) {
+    ElMessage.success(`已压缩：${result.data.output_path}`)
+  } else {
+    ElMessage.error(result.error || 'PDF 压缩失败')
+  }
+}
+
 async function selectSplitFile() {
   const selected = await open({
     multiple: false,
@@ -239,7 +411,7 @@ async function selectSplitFile() {
     splitPreviewPage.value = 1
     splitTotalPages.value = 1
     splitRunWarnings.value = []
-    const pageCount = await tauriCallSafe('get_pdf_page_count', { input: selected })
+    const pageCount = await getPdfPageCount(selected)
     if (pageCount.ok) {
       splitTotalPages.value = pageCount.data || 1
     }
@@ -259,14 +431,12 @@ async function selectSplitOutputDir() {
   if (selected) splitOutputDir.value = selected
 }
 
+function normalizeSelectedPath(value) {
+  return Array.isArray(value) ? value[0] : value
+}
+
 function addSplitRange() {
-  const previous = splitRanges.value[splitRanges.value.length - 1]
-  const start = Math.min(splitPreviewMaxPage.value, Math.max(1, Number(previous?.pageEnd || 0) + 1))
-  const item = {
-    name: `文件${splitRanges.value.length + 1}`,
-    pageStart: start,
-    pageEnd: start,
-  }
+  const item = buildRangeAfter(splitRanges.value, splitRanges.value.length - 1, splitPreviewMaxPage.value)
   splitRanges.value.push(item)
   previewSplitRange(item)
 }
@@ -278,44 +448,24 @@ function previewSplitRange(row) {
 }
 
 function moveSplitPreviewPage(delta) {
-  splitPreviewPage.value = Math.min(splitPreviewMaxPage.value, Math.max(1, Number(splitPreviewPage.value || 1) + delta))
+  splitPreviewPage.value = navigatePage(splitPreviewPage.value, delta, splitPreviewMaxPage.value)
 }
 
 function setSelectedSplitStart() {
-  const range = selectedSplitRange.value
-  if (!range) return
-  range.pageStart = Number(splitPreviewPage.value || 1)
-  if (Number(range.pageEnd || 0) < range.pageStart) {
-    range.pageEnd = range.pageStart
-  }
+  setRangeStart(selectedSplitRange.value, splitPreviewPage.value)
 }
 
 function setSelectedSplitEnd() {
-  const range = selectedSplitRange.value
-  if (!range) return
-  range.pageEnd = Number(splitPreviewPage.value || 1)
-  if (Number(range.pageStart || 0) > range.pageEnd) {
-    range.pageStart = range.pageEnd
-  }
+  setRangeEnd(selectedSplitRange.value, splitPreviewPage.value)
 }
 
 function insertSplitRangeAfter(index) {
-  const previous = splitRanges.value[index]
-  const next = splitRanges.value[index + 1]
-  const start = Math.min(splitPreviewMaxPage.value, Math.max(1, Number(previous?.pageEnd || 0) + 1))
-  const endLimit = next ? Math.max(start, Number(next.pageStart || start) - 1) : start
-  const item = {
-    name: `文件${splitRanges.value.length + 1}`,
-    pageStart: start,
-    pageEnd: endLimit,
-  }
-  splitRanges.value.splice(index + 1, 0, item)
+  const item = insertRangeAfter(splitRanges.value, index, splitPreviewMaxPage.value)
   previewSplitRange(item)
 }
 
 function removeSplitRange(index) {
-  splitRanges.value.splice(index, 1)
-  selectedSplitRangeIndex.value = Math.min(selectedSplitRangeIndex.value, Math.max(0, splitRanges.value.length - 1))
+  selectedSplitRangeIndex.value = removeRangeAt(splitRanges.value, index, selectedSplitRangeIndex.value)
 }
 
 async function doSplitMerged() {
@@ -332,10 +482,10 @@ async function doSplitMerged() {
       outputDir: splitOutputDir.value,
       items: splitRanges.value,
       cleanup: {
-        headerEnabled: false,
-        footerEnabled: false,
-        headerHeightMm: 18,
-        footerHeightMm: 18,
+        headerEnabled: splitCleanupHeader.value,
+        footerEnabled: splitCleanupFooter.value,
+        headerHeightMm: splitCleanupHeaderHeightMm.value,
+        footerHeightMm: splitCleanupFooterHeightMm.value,
       },
     },
   })
@@ -344,7 +494,9 @@ async function doSplitMerged() {
     splitRunWarnings.value = result.data.warnings || []
     const failed = result.data.failed?.length || 0
     const outputs = result.data.outputs?.length || 0
-    failed ? ElMessage.warning(`已拆分 ${outputs} 个，失败 ${failed} 个`) : ElMessage.success(`已拆分 ${outputs} 个 PDF`)
+    failed
+      ? ElMessage.warning(`已拆分 ${outputs} 个，失败 ${failed} 个`)
+      : ElMessage.success(`已拆分 ${outputs} 个 PDF`)
   } else {
     ElMessage.error(result.error || '拆分失败')
   }
@@ -365,14 +517,6 @@ function splitRangeStatus(row) {
     return { type: 'danger', text: '错误' }
   }
   return { type: 'success', text: '正常' }
-}
-
-function fileName(path) {
-  return String(path || '').split(/[\\/]/).pop() || path
-}
-
-function stripPdf(name) {
-  return String(name || '').replace(/\.pdf$/i, '')
 }
 </script>
 
@@ -433,6 +577,20 @@ h3 {
   margin: 6px 0;
 }
 
+.path-hint {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.simple-tool-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+  margin-top: 12px;
+}
+
 .split-options {
   display: grid;
   grid-template-columns: minmax(150px, 1fr) 120px minmax(170px, 1fr) 120px;
@@ -455,6 +613,33 @@ h3 {
 
 .split-warning {
   margin: 10px 0;
+}
+
+.split-cleanup-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.split-cleanup-title {
+  color: #303133;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.split-cleanup-zones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: #606266;
+  font-size: 12px;
 }
 
 .warning-list {
