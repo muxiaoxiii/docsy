@@ -123,6 +123,9 @@ jobs:
         run: cargo test
         working-directory: src-tauri
 
+      - name: Build frontend
+        run: npm run build
+
       - name: Build package
         run: ${{ matrix.command }}
 
