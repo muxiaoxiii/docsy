@@ -141,7 +141,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.brand {
+.brand:hover {
+  opacity: 0.8;
+  transition: opacity 0.15s ease;
+}
   display: flex;
   align-items: center;
   padding: 16px;
@@ -204,7 +207,7 @@ onBeforeUnmount(() => {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 20;
+  z-index: 999;
   pointer-events: none;
 }
 

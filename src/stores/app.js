@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { tauriCall } from '../core/tauriBridge.js'
+import { tauriCallSafe } from '../core/tauriBridge.js'
 import { logError } from '../services/appLogger.js'
 
 export const useAppStore = defineStore('app', () => {
@@ -12,18 +12,18 @@ export const useAppStore = defineStore('app', () => {
   })
 
   async function loadSettings() {
-    try {
-      settings.value = await tauriCall('get_app_settings')
-    } catch (err) {
-      void logError('app.store', 'load settings failed', { error: err })
+    const result = await tauriCallSafe('get_app_settings')
+    if (result.ok) {
+      settings.value = result.data
+    } else {
+      void logError('app.store', 'load settings failed', { error: result.error })
     }
   }
 
   async function saveSettings() {
-    try {
-      await tauriCall('set_app_settings', { settings: settings.value })
-    } catch (err) {
-      void logError('app.store', 'save settings failed', { error: err })
+    const result = await tauriCallSafe('set_app_settings', { settings: settings.value })
+    if (!result.ok) {
+      void logError('app.store', 'save settings failed', { error: result.error })
     }
   }
 

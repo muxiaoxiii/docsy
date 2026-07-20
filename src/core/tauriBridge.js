@@ -85,3 +85,6 @@ export function openPath(path) {
 export function getPdfPageCount(input) {
   return tauriCallSafe('get_pdf_page_count', { input })
 }
+
+// Re-export manual loading animation API for single-import convenience
+export { showLoading, hideLoading } from './loading.js'
