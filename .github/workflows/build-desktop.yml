@@ -124,7 +124,12 @@ jobs:
         working-directory: src-tauri
 
       - name: Build frontend
-        run: npm run build
+        run: |
+          npm run build
+          echo "=== dist contents ==="
+          ls -la dist/ 2>/dev/null || echo "ERROR: dist/ does not exist!"
+          echo "=== dist/index.html ==="
+          cat dist/index.html 2>/dev/null || echo "ERROR: index.html missing!"
 
       - name: Build package
         run: ${{ matrix.command }}
