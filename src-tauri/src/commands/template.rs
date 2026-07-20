@@ -6,7 +6,7 @@ use std::collections::HashMap;
 pub async fn inspect_docx_template(
     path: String,
 ) -> Result<crate::docx_template::TemplateInspection, String> {
-    run_blocking(move || crate::docx_template::inspect_docx_template(&path)).await
+    run_blocking(move || crate::docx_template::engine::inspect_docx(&path)).await
 }
 
 #[tauri::command]
@@ -15,7 +15,7 @@ pub async fn save_docx_template(
 ) -> Result<crate::docx_template::SaveTemplateResult, String> {
     run_blocking(move || {
         let args: crate::docx_template::SaveTemplateArgs = serde_json::from_value(args)?;
-        crate::docx_template::save_docx_template(args)
+        crate::docx_template::engine::save_docx(args)
     })
     .await
 }
@@ -25,8 +25,13 @@ pub async fn save_docx_template_to_library(
     args: serde_json::Value,
 ) -> Result<crate::docx_template::SaveTemplateResult, String> {
     run_blocking(move || {
-        let args: crate::docx_template::SaveTemplateArgs = serde_json::from_value(args)?;
-        crate::docx_template::save_docx_template_to_library(args)
+        let mut args: crate::docx_template::SaveTemplateArgs = serde_json::from_value(args)?;
+        let file_name = crate::docx_template::safe_template_file_name(&args.template_name);
+        args.output_path = crate::docx_template::template_library_dir()
+            .join(format!("{file_name}.docsytpl"))
+            .display()
+            .to_string();
+        crate::docx_template::engine::save_docx(args)
     })
     .await
 }
@@ -81,7 +86,7 @@ pub async fn inspect_docsytpl(
 pub async fn render_docx_template(args: serde_json::Value) -> Result<String, String> {
     run_blocking(move || {
         let args: crate::docx_template::RenderTemplateArgs = serde_json::from_value(args)?;
-        crate::docx_template::render_docx_template(args)
+        crate::docx_template::engine::render_docx(args)
     })
     .await
 }

@@ -82,8 +82,10 @@ async function scanEvidence() {
 async function buildEvidence() {
   building.value = true
   const result = await tauriCallSafe('build_evidence_group_pdfs', {
-    root: evidenceFolder.value,
-    groups: evidenceGroups.value,
+    args: {
+      root: evidenceFolder.value,
+      groups: evidenceGroups.value,
+    },
   })
   if (result.ok) {
     conversionFailures.value = result.data.failedConversions || []

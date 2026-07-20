@@ -11,6 +11,7 @@ const DEFAULT_MANIFEST_URL: &str =
 const DEFAULT_RELEASE_BASE: &str =
     "https://github.com/muxiaoxiii/docsy/releases/download/toolchain-v1";
 const MAX_TOOL_MANIFEST_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_HTTPS_REDIRECTS: usize = 5;
 const MIB: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -240,42 +241,68 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
 
 fn download_package(url: &str, max_bytes: u64) -> Result<Vec<u8>> {
     validate_download_url(url)?;
+    let mut current =
+        reqwest::Url::parse(url).with_context(|| format!("工具下载地址无效: {url}"))?;
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(8))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("初始化下载客户端失败")?;
-    let response = client
-        .get(url)
-        .send()
-        .with_context(|| format!("下载失败: {url}"))?;
-    let status = response.status();
-    if status.is_redirection() {
-        anyhow::bail!(
-            "工具下载地址发生重定向。为避免降级到不安全地址，请在设置中使用最终 HTTPS 下载地址。"
-        );
-    }
-    if !status.is_success() {
-        anyhow::bail!(
-            "下载失败: {url} 返回 {status}。可在设置中改用国内镜像清单，或从本地 zip 工具包安装。"
-        );
-    }
-    if let Some(length) = response.content_length() {
-        if length > max_bytes {
-            anyhow::bail!("工具包过大，已拒绝下载");
+
+    for redirect_count in 0..=MAX_HTTPS_REDIRECTS {
+        let response = client
+            .get(current.clone())
+            .send()
+            .with_context(|| format!("下载失败: {current}"))?;
+        let status = response.status();
+        if status.is_redirection() {
+            if redirect_count == MAX_HTTPS_REDIRECTS {
+                anyhow::bail!("工具下载重定向次数过多，已中止下载");
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .context("工具下载重定向缺少有效的 Location 地址")?;
+            current = resolve_https_redirect(&current, location)?;
+            continue;
         }
+        if !status.is_success() {
+            anyhow::bail!(
+                "下载失败: {current} 返回 {status}。可在设置中改用国内镜像清单，或从本地 zip 工具包安装。"
+            );
+        }
+        if let Some(length) = response.content_length() {
+            if length > max_bytes {
+                anyhow::bail!("工具包过大，已拒绝下载");
+            }
+        }
+        let mut reader = response.take(max_bytes + 1);
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).context("读取下载内容失败")?;
+        if bytes.len() as u64 > max_bytes {
+            anyhow::bail!("工具包过大，已中止下载");
+        }
+        return Ok(bytes);
     }
-    let mut reader = response.take(max_bytes + 1);
-    let mut bytes = Vec::new();
-    reader.read_to_end(&mut bytes).context("读取下载内容失败")?;
-    if bytes.len() as u64 > max_bytes {
-        anyhow::bail!("工具包过大，已中止下载");
-    }
-    Ok(bytes)
+
+    unreachable!("重定向循环必须在上方返回或报错")
 }
 
 fn validate_download_url(url: &str) -> Result<()> {
     let parsed = reqwest::Url::parse(url).with_context(|| format!("工具下载地址无效: {url}"))?;
+    validate_https_url(&parsed)
+}
+
+fn resolve_https_redirect(current: &reqwest::Url, location: &str) -> Result<reqwest::Url> {
+    let target = current
+        .join(location)
+        .with_context(|| format!("工具下载重定向地址无效: {location}"))?;
+    validate_https_url(&target)?;
+    Ok(target)
+}
+
+fn validate_https_url(parsed: &reqwest::Url) -> Result<()> {
     if parsed.scheme() != "https" {
         anyhow::bail!("工具下载地址必须使用 HTTPS");
     }
@@ -482,6 +509,18 @@ mod tests {
         assert!(validate_download_url("https://example.com/tools.zip").is_ok());
         assert!(validate_download_url("http://example.com/tools.zip").is_err());
         assert!(validate_download_url("file:///tmp/tools.zip").is_err());
+    }
+
+    #[test]
+    fn redirects_must_remain_https() {
+        let source = reqwest::Url::parse("https://example.com/tools/latest.zip").unwrap();
+        let relative = resolve_https_redirect(&source, "files/tool.zip").unwrap();
+        assert_eq!(
+            relative.as_str(),
+            "https://example.com/tools/files/tool.zip"
+        );
+        assert!(resolve_https_redirect(&source, "http://mirror.example.com/tool.zip").is_err());
+        assert!(resolve_https_redirect(&source, "file:///tmp/tool.zip").is_err());
     }
 
     #[test]

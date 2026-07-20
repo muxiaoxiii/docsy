@@ -118,6 +118,8 @@ pub struct RunResult {
     pub output_path: String,
     pub pages: u32,
     pub images: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 struct LayoutGrid {
@@ -439,7 +441,7 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     let output_stem = output_file_stem(&images);
     let output_path = unique_output_path(&output_dir, &format!("{output_stem}_docsy_paddler"), ext);
 
-    match args.output_format.as_str() {
+    let warnings = match args.output_format.as_str() {
         "pdf" => generate_pdf(
             &images,
             &output_path,
@@ -459,31 +461,35 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
             &args.scale_mode,
             args.dpi,
         )?,
-        _ => generate_docx(
-            &images,
-            &output_path,
-            page_w,
-            page_h,
-            margin_mm,
-            &grid,
-            cell_w,
-            image_cell_h,
-            filename_reserve,
-            show_filename,
-            filename_without_ext,
-            &filename_remove_text,
-            &filename_rules,
-            border_enabled,
-            border_color,
-            &args.scale_mode,
-            args.dpi,
-        )?,
-    }
+        _ => {
+            generate_docx(
+                &images,
+                &output_path,
+                page_w,
+                page_h,
+                margin_mm,
+                &grid,
+                cell_w,
+                image_cell_h,
+                filename_reserve,
+                show_filename,
+                filename_without_ext,
+                &filename_remove_text,
+                &filename_rules,
+                border_enabled,
+                border_color,
+                &args.scale_mode,
+                args.dpi,
+            )?;
+            Vec::new()
+        }
+    };
 
     Ok(RunResult {
         output_path: output_path.display().to_string(),
         pages: total_pages as u32,
         images: images.len() as u32,
+        warnings,
     })
 }
 
@@ -795,13 +801,35 @@ fn generate_pdf(
     border_color: &str,
     scale_mode: &str,
     dpi: u32,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     use printpdf::*;
 
     let mut doc = PdfDocument::new("image_paddler");
-    let mut warnings = Vec::new();
+    let mut result_warnings = Vec::new();
     let per_page = grid.rows * grid.cols;
-    let font = BuiltinFont::Helvetica;
+    let needs_external_filename_font = show_filename
+        && images.iter().any(|image| {
+            display_filename(
+                &image.path,
+                filename_without_ext,
+                filename_remove_text,
+                filename_rules,
+            )
+            .chars()
+            .any(|ch| !ch.is_ascii())
+        });
+    let filename_font = if needs_external_filename_font {
+        load_pdf_filename_font(&mut doc).map(PdfFontHandle::External)
+    } else {
+        Some(PdfFontHandle::Builtin(BuiltinFont::Helvetica))
+    };
+    let omit_filenames = show_filename && filename_font.is_none();
+    if omit_filenames {
+        result_warnings.push(
+            "PDF 中的图片文件名包含中文或其他非 ASCII 字符，但未找到可嵌入的 CJK 字体，已省略 PDF 中的文件名。请安装 PingFang、微软雅黑或思源黑体后重新生成。"
+                .into(),
+        );
+    }
 
     for (page_idx, chunk) in images.chunks(per_page).enumerate() {
         let mut ops: Vec<Op> = Vec::new();
@@ -873,7 +901,7 @@ fn generate_pdf(
             });
             ops.push(Op::RestoreGraphicsState);
 
-            if show_filename {
+            if show_filename && !omit_filenames {
                 let lines = display_filename_lines(
                     &img_info.path,
                     filename_without_ext,
@@ -883,7 +911,10 @@ fn generate_pdf(
                 );
                 ops.push(Op::StartTextSection);
                 ops.push(Op::SetFont {
-                    font: PdfFontHandle::Builtin(font),
+                    font: filename_font
+                        .as_ref()
+                        .expect("未省略文件名时必须存在 PDF 字体")
+                        .clone(),
                     size: Pt(FILENAME_FONT_PT as f32),
                 });
                 ops.push(Op::SetFillColor {
@@ -918,9 +949,46 @@ fn generate_pdf(
         }
     }
 
-    let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
+    let bytes = doc.save(&PdfSaveOptions::default(), &mut Vec::new());
     std::fs::write(output_path, &bytes)?;
-    Ok(())
+    Ok(result_warnings)
+}
+
+fn load_pdf_filename_font(doc: &mut printpdf::PdfDocument) -> Option<printpdf::FontId> {
+    for path in cjk_font_candidates() {
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let mut warnings = Vec::new();
+        if let Some(font) = printpdf::ParsedFont::from_bytes(&bytes, 0, &mut warnings) {
+            return Some(doc.add_font(&font));
+        }
+    }
+    None
+}
+
+fn cjk_font_candidates() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if cfg!(target_os = "macos") {
+        paths.extend([
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ]);
+    } else if cfg!(windows) {
+        paths.extend([
+            "C:\\Windows\\Fonts\\msyh.ttc",
+            "C:\\Windows\\Fonts\\simsun.ttc",
+            "C:\\Windows\\Fonts\\simhei.ttf",
+        ]);
+    } else {
+        paths.extend([
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+        ]);
+    }
+    paths.into_iter().map(std::path::PathBuf::from).collect()
 }
 
 fn pdf_border_color(color: &str) -> printpdf::Color {

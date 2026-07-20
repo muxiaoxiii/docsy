@@ -36,6 +36,9 @@ pub fn extract(args: &serde_json::Value) -> Result<serde_json::Value> {
 
     let mut filters = vec![format!("fps={fps}")];
     if let Some(drawtext) = drawtext_filter(args) {
+        if !crate::ffmpeg::detect::has_drawtext()? {
+            anyhow::bail!("当前 FFmpeg 不支持 drawtext，无法添加时间戳水印。请关闭水印或更换支持 drawtext 的 FFmpeg");
+        }
         filters.push(drawtext);
     }
 
@@ -92,14 +95,14 @@ struct TimeRange {
 }
 
 fn time_range_args(args: &serde_json::Value) -> Result<TimeRange> {
-    let start = args
-        .get("start_time")
-        .or_else(|| args.get("startTime"))
-        .and_then(|value| parse_time_value(value));
-    let end = args
-        .get("end_time")
-        .or_else(|| args.get("endTime"))
-        .and_then(|value| parse_time_value(value));
+    let start = parse_time_arg(
+        args.get("start_time").or_else(|| args.get("startTime")),
+        "开始时间",
+    )?;
+    let end = parse_time_arg(
+        args.get("end_time").or_else(|| args.get("endTime")),
+        "结束时间",
+    )?;
     if let Some(value) = start {
         if !value.is_finite() || value < 0.0 {
             anyhow::bail!("开始时间不能为负数");
@@ -119,30 +122,51 @@ fn time_range_args(args: &serde_json::Value) -> Result<TimeRange> {
     Ok(TimeRange { start, duration })
 }
 
-fn parse_time_value(value: &serde_json::Value) -> Option<f64> {
+fn parse_time_arg(value: Option<&serde_json::Value>, label: &str) -> Result<Option<f64>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
     if let Some(number) = value.as_f64() {
-        return Some(number);
+        return Ok(Some(number));
     }
-    let text = value.as_str()?.trim();
+    let text = value
+        .as_str()
+        .with_context(|| format!("{label}格式无效，请输入秒数或 HH:MM:SS"))?
+        .trim();
     if text.is_empty() {
-        return None;
+        return Ok(None);
     }
     parse_time_text(text)
+        .map(Some)
+        .with_context(|| format!("{label}格式无效，请输入秒数或 HH:MM:SS"))
 }
 
 fn parse_time_text(text: &str) -> Option<f64> {
     if let Ok(seconds) = text.parse::<f64>() {
-        return Some(seconds);
+        return seconds.is_finite().then_some(seconds);
     }
     let parts: Vec<&str> = text.split(':').collect();
     if !(2..=3).contains(&parts.len()) {
         return None;
     }
-    let mut seconds = 0.0;
-    for part in parts {
-        seconds = seconds * 60.0 + part.parse::<f64>().ok()?;
+    let values: Vec<f64> = parts
+        .iter()
+        .map(|part| part.parse::<f64>().ok())
+        .collect::<Option<_>>()?;
+    if values
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return None;
     }
-    Some(seconds)
+    if values[values.len() - 1] >= 60.0 || values[values.len() - 2] >= 60.0 {
+        return None;
+    }
+    Some(match values.as_slice() {
+        [minutes, seconds] => minutes * 60.0 + seconds,
+        [hours, minutes, seconds] => hours * 3600.0 + minutes * 60.0 + seconds,
+        _ => return None,
+    })
 }
 
 fn format_seconds_arg(seconds: f64) -> String {
@@ -381,5 +405,13 @@ mod tests {
         }))
         .unwrap_err();
         assert!(err.to_string().contains("结束时间必须晚于开始时间"));
+    }
+
+    #[test]
+    fn rejects_nonempty_invalid_video_time() {
+        let err = time_range_args(&serde_json::json!({ "startTime": "tomorrow" })).unwrap_err();
+        assert!(err.to_string().contains("开始时间格式无效"));
+        let err = time_range_args(&serde_json::json!({ "endTime": "01:99" })).unwrap_err();
+        assert!(err.to_string().contains("结束时间格式无效"));
     }
 }

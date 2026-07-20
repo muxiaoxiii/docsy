@@ -141,6 +141,14 @@
             </el-form-item>
 
             <template v-if="settings.timestamp.enabled">
+              <el-alert
+                v-if="!ffmpegStatus.has_drawtext"
+                type="warning"
+                :closable="false"
+                show-icon
+                title="当前 FFmpeg 不支持时间戳水印"
+                description="请关闭水印，或安装支持 drawtext 的 FFmpeg 后重试。"
+              />
               <el-form-item label="水印位置">
                 <el-select v-model="settings.timestamp.position">
                   <el-option label="左上角" value="top-left" />
@@ -170,7 +178,9 @@
             size="large"
             @click="extractFrames"
             :loading="extracting"
-            :disabled="!videoPath || !ffmpegStatus.available"
+            :disabled="
+              !videoPath || !ffmpegStatus.available || (settings.timestamp.enabled && !ffmpegStatus.has_drawtext)
+            "
             style="width: 100%"
           >
             开始抽帧
@@ -337,6 +347,10 @@ function clearVideo() {
 
 async function extractFrames() {
   if (!videoPath.value) return
+  if (settings.timestamp.enabled && !ffmpegStatus.has_drawtext) {
+    ElMessage.error('当前 FFmpeg 不支持 drawtext。请关闭水印或安装支持 drawtext 的 FFmpeg。')
+    return
+  }
 
   extracting.value = true
   extractResult.value = null

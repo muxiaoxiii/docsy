@@ -1,6 +1,6 @@
 [package]
 name = "docsy"
-version = "0.7.5"
+version = "0.8.0"
 description = "Docsy - 轻量文档处理工具箱"
 authors = ["only"]
 edition = "2021"
@@ -36,6 +36,7 @@ log = "0.4"
 allsorts = { version = "0.16.1", default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }
 office_oxide = "0.1"
+quick-xml = { version = "0.37", features = ["serialize", "encoding"] }
 
 [features]
 default = ["custom-protocol"]
