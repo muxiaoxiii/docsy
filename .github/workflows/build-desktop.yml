@@ -117,6 +117,7 @@ jobs:
             -Executables @("ffmpeg.exe", "ffprobe.exe")
 
       - name: Build frontend
+        shell: bash
         run: |
           npm run build
           echo "=== dist contents ==="
