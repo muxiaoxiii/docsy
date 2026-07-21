@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::docx_template::package;
 
@@ -69,7 +69,8 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
     };
 
     let pkg = package::read_docx_package(&source)?;
-    let (_, marks, _) = scan_package_to_runs_and_marks(&pkg)?;
+    let (runs, marks, _) = scan_package_to_runs_and_marks(&pkg)?;
+    prune_stray_punctuation_refs(&mut manifest.fields, &runs);
     super::normalize_manifest_options(&mut manifest);
     super::sanitize_manifest_private_labels(&mut manifest, &marks);
     let xml_parts: Vec<(String, Vec<u8>)> = pkg
@@ -109,6 +110,79 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
         output_path: output.display().to_string(),
         manifest,
     })
+}
+
+/// A text field may span several Word runs when its visible text uses multiple
+/// character formats.  A separately selected colon, comma, or bracket is not
+/// part of that field value, though: keeping it as a second reference causes
+/// rendering to clear the punctuation after it writes the field value into the
+/// first reference.  Keep a standalone punctuation field intact, but remove
+/// accidental punctuation-only references from a multi-reference value field.
+fn prune_stray_punctuation_refs(fields: &mut [super::TemplateField], runs: &[TemplateTextRun]) {
+    let run_text: HashMap<&str, &str> = runs
+        .iter()
+        .map(|run| (run.id.as_str(), run.text.as_str()))
+        .collect();
+
+    for field in fields {
+        if field.mark_refs.len() < 2 || is_structural_field_type(&field.field_type) {
+            continue;
+        }
+
+        let removable: HashSet<String> = field
+            .mark_refs
+            .iter()
+            .filter(|reference| {
+                let Some(text) = run_text.get(reference.mark_id.as_str()) else {
+                    return false;
+                };
+                reference.start.is_none() && reference.end.is_none() && is_punctuation_only(text)
+            })
+            .map(|reference| reference.mark_id.clone())
+            .collect();
+        if removable.is_empty() || removable.len() == field.mark_refs.len() {
+            continue;
+        }
+
+        field
+            .mark_refs
+            .retain(|reference| !removable.contains(&reference.mark_id));
+        field.marks.retain(|mark_id| !removable.contains(mark_id));
+    }
+}
+
+fn is_structural_field_type(field_type: &str) -> bool {
+    matches!(
+        field_type,
+        "prefix" | "suffix" | "connector" | "delete_text" | "ignore"
+    )
+}
+
+fn is_punctuation_only(text: &str) -> bool {
+    let trimmed = text.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().all(|ch| {
+            matches!(
+                ch,
+                '：' | ':'
+                    | '，'
+                    | ','
+                    | '、'
+                    | '。'
+                    | '；'
+                    | ';'
+                    | '（'
+                    | '）'
+                    | '('
+                    | ')'
+                    | '【'
+                    | '】'
+                    | '['
+                    | ']'
+                    | '《'
+                    | '》'
+            )
+        })
 }
 
 /// Render a docx template using the quick-xml engine
@@ -452,6 +526,67 @@ mod tests {
         // Clean up
         let _ = std::fs::remove_dir_all(&output_dir);
         let _ = std::fs::remove_dir_all(docx_path.parent().unwrap());
+    }
+
+    #[test]
+    fn ignores_accidental_punctuation_ref_in_multi_run_value_field() {
+        let mut fields = vec![TemplateField {
+            id: "court".to_string(),
+            name: "法院".to_string(),
+            label: "法院".to_string(),
+            field_type: "text".to_string(),
+            marks: vec![
+                "word/document.xml-p0-r0".to_string(),
+                "word/document.xml-p0-r1".to_string(),
+            ],
+            mark_refs: vec![
+                TemplateMarkRef {
+                    mark_id: "word/document.xml-p0-r0".to_string(),
+                    tag: "court.ref.1".to_string(),
+                    ..Default::default()
+                },
+                TemplateMarkRef {
+                    mark_id: "word/document.xml-p0-r1".to_string(),
+                    tag: "court.ref.2".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }];
+        let runs = vec![
+            TemplateTextRun {
+                id: "word/document.xml-p0-r0".to_string(),
+                part: "word/document.xml".to_string(),
+                run_index: 0,
+                paragraph_index: 0,
+                text: "北京知识产权法院".to_string(),
+                paragraph_text: String::new(),
+                checkbox_like: false,
+                option_label: String::new(),
+                highlighted: true,
+                bold: false,
+                italic: false,
+                underline: false,
+            },
+            TemplateTextRun {
+                id: "word/document.xml-p0-r1".to_string(),
+                part: "word/document.xml".to_string(),
+                run_index: 1,
+                paragraph_index: 0,
+                text: "：".to_string(),
+                paragraph_text: String::new(),
+                checkbox_like: false,
+                option_label: String::new(),
+                highlighted: false,
+                bold: false,
+                italic: false,
+                underline: false,
+            },
+        ];
+
+        prune_stray_punctuation_refs(&mut fields, &runs);
+        assert_eq!(fields[0].mark_refs.len(), 1);
+        assert_eq!(fields[0].marks, ["word/document.xml-p0-r0"]);
     }
 
     #[test]

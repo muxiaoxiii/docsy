@@ -318,8 +318,13 @@ fn wrap_paragraph_runs(
                     let mut run_node =
                         std::mem::replace(&mut children[i], XmlNode::Text(String::new()));
                     let replacements = process_multi_field_run(&mut run_node, &entries);
+                    let count = replacements.len();
                     children.splice(i..i + 1, replacements);
-                    inserted = 1;
+                    // The replacements are derived from one source run. Skip all of
+                    // them so only the next source run advances run_idx; otherwise a
+                    // remaining prefix/suffix run is counted again and every later
+                    // coordinate in the paragraph shifts left.
+                    inserted = count as u32;
                 }
             }
         }
@@ -693,5 +698,47 @@ mod tests {
         </w:p></w:body></w:document>"#;
         let tree = XmlTree::parse(xml.as_bytes()).unwrap();
         assert!(detect_existing_sdt(&tree.root, "word/document.xml").is_ok());
+    }
+
+    #[test]
+    fn multi_range_run_does_not_shift_later_source_run_coordinates() {
+        let mut tree = XmlTree::parse(
+            r#"<w:p><w:r><w:t>甲乙丙丁</w:t></w:r><w:r><w:t>后续字段</w:t></w:r></w:p>"#.as_bytes(),
+        )
+        .unwrap();
+        let mut targets = HashMap::new();
+        targets.insert(
+            ("word/document.xml".to_string(), 0, 0),
+            vec![
+                (
+                    "first".to_string(),
+                    "text".to_string(),
+                    false,
+                    Some(0),
+                    Some(1),
+                ),
+                (
+                    "second".to_string(),
+                    "text".to_string(),
+                    false,
+                    Some(2),
+                    Some(3),
+                ),
+            ],
+        );
+        targets.insert(
+            ("word/document.xml".to_string(), 0, 1),
+            vec![("later".to_string(), "text".to_string(), false, None, None)],
+        );
+
+        wrap_runs_by_coordinates(&mut tree.root, "word/document.xml", &targets, &mut (0, 0))
+            .unwrap();
+
+        let xml = tree.to_xml().unwrap();
+        assert!(xml.contains("w:val=\"first\""));
+        assert!(xml.contains("w:val=\"second\""));
+        assert!(xml.contains("w:val=\"later\""));
+        assert!(xml.contains("{{later}}"));
+        assert!(!xml.contains(">后续字段<"));
     }
 }

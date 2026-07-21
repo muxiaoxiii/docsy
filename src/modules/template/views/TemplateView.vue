@@ -3094,6 +3094,25 @@ function templateSeedValues() {
 }
 
 function validateFieldRowsBeforeSave() {
+  // Every yellow run must remain represented by a confirmed row, including
+  // prefixes, suffixes and "保留原文" rows. Otherwise saving clears its yellow
+  // highlight but leaves its sample text in the generated template.
+  const coveredMarks = new Set()
+  for (const row of fieldRows.value) {
+    if (!row.enabled) continue
+    for (const ref of row.markRefs || []) {
+      if (ref?.markId) coveredMarks.add(ref.markId)
+    }
+    if (row.markId) coveredMarks.add(row.markId)
+  }
+  const missingMarks = marks.value.filter((mark) => !coveredMarks.has(mark.id))
+  if (missingMarks.length) {
+    const samples = missingMarks
+      .slice(0, 3)
+      .map((mark) => `“${mark.text}”`)
+      .join('、')
+    return `仍有 ${missingMarks.length} 处标黄文本未处理：${samples}。请设为字段、前缀、后缀、保留原文或删除文本后再保存`
+  }
   for (const row of fieldRows.value) {
     if (!row.enabled || rowUsage(row) === 'ignore') continue
     if (rowUsage(row) === 'delete_text') continue
@@ -3631,18 +3650,7 @@ function normalizeValues() {
 
 function normalizeStructureOverrides() {
   const result = {}
-  for (const field of renderableTemplateFields.value) {
-    const key = structureOverrideKey(field)
-    if (!key) continue
-    const override = structureOverrides[key]
-    const prefix = override ? (override.prefix ?? '') : sourceFieldPrefix(field)
-    const suffix = fieldUsesRepeatableSuffix(field) ? '' : override ? (override.suffix ?? '') : sourceFieldSuffix(field)
-    if (prefix || suffix || override) {
-      result[key] = { prefix, suffix }
-    }
-  }
   for (const [name, override] of Object.entries(structureOverrides)) {
-    if (result[name]) continue
     const field = fieldByStructureOverrideKey(name)
     result[name] = {
       prefix: override.prefix ?? '',
@@ -3755,15 +3763,7 @@ function structureOverrideKey(field) {
 
 function defaultPrefixForField(field, prefix) {
   const value = cleanStructureText(prefix)
-  if (!value) return ''
-  if (field?.type === 'reference' && isPartyRoleText(value)) {
-    return fillFieldLabel(field) || value
-  }
   return value
-}
-
-function isPartyRoleText(text) {
-  return /^(原告|被告|第三人|上诉人|被上诉人|申请人|被申请人|委托人)$/.test(String(text || '').trim())
 }
 
 function splitPartyInput(value) {
