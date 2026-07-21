@@ -139,11 +139,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APP_PATH="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)"
           DMG_PATH="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -n "$APP_PATH"
           test -n "$DMG_PATH"
-          codesign --verify --deep --verbose=2 "$APP_PATH" || echo "⚠️ codesign verify (ad-hoc) — expected for local dev builds"
           hdiutil verify "$DMG_PATH"
 
       - name: Upload package
