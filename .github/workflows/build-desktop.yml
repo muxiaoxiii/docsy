@@ -18,7 +18,6 @@ jobs:
             os: macos-14
             command: npm run tauri:build:mac
             artifacts: |
-              src-tauri/target/release/bundle/macos/*.app
               src-tauri/target/release/bundle/dmg/*.dmg
           - platform: windows-x64
             os: windows-latest
