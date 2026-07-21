@@ -951,6 +951,7 @@ const checkboxLikeCount = computed(() => marks.value.filter((mark) => mark.check
 onMounted(() => {
   document.addEventListener('selectionchange', rememberSourcePreviewSelection)
   document.addEventListener('pointerup', rememberSourcePreviewSelection)
+  window.addEventListener('docsy-template-library-changed', refreshLibraryAndHistory)
   void loadTemplateLibrary()
   void loadTemplateHistoryRuns()
 })
@@ -958,7 +959,13 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('selectionchange', rememberSourcePreviewSelection)
   document.removeEventListener('pointerup', rememberSourcePreviewSelection)
+  window.removeEventListener('docsy-template-library-changed', refreshLibraryAndHistory)
 })
+
+function refreshLibraryAndHistory() {
+  void loadTemplateLibrary()
+  void loadTemplateHistoryRuns()
+}
 
 function setPreviewSampleValue(name, value) {
   previewSampleValues[name] = value

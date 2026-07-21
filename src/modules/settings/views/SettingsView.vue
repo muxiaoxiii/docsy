@@ -306,6 +306,7 @@ async function restoreTemplate(row) {
   }
   ElMessage.success('模板已恢复')
   await loadTemplateTrash()
+  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
 }
 
 async function permanentlyDeleteTemplate(row) {
@@ -334,6 +335,7 @@ async function permanentlyDeleteTemplate(row) {
   }
   ElMessage.success(migrateToCommon ? '模板已删除，数据已迁移为模板通用数据' : '模板和内部数据已删除')
   await loadTemplateTrash()
+  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
 }
 
 function shortDate(value) {
