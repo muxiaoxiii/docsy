@@ -141,15 +141,17 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.brand:hover {
-  opacity: 0.8;
-  transition: opacity 0.15s ease;
-}
+.brand {
   display: flex;
   align-items: center;
   padding: 16px;
   cursor: pointer;
   gap: 8px;
+}
+
+.brand:hover {
+  opacity: 0.8;
+  transition: opacity 0.15s ease;
 }
 
 .brand-logo {

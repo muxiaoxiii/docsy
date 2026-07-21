@@ -116,13 +116,6 @@ jobs:
             ) `
             -Executables @("ffmpeg.exe", "ffprobe.exe")
 
-      - name: Run frontend tests
-        run: npm run test -- --run
-
-      - name: Run Rust tests
-        run: cargo test
-        working-directory: src-tauri
-
       - name: Build frontend
         run: |
           npm run build
@@ -130,6 +123,13 @@ jobs:
           ls -la dist/ 2>/dev/null || echo "ERROR: dist/ does not exist!"
           echo "=== dist/index.html ==="
           cat dist/index.html 2>/dev/null || echo "ERROR: index.html missing!"
+
+      - name: Run frontend tests
+        run: npm run test -- --run
+
+      - name: Run Rust tests
+        run: cargo test
+        working-directory: src-tauri
 
       - name: Build package
         run: ${{ matrix.command }}
