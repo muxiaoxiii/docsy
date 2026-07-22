@@ -56,7 +56,7 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
     let output = unique_docx_output_path(std::path::Path::new(&args.output_path))?;
 
     let mut manifest = TemplateManifest {
-        // The application version is 0.8.0; the package schema remains v2.
+        // The application version is 0.8.x; the package schema remains v2.
         // It is still the same manifest shape, with stable per-mark tags.
         format_version: 2,
         template: TemplateMeta {
