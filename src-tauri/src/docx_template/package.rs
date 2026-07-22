@@ -12,6 +12,8 @@ use super::MAX_BINARY_ENTRY_BYTES;
 use super::MAX_DOCSYTPL_BYTES;
 use super::MAX_DOCX_BYTES;
 use super::MAX_MANIFEST_BYTES;
+use super::MAX_PACKAGE_UNCOMPRESSED_BYTES;
+use super::MAX_PACKAGE_XML_BYTES;
 use super::MAX_XML_ENTRY_BYTES;
 use super::MAX_ZIP_ENTRIES;
 
@@ -22,6 +24,7 @@ pub fn read_docx_package(path: &Path) -> Result<Package> {
     read_zip_package(&bytes, false, "Word 文件")
 }
 
+#[allow(dead_code)] // byte-backed entry point is kept for callers that already own an upload buffer
 pub fn read_docx_package_from_bytes(bytes: &[u8]) -> Result<Package> {
     read_zip_package(bytes, false, "Word 文件")
 }
@@ -56,7 +59,8 @@ pub fn write_docsytpl_package(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let file = std::fs::File::create(path)?;
+    let temp_path = atomic_temp_path(path);
+    let file = std::fs::File::create(&temp_path)?;
     let mut writer = zip::ZipWriter::new(file);
     let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
@@ -71,6 +75,7 @@ pub fn write_docsytpl_package(
         writer.write_all(data)?;
     }
     writer.finish()?;
+    replace_atomically(&temp_path, path)?;
     Ok(())
 }
 
@@ -80,6 +85,8 @@ fn read_zip_package(bytes: &[u8], filter_xml_only: bool, label: &str) -> Result<
     ensure_entry_count(archive.len(), label)?;
 
     let mut pkg = HashMap::new();
+    let mut total_size = 0_u64;
+    let mut total_xml_size = 0_u64;
     for idx in 0..archive.len() {
         let mut file = archive.by_index(idx)?;
         let name = file.name().to_string();
@@ -99,6 +106,16 @@ fn read_zip_package(bytes: &[u8], filter_xml_only: bool, label: &str) -> Result<
             }
             MAX_BINARY_ENTRY_BYTES
         };
+        total_size = total_size.saturating_add(size);
+        if total_size > MAX_PACKAGE_UNCOMPRESSED_BYTES {
+            anyhow::bail!("{}解压后的总大小超过限制", label);
+        }
+        if super::is_word_xml_part(&name) || name == MANIFEST_PATH {
+            total_xml_size = total_xml_size.saturating_add(size);
+            if total_xml_size > MAX_PACKAGE_XML_BYTES {
+                anyhow::bail!("{}中的 XML 总大小超过限制", label);
+            }
+        }
 
         let data = super::read_vec_with_limit(
             &mut file,
@@ -115,7 +132,8 @@ fn write_zip_package(path: &Path, pkg: &Package) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let file = std::fs::File::create(path)?;
+    let temp_path = atomic_temp_path(path);
+    let file = std::fs::File::create(&temp_path)?;
     let mut writer = zip::ZipWriter::new(file);
     let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for (name, data) in pkg {
@@ -123,6 +141,24 @@ fn write_zip_package(path: &Path, pkg: &Package) -> Result<()> {
         writer.write_all(data)?;
     }
     writer.finish()?;
+    replace_atomically(&temp_path, path)?;
+    Ok(())
+}
+
+fn atomic_temp_path(path: &Path) -> std::path::PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("package");
+    path.with_file_name(format!(".{file_name}.{nonce}.tmp"))
+}
+
+fn replace_atomically(temp_path: &Path, path: &Path) -> Result<()> {
+    if let Err(error) = std::fs::rename(temp_path, path) {
+        let _ = std::fs::remove_file(temp_path);
+        return Err(error.into());
+    }
     Ok(())
 }
 

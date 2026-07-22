@@ -18,8 +18,12 @@ fn parse_mark_coords(mark_id: &str) -> Option<(String, usize, usize)> {
 pub fn build_template_docx(
     package_xml: &[(String, Vec<u8>)],
     fields: &[TemplateField],
-    _index: &DocumentIndex,
+    index: &DocumentIndex,
 ) -> Result<Vec<(String, Vec<u8>)>> {
+    // Do not alter authoring highlights until every selected target is proven
+    // to exist in the source snapshot. A stale preview must fail safely rather
+    // than produce a template containing unmarked sample text.
+    validate_coordinate_targets(fields, index)?;
     let mut results = Vec::new();
 
     for (part_name, xml_bytes) in package_xml {
@@ -49,6 +53,69 @@ pub fn build_template_docx(
         results.push((part_name.clone(), out_xml.into_bytes()));
     }
     Ok(results)
+}
+
+fn validate_coordinate_targets(fields: &[TemplateField], index: &DocumentIndex) -> Result<()> {
+    let mut occupied: HashMap<(String, usize, usize), Vec<(usize, usize)>> = HashMap::new();
+    for field in fields {
+        let targets: Vec<(&str, Option<usize>, Option<usize>)> = if is_marker_field(&field.field_type) {
+            field
+                .options
+                .iter()
+                .map(|option| (option.marker_mark_id.as_str(), None, None))
+                .collect()
+        } else if field.mark_refs.is_empty() {
+            field
+                .marks
+                .iter()
+                .map(|mark| (mark.as_str(), None, None))
+                .collect()
+        } else {
+            field
+                .mark_refs
+                .iter()
+                .map(|mark| (mark.mark_id.as_str(), mark.start, mark.end))
+                .collect()
+        };
+
+        for (mark_id, start, end) in targets {
+            let (part, paragraph_index, run_index) = parse_mark_coords(mark_id)
+                .with_context(|| format!("字段“{}”包含无效标记坐标", field.label))?;
+            let node = index
+                .parts
+                .get(&part)
+                .and_then(|part_index| {
+                    part_index.nodes.iter().find(|node| {
+                        node.paragraph_index == paragraph_index && node.run_index == run_index
+                    })
+                })
+                .with_context(|| {
+                    format!(
+                        "字段“{}”的标记已不在源 Word 中。请重新读取 Word 后再保存模板",
+                        field.label
+                    )
+                })?;
+            let text_len = node.text.chars().count();
+            let range = match (start, end) {
+                (Some(start), Some(end)) if start < end && end <= text_len => (start, end),
+                (None, None) => (0, text_len),
+                _ => anyhow::bail!(
+                    "字段“{}”的标记范围无效。请重新读取 Word 后再保存模板",
+                    field.label
+                ),
+            };
+            let key = (part, paragraph_index, run_index);
+            let ranges = occupied.entry(key).or_default();
+            if ranges
+                .iter()
+                .any(|(left, right)| range.0 < *right && *left < range.1)
+            {
+                anyhow::bail!("字段“{}”与其他字段使用了重叠的文本范围", field.label);
+            }
+            ranges.push(range);
+        }
+    }
+    Ok(())
 }
 
 /// A field target within a run: tag, field_type, is_delete, (start, end) char range
@@ -195,7 +262,10 @@ fn find_sdt_elements(node: &XmlNode, paths: &mut Vec<Vec<String>>, current: Vec<
 }
 
 /// Walk the tree and wrap runs at specified coordinates.
-/// Uses a shared paragraph counter across all w:p and w:tr elements.
+/// The traversal deliberately mirrors `scan_document_index`: every paragraph
+/// is visited once in document order, including paragraphs nested in text
+/// boxes and tables. Keeping one walker prevents saved coordinates drifting
+/// from the coordinates shown during template inspection.
 fn wrap_runs_by_coordinates(
     node: &mut XmlNode,
     part: &str,
@@ -207,47 +277,9 @@ fn wrap_runs_by_coordinates(
             cursor.1 = 0;
             wrap_paragraph_runs(children, part, cursor, coord_map)?;
             cursor.0 += 1;
-        } else if name == "w:tr" {
-            cursor.1 = 0;
-            wrap_tr_runs(children, part, cursor, coord_map)?;
         } else {
-            // Recurse into children
-            let child_count = children.len();
-            for i in 0..child_count {
-                wrap_runs_by_coordinates(&mut children[i], part, coord_map, cursor)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn wrap_tr_runs(
-    children: &mut [XmlNode],
-    part: &str,
-    cursor: &mut (usize, usize),
-    coord_map: &HashMap<(String, usize, usize), Vec<FieldTarget>>,
-) -> Result<()> {
-    for child in children.iter_mut() {
-        if let XmlNode::Element {
-            name, children: cc, ..
-        } = child
-        {
-            if name == "w:tc" {
-                for c in cc.iter_mut() {
-                    if let XmlNode::Element {
-                        name: cn,
-                        children: p_children,
-                        ..
-                    } = c
-                    {
-                        if cn == "w:p" {
-                            wrap_paragraph_runs(p_children, part, cursor, coord_map)?;
-                            cursor.0 += 1; // w:p inside w:tr counts as paragraph
-                        }
-                    }
-                }
-            } else {
-                wrap_tr_runs(cc, part, cursor, coord_map)?;
+            for child in children.iter_mut() {
+                wrap_runs_by_coordinates(child, part, coord_map, cursor)?;
             }
         }
     }
@@ -287,7 +319,7 @@ fn wrap_paragraph_runs(
                     let (tag, _field_type, is_delete, start, end) = entries[0].clone();
                     if is_delete {
                         if let (Some(s), Some(e)) = (start, end) {
-                            delete_text_range(&mut children[i], s, e);
+                            delete_text_range(&mut children[i], s, e)?;
                         } else {
                             children[i] = XmlNode::Text(String::new());
                         }
@@ -295,7 +327,7 @@ fn wrap_paragraph_runs(
                         strip_yellow_highlight(&mut children[i]);
                         if let (Some(s), Some(e)) = (start, end) {
                             let (prefix_run, sdt_node, suffix_run) =
-                                split_run_for_range(&mut children[i], &tag, s, e);
+                                split_run_for_range(&mut children[i], &tag, s, e)?;
                             let mut replacements = Vec::new();
                             if let Some(p) = prefix_run {
                                 replacements.push(p);
@@ -317,7 +349,7 @@ fn wrap_paragraph_runs(
                     // Multi-field: take out the run first to avoid borrow conflict
                     let mut run_node =
                         std::mem::replace(&mut children[i], XmlNode::Text(String::new()));
-                    let replacements = process_multi_field_run(&mut run_node, &entries);
+                    let replacements = process_multi_field_run(&mut run_node, &entries)?;
                     let count = replacements.len();
                     children.splice(i..i + 1, replacements);
                     // The replacements are derived from one source run. Skip all of
@@ -360,8 +392,6 @@ fn find_nested_paragraphs(
             cursor.1 = 0;
             wrap_paragraph_runs(children, part, cursor, coord_map)?;
             cursor.0 += 1;
-        } else if name == "w:tr" {
-            wrap_tr_runs(children, part, cursor, coord_map)?;
         } else {
             for child in children.iter_mut() {
                 find_nested_paragraphs(child, part, cursor, coord_map)?;
@@ -472,7 +502,7 @@ fn split_run_for_range(
     tag: &str,
     start: usize,
     end: usize,
-) -> (Option<XmlNode>, XmlNode, Option<XmlNode>) {
+) -> Result<(Option<XmlNode>, XmlNode, Option<XmlNode>)> {
     let run_clone = run.clone();
     let chars: Vec<char> = collect_text_from_run(&run_clone).chars().collect();
     let start_idx = start.min(chars.len());
@@ -480,6 +510,12 @@ fn split_run_for_range(
     let prefix: String = chars[..start_idx].iter().collect();
     let middle: String = chars[start_idx..end_idx].iter().collect();
     let suffix_text: String = chars[end_idx..].iter().collect();
+
+    if (!prefix.is_empty() || !suffix_text.is_empty()) && run_has_non_text_payload(&run_clone) {
+        anyhow::bail!(
+            "字段不能只覆盖同时包含换行、制表符或嵌入对象的部分文本；请在 Word 中把该字段拆成独立文本后重新标黄"
+        );
+    }
 
     let prefix_run = (!prefix.is_empty()).then(|| {
         let mut value = make_run_with_text(&run_clone, &prefix);
@@ -497,21 +533,36 @@ fn split_run_for_range(
         wrap_as_sdt(make_run_with_text(&run_clone, &middle), tag)
     };
     *run = XmlNode::Text(String::new());
-    (prefix_run, sdt, suffix_run)
+    Ok((prefix_run, sdt, suffix_run))
 }
 
 /// Delete a character range within a w:r element's text
-fn delete_text_range(run: &mut XmlNode, start: usize, end: usize) {
+fn delete_text_range(run: &mut XmlNode, start: usize, end: usize) -> Result<()> {
     let original = run.clone();
     let chars: Vec<char> = collect_text_from_run(&original).chars().collect();
     let start_idx = start.min(chars.len());
     let end_idx = end.min(chars.len()).max(start_idx);
+    if (start_idx > 0 || end_idx < chars.len()) && run_has_non_text_payload(&original) {
+        anyhow::bail!(
+            "删除范围不能只覆盖同时包含换行、制表符或嵌入对象的部分文本；请在 Word 中先拆分该文本"
+        );
+    }
     let text = format!(
         "{}{}",
         chars[..start_idx].iter().collect::<String>(),
         chars[end_idx..].iter().collect::<String>(),
     );
     *run = make_run_with_text(&original, &text);
+    Ok(())
+}
+
+/// A partial split may clone this run several times. Only plain text runs are
+/// safe to clone: copying a tab, break, drawing or field node would duplicate
+/// document content and change the layout.
+fn run_has_non_text_payload(run: &XmlNode) -> bool {
+    matches!(run, XmlNode::Element { children, .. } if children.iter().any(|child| {
+        !matches!(child, XmlNode::Element { name, .. } if name == "w:rPr" || name == "w:t")
+    }))
 }
 
 /// Clone a w:r element preserving its structure, replacing text with content
@@ -582,14 +633,19 @@ fn run_has_text(node: &XmlNode) -> bool {
     false
 }
 
-fn process_multi_field_run(run: &mut XmlNode, entries: &[&FieldTarget]) -> Vec<XmlNode> {
+fn process_multi_field_run(run: &mut XmlNode, entries: &[&FieldTarget]) -> Result<Vec<XmlNode>> {
     if entries.is_empty() {
-        return vec![XmlNode::Text(String::new())];
+        return Ok(vec![XmlNode::Text(String::new())]);
     }
 
     let original_text = collect_text_from_run(run);
     let chars: Vec<char> = original_text.chars().collect();
     let run_clone = run.clone();
+    if run_has_non_text_payload(&run_clone) {
+        anyhow::bail!(
+            "同一文本 run 内不能同时保存多个字段，因为该 run 含有非文本内容；请在 Word 中拆分文本后重新标黄"
+        );
+    }
 
     // Build parts: for each entry, extract [start..end] and keep remaining text around it
     let mut result: Vec<XmlNode> = Vec::new();
@@ -639,7 +695,7 @@ fn process_multi_field_run(run: &mut XmlNode, entries: &[&FieldTarget]) -> Vec<X
     if result.is_empty() {
         result.push(XmlNode::Text(String::new()));
     }
-    result
+    Ok(result)
 }
 
 fn collect_text_from_run(run: &XmlNode) -> String {

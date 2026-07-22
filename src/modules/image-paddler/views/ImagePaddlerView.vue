@@ -19,6 +19,13 @@
             </el-select>
           </el-form-item>
 
+          <el-form-item v-if="folders.length > 1" label="多文件夹">
+            <el-select v-model="settings.output_mode">
+              <el-option label="合并为一个文档" value="merged" />
+              <el-option label="每个文件夹单独生成" value="per_folder" />
+            </el-select>
+          </el-form-item>
+
           <el-form-item label="每页张数">
             <el-select v-model="settings.layout">
               <el-option label="1 张" value="1" />
@@ -146,7 +153,7 @@
           <div v-if="generatedResult" class="generated-result">
             <div>
               <strong>已生成</strong>
-              <div class="output-path">{{ generatedResult.output_path }}</div>
+              <div v-for="path in generatedOutputPaths" :key="path" class="output-path">{{ path }}</div>
             </div>
             <el-button size="small" type="primary" @click="openGeneratedOutput">打开文件</el-button>
           </div>
@@ -264,6 +271,7 @@ const previewSources = reactive({})
 const pageZoom = ref(100)
 let unlistenDragDrop = null
 let analyzeTimer = null
+let analysisRequestId = 0
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
 const KNOWN_NON_IMAGE_EXTENSIONS = new Set([
   'pdf',
@@ -287,6 +295,7 @@ const KNOWN_NON_IMAGE_EXTENSIONS = new Set([
 
 const settings = reactive({
   output_format: 'pdf',
+  output_mode: 'merged',
   layout: '2x1',
   custom_rows: 2,
   custom_cols: 2,
@@ -316,9 +325,13 @@ const previewSlots = computed(() => {
   while (slots.length < layoutGrid.value.rows * layoutGrid.value.cols) slots.push(null)
   return slots
 })
+const generatedOutputPaths = computed(() => {
+  const paths = generatedResult.value?.output_paths || []
+  return paths.length ? paths : generatedResult.value?.output_path ? [generatedResult.value.output_path] : []
+})
 const previewPageStyle = computed(() => ({
   aspectRatio: resolvedOrientation.value === 'landscape' ? '297 / 210' : '210 / 297',
-  padding: `${Math.max(0, settings.margin_mm) * 1.2}px`,
+  padding: `${(Math.max(0, settings.margin_mm) / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}%`,
   width: `${pageZoom.value}%`,
   minWidth: '220px',
 }))
@@ -372,8 +385,10 @@ async function selectFolder() {
 
 async function analyze() {
   if (!folders.value.length) return
+  const requestId = ++analysisRequestId
   analyzing.value = true
   const result = await tauriCallSafe('analyze_image_paddler_folder', { folder: folder.value, folders: folders.value })
+  if (requestId !== analysisRequestId) return
   if (result.ok) {
     analysis.value = result.data
     await preloadVisibleImages()
@@ -397,7 +412,12 @@ async function run() {
   })
   if (result.ok) {
     generatedResult.value = result.data
-    ElMessage.success(`已生成 ${result.data.images} 张图片，${result.data.pages} 页`)
+    const count = result.data.output_paths?.length || 1
+    ElMessage.success(
+      count > 1
+        ? `已生成 ${count} 个文档，共 ${result.data.images} 张图片、${result.data.pages} 页`
+        : `已生成 ${result.data.images} 张图片，${result.data.pages} 页`,
+    )
   } else {
     ElMessage.error(result.error || '生成失败')
   }
@@ -405,8 +425,9 @@ async function run() {
 }
 
 async function openGeneratedOutput() {
-  if (!generatedResult.value?.output_path) return
-  const result = await openPath(generatedResult.value.output_path)
+  const path = generatedResult.value?.output_path
+  if (!path) return
+  const result = await openPath(path)
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开生成文件')
   }

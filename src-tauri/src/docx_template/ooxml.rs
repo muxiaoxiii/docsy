@@ -54,7 +54,7 @@ impl XmlTree {
                 let rest = &decl[enc_start + 9..];
                 let enc_val = rest
                     .trim_start_matches(['"', '\''])
-                    .split(|c| c == '"' || c == '\'')
+                    .split(['"', '\''])
                     .next()
                     .unwrap_or("");
                 let enc_lower = enc_val.to_lowercase();

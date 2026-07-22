@@ -175,7 +175,7 @@ fn render_tree(
 }
 
 fn try_expand_table_row(
-    children: &mut Vec<XmlNode>,
+    children: &[XmlNode],
     idx: usize,
     tag_map: &TagMap<'_>,
     values: &HashMap<String, Value>,
@@ -201,12 +201,15 @@ fn try_expand_table_row(
             let value = value_for_field(values, field)
                 .cloned()
                 .unwrap_or(Value::Null);
-            let items = value_to_items(&value);
+            let items = party_items(&value);
             if items.len() > 1 {
                 let mut new_rows = Vec::new();
                 for item in &items {
                     let mut item_values = values.clone();
-                    item_values.insert(field.id.clone(), serde_json::Value::String(item.clone()));
+                    item_values.insert(
+                        field.id.clone(),
+                        serde_json::json!({ "text": item.text, "suffix": item.suffix }),
+                    );
                     let mut row_tree =
                         XmlTree::parse(row_xml.as_bytes()).context("表格行复制: 解析失败")?;
                     render_tree(&mut row_tree.root, tag_map, &item_values, overrides)?;
@@ -724,8 +727,8 @@ fn strip_suffix_after(children: &mut [XmlNode], at: usize, suffix: &str) {
 
     let mut texts: Vec<(usize, usize)> = Vec::new();
     let mut total = 0;
-    for j in (at + 1)..children.len() {
-        let text = collect_text_from_element(&children[j]);
+    for (j, node) in children.iter().enumerate().skip(at + 1) {
+        let text = collect_text_from_element(node);
         let char_count = text.chars().count();
         if char_count == 0 {
             continue;
@@ -909,8 +912,28 @@ fn party_items(value: &Value) -> Vec<PartyItem> {
                 _ => None,
             })
             .collect(),
+        Value::Object(values) => party_item_from_object(values).into_iter().collect(),
         _ => Vec::new(),
     }
+}
+
+fn party_item_from_object(values: &serde_json::Map<String, Value>) -> Option<PartyItem> {
+    let text = values
+        .get("name")
+        .or_else(|| values.get("text"))?
+        .as_str()?
+        .trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(PartyItem {
+        text: text.to_string(),
+        suffix: values
+            .get("suffix")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    })
 }
 
 fn apply_party_item_suffix(
@@ -949,12 +972,6 @@ fn apply_party_item_suffix(
     );
 }
 
-fn value_to_items(value: &Value) -> Vec<String> {
-    party_items(value)
-        .into_iter()
-        .map(|item| item.rendered())
-        .collect()
-}
 
 #[cfg(test)]
 mod tests {

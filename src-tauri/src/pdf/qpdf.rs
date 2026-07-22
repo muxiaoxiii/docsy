@@ -135,7 +135,7 @@ pub fn extract_pages(
     if pages.is_empty() {
         anyhow::bail!("缺少要提取的页码");
     }
-    if pages.iter().any(|page| *page == 0) {
+    if pages.contains(&0) {
         anyhow::bail!("页码必须从 1 开始");
     }
     let input_path = Path::new(input);
@@ -219,29 +219,40 @@ pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {
         .unwrap_or("output");
 
     let pages = page_count(input)?;
-    let mut outputs = Vec::new();
-
-    for i in 1..=pages {
-        let output = Path::new(output_dir).join(format!("{}-{}.pdf", stem, i));
-        let command_output = std::process::Command::new(&bin)
-            .arg("--empty")
-            .arg("--pages")
-            .arg(input)
-            .arg(i.to_string())
-            .arg("--")
-            .arg(&output)
-            .output()?;
-        if !command_output.status.success() {
-            let stderr = String::from_utf8_lossy(&command_output.stderr);
-            anyhow::bail!("qpdf 拆分第 {i} 页失败: {}", stderr.trim());
-        }
-        if !output.exists() {
-            anyhow::bail!("qpdf 未生成第 {i} 页输出文件");
-        }
-        outputs.push(output.display().to_string());
+    let token = unique_suffix();
+    let output_pattern = Path::new(output_dir).join(format!("{stem}-split-{token}-%d.pdf"));
+    let command_output = std::process::Command::new(&bin)
+        .arg("--split-pages")
+        .arg(input)
+        .arg(&output_pattern)
+        .output()?;
+    if !command_output.status.success() {
+        let stderr = String::from_utf8_lossy(&command_output.stderr);
+        anyhow::bail!("qpdf 拆分失败: {}", stderr.trim());
     }
 
-    Ok(outputs)
+    let prefix = format!("{stem}-split-{token}-");
+    let mut outputs = std::fs::read_dir(output_dir)?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".pdf"))
+        })
+        .collect::<Vec<_>>();
+    outputs.sort();
+    if outputs.len() != pages as usize {
+        anyhow::bail!(
+            "qpdf 拆分输出页数异常：预期 {pages} 个文件，实际 {} 个",
+            outputs.len()
+        );
+    }
+
+    Ok(outputs
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect())
 }
 
 pub fn page_count(input: &str) -> Result<u32> {
@@ -294,6 +305,14 @@ fn unique_output_path_in_dir(input: &Path, output_dir: Option<&str>, suffix: &st
         i += 1;
     }
     path
+}
+
+fn unique_suffix() -> String {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("{}-{millis}", std::process::id())
 }
 
 #[cfg(test)]

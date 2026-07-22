@@ -10,8 +10,17 @@ pub struct QpdfStatus {
 }
 
 #[tauri::command]
-pub fn check_qpdf() -> QpdfStatus {
-    let status = crate::external::QpdfTool.check();
+pub async fn check_qpdf() -> QpdfStatus {
+    let status = run_blocking(|| Ok(crate::external::QpdfTool.check()))
+        .await
+        .unwrap_or_else(|_| crate::external::ToolStatus {
+            available: false,
+            path: None,
+            version: None,
+            install_hint: "无法检测 qpdf".into(),
+            managed: false,
+            source: "unknown".into(),
+        });
     QpdfStatus {
         available: status.available,
         path: status.path,
@@ -26,8 +35,8 @@ pub struct InspectResult {
 }
 
 #[tauri::command]
-pub fn inspect_pdf(input: String) -> Result<InspectResult, String> {
-    let result = crate::pdf::qpdf::inspect(&input).map_err(|e| e.to_string())?;
+pub async fn inspect_pdf(input: String) -> Result<InspectResult, String> {
+    let result = run_blocking(move || crate::pdf::qpdf::inspect(&input)).await?;
     Ok(InspectResult {
         encrypted: result.encrypted,
         pages: result.pages,
@@ -153,17 +162,17 @@ pub async fn inspect_merged_evidence_pdf(
 }
 
 #[tauri::command]
-pub fn delete_pdf_annotations(
+pub async fn delete_pdf_annotations(
     args: serde_json::Value,
 ) -> Result<crate::pdf::annotations::DeleteAnnotationsResult, String> {
-    crate::pdf::annotations::delete_annotations(&args).map_err(|e| e.to_string())
+    run_blocking(move || crate::pdf::annotations::delete_annotations(&args)).await
 }
 
 #[tauri::command]
-pub fn delete_pdf_header_footer_artifacts(
+pub async fn delete_pdf_header_footer_artifacts(
     args: serde_json::Value,
 ) -> Result<crate::pdf::artifacts::DeleteHeaderFooterArtifactsResult, String> {
-    crate::pdf::artifacts::delete_header_footer_artifacts(&args).map_err(|e| e.to_string())
+    run_blocking(move || crate::pdf::artifacts::delete_header_footer_artifacts(&args)).await
 }
 
 #[tauri::command]
@@ -174,6 +183,6 @@ pub async fn render_pdf_preview(
 }
 
 #[tauri::command]
-pub fn get_pdf_page_count(input: String) -> Result<u32, String> {
-    crate::pdf::qpdf::page_count(&input).map_err(|e| e.to_string())
+pub async fn get_pdf_page_count(input: String) -> Result<u32, String> {
+    run_blocking(move || crate::pdf::qpdf::page_count(&input)).await
 }

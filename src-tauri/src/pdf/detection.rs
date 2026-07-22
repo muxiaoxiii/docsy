@@ -12,6 +12,11 @@ use std::sync::LazyLock;
 
 use crate::external::ExternalTool;
 
+// Full bbox XML plus content-stream inspection is intentionally bounded. A
+// merged evidence file can have thousands of scanned pages, and keeping every
+// page's XML/text/object sample in memory is not safe for a desktop workflow.
+const MAX_SPLIT_ANALYSIS_PAGES: u32 = 600;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionArgs {
@@ -228,11 +233,8 @@ pub fn suggest_split_ranges(args: &serde_json::Value) -> Result<SplitSuggestionR
         serde_json::from_value(args.clone()).context("解析拆分建议参数失败")?;
     let total_pages =
         super::qpdf::page_count(&args.input_path).context("读取合并 PDF 总页数失败")?;
-    let max_pages = args
-        .max_pages
-        .unwrap_or(total_pages)
-        .min(total_pages)
-        .max(1);
+    let requested_pages = args.max_pages.unwrap_or(total_pages).min(total_pages).max(1);
+    let max_pages = requested_pages.min(MAX_SPLIT_ANALYSIS_PAGES);
     let detection = detect(&serde_json::json!({
         "inputPath": args.input_path,
         "maxPages": max_pages,
@@ -962,7 +964,7 @@ fn is_noise(text: &str, normalized_text: &str) -> bool {
     }
     let value = text.trim();
     let char_count = value.chars().count();
-    char_count < 2 || char_count > 120
+    !(2..=120).contains(&char_count)
 }
 
 fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSuggestionItem> {

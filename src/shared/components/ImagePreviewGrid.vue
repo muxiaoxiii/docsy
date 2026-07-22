@@ -99,6 +99,7 @@ const page = ref(1)
 const pageSize = ref(props.initialPageSize)
 const zoom = ref(props.initialZoom)
 const sources = reactive({})
+const loadingPaths = new Set()
 const previewVisible = ref(false)
 const previewSrc = ref('')
 
@@ -154,16 +155,24 @@ function adjustZoom(delta) {
 }
 
 async function preloadVisibleImages() {
-  await Promise.all(
-    pagedItems.value.map(async (item) => {
-      const path = itemPath(item)
-      if (!path || sources[path]) return
+  const visiblePaths = pagedItems.value.map(itemPath).filter(Boolean)
+  const keep = new Set(visiblePaths)
+  if (previewSrc.value) keep.add(previewSrc.value)
+  for (const path of Object.keys(sources)) {
+    if (!keep.has(path)) delete sources[path]
+  }
+  const queue = visiblePaths.filter((path) => !sources[path] && !loadingPaths.has(path))
+  const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+    while (queue.length) {
+      const path = queue.shift()
+      if (!path) return
+      loadingPaths.add(path)
       const result = await tauriCallSafe('read_image_data_url', { path })
-      if (result.ok) {
-        sources[path] = result.data
-      }
-    }),
-  )
+      loadingPaths.delete(path)
+      if (result.ok) sources[path] = result.data
+    }
+  })
+  await Promise.all(workers)
 }
 
 function openPreview(item) {

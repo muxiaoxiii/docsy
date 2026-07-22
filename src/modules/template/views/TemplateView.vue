@@ -3441,7 +3441,7 @@ function clearReferenceSelections() {
 
 function fieldFormKey(field) {
   if (!field) return ''
-  return field.type === 'reference' ? field.id || `reference:${field.name}` : field.name
+  return field.id || field.name
 }
 
 function resetFormValues(fields) {
@@ -3506,7 +3506,7 @@ function applyLastValuesToForm(lastValues) {
 function applyValuesToForm(values, overwrite = false) {
   for (const field of renderableTemplateFields.value) {
     const key = fieldFormKey(field)
-    const value = field.type === 'reference' ? (values[field.id] ?? values[field.name]) : values[field.name]
+    const value = values[field.id] ?? values[field.name]
     if (value === undefined) continue
     if (overwrite || isEmptyValue(formValues[key])) {
       formValues[key] = inputValueForField(field, value)
@@ -3637,11 +3637,11 @@ function normalizeValues() {
     } else {
       normalizedValue = value
     }
-    if (field.type === 'reference') {
-      values[field.id] = normalizedValue
-      if (!(field.name in values)) values[field.name] = normalizedValue
-    } else {
+    values[field.id] = normalizedValue
+    if (!(field.name in values)) {
       values[field.name] = normalizedValue
+    }
+    if (field.type !== 'reference') {
       addSemanticAliasValue(values, field, normalizedValue)
     }
   }
@@ -3695,7 +3695,8 @@ function normalizeValuesForReferenceSources() {
       field.type === 'party_list'
         ? partyItemsToValues(formValues[fieldFormKey(field)] || [])
         : formValues[fieldFormKey(field)]
-    values[field.name] = value
+    values[field.id] = value
+    if (!(field.name in values)) values[field.name] = value
     addSemanticAliasValue(values, field, value)
   }
   return values
@@ -3889,12 +3890,12 @@ function ensureExtension(path, extension) {
 
 function allFieldSuggestionItems(field) {
   const combined = [
-    ...(historyContext.value.associationSuggestions?.[field.name] || []).map((item) => ({
+    ...(historyContext.value.associationSuggestions?.[field.id] || []).map((item) => ({
       ...item,
       source: '关联',
     })),
-    ...(historyContext.value.fieldSuggestions?.[field.name] || []),
-    ...(historyContext.value.semanticSuggestions?.[field.name] || []),
+    ...(historyContext.value.fieldSuggestions?.[field.id] || []),
+    ...(historyContext.value.semanticSuggestions?.[field.id] || []),
     ...publicSuggestionItems(field),
   ]
   const seen = new Set()
@@ -3907,7 +3908,7 @@ function allFieldSuggestionItems(field) {
 }
 
 function templateStoredSuggestionItems(field) {
-  return (historyContext.value.fieldSuggestions?.[field.name] || []).slice(0, 6)
+  return (historyContext.value.fieldSuggestions?.[field.id] || []).slice(0, 6)
 }
 
 function completeField(field, query, callback) {

@@ -731,6 +731,7 @@ fn artifact_replacement_texts(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)] // overlay inputs are independent domain parameters
 fn build_overlay_pdf(
     header: Option<&OverlayTextConfig>,
     footer: Option<&OverlayTextConfig>,
@@ -931,6 +932,7 @@ fn add_standard_cjk_font(doc: &mut Document) -> ObjectId {
     })
 }
 
+#[allow(clippy::too_many_arguments)] // the font plan depends on each overlay source and page set
 fn prepare_embedded_overlay_fonts(
     doc: &mut Document,
     header: Option<&OverlayTextConfig>,
@@ -1275,11 +1277,7 @@ fn encode_utf16be_text(text: &str) -> Vec<u8> {
 fn encode_subset_glyph_text(text: &str, char_to_gid: &BTreeMap<char, u16>) -> Vec<u8> {
     text.chars()
         .flat_map(|ch| {
-            let gid = if ch.is_whitespace() {
-                char_to_gid.get(&ch).copied().unwrap_or(0)
-            } else {
-                char_to_gid.get(&ch).copied().unwrap_or(0)
-            };
+            let gid = char_to_gid.get(&ch).copied().unwrap_or(0);
             gid.to_be_bytes()
         })
         .collect()
@@ -1288,7 +1286,7 @@ fn encode_subset_glyph_text(text: &str, char_to_gid: &BTreeMap<char, u16>) -> Ve
 fn requires_embedded_font(text: &str) -> bool {
     text.chars().any(|ch| {
         let cp = ch as u32;
-        cp > 0x7E || cp < 0x20
+        !(0x20..=0x7E).contains(&cp)
     })
 }
 

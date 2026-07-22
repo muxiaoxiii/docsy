@@ -69,10 +69,12 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
     };
 
     let pkg = package::read_docx_package(&source)?;
+    ensure_template_package_safe(&pkg)?;
     let (runs, marks, _) = scan_package_to_runs_and_marks(&pkg)?;
     prune_stray_punctuation_refs(&mut manifest.fields, &runs);
     super::normalize_manifest_options(&mut manifest);
     super::sanitize_manifest_private_labels(&mut manifest, &marks);
+    super::validate_manifest(&manifest)?;
     let xml_parts: Vec<(String, Vec<u8>)> = pkg
         .iter()
         .filter(|(name, _)| is_word_xml_part(name))
@@ -96,7 +98,7 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
         out_pkg.insert(part_name, xml_data);
     }
     for (name, data) in &pkg {
-        if name == "manifest.json" {
+        if name == "manifest.json" || !copy_template_package_entry(name) {
             continue;
         }
         if !is_word_xml_part(name) && !out_pkg.contains_key(name) {
@@ -190,6 +192,7 @@ pub fn render_docx(args: RenderTemplateArgs) -> Result<String> {
     let template_path = std::path::Path::new(&args.template_path);
     let output_path = unique_docx_output_path(std::path::Path::new(&args.output_path))?;
     let (manifest, pkg) = package::read_docsytpl_package(template_path)?;
+    ensure_template_package_safe(&pkg)?;
 
     let xml_parts: Vec<(String, Vec<u8>)> = pkg
         .iter()
@@ -209,7 +212,7 @@ pub fn render_docx(args: RenderTemplateArgs) -> Result<String> {
         out_pkg.insert(part_name, xml_data);
     }
     for (name, data) in &pkg {
-        if name == "manifest.json" {
+        if name == "manifest.json" || !copy_template_package_entry(name) {
             continue;
         }
         if !is_word_xml_part(name) && !out_pkg.contains_key(name) {
@@ -230,9 +233,34 @@ pub fn render_docx(args: RenderTemplateArgs) -> Result<String> {
     Ok(output_path_str)
 }
 
+fn copy_template_package_entry(name: &str) -> bool {
+    !name.starts_with("docProps/")
+}
+
+fn ensure_template_package_safe(pkg: &HashMap<String, Vec<u8>>) -> Result<()> {
+    const UNSUPPORTED_SENSITIVE_PREFIXES: &[&str] = &[
+        "word/comments",
+        "customXml/",
+        "word/embeddings/",
+        "word/vbaProject",
+        "_xmlsignatures/",
+    ];
+    if let Some(name) = pkg.keys().find(|name| {
+        UNSUPPORTED_SENSITIVE_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+    }) {
+        anyhow::bail!(
+            "模板包含无法安全保留的批注、嵌入对象、宏或签名文件（{}）。请在 Word 中移除后重新导入",
+            name
+        );
+    }
+    Ok(())
+}
+
 /// Convert old .doc to .docx using office_oxide
 fn convert_doc_to_docx(path: &std::path::Path) -> Result<std::path::PathBuf> {
-    let doc = office_oxide::Document::open(&path.display().to_string())
+    let doc = office_oxide::Document::open(path.display().to_string())
         .with_context(|| format!("无法读取旧版 .doc 文件: {}", path.display()))?;
     let output = unique_docx_output_path(
         &std::env::temp_dir()
@@ -242,7 +270,7 @@ fn convert_doc_to_docx(path: &std::path::Path) -> Result<std::path::PathBuf> {
             ))
             .with_extension("docx"),
     )?;
-    doc.save_as(&output.display().to_string())
+    doc.save_as(output.display().to_string())
         .with_context(|| format!("转换 .doc → .docx 失败: {}", path.display()))?;
     Ok(output)
 }

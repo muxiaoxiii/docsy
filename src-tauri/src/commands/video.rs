@@ -44,6 +44,6 @@ pub async fn extract_frames(args: serde_json::Value) -> Result<serde_json::Value
 }
 
 #[tauri::command]
-pub fn list_output_frames(dir: String) -> Result<Vec<String>, String> {
-    crate::ffmpeg::extract::list_output_frames(&dir).map_err(|e| e.to_string())
+pub async fn list_output_frames(dir: String) -> Result<Vec<String>, String> {
+    super::run_blocking(move || crate::ffmpeg::extract::list_output_frames(&dir)).await
 }

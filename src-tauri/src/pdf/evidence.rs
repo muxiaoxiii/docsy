@@ -86,6 +86,12 @@ fn collect_supported_files(
 ) -> Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
+        if entry.file_type()?.is_symlink() {
+            // Evidence folders are often assembled with Finder/Explorer aliases.
+            // Never follow them: a link to an ancestor would recurse forever and
+            // a link outside the selected folder should not be imported silently.
+            continue;
+        }
         let path = entry.path();
         if path.is_dir() {
             collect_supported_files(&path, out)?;
@@ -235,7 +241,11 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
             continue;
         }
 
-        let group_output = evidence_dir.join(format!("{}.pdf", safe_file_stem(group_name)));
+        let group_output = evidence_dir.join(format!(
+            "{}-{:016x}.pdf",
+            safe_file_stem(group_name),
+            fnv1a_hash(group_id)
+        ));
         merge_pdfs_with_qpdf(&qpdf_bin, &pdf_paths, &group_output)?;
 
         let page_count = qpdf_page_count(&qpdf_bin, &group_output.display().to_string())?;
@@ -321,10 +331,16 @@ pub fn merge_all(args: &serde_json::Value) -> Result<String> {
 
 fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
     let mut attempts = Vec::new();
+    let canonical = std::fs::canonicalize(doc_path)
+        .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
+    let conversion_dir = output_dir
+        .join("_converted")
+        .join(format!("{:016x}", fnv1a_hash(&canonical.display().to_string())));
+    fs::create_dir_all(&conversion_dir).context("创建 Word 转换工作目录失败")?;
 
     if cfg!(windows) || cfg!(target_os = "macos") {
         match crate::external::WordTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_word(doc_path, output_dir) {
+            Ok(_) => match convert_doc_to_pdf_with_word(doc_path, &conversion_dir) {
                 Ok(path) => return Ok(path),
                 Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
             },
@@ -336,7 +352,7 @@ fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
 
     if cfg!(windows) {
         match crate::external::WpsTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, output_dir) {
+            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir) {
                 Ok(path) => return Ok(path),
                 Err(err) => attempts.push(format!("WPS Writer 转换失败: {err}")),
             },
@@ -345,7 +361,7 @@ fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
     }
 
     match crate::external::LibreOfficeTool.binary_path() {
-        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, output_dir) {
+        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, &conversion_dir) {
             Ok(path) => Ok(path),
             Err(err) => {
                 attempts.push(format!("LibreOffice 转换失败: {err}"));
@@ -646,7 +662,11 @@ fn apply_overlay_batch(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("page");
-        let output = overlay_dir.join(format!("{}_overlay.pdf", safe_file_stem(stem)));
+        let output = overlay_dir.join(format!(
+            "{}-{:016x}_overlay.pdf",
+            safe_file_stem(stem),
+            fnv1a_hash(input)
+        ));
 
         global_seq = apply_overlay_single(
             qpdf_bin,
@@ -681,7 +701,7 @@ fn apply_overlay_single(
 
         let overlay_ops = build_overlay_ops(
             config, input, page_num, page_count, seq, width_pt, height_pt,
-        );
+        )?;
 
         if !overlay_ops.is_empty() {
             use printpdf::*;
@@ -741,7 +761,7 @@ fn build_overlay_ops(
     seq: u32,
     _width_pt: f64,
     height_pt: f64,
-) -> Vec<printpdf::Op> {
+) -> Result<Vec<printpdf::Op>> {
     use printpdf::*;
 
     let mut ops: Vec<Op> = Vec::new();
@@ -750,7 +770,7 @@ fn build_overlay_ops(
     let has_footer = config.footer.as_ref().is_some_and(|f| f.enabled);
 
     if !has_header && !has_footer {
-        return ops;
+        return Ok(ops);
     }
 
     ops.push(Op::StartTextSection);
@@ -785,6 +805,7 @@ fn build_overlay_ops(
             };
 
             if !text.is_empty() {
+                ensure_legacy_overlay_text_supported(&text)?;
                 ops.push(Op::ShowText {
                     items: vec![TextItem::Text(text)],
                 });
@@ -814,6 +835,7 @@ fn build_overlay_ops(
             };
 
             if !text.is_empty() {
+                ensure_legacy_overlay_text_supported(&text)?;
                 ops.push(Op::ShowText {
                     items: vec![TextItem::Text(text)],
                 });
@@ -823,7 +845,20 @@ fn build_overlay_ops(
 
     ops.push(Op::EndTextSection);
 
-    ops
+    Ok(ops)
+}
+
+/// The legacy evidence-overlay path only has PDF base-14 fonts available.
+/// Helvetica cannot render CJK text reliably, so fail before producing a PDF
+/// with invisible or corrupted evidence labels. The current evidence workflow
+/// uses the embedded-font header/footer renderer instead.
+fn ensure_legacy_overlay_text_supported(text: &str) -> Result<()> {
+    if !text.is_ascii() {
+        anyhow::bail!(
+            "旧版证据叠加不支持中文或其他非 ASCII 文本；请使用“分项证据处理”的页眉页脚设置"
+        );
+    }
+    Ok(())
 }
 
 fn create_overlay_pdf_multi(pages: Vec<printpdf::PdfPage>) -> Result<Vec<u8>> {

@@ -25,6 +25,8 @@ pub(super) const MAX_DOCSYTPL_BYTES: u64 = 512 * 1024 * 1024;
 pub(super) const MAX_XML_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
 pub(super) const MAX_BINARY_ENTRY_BYTES: u64 = 256 * 1024 * 1024;
 pub(super) const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
+pub(super) const MAX_PACKAGE_UNCOMPRESSED_BYTES: u64 = 1024 * 1024 * 1024;
+pub(super) const MAX_PACKAGE_XML_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -407,14 +409,18 @@ fn move_template_file(source: &Path, destination_dir: &Path) -> Result<PathBuf> 
 pub fn permanently_delete_template(args: TemplatePermanentDeleteArgs) -> Result<()> {
     let source = PathBuf::from(args.path);
     let manifest = read_template_manifest(&source)?;
-    if source.exists() {
-        std::fs::remove_file(&source)
-            .with_context(|| format!("彻底删除模板文件失败: {}", source.display()))?;
-    }
+
+    // Delete or migrate the associated records before removing the source
+    // package. A failed history operation must not leave a template file whose
+    // invisible data can still appear in later suggestions.
     if args.migrate_to_common {
         crate::template_history::migrate_template_data_to_common(&manifest.template.id)?;
     } else {
         crate::template_history::delete_template_data(&manifest.template.id)?;
+    }
+    if source.exists() {
+        std::fs::remove_file(&source)
+            .with_context(|| format!("彻底删除模板文件失败: {}", source.display()))?;
     }
     Ok(())
 }
@@ -429,8 +435,13 @@ fn read_template_manifest(path: &Path) -> Result<TemplateManifest> {
     Ok(manifest)
 }
 
-fn validate_manifest(manifest: &TemplateManifest) -> Result<()> {
+pub(super) fn validate_manifest(manifest: &TemplateManifest) -> Result<()> {
+    let mut field_ids = HashSet::new();
+    let mut tags = HashSet::new();
     for field in &manifest.fields {
+        if field.id.trim().is_empty() || !field_ids.insert(field.id.trim()) {
+            anyhow::bail!("模板包含空白或重复的字段 ID");
+        }
         if !matches!(
             field.field_type.as_str(),
             "text"
@@ -451,6 +462,26 @@ fn validate_manifest(manifest: &TemplateManifest) -> Result<()> {
                 },
                 field.field_type
             );
+        }
+        for mark_ref in &field.mark_refs {
+            if mark_ref.mark_id.trim().is_empty() {
+                anyhow::bail!("字段“{}”缺少标记坐标", field.label);
+            }
+            if !mark_ref.tag.trim().is_empty() && !tags.insert(mark_ref.tag.trim()) {
+                anyhow::bail!("模板包含重复的字段标记“{}”", mark_ref.tag);
+            }
+            if matches!((mark_ref.start, mark_ref.end), (Some(start), Some(end)) if start >= end)
+            {
+                anyhow::bail!("字段“{}”包含无效文本范围", field.label);
+            }
+        }
+        for option in &field.options {
+            if option.id.trim().is_empty() || option.marker_mark_id.trim().is_empty() {
+                anyhow::bail!("勾选字段“{}”包含不完整选项", field.label);
+            }
+            if !option.marker_tag.trim().is_empty() && !tags.insert(option.marker_tag.trim()) {
+                anyhow::bail!("模板包含重复的字段标记“{}”", option.marker_tag);
+            }
         }
     }
     Ok(())

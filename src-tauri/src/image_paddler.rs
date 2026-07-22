@@ -93,6 +93,11 @@ pub struct RunArgs {
     pub border_enabled: Option<bool>,
     #[serde(default)]
     pub border_color: Option<String>,
+    /// `merged` keeps the selected folders as one evidence set. `per_folder`
+    /// writes one document for each selected folder so unrelated batches never
+    /// silently end up in the same filing.
+    #[serde(default)]
+    pub output_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -116,6 +121,8 @@ pub struct FilenameRule {
 #[derive(Debug, Serialize)]
 pub struct RunResult {
     pub output_path: String,
+    #[serde(default)]
+    pub output_paths: Vec<String>,
     pub pages: u32,
     pub images: u32,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -381,7 +388,62 @@ pub fn analyze(args: &AnalyzeArgs) -> Result<AnalyzeResult> {
 }
 
 pub fn run(args: &RunArgs) -> Result<RunResult> {
-    let mut images = scan_image_folders(&args.folder, &args.folders)?;
+    let sources = folders_from_args(&args.folder, &args.folders);
+    if args.output_mode.as_deref() == Some("per_folder") && sources.len() > 1 {
+        let mut outputs = Vec::new();
+        let mut total_pages = 0_u32;
+        let mut total_images = 0_u32;
+        let mut warnings = Vec::new();
+        for source in sources {
+            let images = scan_image_source(&source)?;
+            if images.is_empty() {
+                warnings.push(format!("未在 {} 找到可排版的图片", source));
+                continue;
+            }
+            let result = run_images(args, images, &image_output_dir(&source))?;
+            total_pages = total_pages.saturating_add(result.pages);
+            total_images = total_images.saturating_add(result.images);
+            warnings.extend(result.warnings);
+            outputs.push(result.output_path);
+        }
+        let Some(output_path) = outputs.first().cloned() else {
+            anyhow::bail!("未在所选文件夹中找到图片文件");
+        };
+        return Ok(RunResult {
+            output_path,
+            output_paths: outputs,
+            pages: total_pages,
+            images: total_images,
+            warnings,
+        });
+    }
+
+    let images = scan_image_folders(&args.folder, &args.folders)?;
+    let first_source = sources.first().cloned().unwrap_or_else(|| args.folder.clone());
+    run_images(args, images, &image_output_dir(&first_source))
+}
+
+fn scan_image_source(source: &str) -> Result<Vec<ImageInfo>> {
+    let path = Path::new(source);
+    if path.is_dir() {
+        scan_images(source)
+    } else {
+        Ok(image_info_from_path(path)?.into_iter().collect())
+    }
+}
+
+fn image_output_dir(source: &str) -> std::path::PathBuf {
+    let path = Path::new(source);
+    if path.is_dir() {
+        path.join("_docsy_image_out")
+    } else {
+        path.parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("_docsy_image_out")
+    }
+}
+
+fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> Result<RunResult> {
     if images.is_empty() {
         anyhow::bail!("未找到图片文件");
     }
@@ -427,19 +489,14 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     let total_pages = images.len().div_ceil(per_page);
     reorder_images(&mut images, &grid, order_mode);
 
-    let first_folder = folders_from_args(&args.folder, &args.folders)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| args.folder.clone());
-    let output_dir = Path::new(&first_folder).join("_docsy_image_out");
-    std::fs::create_dir_all(&output_dir)?;
+    std::fs::create_dir_all(output_dir)?;
     let ext = if args.output_format == "pdf" {
         "pdf"
     } else {
         "docx"
     };
     let output_stem = output_file_stem(&images);
-    let output_path = unique_output_path(&output_dir, &format!("{output_stem}_docsy_paddler"), ext);
+    let output_path = unique_output_path(output_dir, &format!("{output_stem}_docsy_paddler"), ext);
 
     let warnings = match args.output_format.as_str() {
         "pdf" => generate_pdf(
@@ -487,6 +544,7 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
 
     Ok(RunResult {
         output_path: output_path.display().to_string(),
+        output_paths: Vec::new(),
         pages: total_pages as u32,
         images: images.len() as u32,
         warnings,
@@ -809,14 +867,13 @@ fn generate_pdf(
     let per_page = grid.rows * grid.cols;
     let needs_external_filename_font = show_filename
         && images.iter().any(|image| {
-            display_filename(
+            !display_filename(
                 &image.path,
                 filename_without_ext,
                 filename_remove_text,
                 filename_rules,
             )
-            .chars()
-            .any(|ch| !ch.is_ascii())
+            .is_ascii()
         });
     let filename_font = if needs_external_filename_font {
         load_pdf_filename_font(&mut doc).map(PdfFontHandle::External)
@@ -1335,6 +1392,7 @@ mod tests {
             order_mode: Some("z".into()),
             border_enabled: Some(true),
             border_color: Some("dark_gray".into()),
+            output_mode: None,
         };
 
         let first = run(&args).unwrap();

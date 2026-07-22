@@ -14,14 +14,14 @@ pub fn run() {
     app_log::install_panic_hook();
     app_log::init();
 
-    // Clean WebKit NetworkCache on startup to prevent unbounded growth.
-    // pdfjs-dist workers (~1-2MB each) are cached on every PDF preview load.
-    cleanup_webkit_cache();
+    // Clean the previous WebKit NetworkCache without delaying the first window.
+    // PDF.js workers can otherwise accumulate hundreds of megabytes across
+    // sessions, but cache cleanup is not on the application critical path.
+    std::thread::spawn(cleanup_webkit_cache);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
         .invoke_handler(commands::build_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -162,10 +162,7 @@ fn spawn_stream_reader<R: Read + Send + 'static>(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
-        loop {
-            let Ok(read) = reader.read(&mut buffer) else {
-                break;
-            };
+        while let Ok(read) = reader.read(&mut buffer) {
             if read == 0 {
                 break;
             }

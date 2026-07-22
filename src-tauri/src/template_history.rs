@@ -118,11 +118,12 @@ fn record_history_run(
                 continue;
             }
             tx.execute(
-                "INSERT INTO field_history (run_id, template_id, field_name, field_label, semantic_key, value_json, display_value, generated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO field_history (run_id, template_id, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     run_id,
                     manifest.template.id,
+                    field.id,
                     field.name,
                     field.label,
                     field.semantic_key,
@@ -142,16 +143,16 @@ fn canonical_history_values(
     values: &HashMap<String, Value>,
 ) -> HashMap<String, Value> {
     let mut stored = HashMap::new();
+    let mut name_counts = HashMap::<&str, usize>::new();
+    for field in &manifest.fields {
+        *name_counts.entry(field.name.as_str()).or_default() += 1;
+    }
     for field in &manifest.fields {
         let Some(value) = values.get(&field.id).or_else(|| values.get(&field.name)) else {
             continue;
         };
-        if field.reference.is_some() {
-            stored.insert(field.id.clone(), value.clone());
-            if !field.name.trim().is_empty() && !stored.contains_key(&field.name) {
-                stored.insert(field.name.clone(), value.clone());
-            }
-        } else if !field.name.trim().is_empty() {
+        stored.insert(field.id.clone(), value.clone());
+        if !field.name.trim().is_empty() && name_counts.get(field.name.as_str()) == Some(&1) {
             stored.insert(field.name.clone(), value.clone());
         }
     }
@@ -172,12 +173,12 @@ pub fn history_context(
     if full_refresh || current_values.is_none() {
         for field in &manifest.fields {
             field_suggestions.insert(
-                field.name.clone(),
+                field.id.clone(),
                 query_field_suggestions(&conn, &manifest.template.id, field)?,
             );
             if !field.semantic_key.trim().is_empty() {
                 semantic_suggestions.insert(
-                    field.name.clone(),
+                        field.id.clone(),
                     query_semantic_suggestions(&conn, &manifest.template.id, field)?,
                 );
             }
@@ -189,7 +190,7 @@ pub fn history_context(
             let suggestions =
                 query_association_suggestions(&conn, &manifest.template.id, target, values)?;
             if !suggestions.is_empty() {
-                association_suggestions.insert(target.name.clone(), suggestions);
+                association_suggestions.insert(target.id.clone(), suggestions);
             }
         }
     }
@@ -332,6 +333,7 @@ fn init_db(conn: &Connection) -> Result<()> {
             id INTEGER PRIMARY KEY,
             run_id INTEGER NOT NULL,
             template_id TEXT NOT NULL,
+            field_id TEXT NOT NULL DEFAULT '',
             field_name TEXT NOT NULL,
             field_label TEXT NOT NULL,
             semantic_key TEXT,
@@ -347,10 +349,30 @@ fn init_db(conn: &Connection) -> Result<()> {
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_template_runs ON generation_runs(template_id, generated_at);
-        CREATE INDEX IF NOT EXISTS idx_field_history_template_field ON field_history(template_id, field_name);
+        CREATE INDEX IF NOT EXISTS idx_field_history_template_field ON field_history(template_id, field_id);
         CREATE INDEX IF NOT EXISTS idx_field_history_semantic ON field_history(semantic_key);
         CREATE INDEX IF NOT EXISTS idx_field_history_run ON field_history(run_id);
         ",
+    )?;
+    ensure_field_history_id_column(conn)?;
+    Ok(())
+}
+
+fn ensure_field_history_id_column(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(field_history)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|column| column == "field_id") {
+        conn.execute("ALTER TABLE field_history ADD COLUMN field_id TEXT NOT NULL DEFAULT ''", [])?;
+    }
+    conn.execute(
+        "UPDATE field_history SET field_id = field_name WHERE field_id = ''",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_field_history_template_field_id ON field_history(template_id, field_id)",
+        [],
     )?;
     Ok(())
 }
@@ -424,12 +446,12 @@ fn query_field_suggestions(
     let mut stmt = conn.prepare(
         "SELECT value_json, display_value, COUNT(*) AS freq, MAX(generated_at) AS last_used
          FROM field_history
-         WHERE template_id = ?1 AND field_name = ?2
+         WHERE template_id = ?1 AND field_id = ?2
          GROUP BY value_json, display_value
          ORDER BY freq DESC, last_used DESC
          LIMIT 8",
     )?;
-    let rows = stmt.query_map(params![template_id, field.name], |row| {
+    let rows = stmt.query_map(params![template_id, field.id], |row| {
         suggestion_from_row(row, "field")
     })?;
     collect_rows(rows)
@@ -472,7 +494,7 @@ fn query_association_suggestions(
 ) -> Result<Vec<AssociationSuggestion>> {
     let mut suggestions = Vec::new();
     for (trigger_field, trigger_value) in values {
-        if trigger_field == &target.name {
+        if trigger_field == &target.id {
             continue;
         }
         let trigger_display = value_display(trigger_value);
@@ -484,16 +506,16 @@ fn query_association_suggestions(
              FROM field_history AS trigger
              JOIN field_history AS target ON trigger.run_id = target.run_id
              WHERE trigger.template_id = ?1
-               AND trigger.field_name = ?2
+               AND trigger.field_id = ?2
                AND trigger.display_value = ?3
                AND target.template_id = ?1
-               AND target.field_name = ?4
+               AND target.field_id = ?4
              GROUP BY target.value_json, target.display_value
              ORDER BY freq DESC, MAX(target.generated_at) DESC
              LIMIT 3",
         )?;
         let rows = stmt.query_map(
-            params![template_id, trigger_field, trigger_display, target.name],
+                params![template_id, trigger_field, trigger_display, target.id],
             |row| {
                 let value_json: String = row.get(0)?;
                 let display: String = row.get(1)?;
@@ -658,9 +680,10 @@ mod tests {
         let stored = canonical_history_values(&manifest, &values);
 
         assert_eq!(
-            stored.get("第三人"),
+            stored.get("party"),
             Some(&json!(["真实第三人1", "真实第三人2"]))
         );
+        assert_eq!(stored.get("第三人"), None);
         assert_eq!(stored.get("principal_ref"), Some(&json!("被上诉人A公司")));
         assert_eq!(stored.get("当事人"), None);
     }

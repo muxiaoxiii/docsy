@@ -110,6 +110,15 @@ pub fn delete_header_footer_artifacts_file(
     if !input.exists() {
         anyhow::bail!("PDF 不存在: {}", input.display());
     }
+    let output = Path::new(output_path);
+    if same_path(input, output) {
+        anyhow::bail!("标准页眉页脚删除输出路径不能和原始 PDF 相同");
+    }
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).context("创建标准页眉页脚删除输出目录失败")?;
+        }
+    }
     if !targets.header && !targets.footer {
         std::fs::copy(input, output_path).context("复制 PDF 失败")?;
         return Ok(DeleteHeaderFooterArtifactsResult {
@@ -121,16 +130,6 @@ pub fn delete_header_footer_artifacts_file(
             pages_touched: 0,
         });
     }
-    let output = Path::new(output_path);
-    if same_path(input, output) {
-        anyhow::bail!("标准页眉页脚删除输出路径不能和原始 PDF 相同");
-    }
-    if let Some(parent) = output.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).context("创建标准页眉页脚删除输出目录失败")?;
-        }
-    }
-
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
     let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
     let mut removed = ArtifactRemovalStats::default();
