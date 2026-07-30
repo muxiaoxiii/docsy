@@ -82,6 +82,10 @@ export function openPath(path) {
   return tauriCallSafe('open_path', { path })
 }
 
+export function openExternalUrl(url) {
+  return tauriCallSafe('open_external_url', { url })
+}
+
 export function getPdfPageCount(input) {
   return tauriCallSafe('get_pdf_page_count', { input })
 }

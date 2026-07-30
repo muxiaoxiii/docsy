@@ -8,23 +8,27 @@
         <EvidencePdfWorkbench workflow="split" />
       </el-tab-pane>
       <el-tab-pane label="证据扫描" name="scan" lazy>
-        <div class="tab-content">
-          <h3>证据扫描</h3>
-          <p class="hint">扫描文件夹，按子文件夹自动分组合并 PDF</p>
-          <el-button type="primary" @click="selectEvidenceFolder">选择证据文件夹</el-button>
+        <ToolWorkspaceShell title="证据扫描" description="扫描文件夹并按子文件夹自动整理、合并证据 PDF。">
+          <template #toolbar>
+            <el-button type="primary" @click="selectEvidenceFolder">选择证据文件夹</el-button>
+            <el-button v-if="evidenceFolder" :loading="scanning" @click="scanEvidence">重新扫描</el-button>
+          </template>
           <div v-if="evidenceFolder" class="evidence-info">
-            <p>文件夹: {{ evidenceFolder }}</p>
-            <el-button @click="scanEvidence" :loading="scanning">扫描</el-button>
+            <span class="path-label">当前文件夹</span>
+            <p>{{ evidenceFolder }}</p>
           </div>
           <div v-if="evidenceGroups.length" class="evidence-groups">
             <div v-for="group in evidenceGroups" :key="group.name" class="group-item">
-              <h4>{{ group.name }} ({{ group.files.length }} 个文件)</h4>
+              <div class="group-head">
+                <h4>{{ group.name }}</h4>
+                <el-tag size="small" type="info">{{ group.files.length }} 个文件</el-tag>
+              </div>
               <div class="group-files">
                 <span v-for="f in group.files" :key="f.path" class="group-file">{{ f.name }}</span>
               </div>
             </div>
-            <el-button type="success" @click="buildEvidence" :loading="building">生成合并 PDF</el-button>
           </div>
+          <el-empty v-else :description="evidenceFolder ? '尚未扫描到证据分组' : '先选择需要扫描的证据文件夹'" />
           <el-alert
             v-if="conversionFailures.length"
             class="conversion-alert"
@@ -41,7 +45,12 @@
               </div>
             </div>
           </el-alert>
-        </div>
+          <template #actions>
+            <el-button type="success" :disabled="!evidenceGroups.length" :loading="building" @click="buildEvidence">
+              生成合并 PDF
+            </el-button>
+          </template>
+        </ToolWorkspaceShell>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -52,6 +61,7 @@ import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 import EvidencePdfWorkbench from '../../pdf-tools/views/EvidencePdfWorkbench.vue'
+import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 
 const activeTab = ref('merge')
@@ -105,55 +115,76 @@ async function buildEvidence() {
 .evidence-pdf-view,
 .evidence-tabs {
   height: 100%;
+  min-height: 0;
 }
 
-.tab-content {
-  padding: 16px;
-  max-width: 680px;
+.evidence-pdf-view {
+  overflow: hidden;
+  background: var(--docsy-surface);
 }
 
-h3 {
-  margin: 0 0 6px;
-  color: #303133;
-}
-
-.hint {
-  color: #909399;
-  font-size: 13px;
-  margin: 0 0 16px;
+:deep(.evidence-tabs > .el-tabs__content),
+:deep(.evidence-tabs > .el-tabs__content > .el-tab-pane) {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .evidence-info {
-  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 5px;
+  background: var(--docsy-surface-muted);
   font-size: 13px;
-  color: #606266;
+  color: var(--docsy-text);
+}
+
+.evidence-info p {
+  margin: 4px 0 0;
+  word-break: break-all;
+}
+
+.path-label {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
 }
 
 .evidence-groups {
-  margin-top: 16px;
+  display: grid;
+  gap: 10px;
 }
 
 .group-item {
-  margin-bottom: 12px;
-  padding: 10px;
-  background: #f9f9f9;
-  border-radius: 4px;
+  padding: 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 5px;
+  background: var(--docsy-surface-elevated);
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .group-item h4 {
-  margin: 0 0 6px;
+  margin: 0;
   font-size: 13px;
 }
 
 .group-files {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px 10px;
+  margin-top: 8px;
 }
 
 .group-file {
   font-size: 12px;
-  color: #909399;
+  color: var(--docsy-text-muted);
+  word-break: break-all;
 }
 
 .conversion-alert {
@@ -172,15 +203,21 @@ h3 {
 
 .conversion-failure strong {
   display: block;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .conversion-failure span {
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .conversion-failure p {
   margin: 2px 0 0;
   word-break: break-all;
+}
+
+@media (max-width: 1280px) {
+  :deep(.evidence-tabs > .el-tabs__content > .el-tab-pane) {
+    overflow: auto;
+  }
 }
 </style>

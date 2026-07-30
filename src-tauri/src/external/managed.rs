@@ -231,9 +231,11 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
             binaries: vec![binary_name("qpdf")],
         }),
         "ffmpeg" => Some(ToolPackage {
-            version: "release-essentials".into(),
-            url: "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip".into(),
-            sha256: String::new(),
+            version: "8.1.2-essentials".into(),
+            url: "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip"
+                .into(),
+            sha256: "db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec"
+                .into(),
             max_bytes: None,
             binaries: vec![binary_name("ffmpeg"), binary_name("ffprobe")],
         }),
@@ -241,7 +243,8 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
             version: "26.02.0-0".into(),
             url: "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip"
                 .into(),
-            sha256: String::new(),
+            sha256: "993e4a94376ed712fafc7058d724ea0b943d118bbd2305cd9ed55174eb85cda5"
+                .into(),
             max_bytes: None,
             binaries: vec![binary_name("pdftoppm"), binary_name("pdftotext")],
         }),
@@ -317,7 +320,8 @@ impl Drop for TempArchive {
 
 fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchive> {
     validate_download_url(url)?;
-    let mut current = reqwest::Url::parse(url).with_context(|| format!("工具下载地址无效: {url}"))?;
+    let mut current =
+        reqwest::Url::parse(url).with_context(|| format!("工具下载地址无效: {url}"))?;
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(8))
         .redirect(reqwest::redirect::Policy::none())
@@ -325,7 +329,10 @@ fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchiv
         .context("初始化下载客户端失败")?;
 
     for redirect_count in 0..=MAX_HTTPS_REDIRECTS {
-        let response = client.get(current.clone()).send().with_context(|| format!("下载失败: {current}"))?;
+        let response = client
+            .get(current.clone())
+            .send()
+            .with_context(|| format!("下载失败: {current}"))?;
         let status = response.status();
         if status.is_redirection() {
             if redirect_count == MAX_HTTPS_REDIRECTS {
@@ -342,7 +349,10 @@ fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchiv
         if !status.is_success() {
             anyhow::bail!("下载失败: {current} 返回 {status}");
         }
-        if response.content_length().is_some_and(|length| length > max_bytes) {
+        if response
+            .content_length()
+            .is_some_and(|length| length > max_bytes)
+        {
             anyhow::bail!("工具包过大，已拒绝下载");
         }
         let path = std::env::temp_dir().join(format!("docsy-tool-{}.zip", unique_suffix()));
@@ -360,7 +370,8 @@ fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchiv
                 let _ = fs::remove_file(&path);
                 anyhow::bail!("工具包过大，已中止下载");
             }
-            std::io::Write::write_all(&mut output, &buffer[..count]).context("写入工具下载临时文件失败")?;
+            std::io::Write::write_all(&mut output, &buffer[..count])
+                .context("写入工具下载临时文件失败")?;
         }
         return Ok(TempArchive { path });
     }
@@ -445,7 +456,11 @@ fn verify_sha256_file_if_present(path: &Path, expected: &str) -> Result<()> {
     Ok(())
 }
 
-fn extract_zip_file(archive_path: &Path, output_dir: &Path, max_total_uncompressed: u64) -> Result<()> {
+fn extract_zip_file(
+    archive_path: &Path,
+    output_dir: &Path,
+    max_total_uncompressed: u64,
+) -> Result<()> {
     let reader = fs::File::open(archive_path).context("读取工具 zip 失败")?;
     let mut archive = zip::ZipArchive::new(reader).context("读取工具 zip 失败")?;
     let mut total_uncompressed = 0_u64;
@@ -628,5 +643,14 @@ mod tests {
         assert!(
             package_extract_limit("ffmpeg") > package_download_limit("ffmpeg", &default_package)
         );
+    }
+
+    #[test]
+    fn embedded_windows_packages_are_integrity_checked() {
+        for name in ["qpdf", "ffmpeg", "poppler"] {
+            let package = embedded_windows_package_spec(name).expect("Windows package must exist");
+            assert!(has_sha256(&package), "{name} must have a SHA256 checksum");
+            assert!(package.url.starts_with("https://"));
+        }
     }
 }

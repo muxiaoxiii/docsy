@@ -419,7 +419,10 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     }
 
     let images = scan_image_folders(&args.folder, &args.folders)?;
-    let first_source = sources.first().cloned().unwrap_or_else(|| args.folder.clone());
+    let first_source = sources
+        .first()
+        .cloned()
+        .unwrap_or_else(|| args.folder.clone());
     run_images(args, images, &image_output_dir(&first_source))
 }
 

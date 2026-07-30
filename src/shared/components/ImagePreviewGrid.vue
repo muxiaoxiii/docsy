@@ -207,7 +207,7 @@ watch([pageSize, () => props.items.length], () => {
   justify-content: flex-end;
   gap: 8px;
   margin-bottom: 10px;
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 12px;
 }
 
@@ -227,9 +227,9 @@ watch([pageSize, () => props.items.length], () => {
   max-height: 360px;
   overflow: auto;
   padding: 8px;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  background: #fafafa;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  background: var(--docsy-surface-muted);
 }
 
 .image-preview-grid {
@@ -242,7 +242,7 @@ watch([pageSize, () => props.items.length], () => {
   min-width: 0;
   text-align: center;
   padding: 8px;
-  background: #f5f7fa;
+  background: var(--docsy-surface-elevated);
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
@@ -251,8 +251,8 @@ watch([pageSize, () => props.items.length], () => {
 }
 
 .image-preview-card:hover {
-  border-color: #c6e2ff;
-  background: #ecf5ff;
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
 }
 
 .image-preview-thumb-wrap {
@@ -261,7 +261,7 @@ watch([pageSize, () => props.items.length], () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #e4e7ed;
+  background: var(--docsy-border-subtle);
   overflow: hidden;
 }
 
@@ -274,13 +274,13 @@ watch([pageSize, () => props.items.length], () => {
 
 .image-preview-placeholder {
   font-size: 11px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .image-preview-name {
   display: block;
   font-size: 11px;
-  color: #606266;
+  color: var(--docsy-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -288,7 +288,7 @@ watch([pageSize, () => props.items.length], () => {
 
 .image-preview-meta {
   font-size: 10px;
-  color: #c0c4cc;
+  color: var(--docsy-text-muted);
 }
 
 .image-preview-pager {
@@ -297,7 +297,7 @@ watch([pageSize, () => props.items.length], () => {
   justify-content: center;
   gap: 12px;
   margin-top: 10px;
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 12px;
 }
 

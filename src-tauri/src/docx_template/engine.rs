@@ -308,6 +308,7 @@ fn scan_package_to_runs_and_marks(
     let mut runs = Vec::new();
     let mut marks = Vec::new();
     let mut flat_text = String::new();
+    let mut last_paragraph: Option<(String, usize)> = None;
 
     for (part_name, part_index) in &doc_index.parts {
         for node in &part_index.nodes {
@@ -342,10 +343,13 @@ fn scan_package_to_runs_and_marks(
                 });
             }
 
-            if !flat_text.is_empty() {
+            // 按段落聚合：同一段落内的 run 文本直接拼接，段落间用换行分隔
+            let current = (part_name.clone(), node.paragraph_index);
+            if last_paragraph.is_some() && last_paragraph.as_ref() != Some(&current) {
                 flat_text.push('\n');
             }
             flat_text.push_str(&node.text);
+            last_paragraph = Some(current);
         }
     }
 

@@ -150,7 +150,10 @@ fn atomic_temp_path(path: &Path) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("package");
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("package");
     path.with_file_name(format!(".{file_name}.{nonce}.tmp"))
 }
 

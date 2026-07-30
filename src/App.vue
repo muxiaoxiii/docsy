@@ -48,6 +48,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { Setting } from '@element-plus/icons-vue'
 import { getMenuItems } from './core/moduleRegistry.js'
 import { tauriCallSafe } from './core/tauriBridge.js'
+import { listen } from '@tauri-apps/api/event'
+import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
 
 const router = useRouter()
@@ -106,11 +108,35 @@ function finishOperation(event) {
   operationVisible.value = false
 }
 
+let unlistenConversionTimeout = null
+
 onMounted(() => {
   loadSettings()
   window.addEventListener('docsy-settings-updated', applySettingsEvent)
   window.addEventListener('docsy-operation-start', startOperation)
   window.addEventListener('docsy-operation-finish', finishOperation)
+
+  // Listen for conversion timeout events from the backend
+  listen('docsy-conversion-timeout', async () => {
+    try {
+      await ElMessageBox.confirm(
+        '文档转换耗时较长，可能是大文件或 Office 响应慢。是否继续等待？',
+        '转换超时',
+        {
+          confirmButtonText: '继续等待',
+          cancelButtonText: '取消转换',
+          type: 'warning',
+        },
+      )
+      // User chose to continue
+      await tauriCallSafe('respond_conversion_timeout', { continueWaiting: true })
+    } catch {
+      // User chose to cancel
+      await tauriCallSafe('respond_conversion_timeout', { continueWaiting: false })
+    }
+  }).then((unlisten) => {
+    unlistenConversionTimeout = unlisten
+  })
 })
 
 onBeforeUnmount(() => {
@@ -118,6 +144,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('docsy-settings-updated', applySettingsEvent)
   window.removeEventListener('docsy-operation-start', startOperation)
   window.removeEventListener('docsy-operation-finish', finishOperation)
+  if (unlistenConversionTimeout) unlistenConversionTimeout()
 })
 </script>
 
@@ -125,6 +152,7 @@ onBeforeUnmount(() => {
 .app-container {
   height: 100vh;
   overflow: hidden;
+  background: var(--docsy-canvas);
 }
 
 .app-container > .el-container {
@@ -136,17 +164,19 @@ onBeforeUnmount(() => {
 .app-aside {
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
-  border-right: 1px solid #e4e7ed;
+  background: var(--docsy-sidebar);
+  border-right: 1px solid var(--docsy-border-subtle);
   overflow: hidden;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  padding: 16px;
+  min-height: 60px;
+  padding: 12px 16px;
   cursor: pointer;
-  gap: 8px;
+  gap: 10px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
 }
 
 .brand:hover {
@@ -155,52 +185,75 @@ onBeforeUnmount(() => {
 }
 
 .brand-logo {
-  width: 40px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   object-fit: contain;
-  flex: 0 0 40px;
+  flex: 0 0 34px;
 }
 
 .brand-name {
   font-size: 20px;
   font-weight: 700;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .sidebar-menu {
   flex: 1;
   border-right: none;
   overflow-y: auto;
+  padding: 10px 8px;
+  background: transparent;
+}
+
+.sidebar-menu :deep(.el-menu-item) {
+  height: 40px;
+  margin: 3px 0;
+  border-radius: 6px;
+  color: var(--docsy-text);
+}
+
+.sidebar-menu :deep(.el-menu-item:hover) {
+  background: var(--docsy-sidebar-hover);
+}
+
+.sidebar-menu :deep(.el-menu-item.is-active) {
+  color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
+  font-weight: 600;
 }
 
 .sidebar-footer {
   display: flex;
   justify-content: center;
   padding: 12px 0 16px;
-  border-top: 1px solid #e4e7ed;
+  border-top: 1px solid var(--docsy-border-subtle);
+  background: rgba(255, 253, 250, 0.42);
 }
 
 .settings-shortcut.active {
-  color: var(--el-color-primary);
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
+  color: var(--docsy-primary);
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
 }
 
 .app-header {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid #e4e7ed;
-  background: #fff;
+  height: 60px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface);
 }
 
 .page-title {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .app-main {
-  background: #fff;
+  padding: 0;
+  background: var(--docsy-canvas);
   min-height: 0;
   overflow-y: auto;
 }

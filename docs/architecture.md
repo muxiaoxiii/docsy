@@ -1,6 +1,6 @@
 # Docsy 当前架构
 
-更新时间：2026-06-23
+更新时间：2026-07-30
 
 ## 当前边界
 
@@ -22,6 +22,7 @@
 src/modules/
 ├── home/
 ├── pdf-tools/
+├── evidence-pdf/
 ├── image-paddler/
 ├── video-extract/
 ├── template/
@@ -47,8 +48,9 @@ Tauri 命令集中注册在 `src-tauri/src/commands/mod.rs`。
 - `video`
 - `settings`
 - `system`
+- `template`
 
-业务实现放在 `src-tauri/src/services/`、`src-tauri/src/pdf/`、`src-tauri/src/ffmpeg/`、`src-tauri/src/external/` 等目录。`services/history.rs` 现在只负责应用设置读写，不再维护模板生成历史。
+业务实现放在 `src-tauri/src/services/`、`src-tauri/src/pdf/`、`src-tauri/src/ffmpeg/`、`src-tauri/src/external/`、`src-tauri/src/docx_template/` 等目录。`services/history.rs` 负责应用设置读写；`template_history.rs` 负责模板填写历史（SQLite）。
 
 ## 新文书模板设计
 
@@ -60,6 +62,8 @@ P0 边界：
 - 保存 `.docsytpl` zip 包，包含 `manifest.json + template.docx`
 - 普通字段和勾选 marker 都写入带 `w:tag` 的内容控件
 - 打开 `.docsytpl` 填表并生成 docx
+- 批量填写：导出字段表为 Excel → 用户填写 → 校验导入 → 批量生成（`batch.rs`）
+- 字段类型：text / date / select / party_list / reference / checkbox / radio_group / checkbox_group / delete_text
 
 ## 已移除的旧边界
 

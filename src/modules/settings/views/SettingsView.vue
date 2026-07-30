@@ -149,7 +149,7 @@
 
 <script setup>
 import { computed, ref, reactive, onMounted } from 'vue'
-import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -478,7 +478,7 @@ async function openManagedToolsDir() {
 }
 
 async function openToolDownload(tool) {
-  const result = await openPath(tool.downloadUrl)
+  const result = await openExternalUrl(tool.downloadUrl)
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开下载页')
   }
@@ -495,18 +495,20 @@ onMounted(() => {
 
 <style scoped>
 .settings-view {
-  max-width: 700px;
+  max-width: 980px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 24px 28px 40px;
 }
 
 .settings-view h2 {
   margin: 0 0 20px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .settings-section {
   margin-bottom: 20px;
+  border-color: var(--docsy-border-subtle);
+  border-radius: 6px;
 }
 
 .card-header {
@@ -519,9 +521,9 @@ onMounted(() => {
 .managed-dir {
   margin-bottom: 12px;
   padding: 8px 10px;
-  color: #606266;
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
+  color: var(--docsy-text);
+  background: var(--docsy-surface-muted);
+  border: 1px solid var(--docsy-border-subtle);
   border-radius: 4px;
   font-size: 12px;
   word-break: break-all;
@@ -535,7 +537,7 @@ onMounted(() => {
 
 .tool-item {
   padding: 12px;
-  background: #f5f7fa;
+  background: var(--docsy-surface-muted);
   border-radius: 4px;
 }
 
@@ -556,19 +558,20 @@ onMounted(() => {
   flex-direction: column;
   gap: 12px;
   font-size: 12px;
-  color: #909399;
+  color: var(--docsy-text-muted);
   word-break: break-all;
 }
 
 .tool-desc {
   margin: 4px 0;
   font-size: 12px;
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 .tool-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
@@ -584,7 +587,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 10px;
-  background: #f5f7fa;
+  background: var(--docsy-surface-muted);
   border-radius: 4px;
 }
 
@@ -595,13 +598,13 @@ onMounted(() => {
 
 .install-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .form-hint {
   margin-left: 8px;
   font-size: 12px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .diag-actions {
@@ -612,7 +615,7 @@ onMounted(() => {
 
 .section-desc {
   font-size: 13px;
-  color: #909399;
+  color: var(--docsy-text-muted);
   margin: 0 0 12px;
 }
 
@@ -626,5 +629,45 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .settings-view {
+    padding: 16px;
+  }
+
+  .card-header,
+  .tool-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .menu-order-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .menu-order-actions {
+    align-self: stretch;
+  }
+
+  .menu-order-actions .el-button {
+    flex: 1;
+  }
+
+  .bundle-actions,
+  .diag-actions {
+    flex-wrap: wrap;
+  }
+
+  :deep(.el-form-item) {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  :deep(.el-form-item__label) {
+    justify-content: flex-start;
+    width: auto !important;
+  }
 }
 </style>

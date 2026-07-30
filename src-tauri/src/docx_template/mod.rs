@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+pub mod batch;
 pub mod engine;
 pub mod index;
 pub mod ooxml;
@@ -446,6 +447,7 @@ pub(super) fn validate_manifest(manifest: &TemplateManifest) -> Result<()> {
             field.field_type.as_str(),
             "text"
                 | "date"
+                | "select"
                 | "party_list"
                 | "reference"
                 | "checkbox"
@@ -470,14 +472,18 @@ pub(super) fn validate_manifest(manifest: &TemplateManifest) -> Result<()> {
             if !mark_ref.tag.trim().is_empty() && !tags.insert(mark_ref.tag.trim()) {
                 anyhow::bail!("模板包含重复的字段标记“{}”", mark_ref.tag);
             }
-            if matches!((mark_ref.start, mark_ref.end), (Some(start), Some(end)) if start >= end)
-            {
+            if matches!((mark_ref.start, mark_ref.end), (Some(start), Some(end)) if start >= end) {
                 anyhow::bail!("字段“{}”包含无效文本范围", field.label);
             }
         }
         for option in &field.options {
-            if option.id.trim().is_empty() || option.marker_mark_id.trim().is_empty() {
-                anyhow::bail!("勾选字段“{}”包含不完整选项", field.label);
+            // select 类型的 options 不需要 marker_mark_id，只有勾选类型才需要
+            if matches!(field.field_type.as_str(), "checkbox" | "radio_group" | "checkbox_group") {
+                if option.id.trim().is_empty() || option.marker_mark_id.trim().is_empty() {
+                    anyhow::bail!("勾选字段“{}”包含不完整选项", field.label);
+                }
+            } else if option.id.trim().is_empty() {
+                anyhow::bail!("字段“{}”包含不完整选项", field.label);
             }
             if !option.marker_tag.trim().is_empty() && !tags.insert(option.marker_tag.trim()) {
                 anyhow::bail!("模板包含重复的字段标记“{}”", option.marker_tag);

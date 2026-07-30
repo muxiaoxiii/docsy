@@ -126,3 +126,56 @@ pub async fn seed_template_history(
     })
     .await
 }
+
+#[tauri::command]
+pub async fn export_template_fields_xlsx(
+    template_path: String,
+    output_path: String,
+    default_values: Option<HashMap<String, Value>>,
+) -> Result<String, String> {
+    run_blocking(move || {
+        let manifest = crate::docx_template::inspect_template_package(&template_path)?;
+        crate::docx_template::batch::export_fields_xlsx(
+            &manifest,
+            &default_values.unwrap_or_default(),
+            &output_path,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn validate_batch_import(
+    template_path: String,
+    xlsx_path: String,
+) -> Result<crate::docx_template::batch::BatchValidationResult, String> {
+    run_blocking(move || {
+        let manifest = crate::docx_template::inspect_template_package(&template_path)?;
+        crate::docx_template::batch::validate_imported_xlsx(&manifest, &xlsx_path)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn batch_render_from_xlsx(
+    template_path: String,
+    xlsx_path: String,
+    output_dir: String,
+    name_pattern: Option<String>,
+    skip_rows: Option<Vec<usize>>,
+    structure_overrides: Option<HashMap<String, crate::docx_template::StructureOverride>>,
+) -> Result<crate::docx_template::batch::BatchRenderResult, String> {
+    run_blocking(move || {
+        let manifest = crate::docx_template::inspect_template_package(&template_path)?;
+        crate::docx_template::batch::batch_render(
+            &manifest,
+            &xlsx_path,
+            &output_dir,
+            &template_path,
+            name_pattern.as_deref().unwrap_or(""),
+            &skip_rows.unwrap_or_default(),
+            &structure_overrides.unwrap_or_default(),
+        )
+    })
+    .await
+}

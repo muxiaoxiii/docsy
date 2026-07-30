@@ -88,7 +88,8 @@ fn record_history_run(
 ) -> Result<()> {
     let mut conn = open_db()?;
     init_db(&conn)?;
-    upsert_template_meta(&conn, manifest, template_path, false)?;
+    // 不改变 trashed 状态：已回收站的模板不应因历史记录写入而被恢复
+    ensure_template_meta(&conn, manifest, template_path)?;
     let now = chrono::Utc::now().to_rfc3339();
     let stored_values = canonical_history_values(manifest, values);
     let values_json = serde_json::to_string(&stored_values)?;
@@ -178,7 +179,7 @@ pub fn history_context(
             );
             if !field.semantic_key.trim().is_empty() {
                 semantic_suggestions.insert(
-                        field.id.clone(),
+                    field.id.clone(),
                     query_semantic_suggestions(&conn, &manifest.template.id, field)?,
                 );
             }
@@ -236,7 +237,28 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
         })
     })?;
 
-    let mut runs = collect_rows(rows)?;
+    let all_runs: Vec<TemplateHistoryRun> = collect_rows(rows)?;
+
+    // 自动清理：模板文件已不存在于磁盘的记录标记为已删除
+    let mut orphaned_ids = Vec::new();
+    let mut valid_runs = Vec::new();
+    for run in all_runs {
+        if !run.template_path.is_empty() && !std::path::Path::new(&run.template_path).exists() {
+            orphaned_ids.push(run.template_id.clone());
+        } else {
+            valid_runs.push(run);
+        }
+    }
+    if !orphaned_ids.is_empty() {
+        for template_id in &orphaned_ids {
+            let _ = conn.execute(
+                "UPDATE template_meta SET trashed = 1, updated_at = ?2 WHERE template_id = ?1 AND trashed = 0",
+                params![template_id, chrono::Utc::now().to_rfc3339()],
+            );
+        }
+    }
+
+    let mut runs = valid_runs;
     for run in &mut runs {
         run.field_summaries = query_run_field_summaries(&conn, run.id)?;
     }
@@ -364,7 +386,10 @@ fn ensure_field_history_id_column(conn: &Connection) -> Result<()> {
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     if !columns.iter().any(|column| column == "field_id") {
-        conn.execute("ALTER TABLE field_history ADD COLUMN field_id TEXT NOT NULL DEFAULT ''", [])?;
+        conn.execute(
+            "ALTER TABLE field_history ADD COLUMN field_id TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
     }
     conn.execute(
         "UPDATE field_history SET field_id = field_name WHERE field_id = ''",
@@ -399,6 +424,32 @@ fn upsert_template_meta(
             chrono::Utc::now().to_rfc3339()
         ],
     )?;
+    Ok(())
+}
+
+/// Ensure template_meta exists without changing the trashed flag.
+/// Used by history recording so that trashed templates stay trashed.
+fn ensure_template_meta(
+    conn: &Connection,
+    manifest: &TemplateManifest,
+    template_path: &str,
+) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    // Update name/path only if the record already exists
+    let updated = conn.execute(
+        "UPDATE template_meta
+         SET template_name = ?2, template_path = ?3, updated_at = ?4
+         WHERE template_id = ?1",
+        params![manifest.template.id, manifest.template.name, template_path, now],
+    )?;
+    if updated == 0 {
+        // Record doesn't exist yet; insert with trashed = 0
+        conn.execute(
+            "INSERT INTO template_meta (template_id, template_name, template_path, trashed, updated_at)
+             VALUES (?1, ?2, ?3, 0, ?4)",
+            params![manifest.template.id, manifest.template.name, template_path, now],
+        )?;
+    }
     Ok(())
 }
 
@@ -515,7 +566,7 @@ fn query_association_suggestions(
              LIMIT 3",
         )?;
         let rows = stmt.query_map(
-                params![template_id, trigger_field, trigger_display, target.id],
+            params![template_id, trigger_field, trigger_display, target.id],
             |row| {
                 let value_json: String = row.get(0)?;
                 let display: String = row.get(1)?;

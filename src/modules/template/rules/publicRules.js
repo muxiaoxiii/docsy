@@ -189,8 +189,14 @@ export function inferTemplateField({ text, context = '', checkboxLike = false, i
   if (looksLikeDateText(value)) return buildInference('date', '日期', '日期')
   if (looksLikeCourtName(value)) return buildInference('text', '法院', '法院')
   if (looksLikeCaseNumber(value)) return buildInference('text', '案号', '案号')
-  if (looksLikeCauseAction(value)) return buildInference('text', '案由', '案由')
-  if (looksLikeLitigationStage(value)) return buildInference('text', '诉讼阶段', '诉讼阶段')
+  if (looksLikeCauseAction(value)) {
+    const allCauses = PUBLIC_CAUSE_ACTIONS.map((c) => ({ label: c, checkedText: c }))
+    return buildInference('select', '案由', '案由', '案由', allCauses)
+  }
+  if (looksLikeLitigationStage(value)) {
+    const stageOpts = PUBLIC_LITIGATION_STAGES.map((s) => ({ label: s, checkedText: s }))
+    return buildInference('select', '诉讼阶段', '诉讼阶段', '诉讼阶段', stageOpts)
+  }
   if (looksLikeLawFirm(value)) return buildInference('text', '律所名称', '律所名称')
 
   const suffixIdentityRole = inferSuffixIdentityRole(value, context)
@@ -212,7 +218,7 @@ export function inferTemplateField({ text, context = '', checkboxLike = false, i
   return buildInference('text', `字段${index + 1}`, text)
 }
 
-function buildInference(type, name, label, semanticKey = name) {
+function buildInference(type, name, label, semanticKey = name, options = []) {
   return {
     type,
     name,
@@ -222,6 +228,7 @@ function buildInference(type, name, label, semanticKey = name) {
     optionalScope: 'position',
     optionalPrefix: '',
     optionalSuffix: '',
+    options,
   }
 }
 

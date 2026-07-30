@@ -8,6 +8,15 @@ pub fn open_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(&url).map_err(|_| "下载地址无效".to_string())?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return Err("只能打开 HTTPS 下载地址".into());
+    }
+    open::that(parsed.as_str()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn write_frontend_log(level: String, target: String, message: String, context: Option<String>) {
     let ctx = context
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -63,9 +72,8 @@ fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
         "tif" | "tiff" => "image/tiff",
         _ => anyhow::bail!("不支持的图片格式"),
     };
-    let (width, height) = image::image_dimensions(&path).map_err(|error| {
-        anyhow::anyhow!("无法读取图片尺寸: {error}")
-    })?;
+    let (width, height) = image::image_dimensions(&path)
+        .map_err(|error| anyhow::anyhow!("无法读取图片尺寸: {error}"))?;
     if u64::from(width) * u64::from(height) > MAX_SOURCE_PIXELS {
         anyhow::bail!("图片像素过大，无法安全生成预览缩略图");
     }
@@ -108,4 +116,17 @@ fn build_diagnostic_info() -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn list_system_fonts() -> Result<Vec<String>, String> {
     crate::commands::run_blocking(crate::ffmpeg::detect::list_system_fonts).await
+}
+
+/// Respond to a conversion timeout event.
+/// `continue_waiting`: true = keep waiting, false = cancel the conversion.
+#[tauri::command]
+pub fn respond_conversion_timeout(
+    state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
+    continue_waiting: bool,
+) -> Result<(), String> {
+    state
+        .response
+        .store(if continue_waiting { 1 } else { 2 }, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }

@@ -228,8 +228,8 @@ function cancelRender() {
   justify-content: center;
   align-items: flex-start;
   padding: 12px;
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
+  background: var(--docsy-surface-muted);
+  border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
   min-height: 520px;
 }
@@ -263,7 +263,7 @@ function cancelRender() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #606266;
+  color: var(--docsy-text);
   background: rgba(255, 255, 255, 0.62);
   font-size: 13px;
 }
@@ -276,9 +276,9 @@ function cancelRender() {
 }
 
 .preview-empty {
-  color: #606266;
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
+  color: var(--docsy-text);
+  background: var(--docsy-surface-muted);
+  border: 1px solid var(--docsy-border-subtle);
 }
 
 .preview-error {

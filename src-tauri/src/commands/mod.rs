@@ -59,6 +59,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         settings::open_managed_tools_dir,
         // system
         system::open_path,
+        system::open_external_url,
         system::write_frontend_log,
         system::get_log_file_path,
         system::read_image_data_url,
@@ -66,6 +67,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         system::open_log_dir,
         system::get_diagnostic_info,
         system::list_system_fonts,
+        system::respond_conversion_timeout,
         // template
         template::inspect_docx_template,
         template::save_docx_template,
@@ -80,5 +82,8 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         template::get_template_history_context,
         template::list_template_generation_runs,
         template::seed_template_history,
+        template::export_template_fields_xlsx,
+        template::validate_batch_import,
+        template::batch_render_from_xlsx,
     ]
 }

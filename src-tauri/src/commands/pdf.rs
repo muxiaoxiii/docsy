@@ -114,8 +114,10 @@ pub async fn scan_evidence_folder(root: String) -> Result<serde_json::Value, Str
 #[tauri::command]
 pub async fn build_evidence_group_pdfs(
     args: serde_json::Value,
+    conversion_state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
 ) -> Result<serde_json::Value, String> {
-    run_blocking(move || crate::pdf::evidence::build_group_pdfs(&args)).await
+    let state = (*conversion_state).clone();
+    run_blocking(move || crate::pdf::evidence::build_group_pdfs(&args, &state)).await
 }
 
 #[tauri::command]

@@ -37,6 +37,8 @@ allsorts = { version = "0.16.1", default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }
 office_oxide = "0.1"
 quick-xml = { version = "0.37", features = ["serialize", "encoding"] }
+calamine = { version = "0.26", features = ["dates"] }
+rust_xlsxwriter = "0.80"
 
 [features]
 default = ["custom-protocol"]

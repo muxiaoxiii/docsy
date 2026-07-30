@@ -73,7 +73,7 @@ DOCSY_TOOL_MANIFEST_URL
 
 清单里的 `url` 不需要指向 GitHub，可以指向任意可访问的 zip 下载地址。每个 zip 内部目录结构不限，Docsy 会递归查找需要的可执行文件。
 
-如果清单不可用，Windows x64 会回退到公开 zip 包：
+如果清单不可用，Windows x64 会回退到版本固定且带 SHA256 校验的公开 zip 包：
 
 - qpdf: qpdf 官方 `msvc64.zip`
 - FFmpeg: Gyan.dev `ffmpeg-release-essentials.zip`

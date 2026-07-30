@@ -58,25 +58,26 @@ pub fn build_template_docx(
 fn validate_coordinate_targets(fields: &[TemplateField], index: &DocumentIndex) -> Result<()> {
     let mut occupied: HashMap<(String, usize, usize), Vec<(usize, usize)>> = HashMap::new();
     for field in fields {
-        let targets: Vec<(&str, Option<usize>, Option<usize>)> = if is_marker_field(&field.field_type) {
-            field
-                .options
-                .iter()
-                .map(|option| (option.marker_mark_id.as_str(), None, None))
-                .collect()
-        } else if field.mark_refs.is_empty() {
-            field
-                .marks
-                .iter()
-                .map(|mark| (mark.as_str(), None, None))
-                .collect()
-        } else {
-            field
-                .mark_refs
-                .iter()
-                .map(|mark| (mark.mark_id.as_str(), mark.start, mark.end))
-                .collect()
-        };
+        let targets: Vec<(&str, Option<usize>, Option<usize>)> =
+            if is_marker_field(&field.field_type) {
+                field
+                    .options
+                    .iter()
+                    .map(|option| (option.marker_mark_id.as_str(), None, None))
+                    .collect()
+            } else if field.mark_refs.is_empty() {
+                field
+                    .marks
+                    .iter()
+                    .map(|mark| (mark.as_str(), None, None))
+                    .collect()
+            } else {
+                field
+                    .mark_refs
+                    .iter()
+                    .map(|mark| (mark.mark_id.as_str(), mark.start, mark.end))
+                    .collect()
+            };
 
         for (mark_id, start, end) in targets {
             let (part, paragraph_index, run_index) = parse_mark_coords(mark_id)

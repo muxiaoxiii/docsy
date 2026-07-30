@@ -66,6 +66,7 @@
               <el-select v-model="groupType" class="type-input" size="small">
                 <el-option label="文本" value="text" />
                 <el-option label="日期" value="date" />
+                <el-option label="下拉选择" value="select" />
                 <el-option label="列表" value="party_list" />
                 <el-option label="引用" value="reference" />
                 <el-option label="互斥勾选组" value="radio_group" />
@@ -363,6 +364,45 @@
                             </el-form-item>
                           </template>
 
+                          <template v-if="rowUsage(row) === 'field' && row.type === 'select'">
+                            <el-form-item label="下拉选项">
+                              <div class="select-options-editor">
+                                <div
+                                  v-for="(opt, optIdx) in row.selectOptions || []"
+                                  :key="optIdx"
+                                  class="select-option-row"
+                                >
+                                  <el-input
+                                    v-model="opt.label"
+                                    size="small"
+                                    placeholder="选项文本"
+                                    class="select-option-input"
+                                  />
+                                  <el-input
+                                    v-model="opt.checkedText"
+                                    size="small"
+                                    placeholder="输出值（留空同文本）"
+                                    class="select-option-input"
+                                  />
+                                  <el-button
+                                    size="small"
+                                    text
+                                    type="danger"
+                                    @click="(row.selectOptions || []).splice(optIdx, 1)"
+                                  >
+                                    删除
+                                  </el-button>
+                                </div>
+                                <el-button
+                                  size="small"
+                                  @click="addSelectOption(row)"
+                                >
+                                  添加选项
+                                </el-button>
+                              </div>
+                            </el-form-item>
+                          </template>
+
                           <template v-if="rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix'">
                             <el-form-item label="归属字段">
                               <el-select
@@ -567,6 +607,15 @@
                 <p>{{ renderableTemplateFields.length }} 个字段。输入时会从历史和通用字段里即时检索。</p>
               </div>
               <el-button type="success" :loading="rendering" @click="renderTemplate">生成 Word</el-button>
+              <el-dropdown @command="handleBatchCommand" trigger="click">
+                <el-button :loading="batchProcessing">批量填写 <el-icon class="el-icon--right"><arrow-down /></el-icon></el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="export">导出字段表</el-dropdown-item>
+                    <el-dropdown-item command="import">导入并生成</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
 
             <div class="template-form-grid">
@@ -693,6 +742,23 @@
                     @input="scheduleHistoryRefresh"
                   />
                 </div>
+                <el-select
+                  v-else-if="field.type === 'select'"
+                  v-model="formValues[fieldFormKey(field)]"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  placeholder="选择或输入"
+                  @change="scheduleHistoryRefresh"
+                >
+                  <el-option
+                    v-for="opt in selectFieldOptions(field)"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
                 <el-autocomplete
                   v-else
                   v-model="formValues[fieldFormKey(field)]"
@@ -814,7 +880,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { QuestionFilled } from '@element-plus/icons-vue'
+import { QuestionFilled, ArrowDown } from '@element-plus/icons-vue'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
 import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
@@ -835,8 +901,9 @@ import {
 const activeTab = ref('build')
 
 const typeHelpItems = [
-  { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、案由、律所名称。' },
+  { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、律所名称。' },
   { value: 'date', label: '日期', description: '日期字段，填写时用日期选择器，生成时输出中文日期格式。' },
+  { value: 'select', label: '下拉选择', description: '从预设选项中选择或手动输入，如案由、诉讼阶段。' },
   { value: 'party_list', label: '列表', description: '适合当事人、律师等多项内容；多个名称按顺序用顿号连接。' },
   { value: 'reference', label: '引用', description: '复用前面字段的值；来源由填写时选择或在设置里指定。' },
   { value: 'checkbox', label: '单个勾选', description: '一个独立方框，只控制是否勾选。' },
@@ -854,6 +921,7 @@ const typeHelpItems = [
 
 const previewLegendItems = [
   { className: 'preview-text', label: '文本', type: 'text' },
+  { className: 'preview-text', label: '下拉选择', type: 'select' },
   { className: 'preview-date', label: '日期', type: 'date' },
   { className: 'preview-party', label: '列表', type: 'party_list' },
   { className: 'preview-reference', label: '引用', type: 'reference' },
@@ -909,6 +977,7 @@ const formValues = reactive({})
 const referenceSelections = reactive({})
 const structureOverrides = reactive({})
 const rendering = ref(false)
+const batchProcessing = ref(false)
 const historyContext = ref({
   lastValues: {},
   fieldSuggestions: {},
@@ -1607,6 +1676,11 @@ function markToRow(mark, index) {
     referenceSourceSemanticKey: '',
     referenceSourceIndex: null,
     referenceSourceKey: referenceSourceKey('auto', '', null),
+    options: inferred.options || [],
+    selectOptions: (inferred.options || []).map((opt) => ({
+      label: opt.label || '',
+      checkedText: opt.checkedText || '',
+    })),
   }
 }
 
@@ -2877,6 +2951,8 @@ function onRowTypeChange(row) {
     row.label = row.name
     if (!row.referenceSourceKey) row.referenceSourceKey = referenceSourceKey('auto', '', null)
     syncReferenceSourceFromKey(row)
+  } else if (row.type === 'select') {
+    if (!row.selectOptions) row.selectOptions = []
   }
   row.partyItems = row.type === 'party_list' ? splitPartyLabelText(row.text) : []
 }
@@ -3189,6 +3265,21 @@ function buildFields() {
         enabled: true,
         removeEmptyPrefix: row.optionalPrefix || '',
         removeEmptySuffix: row.optionalSuffix || '',
+      }
+    }
+    if (type === 'select') {
+      const src = row.selectOptions?.length ? row.selectOptions : row.options
+      if (src?.length && field.options.length === 0) {
+        field.options = src
+          .filter((opt) => (opt.label || opt.checkedText || '').trim())
+          .map((opt, i) => ({
+            id: `opt_${i + 1}`,
+            label: opt.label || opt.checkedText || '',
+            checkedText: opt.checkedText || opt.label || '',
+            uncheckedText: '',
+            markerMarkId: '',
+            markerTag: '',
+          }))
       }
     }
     if (isMarkerType(type)) {
@@ -3540,6 +3631,15 @@ function firstOptionLabel(field) {
   return field.options?.[0]?.label || ''
 }
 
+function selectFieldOptions(field) {
+  return (field.options || [])
+    .map((opt) => ({
+      label: opt.label || '',
+      value: opt.checkedText || opt.label || '',
+    }))
+    .filter((opt) => opt.label)
+}
+
 function fieldStructureHints(field) {
   const override = existingStructureOverrideForField(field)
   const prefixes = override ? [override.prefix ?? ''] : [sourceFieldPrefix(field)].filter((text) => text !== '')
@@ -3624,6 +3724,212 @@ async function renderTemplate() {
   await loadHistoryContext(false)
   await loadTemplateHistoryRuns()
   await openPath(result.data)
+}
+
+// ── Batch Fill ──────────────────────────────────────────────────────────────
+
+async function handleBatchCommand(command) {
+  if (command === 'export') {
+    await exportBatchTemplate()
+  } else if (command === 'import') {
+    await importAndBatchRender()
+  }
+}
+
+async function exportBatchTemplate() {
+  if (!templatePath.value || !templateManifest.value) return
+  const defaultName = `${stripExtension(fileName(templatePath.value), /\.docsytpl$/i)}-批量填写模板.xlsx`
+  const outputPath = await save({
+    defaultPath: `${parentDir(templatePath.value)}/${defaultName}`,
+    filters: [{ name: 'Excel 文件', extensions: ['xlsx'] }],
+  })
+  if (!outputPath) return
+
+  batchProcessing.value = true
+  const result = await tauriCallSafe('export_template_fields_xlsx', {
+    templatePath: templatePath.value,
+    outputPath: ensureExtension(outputPath, 'xlsx'),
+    defaultValues: normalizeValues(),
+  })
+  batchProcessing.value = false
+
+  if (!result.ok) {
+    ElMessage.error(result.error || '导出失败')
+    return
+  }
+  ElMessage.success('字段表已导出')
+  await openPath(result.data)
+}
+
+async function importAndBatchRender() {
+  if (!templatePath.value || !templateManifest.value) return
+
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'Excel 文件', extensions: ['xlsx'] }],
+  })
+  if (!selected) return
+
+  const xlsxPath = typeof selected === 'string' ? selected : selected
+
+  // Step 1: Validate
+  batchProcessing.value = true
+  const validation = await tauriCallSafe('validate_batch_import', {
+    templatePath: templatePath.value,
+    xlsxPath,
+  })
+
+  if (!validation.ok) {
+    batchProcessing.value = false
+    ElMessage.error(validation.error || '校验失败')
+    return
+  }
+
+  const v = validation.data
+
+  // Show validation result dialog
+  const { proceed, skipRows } = await showValidationDialog(v)
+  if (!proceed) {
+    batchProcessing.value = false
+    return
+  }
+
+  // Step 2: Choose output directory
+  const outputDir = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: parentDir(templatePath.value),
+  })
+  if (!outputDir) {
+    batchProcessing.value = false
+    return
+  }
+
+  // Step 3: Batch render (pass current structureOverrides + skipRows)
+  const result = await tauriCallSafe('batch_render_from_xlsx', {
+    templatePath: templatePath.value,
+    xlsxPath,
+    outputDir: typeof outputDir === 'string' ? outputDir : outputDir,
+    namePattern: '',
+    skipRows,
+    structureOverrides: normalizeStructureOverrides(),
+  })
+  batchProcessing.value = false
+
+  if (!result.ok) {
+    ElMessage.error(result.error || '批量生成失败')
+    return
+  }
+
+  const r = result.data
+  const msg = `批量生成完成：成功 ${r.success} 份` + (r.failed > 0 ? `，失败 ${r.failed} 份` : '')
+  ElMessage.success(msg)
+
+  if (r.outputs?.length) {
+    await openPath(r.outputs[0])
+  }
+}
+
+async function showValidationDialog(validation) {
+  const v = validation
+  const lines = []
+
+  if (!v.templateIdMatch) {
+    lines.push('❌ Excel 文件的模板 ID 与当前模板不匹配，无法生成。请使用当前模板导出的字段表。')
+    lines.push('')
+  }
+
+  lines.push(`共 ${v.totalRows} 行数据，${v.validRows} 行有效。`)
+
+  if (v.warnings.length) {
+    lines.push('')
+    lines.push('警告：')
+    for (const w of v.warnings) {
+      lines.push(`  · ${w.message}`)
+    }
+  }
+
+  // Collect error row indices for skip
+  const errorRowSet = new Set(v.errors.map((e) => e.row))
+
+  if (v.errors.length) {
+    lines.push('')
+    lines.push('错误：')
+    const shown = v.errors.slice(0, 10)
+    for (const e of shown) {
+      lines.push(`  · 第 ${e.row + 1} 行：${e.message}`)
+    }
+    if (v.errors.length > 10) {
+      lines.push(`  · ...还有 ${v.errors.length - 10} 个错误`)
+    }
+  }
+
+  // Block if no valid rows
+  if (v.validRows === 0 && v.totalRows > 0) {
+    lines.push('')
+    lines.push('❌ 没有有效数据行，无法生成。')
+  }
+
+  // Block if template ID mismatch
+  if (!v.templateIdMatch) {
+    try {
+      await ElMessageBox.alert(lines.join('\n'), '模板不匹配', {
+        confirmButtonText: '知道了',
+        type: 'error',
+        customStyle: { whiteSpace: 'pre-line' },
+      })
+    } catch {
+      // User dismissed the alert — proceed to return false
+    }
+    return { proceed: false, skipRows: [] }
+  }
+
+  // Block if no valid rows
+  if (v.validRows === 0) {
+    try {
+      await ElMessageBox.alert(lines.join('\n'), '无有效数据', {
+        confirmButtonText: '知道了',
+        type: 'warning',
+        customStyle: { whiteSpace: 'pre-line' },
+      })
+    } catch {
+      // User dismissed
+    }
+    return { proceed: false, skipRows: [] }
+  }
+
+  const hasErrors = v.errors.length > 0
+  const title = hasErrors ? '校验结果（有错误）' : '校验结果'
+  const type = hasErrors ? 'warning' : 'info'
+
+  try {
+    if (hasErrors) {
+      await ElMessageBox.confirm(
+        lines.join('\n'),
+        title,
+        {
+          confirmButtonText: '跳过错误行继续',
+          cancelButtonText: '取消',
+          type,
+          customStyle: { whiteSpace: 'pre-line' },
+        },
+      )
+    } else {
+      await ElMessageBox.confirm(
+        lines.join('\n'),
+        title,
+        {
+          confirmButtonText: '开始生成',
+          cancelButtonText: '取消',
+          type,
+          customStyle: { whiteSpace: 'pre-line' },
+        },
+      )
+    }
+    return { proceed: true, skipRows: Array.from(errorRowSet) }
+  } catch {
+    return { proceed: false, skipRows: [] }
+  }
 }
 
 function normalizeValues() {
@@ -3838,6 +4144,11 @@ function addPartyItem(field) {
   scheduleHistoryRefresh()
 }
 
+function addSelectOption(row) {
+  if (!row.selectOptions) row.selectOptions = []
+  row.selectOptions.push({ label: '', checkedText: '' })
+}
+
 function removePartyItem(field, index) {
   const rows = partyListRows(field)
   rows.splice(index, 1)
@@ -4028,22 +4339,29 @@ function todayText() {
   min-height: 100%;
 }
 
+.template-view {
+  padding: 20px 24px 36px;
+  background: var(--docsy-canvas);
+}
+
 :deep(.template-tabs > .el-tabs__content),
 :deep(.template-tabs > .el-tabs__content > .el-tab-pane) {
+  min-width: 0;
   overflow: visible;
 }
 
 .workspace {
   display: grid;
   gap: 14px;
-  padding: 4px;
+  padding-top: 8px;
 }
 
 .panel {
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
   padding: 14px;
-  background: #fff;
+  background: var(--docsy-surface-elevated);
+  box-shadow: 0 3px 14px rgba(54, 45, 36, 0.035);
 }
 
 .panel-header {
@@ -4065,18 +4383,18 @@ function todayText() {
 }
 
 .help-button {
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 h3 {
   margin: 0 0 4px;
   font-size: 16px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 p {
   margin: 0;
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 13px;
 }
 
@@ -4103,10 +4421,10 @@ p {
   overflow: auto;
   margin: 0;
   padding: 10px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
-  background: #fafafa;
-  color: #303133;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-strong);
   font-family: inherit;
   font-size: 13px;
   line-height: 1.7;
@@ -4121,13 +4439,13 @@ p {
   align-items: center;
   margin-bottom: 10px;
   padding: 8px 10px;
-  border: 1px solid #d9ecff;
+  border: 1px solid #cddfd9;
   border-radius: 6px;
-  background: #f4f9ff;
+  background: var(--docsy-primary-soft);
 }
 
 .selection-count {
-  color: #409eff;
+  color: var(--docsy-primary);
   font-size: 13px;
   font-weight: 600;
 }
@@ -4137,9 +4455,9 @@ p {
   gap: 8px;
   margin-bottom: 10px;
   padding: 10px;
-  border: 1px solid #e1f3d8;
+  border: 1px solid #d7e4d1;
   border-radius: 6px;
-  background: #f6ffed;
+  background: #f2f7ef;
 }
 
 .suggestion-header,
@@ -4151,7 +4469,7 @@ p {
 }
 
 .suggestion-header strong {
-  color: #3f7d20;
+  color: var(--docsy-success);
   font-size: 13px;
 }
 
@@ -4161,7 +4479,7 @@ p {
 }
 
 .suggestion-item {
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 13px;
 }
 
@@ -4176,29 +4494,29 @@ p {
 .type-help-item {
   display: grid;
   gap: 2px;
-  color: #606266;
+  color: var(--docsy-text);
   line-height: 1.45;
 }
 
 .type-help-item strong {
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .field-rules {
   display: grid;
   gap: 12px;
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 .field-rules h4 {
   margin: 0 0 6px;
-  color: #303133;
+  color: var(--docsy-text-strong);
   font-size: 13px;
 }
 
 .field-rules p {
   margin: 4px 0 0;
-  color: #606266;
+  color: var(--docsy-text);
   line-height: 1.55;
 }
 
@@ -4216,12 +4534,12 @@ p {
   grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 13px;
 }
 
 .rule-summary-item strong {
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .template-build-actions {
@@ -4235,7 +4553,7 @@ p {
 .preview-panel {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid var(--docsy-border-subtle);
 }
 
 .preview-panel-header {
@@ -4249,7 +4567,7 @@ p {
 .preview-panel-header h3,
 .template-preview-grid h4 {
   margin: 0;
-  color: #303133;
+  color: var(--docsy-text-strong);
   font-size: 14px;
 }
 
@@ -4268,10 +4586,10 @@ p {
   max-height: 360px;
   overflow: auto;
   padding: 10px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
-  background: #fafafa;
-  color: #303133;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-strong);
   font-size: 13px;
   line-height: 1.8;
   white-space: pre-wrap;
@@ -4310,8 +4628,8 @@ p {
 }
 
 .preview-text {
-  background: #ecf5ff;
-  color: #1f5f99;
+  background: var(--docsy-primary-soft);
+  color: var(--docsy-primary-hover);
 }
 
 .preview-date {
@@ -4357,7 +4675,7 @@ p {
 
 .preview-suffix {
   background: #f6f6f6;
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 .preview-delete-text {
@@ -4367,18 +4685,18 @@ p {
 }
 
 .preview-ignore {
-  background: #f5f7fa;
-  color: #909399;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
 }
 
 .preview-deleted {
-  color: #909399;
+  color: var(--docsy-text-muted);
   text-decoration: line-through;
   opacity: 0.7;
 }
 
 .preview-focused {
-  outline: 2px solid #409eff;
+  outline: 2px solid var(--docsy-primary);
 }
 
 .preview-legend {
@@ -4392,9 +4710,9 @@ p {
 .preview-selection-status {
   max-width: 360px;
   padding: 3px 8px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--docsy-border-strong);
   border-radius: 4px;
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4408,8 +4726,8 @@ p {
   align-items: center;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid #ebeef5;
-  color: #606266;
+  border-top: 1px solid var(--docsy-border-subtle);
+  color: var(--docsy-text);
   font-size: 13px;
 }
 
@@ -4431,11 +4749,11 @@ p {
   border: 1px solid #fcd3d3;
   border-radius: 6px;
   background: #fef0f0;
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 .reference-suggestion p {
-  color: #606266;
+  color: var(--docsy-text);
   line-height: 1.5;
 }
 
@@ -4466,11 +4784,11 @@ p {
 }
 
 .structure-mark {
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .relation-arrow {
-  color: #909399;
+  color: var(--docsy-text-muted);
   flex: 0 0 auto;
 }
 
@@ -4487,7 +4805,7 @@ p {
 }
 
 .field-label {
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4509,14 +4827,14 @@ p {
 }
 
 :deep(.ignored-field-row) {
-  color: #909399;
-  background: #fafafa;
+  color: var(--docsy-text-muted);
+  background: var(--docsy-surface-muted);
   opacity: 0.72;
 }
 
 :deep(.ignored-field-row .el-input__wrapper),
 :deep(.ignored-field-row .el-select__wrapper) {
-  background: #f5f7fa;
+  background: var(--docsy-surface-muted);
 }
 
 :deep(.delete-field-row) {
@@ -4525,7 +4843,7 @@ p {
 }
 
 :deep(.party-child-row) {
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 :deep(.party-group-row) {
@@ -4541,7 +4859,7 @@ p {
 }
 
 .party-child-field > span:first-child {
-  color: #409eff;
+  color: var(--docsy-primary);
   font-weight: 600;
 }
 
@@ -4563,7 +4881,7 @@ p {
 }
 
 :deep(.grouped-field-row-0 td:first-child) {
-  border-left-color: #409eff;
+  border-left-color: var(--docsy-primary);
 }
 
 :deep(.grouped-field-row-1 td) {
@@ -4616,23 +4934,23 @@ p {
   display: grid;
   gap: 5px;
   padding: 12px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--docsy-border-strong);
   border-radius: 6px;
-  background: #fff;
-  color: #303133;
+  background: var(--docsy-surface-elevated);
+  color: var(--docsy-text-strong);
   text-align: left;
   cursor: pointer;
 }
 
 .template-library-card:hover,
 .template-library-card.active {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
 }
 
 .template-library-card span,
 .template-library-card small {
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .history-group-list,
@@ -4645,9 +4963,9 @@ p {
   display: grid;
   gap: 8px;
   padding: 12px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
-  background: #fafafa;
+  background: var(--docsy-surface-muted);
 }
 
 .history-group-header,
@@ -4664,26 +4982,26 @@ p {
 
 .history-group-header h4 {
   margin: 0 0 2px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .history-group-header span {
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
 }
 
 .history-run-card {
   justify-content: space-between;
   padding: 10px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
-  background: #fff;
+  background: var(--docsy-surface-elevated);
   cursor: pointer;
 }
 
 .history-run-card:hover {
-  border-color: #409eff;
-  background: #f5faff;
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
 }
 
 .history-run-main {
@@ -4694,7 +5012,7 @@ p {
 
 .history-run-main > span {
   overflow: hidden;
-  color: #909399;
+  color: var(--docsy-text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4721,9 +5039,9 @@ p {
   gap: 8px;
   min-width: 0;
   padding: 12px 34px 12px 12px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
-  background: #fff;
+  background: var(--docsy-surface-elevated);
 }
 
 .field-more-button {
@@ -4732,17 +5050,17 @@ p {
   bottom: 8px;
   width: 22px;
   height: 22px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--docsy-border-strong);
   border-radius: 50%;
-  background: #fff;
-  color: #606266;
+  background: var(--docsy-surface);
+  color: var(--docsy-text);
   cursor: pointer;
   line-height: 18px;
 }
 
 .field-more-button:hover {
-  border-color: #409eff;
-  color: #409eff;
+  border-color: var(--docsy-primary);
+  color: var(--docsy-primary);
 }
 
 .fill-structure-editor {
@@ -4768,8 +5086,8 @@ p {
   flex: 0 0 auto;
   padding: 1px 6px;
   border-radius: 4px;
-  background: #f4f4f5;
-  color: #909399;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
   font-size: 12px;
   font-style: normal;
 }
@@ -4786,15 +5104,15 @@ p {
 }
 
 .fill-structure-hint {
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
 }
 
 .fill-structure-hint code {
   padding: 1px 5px;
   border-radius: 4px;
-  background: #f4f4f5;
-  color: #606266;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text);
   font-family: inherit;
 }
 
@@ -4857,14 +5175,29 @@ p {
   justify-content: flex-start;
 }
 
+.select-options-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.select-option-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.select-option-input {
+  flex: 1;
+}
+
 .field-structure-hint {
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
   line-height: 1.5;
 }
 
 .party-order {
-  color: #909399;
+  color: var(--docsy-text-muted);
   text-align: center;
 }
 
@@ -4874,8 +5207,8 @@ p {
   min-height: 24px;
   padding: 0 8px;
   border-radius: 4px;
-  background: #f4f4f5;
-  color: #606266;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text);
   font-size: 12px;
 }
 
@@ -4893,5 +5226,49 @@ p {
 .field-panel,
 .form-panel {
   min-height: 0;
+}
+
+@media (max-width: 1180px) {
+  .template-preview-grid,
+  .template-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-header,
+  .panel-header.compact {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .panel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-self: stretch;
+  }
+
+  .template-name {
+    flex: 1 1 220px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .template-view {
+    padding: 16px;
+  }
+
+  .party-list-row,
+  .party-list-row.compact,
+  .party-list-row.compact.no-suffix {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .party-list-row > :not(.party-order):not(.el-autocomplete):not(.el-input) {
+    grid-column: 2;
+  }
+
+  .party-row-actions {
+    justify-content: flex-start;
+  }
 }
 </style>

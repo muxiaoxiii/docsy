@@ -138,8 +138,15 @@ fn render_tree(
                                 }
                             } else {
                                 apply_party_item_suffix(children, i, field, *slot, &value);
-                                let sdt_index =
-                                    apply_structure_override(children, i, field, *slot, overrides);
+                                // Reference 字段：仅当用户显式设置了覆盖前缀/后缀时才应用，
+                                // 否则保留模板原文（因为引用值来自其他字段）
+                                let is_reference = field.reference.is_some();
+                                let has_explicit_override = overrides.get(&field.id).is_some();
+                                let sdt_index = if is_reference && !has_explicit_override {
+                                    i
+                                } else {
+                                    apply_structure_override(children, i, field, *slot, overrides)
+                                };
                                 replace_sdt_content(
                                     &mut children[sdt_index],
                                     field,
@@ -372,6 +379,10 @@ fn optional_rule_for_slot(
 /// Apply a user-edited affix to its original document position. Affixes are
 /// ordinary template text, not part of the field value; appending them inside
 /// the SDT duplicates the source text and breaks empty-field cleanup.
+///
+/// When no explicit structure override exists, falls back to the optional rule's
+/// prefix/suffix so that fields like 案号 automatically get their wrapper text
+/// (e.g. "（案号：" / "）") applied even if the user never opened the structure editor.
 fn apply_structure_override(
     siblings: &mut Vec<XmlNode>,
     at: usize,
@@ -379,18 +390,31 @@ fn apply_structure_override(
     slot: Option<usize>,
     overrides: &HashMap<String, StructureOverride>,
 ) -> usize {
-    let Some(override_) = overrides.get(&field.id) else {
-        return at;
-    };
+    let override_ = overrides.get(&field.id);
+    let rule = optional_rule_for_slot(field, slot);
+
+    // User override takes priority; fall back to optionalRule prefix/suffix
+    let effective_prefix = override_
+        .and_then(|o| o.prefix.as_deref())
+        .or_else(|| {
+            rule.map(|r| r.remove_empty_prefix.as_str())
+                .filter(|s| !s.is_empty())
+        });
+    let effective_suffix = override_
+        .and_then(|o| o.suffix.as_deref())
+        .or_else(|| {
+            rule.map(|r| r.remove_empty_suffix.as_str())
+                .filter(|s| !s.is_empty())
+        });
+
     let ref_count = field.mark_refs.len();
     let index = slot.unwrap_or(0);
     let is_first = ref_count <= 1 || index == 0;
     let is_last = ref_count <= 1 || index + 1 >= ref_count;
-    let rule = optional_rule_for_slot(field, slot);
 
     let mut sdt_index = at;
     if is_first {
-        if let Some(prefix) = override_.prefix.as_deref() {
+        if let Some(prefix) = effective_prefix {
             let source = rule
                 .map(|item| item.remove_empty_prefix.as_str())
                 .unwrap_or("");
@@ -400,7 +424,7 @@ fn apply_structure_override(
         }
     }
     if is_last {
-        if let Some(suffix) = override_.suffix.as_deref() {
+        if let Some(suffix) = effective_suffix {
             let source = rule
                 .map(|item| item.remove_empty_suffix.as_str())
                 .unwrap_or("");
@@ -971,7 +995,6 @@ fn apply_party_item_suffix(
         &items[index].suffix,
     );
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -406,7 +406,6 @@ async function run() {
       folder: folder.value,
       folders: folders.value,
       ...settings,
-      filename_remove_text: '',
       orientation: resolvedOrientation.value,
     },
   })
@@ -760,33 +759,40 @@ function scaleModeLabel(value) {
 <style scoped>
 .image-paddler-view {
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--docsy-surface);
 }
 
 .paddler-layout {
-  display: flex;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
   height: 100%;
+  min-height: 0;
 }
 
 .settings-panel {
-  width: 280px;
-  flex-shrink: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px;
+  border-right: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface);
 }
 
 .settings-panel h3 {
   margin: 0 0 4px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .hint {
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
   margin: 0 0 16px;
 }
 
 .folder-path {
   font-size: 12px;
-  color: #909399;
+  color: var(--docsy-text-muted);
   word-break: break-all;
   display: block;
   margin-top: 4px;
@@ -842,8 +848,11 @@ function scaleModeLabel(value) {
 }
 
 .result-panel {
-  flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
+  padding: 20px;
+  background: var(--docsy-canvas);
 }
 
 .analysis-summary {
@@ -857,10 +866,10 @@ function scaleModeLabel(value) {
   gap: 12px;
   margin-top: 10px;
   padding: 10px 12px;
-  border: 1px solid #d9ecff;
-  background: #f4f9ff;
+  border: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-primary-soft);
   border-radius: 4px;
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 12px;
 }
 
@@ -874,13 +883,13 @@ function scaleModeLabel(value) {
   align-items: center;
   margin-bottom: 8px;
   font-size: 12px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .section-head h4 {
   margin: 0;
   font-size: 13px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .preview-toolbar {
@@ -897,7 +906,7 @@ function scaleModeLabel(value) {
 .zoom-value {
   width: 42px;
   text-align: right;
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 .page-size-select {
@@ -907,15 +916,15 @@ function scaleModeLabel(value) {
 .page-preview-shell {
   display: block;
   padding: 12px;
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
+  background: var(--docsy-surface-muted);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
   overflow: auto;
 }
 
 .page-preview {
   background: #fff;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--docsy-border-strong);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   margin: 0 auto;
 }
@@ -931,7 +940,7 @@ function scaleModeLabel(value) {
   min-width: 0;
   min-height: 0;
   border: 1px solid transparent;
-  background: #fafafa;
+  background: #fbfaf8;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -970,7 +979,7 @@ function scaleModeLabel(value) {
   width: 100%;
   line-height: 14px;
   padding: 2px 4px;
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 11px;
   text-align: center;
   overflow: hidden;
@@ -988,15 +997,15 @@ function scaleModeLabel(value) {
   align-items: center;
   padding: 10px 12px;
   margin-bottom: 12px;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
-  background: #f5f7fa;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  background: var(--docsy-surface-muted);
   font-size: 13px;
 }
 
 .output-path {
   margin-top: 4px;
-  color: #606266;
+  color: var(--docsy-text);
   word-break: break-all;
   font-size: 12px;
 }
@@ -1025,13 +1034,38 @@ function scaleModeLabel(value) {
 
 .unit-label {
   margin-left: 8px;
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
 }
 
 .analyze-hint {
   margin-left: 8px;
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
+}
+
+@media (max-width: 1180px) {
+  .image-paddler-view {
+    overflow: auto;
+  }
+
+  .paddler-layout {
+    display: block;
+    height: auto;
+  }
+
+  .settings-panel,
+  .result-panel {
+    overflow: visible;
+  }
+
+  .settings-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--docsy-border-subtle);
+  }
+
+  .filename-rule-keep {
+    grid-template-columns: 78px minmax(0, 1fr) auto;
+  }
 }
 </style>

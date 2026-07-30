@@ -1,4 +1,14 @@
+import { Document, DocumentChecked, Files, Picture, VideoCamera } from '@element-plus/icons-vue'
+
 const modules = import.meta.glob('../modules/*/index.js', { eager: true })
+
+const moduleIcons = {
+  Document,
+  DocumentChecked,
+  Files,
+  Picture,
+  VideoCamera,
+}
 
 export const moduleRegistry = Object.values(modules)
   .map((m) => m.default)
@@ -15,6 +25,7 @@ export function getMenuItems(settings = {}) {
     .flatMap((m) =>
       m.menuItems.map((item) => ({
         ...item,
+        icon: resolveModuleIcon(item.icon || m.icon),
         moduleId: m.id,
       })),
     )
@@ -24,7 +35,13 @@ export function getMenuItems(settings = {}) {
 export function getHomeCards(settings = {}) {
   return orderedModules(settings)
     .filter((m) => isModuleVisible(m.id, settings))
-    .flatMap((m) => (m.homeCards || []).map((card) => ({ ...card, moduleId: m.id })))
+    .flatMap((m) =>
+      (m.homeCards || []).map((card) => ({
+        ...card,
+        icon: resolveModuleIcon(card.icon || m.icon),
+        moduleId: m.id,
+      })),
+    )
 }
 
 export function getModule(id) {
@@ -41,7 +58,7 @@ export function getMenuModules() {
     .map((m) => ({
       id: m.id,
       name: m.name,
-      icon: m.icon,
+      icon: resolveModuleIcon(m.icon),
       defaultVisible: m.defaultVisible !== false,
     }))
 }
@@ -64,4 +81,9 @@ function orderedModules(settings = {}) {
 function isModuleVisible(id, settings = {}) {
   const visibility = settings.menu_visibility || {}
   return visibility[id] !== false
+}
+
+function resolveModuleIcon(icon) {
+  if (typeof icon !== 'string') return icon
+  return moduleIcons[icon]
 }

@@ -3,11 +3,83 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use crate::external::ExternalTool;
 use crate::sort_utils::natural_cmp;
+use crate::ConversionState;
 
 const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm"];
+
+/// Run a child process with interactive timeout.
+/// When the initial timeout expires, emits a Tauri event and waits for user response.
+/// If the user chooses to continue, waits another `timeout` period, repeating up to `max_rounds`.
+/// Returns Ok(output) on success, Err on cancel or max rounds exceeded.
+fn run_process_with_interactive_timeout(
+    cmd: &mut std::process::Command,
+    initial_timeout: std::time::Duration,
+    conversion_state: &Arc<ConversionState>,
+    app: &tauri::AppHandle,
+) -> Result<std::process::Output> {
+    conversion_state.reset();
+
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("启动转换进程失败")?;
+
+    conversion_state.pid.store(child.id() as u64, Ordering::SeqCst);
+
+    let timeout = initial_timeout;
+    let start = std::time::Instant::now();
+    let poll_interval = std::time::Duration::from_secs(1);
+
+    loop {
+        // Check if process finished
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout = child.stdout.take().map(|mut s| {
+                    let mut buf = Vec::new();
+                    let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+                    buf
+                });
+                let stderr = child.stderr.take().map(|mut s| {
+                    let mut buf = Vec::new();
+                    let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+                    buf
+                });
+                return Ok(std::process::Output {
+                    status,
+                    stdout: stdout.unwrap_or_default(),
+                    stderr: stderr.unwrap_or_default(),
+                });
+            }
+            Ok(None) => {
+                // Still running
+            }
+            Err(e) => {
+                let _ = child.kill();
+                anyhow::bail!("检查转换进程状态失败: {e}");
+            }
+        }
+
+        // Check timeout
+        if start.elapsed() >= timeout {
+            // Ask user whether to continue
+            let should_continue = conversion_state.wait_for_user_response(app);
+            if !should_continue {
+                let _ = child.kill();
+                anyhow::bail!("用户取消了转换");
+            }
+            // User chose to continue — reset start time for another round
+            // (loop continues, effectively extending the timeout)
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum FileType {
@@ -179,7 +251,10 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
     }))
 }
 
-pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
+pub fn build_group_pdfs(
+    args: &serde_json::Value,
+    conversion_state: &Arc<ConversionState>,
+) -> Result<serde_json::Value> {
     let root = args["root"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("缺少 root 参数"))?;
@@ -220,7 +295,7 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
                 "pdf" => {
                     pdf_paths.push(file_path.to_string());
                 }
-                "word" => match convert_word_to_pdf(file_path, &evidence_dir) {
+                "word" => match convert_word_to_pdf(file_path, &evidence_dir, conversion_state) {
                     Ok(converted) => pdf_paths.push(converted),
                     Err(err) => failed_conversions.push(serde_json::json!({
                         "groupId": group_id,
@@ -329,18 +404,23 @@ pub fn merge_all(args: &serde_json::Value) -> Result<String> {
     Ok(output_path_str)
 }
 
-fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
+fn convert_word_to_pdf(
+    doc_path: &str,
+    output_dir: &Path,
+    conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
     let mut attempts = Vec::new();
     let canonical = std::fs::canonicalize(doc_path)
         .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
-    let conversion_dir = output_dir
-        .join("_converted")
-        .join(format!("{:016x}", fnv1a_hash(&canonical.display().to_string())));
+    let conversion_dir = output_dir.join("_converted").join(format!(
+        "{:016x}",
+        fnv1a_hash(&canonical.display().to_string())
+    ));
     fs::create_dir_all(&conversion_dir).context("创建 Word 转换工作目录失败")?;
 
     if cfg!(windows) || cfg!(target_os = "macos") {
         match crate::external::WordTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_word(doc_path, &conversion_dir) {
+            Ok(_) => match convert_doc_to_pdf_with_word(doc_path, &conversion_dir, conversion_state) {
                 Ok(path) => return Ok(path),
                 Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
             },
@@ -352,7 +432,7 @@ fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
 
     if cfg!(windows) {
         match crate::external::WpsTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir) {
+            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir, conversion_state) {
                 Ok(path) => return Ok(path),
                 Err(err) => attempts.push(format!("WPS Writer 转换失败: {err}")),
             },
@@ -361,7 +441,8 @@ fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
     }
 
     match crate::external::LibreOfficeTool.binary_path() {
-        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, &conversion_dir) {
+        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, &conversion_dir)
+        {
             Ok(path) => Ok(path),
             Err(err) => {
                 attempts.push(format!("LibreOffice 转换失败: {err}"));
@@ -384,7 +465,11 @@ fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
 }
 
 #[cfg(windows)]
-fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<String> {
+fn convert_doc_to_pdf_with_word(
+    doc_path: &str,
+    output_dir: &Path,
+    conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
     let input = std::fs::canonicalize(doc_path)
         .with_context(|| format!("读取 DOC/DOCX 文件失败: {doc_path}"))?;
     let stem = input
@@ -408,27 +493,37 @@ fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<Str
         output = powershell_escape(&output.display().to_string()),
     );
 
-    let status = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .context("启动 Microsoft Word 转换失败")?;
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &script,
+    ]);
 
-    if !status.success() || !output.exists() {
+    let app = crate::get_app_handle()
+        .ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let output_result = run_process_with_interactive_timeout(
+        &mut cmd,
+        std::time::Duration::from_secs(60),
+        conversion_state,
+        app,
+    )
+    .context("Microsoft Word 转换失败")?;
+
+    if !output_result.status.success() || !output.exists() {
         anyhow::bail!("Microsoft Word 转 PDF 失败: {doc_path}");
     }
     Ok(output.display().to_string())
 }
 
 #[cfg(windows)]
-fn convert_doc_to_pdf_with_wps(doc_path: &str, output_dir: &Path) -> Result<String> {
+fn convert_doc_to_pdf_with_wps(
+    doc_path: &str,
+    output_dir: &Path,
+    conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
     let input = std::fs::canonicalize(doc_path)
         .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
     let stem = input
@@ -459,32 +554,46 @@ fn convert_doc_to_pdf_with_wps(doc_path: &str, output_dir: &Path) -> Result<Stri
         output = powershell_escape(&output.display().to_string()),
     );
 
-    let status = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .context("启动 WPS Writer 转换失败")?;
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &script,
+    ]);
 
-    if !status.success() || !output.exists() {
+    let app = crate::get_app_handle()
+        .ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let output_result = run_process_with_interactive_timeout(
+        &mut cmd,
+        std::time::Duration::from_secs(60),
+        conversion_state,
+        app,
+    )
+    .context("WPS Writer 转换失败")?;
+
+    if !output_result.status.success() || !output.exists() {
         anyhow::bail!("WPS Writer 转 PDF 失败: {doc_path}");
     }
     Ok(output.display().to_string())
 }
 
 #[cfg(not(windows))]
-fn convert_doc_to_pdf_with_wps(_doc_path: &str, _output_dir: &Path) -> Result<String> {
+fn convert_doc_to_pdf_with_wps(
+    _doc_path: &str,
+    _output_dir: &Path,
+    _conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
     anyhow::bail!("当前平台不支持 WPS Writer 自动转换")
 }
 
 #[cfg(target_os = "macos")]
-fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<String> {
+fn convert_doc_to_pdf_with_word(
+    doc_path: &str,
+    output_dir: &Path,
+    _conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
     let input = std::fs::canonicalize(doc_path)
         .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
     let stem = input
@@ -533,7 +642,11 @@ end run
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-fn convert_doc_to_pdf_with_word(_doc_path: &str, _output_dir: &Path) -> Result<String> {
+fn convert_doc_to_pdf_with_word(
+    _doc_path: &str,
+    _output_dir: &Path,
+    _conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
     anyhow::bail!("当前平台不支持 Microsoft Word 自动转换")
 }
 

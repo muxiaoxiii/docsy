@@ -218,7 +218,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
-import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { Loading, CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
@@ -279,7 +279,7 @@ async function installFfmpeg() {
 }
 
 async function openFfmpegDownload() {
-  const res = await openPath('https://www.gyan.dev/ffmpeg/builds/')
+  const res = await openExternalUrl('https://www.gyan.dev/ffmpeg/builds/')
   if (!res.ok) {
     ElMessage.error('无法打开 FFmpeg 下载页: ' + res.error)
   }
@@ -458,36 +458,44 @@ onBeforeUnmount(() => {
 <style scoped>
 .video-extract-view {
   height: 100%;
+  min-height: 0;
   overflow: hidden;
+  background: var(--docsy-surface);
 }
 
 .extract-layout {
-  display: flex;
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
   height: 100%;
-  gap: 16px;
+  min-height: 0;
 }
 
 .extract-settings {
-  width: 380px;
-  flex-shrink: 0;
+  min-width: 0;
   overflow-y: auto;
-  padding: 16px;
-  border-right: 1px solid #e4e7ed;
+  padding: 20px;
+  border-right: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface);
 }
 
 .extract-results {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
+  background: var(--docsy-canvas);
 }
 
 .results-header {
   padding: 12px 16px;
-  border-bottom: 1px solid #e4e7ed;
+  min-height: 52px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface);
   font-weight: 600;
   font-size: 14px;
-  color: #303133;
+  color: var(--docsy-text-strong);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -496,7 +504,7 @@ onBeforeUnmount(() => {
 .results-count {
   font-weight: 400;
   font-size: 12px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .results-loading {
@@ -505,7 +513,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .results-loading p {
@@ -529,13 +537,19 @@ onBeforeUnmount(() => {
 }
 
 .section-block {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+}
+
+.section-block:last-child {
+  border-bottom: 0;
 }
 
 .section-title {
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
+  color: var(--docsy-text-strong);
   margin-bottom: 10px;
 }
 
@@ -544,7 +558,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 .status-ok {
@@ -556,35 +570,35 @@ onBeforeUnmount(() => {
 }
 
 .drop-zone {
-  border: 2px dashed #dcdfe6;
-  border-radius: 8px;
+  border: 1px dashed var(--docsy-border-strong);
+  border-radius: 6px;
   padding: 24px 16px;
   text-align: center;
   cursor: pointer;
   transition:
     border-color 0.2s,
     background 0.2s;
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 13px;
 }
 
 .drop-zone:hover,
 .drop-zone-active {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
 }
 
 .drop-icon {
   font-size: 32px;
   margin-bottom: 8px;
-  color: #c0c4cc;
+  color: var(--docsy-text-muted);
 }
 
 .selected-file {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .file-name {
@@ -609,12 +623,12 @@ onBeforeUnmount(() => {
 
 .info-label {
   font-size: 11px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .info-value {
   font-size: 13px;
-  color: #303133;
+  color: var(--docsy-text-strong);
   font-weight: 500;
 }
 
@@ -639,8 +653,29 @@ onBeforeUnmount(() => {
 .path-hint {
   width: 100%;
   margin-top: 4px;
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
   word-break: break-all;
+}
+
+@media (max-width: 1180px) {
+  .video-extract-view {
+    overflow: auto;
+  }
+
+  .extract-layout {
+    display: block;
+    height: auto;
+  }
+
+  .extract-settings {
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--docsy-border-subtle);
+  }
+
+  .extract-results {
+    min-height: 560px;
+  }
 }
 </style>

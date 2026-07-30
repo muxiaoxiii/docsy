@@ -2,13 +2,13 @@
 
 轻量本地文档处理工具箱。基于 **Tauri 2 + Vue 3 + Rust**。
 
-当前开发分支：`codex/template-quickxml-0.8`（0.8.1）
+当前开发分支：`codex/template-quickxml-0.8`（0.8.2）
 
 ## 功能模块
 
 | 模块 | 说明 |
 | --- | --- |
-| **模板系统** | Word 模板制作 / 字段填写 / 生成文书，基于 quick-xml 引擎解析 OOXML |
+| **模板系统** | Word 模板制作 / 字段填写 / 生成文书 / 批量填写（Excel 导入导出），基于 quick-xml 引擎解析 OOXML |
 | **PDF 工具** | 解锁、合并、拆分、页眉页脚叠加、页面提取、压缩 |
 | **证据 PDF** | 批量页眉页脚检测与标注、合并证据导入拆分、页码自动分配 |
 | **图片排版** | 批量图片排版为 A4 文档 |
@@ -35,8 +35,8 @@ src-tauri/src/docx_template/
 ├── render.rs    # 值替换 + 格式保留 + 表格行复制 + 前后缀擦除
 ├── index.rs     # 稳定文本索引（段落/run/text 坐标）
 ├── package.rs   # docx/docsytpl zip 读写 + 大小限制
-├── table.rs     # 表格行复制 + 多字段检测
-└── migration.rs # manifest 版本迁移
+├── batch.rs     # 批量填写：Excel 导出/校验/批量生成
+└── mod.rs       # 数据结构 + 验证器 + 模板库管理
 ```
 
 **关键改进**（相对 0.7.x 正则引擎）：
@@ -78,7 +78,7 @@ npm run tauri dev
 ```bash
 npm test                    # 前端 vitest (55 tests)
 npm run lint                # ESLint
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust tests (154 tests)
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust tests (121 tests)
 cargo check --manifest-path src-tauri/Cargo.toml  # Rust type check
 ```
 
