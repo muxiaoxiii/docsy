@@ -24,9 +24,7 @@
             <el-button size="small" type="primary" @click="installFfmpeg" :loading="installing">
               下载安装到 Docsy
             </el-button>
-            <el-button size="small" @click="openFfmpegDownload">
-              下载页
-            </el-button>
+            <el-button size="small" @click="openFfmpegDownload"> 下载页 </el-button>
           </div>
         </div>
 
@@ -44,7 +42,7 @@
             <template v-if="videoPath">
               <div class="selected-file">
                 <el-icon><VideoCamera /></el-icon>
-                <span class="file-name">{{ baseName(videoPath) }}</span>
+                <span class="file-name">{{ fileName(videoPath) }}</span>
                 <el-button text type="danger" size="small" @click.stop="clearVideo">清除</el-button>
               </div>
             </template>
@@ -89,13 +87,18 @@
             <el-form-item label="输出目录">
               <div class="path-picker">
                 <el-button @click="selectOutputDir">选择</el-button>
-                <el-button v-if="settings.outputDir" text type="danger" @click="settings.outputDir = ''">清除</el-button>
+                <el-button v-if="settings.outputDir" text type="danger" @click="settings.outputDir = ''"
+                  >清除</el-button
+                >
               </div>
               <div class="path-hint">{{ settings.outputDir || '默认保存到视频所在文件夹' }}</div>
             </el-form-item>
 
             <el-form-item label="文件名前缀">
-              <el-input v-model="settings.filenamePrefix" placeholder="留空则使用视频名，输出为 视频名_时间_frame_序号" />
+              <el-input
+                v-model="settings.filenamePrefix"
+                placeholder="留空则使用视频名，输出为 视频名_时间_frame_序号"
+              />
             </el-form-item>
 
             <el-form-item label="抽帧模式">
@@ -111,6 +114,15 @@
 
             <el-form-item v-else label="间隔(秒)">
               <el-input-number v-model="settings.interval" :min="0.1" :max="3600" :step="1" :precision="1" />
+            </el-form-item>
+
+            <el-form-item label="时间范围">
+              <div class="time-range-inputs">
+                <el-input v-model="settings.startTime" placeholder="开始，如 01:30:00" clearable />
+                <span>至</span>
+                <el-input v-model="settings.endTime" placeholder="结束，如 01:35:00" clearable />
+              </div>
+              <div class="path-hint">留空则处理全片；也可直接输入秒数。</div>
             </el-form-item>
 
             <el-form-item label="输出格式">
@@ -129,6 +141,14 @@
             </el-form-item>
 
             <template v-if="settings.timestamp.enabled">
+              <el-alert
+                v-if="!ffmpegStatus.has_drawtext"
+                type="warning"
+                :closable="false"
+                show-icon
+                title="当前 FFmpeg 不支持时间戳水印"
+                description="请关闭水印，或安装支持 drawtext 的 FFmpeg 后重试。"
+              />
               <el-form-item label="水印位置">
                 <el-select v-model="settings.timestamp.position">
                   <el-option label="左上角" value="top-left" />
@@ -158,7 +178,9 @@
             size="large"
             @click="extractFrames"
             :loading="extracting"
-            :disabled="!videoPath || !ffmpegStatus.available"
+            :disabled="
+              !videoPath || !ffmpegStatus.available || (settings.timestamp.enabled && !ffmpegStatus.has_drawtext)
+            "
             style="width: 100%"
           >
             开始抽帧
@@ -196,18 +218,13 @@
 
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
-import {
-  Loading,
-  CircleCheckFilled,
-  WarningFilled,
-  VideoCamera,
-  UploadFilled,
-} from '@element-plus/icons-vue'
+import { Loading, CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
+import { fileName } from '../../../core/filePath.js'
 
 const ffmpegLoading = ref(true)
 const ffmpegStatus = reactive({ available: false, path: null, version: null, has_drawtext: false })
@@ -223,6 +240,8 @@ const settings = reactive({
   mode: 'fps',
   fps: 1.0,
   interval: 1.0,
+  startTime: '',
+  endTime: '',
   format: 'jpg',
   quality: 90,
   timestamp: {
@@ -236,6 +255,7 @@ const extracting = ref(false)
 const extractResult = ref(null)
 const resultImages = ref([])
 let unlistenDragDrop = null
+const VIDEO_EXTENSIONS = new Set(['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'])
 
 async function checkFfmpeg() {
   ffmpegLoading.value = true
@@ -259,7 +279,7 @@ async function installFfmpeg() {
 }
 
 async function openFfmpegDownload() {
-  const res = await tauriCallSafe('open_path', { path: 'https://www.gyan.dev/ffmpeg/builds/' })
+  const res = await openExternalUrl('https://www.gyan.dev/ffmpeg/builds/')
   if (!res.ok) {
     ElMessage.error('无法打开 FFmpeg 下载页: ' + res.error)
   }
@@ -268,9 +288,7 @@ async function openFfmpegDownload() {
 async function selectFile() {
   const file = await open({
     multiple: false,
-    filters: [
-      { name: '视频文件', extensions: ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'] },
-    ],
+    filters: [{ name: '视频文件', extensions: ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'] }],
   })
   if (file) {
     await loadVideo(normalizeSelectedPath(file))
@@ -288,14 +306,22 @@ async function onDrop(e) {
   dragging.value = false
   const files = e.dataTransfer?.files
   if (files?.length && files[0].path) {
-    await loadVideo(files[0].path)
+    await loadVideoIfSupported(files[0].path)
   }
 }
 
 async function handleDroppedPaths(paths) {
   const first = Array.isArray(paths) ? paths[0] : null
   if (!first) return
-  await loadVideo(first)
+  await loadVideoIfSupported(first)
+}
+
+async function loadVideoIfSupported(path) {
+  if (!isVideoPath(path)) {
+    ElMessage.warning('请拖入支持的视频文件')
+    return
+  }
+  await loadVideo(path)
 }
 
 async function loadVideo(path) {
@@ -321,6 +347,10 @@ function clearVideo() {
 
 async function extractFrames() {
   if (!videoPath.value) return
+  if (settings.timestamp.enabled && !ffmpegStatus.has_drawtext) {
+    ElMessage.error('当前 FFmpeg 不支持 drawtext。请关闭水印或安装支持 drawtext 的 FFmpeg。')
+    return
+  }
 
   extracting.value = true
   extractResult.value = null
@@ -331,6 +361,8 @@ async function extractFrames() {
     output_dir: settings.outputDir,
     filename_prefix: settings.filenamePrefix,
     fps: settings.mode === 'fps' ? settings.fps : 1.0 / settings.interval,
+    startTime: settings.startTime,
+    endTime: settings.endTime,
     format: settings.format,
     quality: settings.quality,
     timestamp: settings.timestamp.enabled
@@ -350,7 +382,7 @@ async function extractFrames() {
     ElMessage.success(`抽帧完成，共 ${res.data.count} 帧`)
 
     if (Array.isArray(res.data.frames)) {
-      resultImages.value = res.data.frames.map(path => ({ path }))
+      resultImages.value = res.data.frames.map((path) => ({ path }))
     } else if (res.data.output_dir) {
       await loadResultImages(res.data.output_dir)
     }
@@ -362,20 +394,26 @@ async function extractFrames() {
 async function loadResultImages(dir) {
   const res = await tauriCallSafe('list_output_frames', { dir })
   if (res.ok && Array.isArray(res.data)) {
-    resultImages.value = res.data.map(path => ({ path }))
+    resultImages.value = res.data.map((path) => ({ path }))
   }
 }
 
 function frameName(img) {
-  return baseName(img?.path || '')
+  return fileName(img?.path || '')
 }
 
 function normalizeSelectedPath(value) {
   return Array.isArray(value) ? value[0] : value
 }
 
-function baseName(path) {
-  return String(path || '').split(/[\\/]/).pop() || path
+function isVideoPath(path) {
+  const ext = String(path || '')
+    .split(/[\\/]/)
+    .pop()
+    ?.split('.')
+    .pop()
+    ?.toLowerCase()
+  return Boolean(ext && VIDEO_EXTENSIONS.has(ext))
 }
 
 function formatDuration(seconds) {
@@ -420,36 +458,44 @@ onBeforeUnmount(() => {
 <style scoped>
 .video-extract-view {
   height: 100%;
+  min-height: 0;
   overflow: hidden;
+  background: var(--docsy-surface);
 }
 
 .extract-layout {
-  display: flex;
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
   height: 100%;
-  gap: 16px;
+  min-height: 0;
 }
 
 .extract-settings {
-  width: 380px;
-  flex-shrink: 0;
+  min-width: 0;
   overflow-y: auto;
-  padding: 16px;
-  border-right: 1px solid #e4e7ed;
+  padding: 20px;
+  border-right: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface);
 }
 
 .extract-results {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
+  background: var(--docsy-canvas);
 }
 
 .results-header {
   padding: 12px 16px;
-  border-bottom: 1px solid #e4e7ed;
+  min-height: 52px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface);
   font-weight: 600;
   font-size: 14px;
-  color: #303133;
+  color: var(--docsy-text-strong);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -458,7 +504,7 @@ onBeforeUnmount(() => {
 .results-count {
   font-weight: 400;
   font-size: 12px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .results-loading {
@@ -467,7 +513,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .results-loading p {
@@ -491,13 +537,19 @@ onBeforeUnmount(() => {
 }
 
 .section-block {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+}
+
+.section-block:last-child {
+  border-bottom: 0;
 }
 
 .section-title {
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
+  color: var(--docsy-text-strong);
   margin-bottom: 10px;
 }
 
@@ -506,7 +558,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #606266;
+  color: var(--docsy-text);
 }
 
 .status-ok {
@@ -518,33 +570,35 @@ onBeforeUnmount(() => {
 }
 
 .drop-zone {
-  border: 2px dashed #dcdfe6;
-  border-radius: 8px;
+  border: 1px dashed var(--docsy-border-strong);
+  border-radius: 6px;
   padding: 24px 16px;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
-  color: #909399;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+  color: var(--docsy-text-muted);
   font-size: 13px;
 }
 
 .drop-zone:hover,
 .drop-zone-active {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
 }
 
 .drop-icon {
   font-size: 32px;
   margin-bottom: 8px;
-  color: #c0c4cc;
+  color: var(--docsy-text-muted);
 }
 
 .selected-file {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .file-name {
@@ -569,12 +623,12 @@ onBeforeUnmount(() => {
 
 .info-label {
   font-size: 11px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .info-value {
   font-size: 13px;
-  color: #303133;
+  color: var(--docsy-text-strong);
   font-weight: 500;
 }
 
@@ -588,11 +642,40 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+.time-range-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
 .path-hint {
   width: 100%;
   margin-top: 4px;
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
   word-break: break-all;
+}
+
+@media (max-width: 1180px) {
+  .video-extract-view {
+    overflow: auto;
+  }
+
+  .extract-layout {
+    display: block;
+    height: auto;
+  }
+
+  .extract-settings {
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--docsy-border-subtle);
+  }
+
+  .extract-results {
+    min-height: 560px;
+  }
 }
 </style>

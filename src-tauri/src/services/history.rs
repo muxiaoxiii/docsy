@@ -33,6 +33,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<()> {
 
 fn data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
+        .or_else(|| dirs::home_dir().map(|dir| dir.join(".local").join("share")))
+        .unwrap_or_else(std::env::temp_dir)
         .join("Docsy")
 }

@@ -22,12 +22,7 @@
           @click="openPreview(item)"
         >
           <span class="image-preview-thumb-wrap" :style="thumbWrapStyle">
-            <img
-              v-if="imageSrc(item)"
-              :src="imageSrc(item)"
-              :alt="itemName(item)"
-              class="image-preview-thumb"
-            />
+            <img v-if="imageSrc(item)" :src="imageSrc(item)" :alt="itemName(item)" class="image-preview-thumb" />
             <span v-else class="image-preview-placeholder">预览中</span>
           </span>
           <span class="image-preview-name" :title="itemName(item)">{{ itemName(item) }}</span>
@@ -55,6 +50,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { tauriCallSafe } from '../../core/tauriBridge.js'
+import { fileName } from '../../core/filePath.js'
 
 const props = defineProps({
   items: {
@@ -103,6 +99,7 @@ const page = ref(1)
 const pageSize = ref(props.initialPageSize)
 const zoom = ref(props.initialZoom)
 const sources = reactive({})
+const loadingPaths = new Set()
 const previewVisible = ref(false)
 const previewSrc = ref('')
 
@@ -114,8 +111,8 @@ const rangeLabel = computed(() => {
   if (!props.items.length) return '0 / 0'
   return `${pageStart.value + 1}-${pageEnd.value} / ${props.items.length}`
 })
-const cardSize = computed(() => Math.round(112 * zoom.value / 100))
-const thumbSize = computed(() => Math.round(72 * zoom.value / 100))
+const cardSize = computed(() => Math.round((112 * zoom.value) / 100))
+const thumbSize = computed(() => Math.round((72 * zoom.value) / 100))
 const gridStyle = computed(() => ({
   gridTemplateColumns: `repeat(auto-fill, minmax(${cardSize.value}px, 1fr))`,
 }))
@@ -136,7 +133,7 @@ function itemPath(item) {
 function itemName(item) {
   if (props.nameResolver) return props.nameResolver(item)
   const path = itemPath(item)
-  return String(path || '').split(/[\\/]/).pop() || path
+  return fileName(path)
 }
 
 function itemMeta(item) {
@@ -158,14 +155,24 @@ function adjustZoom(delta) {
 }
 
 async function preloadVisibleImages() {
-  await Promise.all(pagedItems.value.map(async (item) => {
-    const path = itemPath(item)
-    if (!path || sources[path]) return
-    const result = await tauriCallSafe('read_image_data_url', { path })
-    if (result.ok) {
-      sources[path] = result.data
+  const visiblePaths = pagedItems.value.map(itemPath).filter(Boolean)
+  const keep = new Set(visiblePaths)
+  if (previewSrc.value) keep.add(previewSrc.value)
+  for (const path of Object.keys(sources)) {
+    if (!keep.has(path)) delete sources[path]
+  }
+  const queue = visiblePaths.filter((path) => !sources[path] && !loadingPaths.has(path))
+  const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+    while (queue.length) {
+      const path = queue.shift()
+      if (!path) return
+      loadingPaths.add(path)
+      const result = await tauriCallSafe('read_image_data_url', { path })
+      loadingPaths.delete(path)
+      if (result.ok) sources[path] = result.data
     }
-  }))
+  })
+  await Promise.all(workers)
 }
 
 function openPreview(item) {
@@ -175,9 +182,13 @@ function openPreview(item) {
   previewVisible.value = true
 }
 
-watch([pagedItems, pageSize], () => {
-  preloadVisibleImages()
-}, { immediate: true })
+watch(
+  [pagedItems, pageSize],
+  () => {
+    preloadVisibleImages()
+  },
+  { immediate: true },
+)
 
 watch([pageSize, () => props.items.length], () => {
   if (page.value > pageCount.value) page.value = pageCount.value
@@ -196,7 +207,7 @@ watch([pageSize, () => props.items.length], () => {
   justify-content: flex-end;
   gap: 8px;
   margin-bottom: 10px;
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 12px;
 }
 
@@ -216,9 +227,9 @@ watch([pageSize, () => props.items.length], () => {
   max-height: 360px;
   overflow: auto;
   padding: 8px;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  background: #fafafa;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  background: var(--docsy-surface-muted);
 }
 
 .image-preview-grid {
@@ -231,7 +242,7 @@ watch([pageSize, () => props.items.length], () => {
   min-width: 0;
   text-align: center;
   padding: 8px;
-  background: #f5f7fa;
+  background: var(--docsy-surface-elevated);
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
@@ -240,8 +251,8 @@ watch([pageSize, () => props.items.length], () => {
 }
 
 .image-preview-card:hover {
-  border-color: #c6e2ff;
-  background: #ecf5ff;
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
 }
 
 .image-preview-thumb-wrap {
@@ -250,7 +261,7 @@ watch([pageSize, () => props.items.length], () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #e4e7ed;
+  background: var(--docsy-border-subtle);
   overflow: hidden;
 }
 
@@ -263,13 +274,13 @@ watch([pageSize, () => props.items.length], () => {
 
 .image-preview-placeholder {
   font-size: 11px;
-  color: #909399;
+  color: var(--docsy-text-muted);
 }
 
 .image-preview-name {
   display: block;
   font-size: 11px;
-  color: #606266;
+  color: var(--docsy-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -277,7 +288,7 @@ watch([pageSize, () => props.items.length], () => {
 
 .image-preview-meta {
   font-size: 10px;
-  color: #c0c4cc;
+  color: var(--docsy-text-muted);
 }
 
 .image-preview-pager {
@@ -286,7 +297,7 @@ watch([pageSize, () => props.items.length], () => {
   justify-content: center;
   gap: 12px;
   margin-top: 10px;
-  color: #606266;
+  color: var(--docsy-text);
   font-size: 12px;
 }
 

@@ -1,6 +1,19 @@
 #[tauri::command]
 pub fn open_path(path: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(path);
+    if !path.exists() {
+        return Err("要打开的文件不存在".into());
+    }
     open::that(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(&url).map_err(|_| "下载地址无效".to_string())?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return Err("只能打开 HTTPS 下载地址".into());
+    }
+    open::that(parsed.as_str()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -34,10 +47,18 @@ pub fn open_log_dir() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn read_image_data_url(path: String) -> Result<String, String> {
-    use base64::Engine;
+pub async fn read_image_data_url(path: String) -> Result<String, String> {
+    crate::commands::run_blocking(move || preview_image_data_url(&path)).await
+}
 
-    let path = std::path::PathBuf::from(&path);
+fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
+    use base64::Engine;
+    use std::io::Cursor;
+
+    const MAX_PREVIEW_EDGE: u32 = 1600;
+    const MAX_SOURCE_PIXELS: u64 = 64_000_000;
+
+    let path = std::path::PathBuf::from(path);
     let ext = path
         .extension()
         .and_then(|v| v.to_str())
@@ -48,12 +69,23 @@ pub fn read_image_data_url(path: String) -> Result<String, String> {
         "png" => "image/png",
         "webp" => "image/webp",
         "bmp" => "image/bmp",
-        "gif" => "image/gif",
-        _ => "application/octet-stream",
+        "tif" | "tiff" => "image/tiff",
+        _ => anyhow::bail!("不支持的图片格式"),
     };
-    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let (width, height) = image::image_dimensions(&path)
+        .map_err(|error| anyhow::anyhow!("无法读取图片尺寸: {error}"))?;
+    if u64::from(width) * u64::from(height) > MAX_SOURCE_PIXELS {
+        anyhow::bail!("图片像素过大，无法安全生成预览缩略图");
+    }
+    let image = image::open(&path).map_err(|error| anyhow::anyhow!("读取图片失败: {error}"))?;
+    let preview = image.thumbnail(MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE);
+    let mut bytes = Vec::new();
+    preview
+        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+        .map_err(|error| anyhow::anyhow!("生成图片缩略图失败: {error}"))?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(format!("data:{mime};base64,{encoded}"))
+    let _ = mime;
+    Ok(format!("data:image/jpeg;base64,{encoded}"))
 }
 
 #[tauri::command]
@@ -82,6 +114,19 @@ fn build_diagnostic_info() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-pub fn list_system_fonts() -> Result<Vec<String>, String> {
-    crate::ffmpeg::detect::list_system_fonts().map_err(|e| e.to_string())
+pub async fn list_system_fonts() -> Result<Vec<String>, String> {
+    crate::commands::run_blocking(crate::ffmpeg::detect::list_system_fonts).await
+}
+
+/// Respond to a conversion timeout event.
+/// `continue_waiting`: true = keep waiting, false = cancel the conversion.
+#[tauri::command]
+pub fn respond_conversion_timeout(
+    state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
+    continue_waiting: bool,
+) -> Result<(), String> {
+    state
+        .response
+        .store(if continue_waiting { 1 } else { 2 }, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }

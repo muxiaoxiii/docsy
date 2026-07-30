@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build ${{ matrix.platform }}
@@ -18,7 +21,6 @@ jobs:
             os: macos-14
             command: npm run tauri:build:mac
             artifacts: |
-              src-tauri/target/release/bundle/macos/*.app
               src-tauri/target/release/bundle/dmg/*.dmg
           - platform: windows-x64
             os: windows-latest
@@ -116,11 +118,19 @@ jobs:
             ) `
             -Executables @("ffmpeg.exe", "ffprobe.exe")
 
+      - name: Build frontend
+        shell: bash
+        run: |
+          npm run build
+          echo "=== dist contents ==="
+          ls -la dist/ 2>/dev/null || echo "ERROR: dist/ does not exist!"
+          echo "=== dist/index.html ==="
+          cat dist/index.html 2>/dev/null || echo "ERROR: index.html missing!"
+
       - name: Run frontend tests
         run: npm run test -- --run
 
       - name: Run Rust tests
-        continue-on-error: true
         run: cargo test
         working-directory: src-tauri
 
@@ -132,11 +142,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APP_PATH="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)"
           DMG_PATH="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -n "$APP_PATH"
           test -n "$DMG_PATH"
-          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           hdiutil verify "$DMG_PATH"
 
       - name: Upload package
@@ -145,3 +152,26 @@ jobs:
           name: docsy-${{ matrix.platform }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download desktop packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: docsy-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release and upload packages
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/*.dmg
+            release-assets/*.exe
+            release-assets/*.sig

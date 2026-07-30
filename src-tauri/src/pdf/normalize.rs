@@ -142,10 +142,9 @@ fn normalize_page_content(
     page_id: ObjectId,
     transform: &A4Transform,
 ) -> Result<()> {
-    let content = match doc.get_and_decode_page_content(page_id) {
-        Ok(content) => content,
-        Err(_) => return Ok(()),
-    };
+    let content = doc
+        .get_and_decode_page_content(page_id)
+        .context("无法解码 PDF 页面内容流，已停止 A4 规范化以避免裁切原文")?;
     if content.operations.is_empty() {
         return Ok(());
     }

@@ -3,10 +3,83 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use crate::external::ExternalTool;
+use crate::sort_utils::natural_cmp;
+use crate::ConversionState;
 
-const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx"];
+const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm"];
+
+/// Run a child process with interactive timeout.
+/// When the initial timeout expires, emits a Tauri event and waits for user response.
+/// If the user chooses to continue, waits another `timeout` period, repeating up to `max_rounds`.
+/// Returns Ok(output) on success, Err on cancel or max rounds exceeded.
+fn run_process_with_interactive_timeout(
+    cmd: &mut std::process::Command,
+    initial_timeout: std::time::Duration,
+    conversion_state: &Arc<ConversionState>,
+    app: &tauri::AppHandle,
+) -> Result<std::process::Output> {
+    conversion_state.reset();
+
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("启动转换进程失败")?;
+
+    conversion_state.pid.store(child.id() as u64, Ordering::SeqCst);
+
+    let timeout = initial_timeout;
+    let start = std::time::Instant::now();
+    let poll_interval = std::time::Duration::from_secs(1);
+
+    loop {
+        // Check if process finished
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout = child.stdout.take().map(|mut s| {
+                    let mut buf = Vec::new();
+                    let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+                    buf
+                });
+                let stderr = child.stderr.take().map(|mut s| {
+                    let mut buf = Vec::new();
+                    let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+                    buf
+                });
+                return Ok(std::process::Output {
+                    status,
+                    stdout: stdout.unwrap_or_default(),
+                    stderr: stderr.unwrap_or_default(),
+                });
+            }
+            Ok(None) => {
+                // Still running
+            }
+            Err(e) => {
+                let _ = child.kill();
+                anyhow::bail!("检查转换进程状态失败: {e}");
+            }
+        }
+
+        // Check timeout
+        if start.elapsed() >= timeout {
+            // Ask user whether to continue
+            let should_continue = conversion_state.wait_for_user_response(app);
+            if !should_continue {
+                let _ = child.kill();
+                anyhow::bail!("用户取消了转换");
+            }
+            // User chose to continue — reset start time for another round
+            // (loop continues, effectively extending the timeout)
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum FileType {
@@ -18,7 +91,7 @@ impl FileType {
     fn from_ext(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
             "pdf" => Some(Self::Pdf),
-            "doc" | "docx" => Some(Self::Word),
+            "doc" | "docx" | "docm" => Some(Self::Word),
             _ => None,
         }
     }
@@ -63,48 +136,6 @@ struct IdentityConfig {
     start_number: Option<u32>,
 }
 
-fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    let (mut ai, mut bi) = (0usize, 0usize);
-    let (ab, bb) = (a.as_bytes(), b.as_bytes());
-    while ai < ab.len() && bi < bb.len() {
-        if ab[ai].is_ascii_digit() && bb[bi].is_ascii_digit() {
-            let (mut ae, mut be) = (ai, bi);
-            while ae < ab.len() && ab[ae].is_ascii_digit() {
-                ae += 1;
-            }
-            while be < bb.len() && bb[be].is_ascii_digit() {
-                be += 1;
-            }
-            while ai < ae && ab[ai] == b'0' {
-                ai += 1;
-            }
-            while bi < be && bb[bi] == b'0' {
-                bi += 1;
-            }
-            let (alen, blen) = (ae - ai, be - bi);
-            if alen != blen {
-                return alen.cmp(&blen);
-            }
-            while ai < ae {
-                if ab[ai] != bb[bi] {
-                    return ab[ai].cmp(&bb[bi]);
-                }
-                ai += 1;
-                bi += 1;
-            }
-        } else {
-            let ac = ab[ai].to_ascii_lowercase();
-            let bc = bb[bi].to_ascii_lowercase();
-            if ac != bc {
-                return ac.cmp(&bc);
-            }
-            ai += 1;
-            bi += 1;
-        }
-    }
-    ab.len().cmp(&bb.len())
-}
-
 fn fnv1a_hash(s: &str) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
     for b in s.as_bytes() {
@@ -127,6 +158,12 @@ fn collect_supported_files(
 ) -> Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
+        if entry.file_type()?.is_symlink() {
+            // Evidence folders are often assembled with Finder/Explorer aliases.
+            // Never follow them: a link to an ancestor would recurse forever and
+            // a link outside the selected folder should not be imported silently.
+            continue;
+        }
         let path = entry.path();
         if path.is_dir() {
             collect_supported_files(&path, out)?;
@@ -214,7 +251,10 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
     }))
 }
 
-pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
+pub fn build_group_pdfs(
+    args: &serde_json::Value,
+    conversion_state: &Arc<ConversionState>,
+) -> Result<serde_json::Value> {
     let root = args["root"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("缺少 root 参数"))?;
@@ -228,6 +268,7 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
     let qpdf_bin = crate::external::QpdfTool.binary_path()?;
 
     let mut results = Vec::new();
+    let mut failed_conversions = Vec::new();
 
     for group in groups {
         let group_name = group["name"]
@@ -254,10 +295,19 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
                 "pdf" => {
                     pdf_paths.push(file_path.to_string());
                 }
-                "word" => {
-                    let converted = convert_word_to_pdf(file_path, &evidence_dir)?;
-                    pdf_paths.push(converted);
-                }
+                "word" => match convert_word_to_pdf(file_path, &evidence_dir, conversion_state) {
+                    Ok(converted) => pdf_paths.push(converted),
+                    Err(err) => failed_conversions.push(serde_json::json!({
+                        "groupId": group_id,
+                        "groupName": group_name,
+                        "path": file_path,
+                        "name": Path::new(file_path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or(file_path),
+                        "reason": err.to_string(),
+                    })),
+                },
                 _ => {}
             }
         }
@@ -266,7 +316,11 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
             continue;
         }
 
-        let group_output = evidence_dir.join(format!("{}.pdf", safe_file_stem(group_name)));
+        let group_output = evidence_dir.join(format!(
+            "{}-{:016x}.pdf",
+            safe_file_stem(group_name),
+            fnv1a_hash(group_id)
+        ));
         merge_pdfs_with_qpdf(&qpdf_bin, &pdf_paths, &group_output)?;
 
         let page_count = qpdf_page_count(&qpdf_bin, &group_output.display().to_string())?;
@@ -276,12 +330,18 @@ pub fn build_group_pdfs(args: &serde_json::Value) -> Result<serde_json::Value> {
             "name": group_name,
             "outputPath": group_output.display().to_string(),
             "pageCount": page_count,
+            "conversionFailures": failed_conversions
+                .iter()
+                .filter(|item| item["groupId"].as_str() == Some(group_id))
+                .cloned()
+                .collect::<Vec<_>>(),
         }));
     }
 
     Ok(serde_json::json!({
         "evidenceDir": evidence_dir.display().to_string(),
         "results": results,
+        "failedConversions": failed_conversions,
     }))
 }
 
@@ -344,21 +404,72 @@ pub fn merge_all(args: &serde_json::Value) -> Result<String> {
     Ok(output_path_str)
 }
 
-fn convert_word_to_pdf(doc_path: &str, output_dir: &Path) -> Result<String> {
+fn convert_word_to_pdf(
+    doc_path: &str,
+    output_dir: &Path,
+    conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
+    let mut attempts = Vec::new();
+    let canonical = std::fs::canonicalize(doc_path)
+        .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
+    let conversion_dir = output_dir.join("_converted").join(format!(
+        "{:016x}",
+        fnv1a_hash(&canonical.display().to_string())
+    ));
+    fs::create_dir_all(&conversion_dir).context("创建 Word 转换工作目录失败")?;
+
+    if cfg!(windows) || cfg!(target_os = "macos") {
+        match crate::external::WordTool.binary_path() {
+            Ok(_) => match convert_doc_to_pdf_with_word(doc_path, &conversion_dir, conversion_state) {
+                Ok(path) => return Ok(path),
+                Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
+            },
+            Err(err) => attempts.push(format!("未检测到 Microsoft Word: {err}")),
+        }
+    } else {
+        attempts.push("当前平台不支持 Microsoft Word 自动转换".to_string());
+    }
+
     if cfg!(windows) {
-        if let Ok(path) = convert_doc_to_pdf_with_word(doc_path, output_dir) {
-            return Ok(path);
+        match crate::external::WpsTool.binary_path() {
+            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir, conversion_state) {
+                Ok(path) => return Ok(path),
+                Err(err) => attempts.push(format!("WPS Writer 转换失败: {err}")),
+            },
+            Err(err) => attempts.push(format!("未检测到 WPS Writer: {err}")),
         }
     }
 
-    let lo_bin = crate::external::LibreOfficeTool
-        .binary_path()
-        .context("未找到 Microsoft Word 或 LibreOffice，无法转换 DOC/DOCX")?;
-    convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, output_dir)
+    match crate::external::LibreOfficeTool.binary_path() {
+        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, &conversion_dir)
+        {
+            Ok(path) => Ok(path),
+            Err(err) => {
+                attempts.push(format!("LibreOffice 转换失败: {err}"));
+                anyhow::bail!(
+                    "没有可用的 Word 转 PDF 引擎，文件未转换: {}。{}",
+                    doc_path,
+                    attempts.join("；")
+                );
+            }
+        },
+        Err(err) => {
+            attempts.push(format!("未检测到 LibreOffice: {err}"));
+            anyhow::bail!(
+                "没有可用的 Word 转 PDF 引擎，文件未转换: {}。{}",
+                doc_path,
+                attempts.join("；")
+            );
+        }
+    }
 }
 
 #[cfg(windows)]
-fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<String> {
+fn convert_doc_to_pdf_with_word(
+    doc_path: &str,
+    output_dir: &Path,
+    conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
     let input = std::fs::canonicalize(doc_path)
         .with_context(|| format!("读取 DOC/DOCX 文件失败: {doc_path}"))?;
     let stem = input
@@ -382,14 +493,143 @@ fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<Str
         output = powershell_escape(&output.display().to_string()),
     );
 
-    let status = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ])
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &script,
+    ]);
+
+    let app = crate::get_app_handle()
+        .ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let output_result = run_process_with_interactive_timeout(
+        &mut cmd,
+        std::time::Duration::from_secs(60),
+        conversion_state,
+        app,
+    )
+    .context("Microsoft Word 转换失败")?;
+
+    if !output_result.status.success() || !output.exists() {
+        anyhow::bail!("Microsoft Word 转 PDF 失败: {doc_path}");
+    }
+    Ok(output.display().to_string())
+}
+
+#[cfg(windows)]
+fn convert_doc_to_pdf_with_wps(
+    doc_path: &str,
+    output_dir: &Path,
+    conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
+    let input = std::fs::canonicalize(doc_path)
+        .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    let output = output_dir.join(format!("{stem}.pdf"));
+    let script = format!(
+        "$ErrorActionPreference='Stop';\
+         $wps=$null;$doc=$null;\
+         try {{\
+           $wps=New-Object -ComObject KWPS.Application;\
+           $wps.Visible=$false;\
+           try {{ $wps.DisplayAlerts=$false }} catch {{ }};\
+           $doc=$wps.Documents.Open('{input}');\
+           try {{\
+             $doc.ExportAsFixedFormat('{output}', 17);\
+           }} catch {{\
+             $doc.SaveAs('{output}', 17);\
+           }};\
+         }} finally {{\
+           if ($doc -ne $null) {{ try {{ $doc.Close([ref]$false) | Out-Null }} catch {{ }} }};\
+           if ($wps -ne $null) {{ try {{ $wps.Quit() | Out-Null }} catch {{ }} }};\
+           [System.GC]::Collect();\
+           [System.GC]::WaitForPendingFinalizers();\
+         }}",
+        input = powershell_escape(&input.display().to_string()),
+        output = powershell_escape(&output.display().to_string()),
+    );
+
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &script,
+    ]);
+
+    let app = crate::get_app_handle()
+        .ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let output_result = run_process_with_interactive_timeout(
+        &mut cmd,
+        std::time::Duration::from_secs(60),
+        conversion_state,
+        app,
+    )
+    .context("WPS Writer 转换失败")?;
+
+    if !output_result.status.success() || !output.exists() {
+        anyhow::bail!("WPS Writer 转 PDF 失败: {doc_path}");
+    }
+    Ok(output.display().to_string())
+}
+
+#[cfg(not(windows))]
+fn convert_doc_to_pdf_with_wps(
+    _doc_path: &str,
+    _output_dir: &Path,
+    _conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
+    anyhow::bail!("当前平台不支持 WPS Writer 自动转换")
+}
+
+#[cfg(target_os = "macos")]
+fn convert_doc_to_pdf_with_word(
+    doc_path: &str,
+    output_dir: &Path,
+    _conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
+    let input = std::fs::canonicalize(doc_path)
+        .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    let output = output_dir.join(format!("{stem}.pdf"));
+    let script = r#"
+on run argv
+  set inputPath to item 1 of argv
+  set outputPath to item 2 of argv
+  set inputHfsPath to POSIX file inputPath as text
+  set outputFile to POSIX file outputPath
+  set docRef to missing value
+  tell application "Microsoft Word"
+    set visible to false
+    try
+      open file inputHfsPath
+      set docRef to active document
+      save as docRef file name outputFile file format format PDF
+    on error errMsg number errNum
+      try
+        if docRef is not missing value then close docRef saving no
+      end try
+      error errMsg number errNum
+    end try
+    close docRef saving no
+  end tell
+end run
+"#;
+
+    let status = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .arg(input.display().to_string())
+        .arg(output.display().to_string())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -401,8 +641,12 @@ fn convert_doc_to_pdf_with_word(doc_path: &str, output_dir: &Path) -> Result<Str
     Ok(output.display().to_string())
 }
 
-#[cfg(not(windows))]
-fn convert_doc_to_pdf_with_word(_doc_path: &str, _output_dir: &Path) -> Result<String> {
+#[cfg(not(any(windows, target_os = "macos")))]
+fn convert_doc_to_pdf_with_word(
+    _doc_path: &str,
+    _output_dir: &Path,
+    _conversion_state: &Arc<ConversionState>,
+) -> Result<String> {
     anyhow::bail!("当前平台不支持 Microsoft Word 自动转换")
 }
 
@@ -423,7 +667,7 @@ fn convert_doc_to_pdf_with_libreoffice(
         .status()?;
 
     if !status.success() {
-        anyhow::bail!("DOC/DOCX 转换失败: {}", doc_path);
+        anyhow::bail!("Word 文件转换失败: {}", doc_path);
     }
 
     let stem = Path::new(doc_path)
@@ -433,7 +677,7 @@ fn convert_doc_to_pdf_with_libreoffice(
     let pdf_path = output_dir.join(format!("{}.pdf", stem));
 
     if !pdf_path.exists() {
-        anyhow::bail!("DOC/DOCX 转换输出未找到: {}", doc_path);
+        anyhow::bail!("Word 文件转换输出未找到: {}", doc_path);
     }
 
     Ok(pdf_path.display().to_string())
@@ -531,7 +775,11 @@ fn apply_overlay_batch(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("page");
-        let output = overlay_dir.join(format!("{}_overlay.pdf", safe_file_stem(stem)));
+        let output = overlay_dir.join(format!(
+            "{}-{:016x}_overlay.pdf",
+            safe_file_stem(stem),
+            fnv1a_hash(input)
+        ));
 
         global_seq = apply_overlay_single(
             qpdf_bin,
@@ -566,7 +814,7 @@ fn apply_overlay_single(
 
         let overlay_ops = build_overlay_ops(
             config, input, page_num, page_count, seq, width_pt, height_pt,
-        );
+        )?;
 
         if !overlay_ops.is_empty() {
             use printpdf::*;
@@ -626,7 +874,7 @@ fn build_overlay_ops(
     seq: u32,
     _width_pt: f64,
     height_pt: f64,
-) -> Vec<printpdf::Op> {
+) -> Result<Vec<printpdf::Op>> {
     use printpdf::*;
 
     let mut ops: Vec<Op> = Vec::new();
@@ -635,7 +883,7 @@ fn build_overlay_ops(
     let has_footer = config.footer.as_ref().is_some_and(|f| f.enabled);
 
     if !has_header && !has_footer {
-        return ops;
+        return Ok(ops);
     }
 
     ops.push(Op::StartTextSection);
@@ -670,6 +918,7 @@ fn build_overlay_ops(
             };
 
             if !text.is_empty() {
+                ensure_legacy_overlay_text_supported(&text)?;
                 ops.push(Op::ShowText {
                     items: vec![TextItem::Text(text)],
                 });
@@ -699,6 +948,7 @@ fn build_overlay_ops(
             };
 
             if !text.is_empty() {
+                ensure_legacy_overlay_text_supported(&text)?;
                 ops.push(Op::ShowText {
                     items: vec![TextItem::Text(text)],
                 });
@@ -708,7 +958,20 @@ fn build_overlay_ops(
 
     ops.push(Op::EndTextSection);
 
-    ops
+    Ok(ops)
+}
+
+/// The legacy evidence-overlay path only has PDF base-14 fonts available.
+/// Helvetica cannot render CJK text reliably, so fail before producing a PDF
+/// with invisible or corrupted evidence labels. The current evidence workflow
+/// uses the embedded-font header/footer renderer instead.
+fn ensure_legacy_overlay_text_supported(text: &str) -> Result<()> {
+    if !text.is_ascii() {
+        anyhow::bail!(
+            "旧版证据叠加不支持中文或其他非 ASCII 文本；请使用“分项证据处理”的页眉页脚设置"
+        );
+    }
+    Ok(())
 }
 
 fn create_overlay_pdf_multi(pages: Vec<printpdf::PdfPage>) -> Result<Vec<u8>> {

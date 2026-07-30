@@ -46,13 +46,7 @@ pub(crate) fn parse_page_sizes(json: &Value) -> Result<Vec<PageSize>> {
         let obj_ref = page.get("object").and_then(|v| v.as_str());
         let size = page_size_from_page_entry(page)
             .or_else(|| obj_ref.and_then(|r| resolve_page_size(objects, r)))
-            .unwrap_or(PageSize {
-                width_pt: A4_WIDTH_PT,
-                height_pt: A4_HEIGHT_PT,
-                raw_width_pt: A4_WIDTH_PT,
-                raw_height_pt: A4_HEIGHT_PT,
-                rotate: 0,
-            });
+            .with_context(|| "无法读取 PDF 页面尺寸，已停止处理以避免按错误 A4 尺寸定位内容")?;
         sizes.push(size);
     }
 
@@ -83,15 +77,26 @@ fn resolve_page_size(objects: Option<&Vec<Value>>, obj_ref: &str) -> Option<Page
     let objects = objects?;
 
     for obj in objects {
-        let page_obj = obj
+        // qpdf emits a metadata object before the object map. A missing page
+        // key in that first entry is normal, not a reason to abandon the
+        // remaining object maps.
+        let Some(page_obj) = obj
             .get(obj_ref)
-            .or_else(|| obj.get(format!("obj:{obj_ref}").as_str()))?;
-        let value = page_obj.get("value")?;
-        let box_value = value
+            .or_else(|| obj.get(format!("obj:{obj_ref}").as_str()))
+        else {
+            continue;
+        };
+        let Some(value) = page_obj.get("value") else {
+            continue;
+        };
+        let Some(box_value) = value
             .get("/CropBox")
             .or_else(|| value.get("CropBox"))
             .or_else(|| value.get("/MediaBox"))
-            .or_else(|| value.get("MediaBox"))?;
+            .or_else(|| value.get("MediaBox"))
+        else {
+            continue;
+        };
         if let Some(size) = page_size_from_box(box_value) {
             let rotate = value
                 .get("/Rotate")
@@ -195,5 +200,23 @@ mod tests {
         assert_eq!(pages[0].width_pt, 841.89);
         assert_eq!(pages[0].height_pt, 595.28);
         assert_eq!(pages[0].rotate, 270);
+    }
+
+    #[test]
+    fn skips_qpdf_metadata_before_object_map() {
+        let value = json!({
+            "pages": [{ "object": "5 0 R" }],
+            "qpdf": [
+                { "jsonversion": 2 },
+                {
+                    "obj:5 0 R": {
+                        "value": { "/MediaBox": [0, 0, 612, 792] }
+                    }
+                }
+            ]
+        });
+        let pages = parse_page_sizes(&value).expect("page size should be read after metadata");
+        assert_eq!(pages[0].width_pt, 612.0);
+        assert_eq!(pages[0].height_pt, 792.0);
     }
 }

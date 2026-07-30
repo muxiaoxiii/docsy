@@ -16,9 +16,7 @@ export default {
     },
   ],
 
-  menuItems: [
-    { label: '证据处理', route: 'evidence-pdf', icon: 'DocumentChecked' },
-  ],
+  menuItems: [{ label: '证据处理', route: 'evidence-pdf', icon: 'DocumentChecked' }],
 
   homeCards: [
     {

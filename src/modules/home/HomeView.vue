@@ -27,7 +27,6 @@
         </el-card>
       </div>
     </div>
-
   </div>
 </template>
 
@@ -43,7 +42,7 @@ const settings = ref({
   menu_order: [],
 })
 const homeCards = computed(() => getHomeCards(settings.value))
-const version = ref('0.5.3')
+const version = ref(import.meta.env.PACKAGE_VERSION || '')
 
 async function loadData() {
   const appSettings = await tauriCallSafe('get_app_settings')
@@ -72,9 +71,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .home-view {
-  max-width: 920px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 30px 20px;
+  padding: 34px 28px 40px;
 }
 
 .hero {
@@ -82,8 +81,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 36px;
-  margin-bottom: 32px;
-  min-height: 240px;
+  margin-bottom: 28px;
+  min-height: 220px;
 }
 
 .hero-copy {
@@ -92,13 +91,13 @@ onBeforeUnmount(() => {
 
 .hero h1 {
   margin: 0 0 8px;
-  color: #303133;
+  color: var(--docsy-text-strong);
   font-size: 34px;
   line-height: 1.1;
 }
 
 .subtitle {
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 13px;
   margin: 0;
 }
@@ -116,7 +115,7 @@ onBeforeUnmount(() => {
 .section h3 {
   margin: 0 0 12px;
   font-size: 15px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .cards {
@@ -127,27 +126,34 @@ onBeforeUnmount(() => {
 
 .home-card {
   cursor: pointer;
-  text-align: center;
-  transition: transform 0.15s, box-shadow 0.15s;
+  min-height: 142px;
+  text-align: left;
+  border-color: var(--docsy-border-subtle);
+  border-radius: 6px;
+  background: var(--docsy-surface-elevated);
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
 }
 
 .home-card:hover {
   transform: translateY(-2px);
+  border-color: var(--docsy-primary);
 }
 
 .card-icon {
   margin-bottom: 8px;
-  color: #409eff;
+  color: var(--docsy-primary);
 }
 
 .home-card h4 {
   margin: 0 0 4px;
   font-size: 14px;
-  color: #303133;
+  color: var(--docsy-text-strong);
 }
 
 .home-card p {
-  color: #909399;
+  color: var(--docsy-text-muted);
   font-size: 12px;
   margin: 0;
 }

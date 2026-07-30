@@ -74,6 +74,8 @@ pub(crate) struct HeaderFooterArtifactEditResult {
     pub removed_footer: usize,
     pub edited_header: usize,
     pub edited_footer: usize,
+    pub removed_header_pages: BTreeSet<usize>,
+    pub removed_footer_pages: BTreeSet<usize>,
     pub edited_header_pages: BTreeSet<usize>,
     pub edited_footer_pages: BTreeSet<usize>,
 }
@@ -108,6 +110,15 @@ pub fn delete_header_footer_artifacts_file(
     if !input.exists() {
         anyhow::bail!("PDF 不存在: {}", input.display());
     }
+    let output = Path::new(output_path);
+    if same_path(input, output) {
+        anyhow::bail!("标准页眉页脚删除输出路径不能和原始 PDF 相同");
+    }
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).context("创建标准页眉页脚删除输出目录失败")?;
+        }
+    }
     if !targets.header && !targets.footer {
         std::fs::copy(input, output_path).context("复制 PDF 失败")?;
         return Ok(DeleteHeaderFooterArtifactsResult {
@@ -119,16 +130,6 @@ pub fn delete_header_footer_artifacts_file(
             pages_touched: 0,
         });
     }
-    let output = Path::new(output_path);
-    if same_path(input, output) {
-        anyhow::bail!("标准页眉页脚删除输出路径不能和原始 PDF 相同");
-    }
-    if let Some(parent) = output.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).context("创建标准页眉页脚删除输出目录失败")?;
-        }
-    }
-
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
     let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
     let mut removed = ArtifactRemovalStats::default();
@@ -231,6 +232,12 @@ fn merge_edit_result(
     target.edited_header += source.edited_header;
     target.edited_footer += source.edited_footer;
     target
+        .removed_header_pages
+        .extend(source.removed_header_pages);
+    target
+        .removed_footer_pages
+        .extend(source.removed_footer_pages);
+    target
         .edited_header_pages
         .extend(source.edited_header_pages);
     target
@@ -278,8 +285,14 @@ fn edit_target_artifact_ranges(
                     }
                 }
                 match region {
-                    ArtifactRegion::Header => result.removed_header += 1,
-                    ArtifactRegion::Footer => result.removed_footer += 1,
+                    ArtifactRegion::Header => {
+                        result.removed_header += 1;
+                        result.removed_header_pages.insert(page_index);
+                    }
+                    ArtifactRegion::Footer => {
+                        result.removed_footer += 1;
+                        result.removed_footer_pages.insert(page_index);
+                    }
                 }
                 index = end + 1;
                 continue;

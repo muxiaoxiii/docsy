@@ -1,7 +1,9 @@
 use crate::external::ExternalTool;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const FFMPEG_EXTRACT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub fn extract(args: &serde_json::Value) -> Result<serde_json::Value> {
     let started = Instant::now();
@@ -30,19 +32,26 @@ pub fn extract(args: &serde_json::Value) -> Result<serde_json::Value> {
     if !fps.is_finite() || fps <= 0.0 {
         anyhow::bail!("抽帧频率必须大于 0");
     }
+    let time_range = time_range_args(args)?;
 
     let mut filters = vec![format!("fps={fps}")];
     if let Some(drawtext) = drawtext_filter(args) {
+        if !crate::ffmpeg::detect::has_drawtext()? {
+            anyhow::bail!("当前 FFmpeg 不支持 drawtext，无法添加时间戳水印。请关闭水印或更换支持 drawtext 的 FFmpeg");
+        }
         filters.push(drawtext);
     }
 
     let mut cmd = std::process::Command::new(&bin);
-    cmd.arg("-hide_banner")
-        .arg("-y")
-        .arg("-i")
-        .arg(input_path)
-        .arg("-vf")
-        .arg(filters.join(","));
+    cmd.arg("-hide_banner").arg("-y");
+    if let Some(start) = time_range.start {
+        cmd.arg("-ss").arg(format_seconds_arg(start));
+    }
+    cmd.arg("-i").arg(input_path);
+    if let Some(duration) = time_range.duration {
+        cmd.arg("-t").arg(format_seconds_arg(duration));
+    }
+    cmd.arg("-vf").arg(filters.join(","));
 
     match format.as_str() {
         "jpg" => {
@@ -55,19 +64,113 @@ pub fn extract(args: &serde_json::Value) -> Result<serde_json::Value> {
         _ => {}
     }
 
-    let output = cmd.arg(&output_pattern).output()?;
+    cmd.arg(&output_pattern);
+    let output =
+        crate::external::command_output_with_idle_timeout(&mut cmd, FFMPEG_EXTRACT_IDLE_TIMEOUT)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("ffmpeg 抽帧失败: {}", stderr.trim());
     }
 
-    let frames = rename_extracted_frames(&output_dir, &temp_prefix, &prefix, &format, fps)?;
+    let frames = rename_extracted_frames(
+        &output_dir,
+        &temp_prefix,
+        &prefix,
+        &format,
+        fps,
+        time_range.start.unwrap_or(0.0),
+    )?;
     Ok(serde_json::json!({
         "output_dir": output_dir.display().to_string(),
         "count": frames.len(),
         "elapsed": started.elapsed().as_millis(),
         "frames": frames,
     }))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TimeRange {
+    start: Option<f64>,
+    duration: Option<f64>,
+}
+
+fn time_range_args(args: &serde_json::Value) -> Result<TimeRange> {
+    let start = parse_time_arg(
+        args.get("start_time").or_else(|| args.get("startTime")),
+        "开始时间",
+    )?;
+    let end = parse_time_arg(
+        args.get("end_time").or_else(|| args.get("endTime")),
+        "结束时间",
+    )?;
+    if let Some(value) = start {
+        if !value.is_finite() || value < 0.0 {
+            anyhow::bail!("开始时间不能为负数");
+        }
+    }
+    if let Some(value) = end {
+        if !value.is_finite() || value < 0.0 {
+            anyhow::bail!("结束时间不能为负数");
+        }
+    }
+    let duration = match (start, end) {
+        (Some(start), Some(end)) if end <= start => anyhow::bail!("结束时间必须晚于开始时间"),
+        (Some(start), Some(end)) => Some(end - start),
+        (None, Some(end)) => Some(end),
+        _ => None,
+    };
+    Ok(TimeRange { start, duration })
+}
+
+fn parse_time_arg(value: Option<&serde_json::Value>, label: &str) -> Result<Option<f64>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let Some(number) = value.as_f64() {
+        return Ok(Some(number));
+    }
+    let text = value
+        .as_str()
+        .with_context(|| format!("{label}格式无效，请输入秒数或 HH:MM:SS"))?
+        .trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    parse_time_text(text)
+        .map(Some)
+        .with_context(|| format!("{label}格式无效，请输入秒数或 HH:MM:SS"))
+}
+
+fn parse_time_text(text: &str) -> Option<f64> {
+    if let Ok(seconds) = text.parse::<f64>() {
+        return seconds.is_finite().then_some(seconds);
+    }
+    let parts: Vec<&str> = text.split(':').collect();
+    if !(2..=3).contains(&parts.len()) {
+        return None;
+    }
+    let values: Vec<f64> = parts
+        .iter()
+        .map(|part| part.parse::<f64>().ok())
+        .collect::<Option<_>>()?;
+    if values
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return None;
+    }
+    if values[values.len() - 1] >= 60.0 || values[values.len() - 2] >= 60.0 {
+        return None;
+    }
+    Some(match values.as_slice() {
+        [minutes, seconds] => minutes * 60.0 + seconds,
+        [hours, minutes, seconds] => hours * 3600.0 + minutes * 60.0 + seconds,
+        _ => return None,
+    })
+}
+
+fn format_seconds_arg(seconds: f64) -> String {
+    format!("{:.3}", seconds.max(0.0))
 }
 
 pub fn list_output_frames(dir: &str) -> Result<Vec<String>> {
@@ -183,6 +286,7 @@ fn rename_extracted_frames(
     prefix: &str,
     format: &str,
     fps: f64,
+    timeline_offset_seconds: f64,
 ) -> Result<Vec<String>> {
     let mut temp_frames = Vec::new();
     for entry in std::fs::read_dir(output_dir)? {
@@ -201,7 +305,7 @@ fn rename_extracted_frames(
     let mut frames = Vec::with_capacity(temp_frames.len());
     for (idx, path) in temp_frames.into_iter().enumerate() {
         let seq = idx + 1;
-        let seconds = idx as f64 / fps;
+        let seconds = timeline_offset_seconds + idx as f64 / fps;
         let time = format_frame_time(seconds);
         let file_name = format!("{prefix}_{time}_frame_{seq:04}.{format}");
         let target = unique_frame_path(output_dir, &file_name);
@@ -280,5 +384,34 @@ mod tests {
         assert_eq!(format_frame_time(0.0), "00_00_00_000");
         assert_eq!(format_frame_time(3.5), "00_00_03_500");
         assert_eq!(format_frame_time(3661.25), "01_01_01_250");
+    }
+
+    #[test]
+    fn parses_video_time_range() {
+        let range = time_range_args(&serde_json::json!({
+            "startTime": "01:30:00",
+            "endTime": "01:35:30"
+        }))
+        .unwrap();
+        assert_eq!(range.start, Some(5400.0));
+        assert_eq!(range.duration, Some(330.0));
+    }
+
+    #[test]
+    fn rejects_reversed_video_time_range() {
+        let err = time_range_args(&serde_json::json!({
+            "startTime": "10",
+            "endTime": "5"
+        }))
+        .unwrap_err();
+        assert!(err.to_string().contains("结束时间必须晚于开始时间"));
+    }
+
+    #[test]
+    fn rejects_nonempty_invalid_video_time() {
+        let err = time_range_args(&serde_json::json!({ "startTime": "tomorrow" })).unwrap_err();
+        assert!(err.to_string().contains("开始时间格式无效"));
+        let err = time_range_args(&serde_json::json!({ "endTime": "01:99" })).unwrap_err();
+        assert!(err.to_string().contains("结束时间格式无效"));
     }
 }

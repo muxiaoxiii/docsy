@@ -16,6 +16,7 @@ import {
   sortByNatural,
   toChineseNumber,
   totalPages,
+  updatePageRanges,
 } from './useEvidencePdfSession.js'
 
 const baseRules = {
@@ -48,20 +49,37 @@ const noInsertionRules = {
 }
 
 describe('Evidence PDF session helpers', () => {
-  it('assigns continuous page ranges across separate PDFs', () => {
+  it('assigns continuous page ranges without mutating source files', () => {
     const files = [
       { ...createEvidenceFile('/tmp/证据1.pdf'), pages: 3 },
       { ...createEvidenceFile('/tmp/证据2.pdf'), pages: 2 },
     ]
 
-    assignPageRanges(files)
+    const ranged = assignPageRanges(files)
 
+    expect(ranged[0].pageStart).toBe(1)
+    expect(ranged[0].pageEnd).toBe(3)
+    expect(ranged[1].pageStart).toBe(4)
+    expect(ranged[1].pageEnd).toBe(6 - 1)
+    expect(files[1].pageStart).toBe(1)
+    expect(files[1].pageEnd).toBe(0)
+    expect(pageRangeText(ranged[1])).toBe('4-5')
+    expect(totalPages(files)).toBe(5)
+  })
+
+  it('updates page ranges in place for editable UI rows', () => {
+    const files = [
+      { ...createEvidenceFile('/tmp/证据1.pdf'), pages: 3 },
+      { ...createEvidenceFile('/tmp/证据2.pdf'), pages: 2 },
+    ]
+
+    const updated = updatePageRanges(files)
+
+    expect(updated[0]).toBe(files[0])
     expect(files[0].pageStart).toBe(1)
     expect(files[0].pageEnd).toBe(3)
     expect(files[1].pageStart).toBe(4)
-    expect(files[1].pageEnd).toBe(6 - 1)
-    expect(pageRangeText(files[1])).toBe('4-5')
-    expect(totalPages(files)).toBe(5)
+    expect(files[1].pageEnd).toBe(5)
   })
 
   it('builds per-file headers and merged total page footer jobs', () => {
@@ -90,29 +108,14 @@ describe('Evidence PDF session helpers', () => {
   it('sorts Chinese file labels in natural numeric order', () => {
     const values = ['证据11-1.pdf', '证据2.pdf', '证据1.pdf', '证据10.pdf']
 
-    expect([...values].sort(naturalCompare)).toEqual([
-      '证据1.pdf',
-      '证据2.pdf',
-      '证据10.pdf',
-      '证据11-1.pdf',
-    ])
+    expect([...values].sort(naturalCompare)).toEqual(['证据1.pdf', '证据2.pdf', '证据10.pdf', '证据11-1.pdf'])
   })
 
   it('sorts rows by natural values while preserving ties', () => {
-    const rows = [
-      { name: '1-10' },
-      { name: '1-2' },
-      { name: '11-20' },
-      { name: '1-2' },
-    ]
+    const rows = [{ name: '1-10' }, { name: '1-2' }, { name: '11-20' }, { name: '1-2' }]
 
-    expect(sortByNatural(rows, row => row.name).map(row => row.name)).toEqual([
-      '1-2',
-      '1-2',
-      '1-10',
-      '11-20',
-    ])
-    expect(sortByNatural(rows, row => row.name, 'descending').map(row => row.name)).toEqual([
+    expect(sortByNatural(rows, (row) => row.name).map((row) => row.name)).toEqual(['1-2', '1-2', '1-10', '11-20'])
+    expect(sortByNatural(rows, (row) => row.name, 'descending').map((row) => row.name)).toEqual([
       '11-20',
       '1-10',
       '1-2',
@@ -156,6 +159,11 @@ describe('Evidence PDF session helpers', () => {
     expect(items[0].footer.text).toBe('new footer')
   })
 
+  it('rejects header and footer write checks without an input path', () => {
+    expect(canWriteHeader(null)).toBe(false)
+    expect(canWriteFooter({})).toBe(false)
+  })
+
   it('converts confirmed plain text headers and footers into cleanup targets plus independent overlays', () => {
     const files = [
       {
@@ -182,7 +190,9 @@ describe('Evidence PDF session helpers', () => {
     expect(canWriteFooter(files[0])).toBe(true)
     expect(items[0].header).toBeNull()
     expect(items[0].footer).toBeNull()
-    expect(items[0].extraOverlays.map(item => item.text)).toEqual(['new header', 'new footer'])
+    expect(items[0].extraOverlays.map((item) => item.text)).toEqual(['new header', 'new footer'])
+    expect(items[0].extraOverlays[0]).toMatchObject({ pageStart: 1, pageEnd: 3 })
+    expect(items[0].extraOverlays[1]).toMatchObject({ pageStart: 1, pageEnd: 3 })
     expect(items[0].cleanup.plainHeaderTargets[0]).toMatchObject({
       text: 'old plain header',
       normalizedText: 'oldplainheader',
@@ -230,6 +240,7 @@ describe('Evidence PDF session helpers', () => {
     expect(items[0].header.text).toBe('测试页眉3')
     expect(items[0].extraOverlays[0].text).toBe('新测试页眉3')
     expect(items[0].extraOverlays[0].align).toBe('right')
+    expect(items[0].extraOverlays[0].fontSize).toBeCloseTo(11.6, 2)
     expect(items[0].extraOverlays[0].marginMm).toBeCloseTo(12.347, 2)
   })
 
@@ -278,6 +289,7 @@ describe('Evidence PDF session helpers', () => {
       region: 'footer',
       text: '第1页',
       align: 'right',
+      fontSize: 10.08,
     })
   })
 
@@ -311,13 +323,17 @@ describe('Evidence PDF session helpers', () => {
       },
     ]
 
-    const items = buildHeaderFooterItems(files, {
-      ...baseRules,
-      headerMode: 'none',
-      footerEnabled: false,
-      cleanupHeaderEnabled: false,
-      cleanupFooterEnabled: false,
-    }, '/out')
+    const items = buildHeaderFooterItems(
+      files,
+      {
+        ...baseRules,
+        headerMode: 'none',
+        footerEnabled: false,
+        cleanupHeaderEnabled: false,
+        cleanupFooterEnabled: false,
+      },
+      '/out',
+    )
 
     expect(items[0].cleanup.headerEnabled).toBe(true)
     expect(items[0].cleanup.forceDeleteHeader).toBe(true)
@@ -395,15 +411,25 @@ describe('Evidence PDF session helpers', () => {
   })
 
   it('expands repeating detected header/footer targets to the full file', () => {
-    expect(candidateTargetRange({
-      pageRange: { start: 1, end: 20 },
-      repeating: true,
-    }, 159)).toEqual({ start: 1, end: 159 })
+    expect(
+      candidateTargetRange(
+        {
+          pageRange: { start: 1, end: 20 },
+          repeating: true,
+        },
+        159,
+      ),
+    ).toEqual({ start: 1, end: 159 })
 
-    expect(candidateTargetRange({
-      pageRange: { start: 3, end: 5 },
-      repeating: false,
-    }, 159)).toEqual({ start: 3, end: 5 })
+    expect(
+      candidateTargetRange(
+        {
+          pageRange: { start: 3, end: 5 },
+          repeating: false,
+        },
+        159,
+      ),
+    ).toEqual({ start: 3, end: 5 })
   })
 
   it('can number footers per file instead of continuously', () => {
@@ -412,10 +438,14 @@ describe('Evidence PDF session helpers', () => {
       { ...createEvidenceFile('/case/付款.pdf'), pages: 4, header: '证据2 付款' },
     ]
 
-    const items = buildHeaderFooterItems(files, {
-      ...baseRules,
-      footerContinuous: false,
-    }, '/out')
+    const items = buildHeaderFooterItems(
+      files,
+      {
+        ...baseRules,
+        footerContinuous: false,
+      },
+      '/out',
+    )
 
     expect(items[0].pageStart).toBe(1)
     expect(items[0].totalPages).toBe(2)
@@ -448,11 +478,15 @@ describe('Evidence PDF session helpers', () => {
       { ...createEvidenceFile('/case/付款.pdf'), pages: 4, header: '证据2 付款' },
     ]
 
-    const payload = buildEvidencePdfRulePayload(files, {
-      ...baseRules,
-      outputMode: 'merge_only',
-      mergeFileName: '提交证据.pdf',
-    }, '/out')
+    const payload = buildEvidencePdfRulePayload(
+      files,
+      {
+        ...baseRules,
+        outputMode: 'merge_only',
+        mergeFileName: '提交证据.pdf',
+      },
+      '/out',
+    )
 
     expect(payload.merge.enabled).toBe(true)
     expect(payload.merge.outputMode).toBe('merge_only')
@@ -461,9 +495,7 @@ describe('Evidence PDF session helpers', () => {
   })
 
   it('builds merge output path for processed evidence packages', () => {
-    const files = [
-      { ...createEvidenceFile('/case/合同.pdf'), pages: 2 },
-    ]
+    const files = [{ ...createEvidenceFile('/case/合同.pdf'), pages: 2 }]
 
     expect(buildMergeOutputPath(files, '/out', '证据包')).toBe('/out/证据包.pdf')
     expect(buildMergeOutputPath(files, '', 'final.pdf')).toBe('/case/_docsy_pdf_processed/final.pdf')
@@ -476,9 +508,15 @@ describe('Evidence PDF session helpers', () => {
     expect(buildHeaderText(file, 0, { ...baseRules, headerMode: 'filename' })).toBe('鉴定意见')
     expect(buildHeaderText(file, 0, { ...baseRules, headerMode: 'custom', headerText: '' })).toBe('')
     expect(buildHeaderText(file, 0, { ...baseRules, headerMode: 'custom', headerText: '固定说明' })).toBe('固定说明')
-    expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'custom', headerText: '证据[##]-[文件名]' })).toBe('证据03-鉴定意见')
-    expect(buildHeaderText(file, 10, { ...baseRules, headerMode: 'custom', headerText: '证据[中文序号]' })).toBe('证据十一')
-    expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'filename', headerPrefix: '证据[##]-' })).toBe('证据03-鉴定意见')
+    expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'custom', headerText: '证据[##]-[文件名]' })).toBe(
+      '证据03-鉴定意见',
+    )
+    expect(buildHeaderText(file, 10, { ...baseRules, headerMode: 'custom', headerText: '证据[中文序号]' })).toBe(
+      '证据十一',
+    )
+    expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'filename', headerPrefix: '证据[##]-' })).toBe(
+      '证据03-鉴定意见',
+    )
     expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'prefix_seq', headerText: '原告' })).toBe('原告证据3')
   })
 

@@ -16,9 +16,7 @@ export default {
     },
   ],
 
-  menuItems: [
-    { label: 'PDF 工具', route: 'pdf-tools', icon: 'Files' },
-  ],
+  menuItems: [{ label: 'PDF 工具', route: 'pdf-tools', icon: 'Files' }],
 
   homeCards: [
     {

@@ -1,15 +1,24 @@
 use crate::external::ExternalTool;
 use anyhow::{Context, Result};
+use std::time::Duration;
+
+const FFPROBE_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub fn probe_video(path: &str) -> Result<serde_json::Value> {
     let ffmpeg = crate::external::FfmpegTool;
     let bin = ffmpeg.binary_path()?;
+    let ffprobe_name = if cfg!(windows) {
+        "ffprobe.exe"
+    } else {
+        "ffprobe"
+    };
     let ffprobe = bin
         .parent()
         .unwrap_or(&std::path::PathBuf::from("."))
-        .join("ffprobe");
+        .join(ffprobe_name);
 
-    let output = std::process::Command::new(&ffprobe)
+    let mut command = std::process::Command::new(&ffprobe);
+    command
         .args([
             "-v",
             "quiet",
@@ -18,8 +27,9 @@ pub fn probe_video(path: &str) -> Result<serde_json::Value> {
             "-show_format",
             "-show_streams",
         ])
-        .arg(path)
-        .output()?;
+        .arg(path);
+    let output =
+        crate::external::command_output_with_idle_timeout(&mut command, FFPROBE_IDLE_TIMEOUT)?;
 
     if !output.status.success() {
         anyhow::bail!("ffprobe 失败");

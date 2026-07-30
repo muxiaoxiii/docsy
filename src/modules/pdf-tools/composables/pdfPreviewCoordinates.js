@@ -1,3 +1,7 @@
+import { mmToPt, ptToMm } from '../../../core/unitConversion.js'
+
+export { mmToPt, ptToMm }
+
 export const DEFAULT_PAGE_INFO = {
   widthPt: 595.28,
   heightPt: 841.89,
@@ -6,14 +10,6 @@ export const DEFAULT_PAGE_INFO = {
 const EDGE_MARGIN_PT = 36
 const MIN_PREVIEW_FONT_PX = 8
 const PREVIEW_FONT_SCALE = 1.5
-
-export function mmToPt(mm) {
-  return Number(mm || 0) * 72 / 25.4
-}
-
-export function ptToMm(pt) {
-  return Number(pt || 0) * 25.4 / 72
-}
 
 export function ptToPercent(pt, dimensionPt) {
   if (!dimensionPt) return 0
@@ -36,9 +32,8 @@ export function textOverlayStyle(kind, pageInfo = DEFAULT_PAGE_INFO, config = {}
   const align = config.align || 'center'
   const offsetPercent = mmToPercent(config.offsetXMm || 0, widthPt)
   const edgePercent = ptToPercent(EDGE_MARGIN_PT, widthPt)
-  const yPercent = kind === 'header'
-    ? mmToPercent(config.marginMm, heightPt)
-    : 100 - mmToPercent(config.marginMm, heightPt)
+  const yPercent =
+    kind === 'header' ? mmToPercent(config.marginMm, heightPt) : 100 - mmToPercent(config.marginMm, heightPt)
 
   const horizontal = horizontalStyle(align, edgePercent, offsetPercent)
   return {

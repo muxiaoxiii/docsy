@@ -48,15 +48,16 @@ const pageInfo = ref({
 })
 
 const frameStyle = computed(() => ({
-  aspectRatio: pageInfo.value.widthPx && pageInfo.value.heightPx
-    ? `${pageInfo.value.widthPx} / ${pageInfo.value.heightPx}`
-    : `${pageInfo.value.widthPt} / ${pageInfo.value.heightPt}`,
+  aspectRatio:
+    pageInfo.value.widthPx && pageInfo.value.heightPx
+      ? `${pageInfo.value.widthPx} / ${pageInfo.value.heightPx}`
+      : `${pageInfo.value.widthPt} / ${pageInfo.value.heightPt}`,
 }))
 
 watch(
   () => [props.filePath, props.page, props.scale, props.reloadKey, props.engine],
   () => renderCurrentPage(),
-  { immediate: true }
+  { immediate: true },
 )
 
 onBeforeUnmount(() => {
@@ -126,7 +127,7 @@ async function tryRenderWithBackend(requestId) {
   try {
     await renderWithBackend(requestId)
     return true
-  } catch (err) {
+  } catch {
     imageDataUrl.value = ''
     return false
   }
@@ -227,8 +228,8 @@ function cancelRender() {
   justify-content: center;
   align-items: flex-start;
   padding: 12px;
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
+  background: var(--docsy-surface-muted);
+  border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
   min-height: 520px;
 }
@@ -262,7 +263,7 @@ function cancelRender() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #606266;
+  color: var(--docsy-text);
   background: rgba(255, 255, 255, 0.62);
   font-size: 13px;
 }
@@ -275,9 +276,9 @@ function cancelRender() {
 }
 
 .preview-empty {
-  color: #606266;
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
+  color: var(--docsy-text);
+  background: var(--docsy-surface-muted);
+  border: 1px solid var(--docsy-border-subtle);
 }
 
 .preview-error {

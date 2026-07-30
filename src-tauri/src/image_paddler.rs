@@ -3,6 +3,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
+
+use crate::sort_utils::natural_cmp;
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"];
 
@@ -12,6 +15,14 @@ const FILENAME_FONT_PT: f64 = 8.0;
 const FILENAME_MAX_LINES: usize = 2;
 const FILENAME_LINE_HEIGHT_MM: f64 = 4.2;
 const DOCX_TRAILING_GAP_MM: f64 = 2.0;
+
+static TRAILING_NUMBER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[-_]\d+$").unwrap());
+static TIME_PART_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s").unwrap()
+});
+static NUMBER_PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+").unwrap());
+static OUTPUT_STEM_SUFFIX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:[_-]?(?:frame|img|image)?[_-]?\d+)$").unwrap());
 
 #[derive(Debug, Deserialize)]
 pub struct AnalyzeArgs {
@@ -82,6 +93,11 @@ pub struct RunArgs {
     pub border_enabled: Option<bool>,
     #[serde(default)]
     pub border_color: Option<String>,
+    /// `merged` keeps the selected folders as one evidence set. `per_folder`
+    /// writes one document for each selected folder so unrelated batches never
+    /// silently end up in the same filing.
+    #[serde(default)]
+    pub output_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -105,8 +121,12 @@ pub struct FilenameRule {
 #[derive(Debug, Serialize)]
 pub struct RunResult {
     pub output_path: String,
+    #[serde(default)]
+    pub output_paths: Vec<String>,
     pub pages: u32,
     pub images: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 struct LayoutGrid {
@@ -135,7 +155,7 @@ fn parse_layout(
     }
     match layout {
         "1" => LayoutGrid { rows: 1, cols: 1 },
-        "2" => LayoutGrid { rows: 1, cols: 2 },
+        "2" => LayoutGrid { rows: 2, cols: 1 },
         "3" => LayoutGrid { rows: 1, cols: 3 },
         "4" => LayoutGrid { rows: 2, cols: 2 },
         _ => {
@@ -147,38 +167,12 @@ fn parse_layout(
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum NatPart<'a> {
-    Text(&'a str),
-    Num(u64),
-}
-
-fn natural_sort_key(s: &str) -> Vec<NatPart<'_>> {
-    let re = Regex::new(r"(\d+)").unwrap();
-    let mut result = Vec::new();
-    let mut last = 0;
-    for m in re.find_iter(s) {
-        if m.start() > last {
-            result.push(NatPart::Text(&s[last..m.start()]));
-        }
-        if let Ok(n) = m.as_str().parse::<u64>() {
-            result.push(NatPart::Num(n));
-        }
-        last = m.end();
-    }
-    if last < s.len() {
-        result.push(NatPart::Text(&s[last..]));
-    }
-    result
-}
-
 fn extract_prefix(filename: &str) -> String {
     let stem = Path::new(filename)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(filename);
-    let re = Regex::new(r"[-_]\d+$").unwrap();
-    re.replace(stem, "").to_string()
+    TRAILING_NUMBER_RE.replace(stem, "").to_string()
 }
 
 fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
@@ -195,8 +189,8 @@ fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
             let ext_lower = ext.to_lowercase();
             if IMAGE_EXTENSIONS.contains(&ext_lower.as_str()) {
                 let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let (width, height) = match image::open(&path) {
-                    Ok(img) => (img.width(), img.height()),
+                let (width, height) = match image::image_dimensions(&path) {
+                    Ok(dimensions) => dimensions,
                     Err(_) => continue,
                 };
                 images.push(ImageInfo {
@@ -209,11 +203,7 @@ fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
         }
     }
 
-    images.sort_by(|a, b| {
-        let ka = natural_sort_key(&a.path);
-        let kb = natural_sort_key(&b.path);
-        ka.cmp(&kb)
-    });
+    images.sort_by(|a, b| natural_cmp(&a.path, &b.path));
 
     Ok(images)
 }
@@ -247,11 +237,7 @@ fn scan_image_folders(folder: &str, folders: &Option<Vec<String>>) -> Result<Vec
             }
         }
     }
-    all.sort_by(|a, b| {
-        let ka = natural_sort_key(&a.path);
-        let kb = natural_sort_key(&b.path);
-        ka.cmp(&kb)
-    });
+    all.sort_by(|a, b| natural_cmp(&a.path, &b.path));
     Ok(all)
 }
 
@@ -265,14 +251,14 @@ fn image_info_from_path(path: &Path) -> Result<Option<ImageInfo>> {
         return Ok(None);
     }
     let metadata = std::fs::metadata(path)?;
-    let img = match image::open(path) {
-        Ok(img) => img,
+    let (width, height) = match image::image_dimensions(path) {
+        Ok(dimensions) => dimensions,
         Err(_) => return Ok(None),
     };
     Ok(Some(ImageInfo {
         path: path.display().to_string(),
-        width: img.width(),
-        height: img.height(),
+        width,
+        height,
         file_size: metadata.len(),
     }))
 }
@@ -291,7 +277,7 @@ fn build_groups(images: &[ImageInfo]) -> Vec<ImageGroup> {
         .into_iter()
         .map(|(prefix, count)| ImageGroup { prefix, count })
         .collect();
-    groups.sort_by(|a, b| a.prefix.cmp(&b.prefix));
+    groups.sort_by(|a, b| natural_cmp(&a.prefix, &b.prefix));
     groups
 }
 
@@ -402,7 +388,65 @@ pub fn analyze(args: &AnalyzeArgs) -> Result<AnalyzeResult> {
 }
 
 pub fn run(args: &RunArgs) -> Result<RunResult> {
-    let mut images = scan_image_folders(&args.folder, &args.folders)?;
+    let sources = folders_from_args(&args.folder, &args.folders);
+    if args.output_mode.as_deref() == Some("per_folder") && sources.len() > 1 {
+        let mut outputs = Vec::new();
+        let mut total_pages = 0_u32;
+        let mut total_images = 0_u32;
+        let mut warnings = Vec::new();
+        for source in sources {
+            let images = scan_image_source(&source)?;
+            if images.is_empty() {
+                warnings.push(format!("未在 {} 找到可排版的图片", source));
+                continue;
+            }
+            let result = run_images(args, images, &image_output_dir(&source))?;
+            total_pages = total_pages.saturating_add(result.pages);
+            total_images = total_images.saturating_add(result.images);
+            warnings.extend(result.warnings);
+            outputs.push(result.output_path);
+        }
+        let Some(output_path) = outputs.first().cloned() else {
+            anyhow::bail!("未在所选文件夹中找到图片文件");
+        };
+        return Ok(RunResult {
+            output_path,
+            output_paths: outputs,
+            pages: total_pages,
+            images: total_images,
+            warnings,
+        });
+    }
+
+    let images = scan_image_folders(&args.folder, &args.folders)?;
+    let first_source = sources
+        .first()
+        .cloned()
+        .unwrap_or_else(|| args.folder.clone());
+    run_images(args, images, &image_output_dir(&first_source))
+}
+
+fn scan_image_source(source: &str) -> Result<Vec<ImageInfo>> {
+    let path = Path::new(source);
+    if path.is_dir() {
+        scan_images(source)
+    } else {
+        Ok(image_info_from_path(path)?.into_iter().collect())
+    }
+}
+
+fn image_output_dir(source: &str) -> std::path::PathBuf {
+    let path = Path::new(source);
+    if path.is_dir() {
+        path.join("_docsy_image_out")
+    } else {
+        path.parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("_docsy_image_out")
+    }
+}
+
+fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> Result<RunResult> {
     if images.is_empty() {
         anyhow::bail!("未找到图片文件");
     }
@@ -448,21 +492,16 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     let total_pages = images.len().div_ceil(per_page);
     reorder_images(&mut images, &grid, order_mode);
 
-    let first_folder = folders_from_args(&args.folder, &args.folders)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| args.folder.clone());
-    let output_dir = Path::new(&first_folder).join("_docsy_image_out");
-    std::fs::create_dir_all(&output_dir)?;
+    std::fs::create_dir_all(output_dir)?;
     let ext = if args.output_format == "pdf" {
         "pdf"
     } else {
         "docx"
     };
     let output_stem = output_file_stem(&images);
-    let output_path = unique_output_path(&output_dir, &format!("{output_stem}_docsy_paddler"), ext);
+    let output_path = unique_output_path(output_dir, &format!("{output_stem}_docsy_paddler"), ext);
 
-    match args.output_format.as_str() {
+    let warnings = match args.output_format.as_str() {
         "pdf" => generate_pdf(
             &images,
             &output_path,
@@ -482,31 +521,36 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
             &args.scale_mode,
             args.dpi,
         )?,
-        _ => generate_docx(
-            &images,
-            &output_path,
-            page_w,
-            page_h,
-            margin_mm,
-            &grid,
-            cell_w,
-            image_cell_h,
-            filename_reserve,
-            show_filename,
-            filename_without_ext,
-            &filename_remove_text,
-            &filename_rules,
-            border_enabled,
-            border_color,
-            &args.scale_mode,
-            args.dpi,
-        )?,
-    }
+        _ => {
+            generate_docx(
+                &images,
+                &output_path,
+                page_w,
+                page_h,
+                margin_mm,
+                &grid,
+                cell_w,
+                image_cell_h,
+                filename_reserve,
+                show_filename,
+                filename_without_ext,
+                &filename_remove_text,
+                &filename_rules,
+                border_enabled,
+                border_color,
+                &args.scale_mode,
+                args.dpi,
+            )?;
+            Vec::new()
+        }
+    };
 
     Ok(RunResult {
         output_path: output_path.display().to_string(),
+        output_paths: Vec::new(),
         pages: total_pages as u32,
         images: images.len() as u32,
+        warnings,
     })
 }
 
@@ -629,25 +673,21 @@ fn keep_filename_parts(input: &str, rule: &FilenameRule) -> String {
 }
 
 fn extract_time_parts(input: &str) -> Vec<String> {
-    Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s")
-        .unwrap()
+    TIME_PART_RE
         .find_iter(input)
         .map(|m| m.as_str().to_string())
         .collect()
 }
 
 fn extract_number_parts(input: &str) -> Vec<String> {
-    Regex::new(r"\d+")
-        .unwrap()
+    NUMBER_PART_RE
         .find_iter(input)
         .map(|m| m.as_str().to_string())
         .collect()
 }
 
 fn extract_number_parts_without_times(input: &str) -> Vec<String> {
-    let time_re =
-        Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s").unwrap();
-    let cleaned = time_re.replace_all(input, " ");
+    let cleaned = TIME_PART_RE.replace_all(input, " ");
     extract_number_parts(&cleaned)
 }
 
@@ -735,8 +775,7 @@ fn output_file_stem(images: &[ImageInfo]) -> String {
         .and_then(|img| Path::new(&img.path).file_stem())
         .and_then(|s| s.to_str())
         .unwrap_or("images");
-    let re = Regex::new(r"(?i)(?:[_-]?(?:frame|img|image)?[_-]?\d+)$").unwrap();
-    let cleaned = re.replace(first_name, "");
+    let cleaned = OUTPUT_STEM_SUFFIX_RE.replace(first_name, "");
     let stem = cleaned.trim_matches(['_', '-', ' ']);
     let fallback = if stem.is_empty() { first_name } else { stem };
     sanitize_output_name(fallback)
@@ -823,13 +862,34 @@ fn generate_pdf(
     border_color: &str,
     scale_mode: &str,
     dpi: u32,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     use printpdf::*;
 
     let mut doc = PdfDocument::new("image_paddler");
-    let mut warnings = Vec::new();
+    let mut result_warnings = Vec::new();
     let per_page = grid.rows * grid.cols;
-    let font = BuiltinFont::Helvetica;
+    let needs_external_filename_font = show_filename
+        && images.iter().any(|image| {
+            !display_filename(
+                &image.path,
+                filename_without_ext,
+                filename_remove_text,
+                filename_rules,
+            )
+            .is_ascii()
+        });
+    let filename_font = if needs_external_filename_font {
+        load_pdf_filename_font(&mut doc).map(PdfFontHandle::External)
+    } else {
+        Some(PdfFontHandle::Builtin(BuiltinFont::Helvetica))
+    };
+    let omit_filenames = show_filename && filename_font.is_none();
+    if omit_filenames {
+        result_warnings.push(
+            "PDF 中的图片文件名包含中文或其他非 ASCII 字符，但未找到可嵌入的 CJK 字体，已省略 PDF 中的文件名。请安装 PingFang、微软雅黑或思源黑体后重新生成。"
+                .into(),
+        );
+    }
 
     for (page_idx, chunk) in images.chunks(per_page).enumerate() {
         let mut ops: Vec<Op> = Vec::new();
@@ -901,7 +961,7 @@ fn generate_pdf(
             });
             ops.push(Op::RestoreGraphicsState);
 
-            if show_filename {
+            if show_filename && !omit_filenames {
                 let lines = display_filename_lines(
                     &img_info.path,
                     filename_without_ext,
@@ -911,7 +971,10 @@ fn generate_pdf(
                 );
                 ops.push(Op::StartTextSection);
                 ops.push(Op::SetFont {
-                    font: PdfFontHandle::Builtin(font),
+                    font: filename_font
+                        .as_ref()
+                        .expect("未省略文件名时必须存在 PDF 字体")
+                        .clone(),
                     size: Pt(FILENAME_FONT_PT as f32),
                 });
                 ops.push(Op::SetFillColor {
@@ -946,9 +1009,46 @@ fn generate_pdf(
         }
     }
 
-    let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
+    let bytes = doc.save(&PdfSaveOptions::default(), &mut Vec::new());
     std::fs::write(output_path, &bytes)?;
-    Ok(())
+    Ok(result_warnings)
+}
+
+fn load_pdf_filename_font(doc: &mut printpdf::PdfDocument) -> Option<printpdf::FontId> {
+    for path in cjk_font_candidates() {
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let mut warnings = Vec::new();
+        if let Some(font) = printpdf::ParsedFont::from_bytes(&bytes, 0, &mut warnings) {
+            return Some(doc.add_font(&font));
+        }
+    }
+    None
+}
+
+fn cjk_font_candidates() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if cfg!(target_os = "macos") {
+        paths.extend([
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ]);
+    } else if cfg!(windows) {
+        paths.extend([
+            "C:\\Windows\\Fonts\\msyh.ttc",
+            "C:\\Windows\\Fonts\\simsun.ttc",
+            "C:\\Windows\\Fonts\\simhei.ttf",
+        ]);
+    } else {
+        paths.extend([
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+        ]);
+    }
+    paths.into_iter().map(std::path::PathBuf::from).collect()
 }
 
 fn pdf_border_color(color: &str) -> printpdf::Color {
@@ -1180,6 +1280,13 @@ mod tests {
     }
 
     #[test]
+    fn legacy_two_image_layout_matches_preview_stacked_order() {
+        let g = parse_layout("2", None, None);
+        assert_eq!(g.rows, 2);
+        assert_eq!(g.cols, 1);
+    }
+
+    #[test]
     fn test_parse_custom_layout() {
         let g = parse_layout("custom", Some(3), Some(2));
         assert_eq!(g.rows, 3);
@@ -1252,7 +1359,7 @@ mod tests {
     #[test]
     fn test_natural_sort() {
         let mut v = vec!["img_10.jpg", "img_2.jpg", "img_1.jpg"];
-        v.sort_by(|a, b| natural_sort_key(a).cmp(&natural_sort_key(b)));
+        v.sort_by(|a, b| natural_cmp(a, b));
         assert_eq!(v, vec!["img_1.jpg", "img_2.jpg", "img_10.jpg"]);
     }
 
@@ -1288,6 +1395,7 @@ mod tests {
             order_mode: Some("z".into()),
             border_enabled: Some(true),
             border_color: Some("dark_gray".into()),
+            output_mode: None,
         };
 
         let first = run(&args).unwrap();

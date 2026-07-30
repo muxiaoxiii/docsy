@@ -16,9 +16,7 @@ export default {
     },
   ],
 
-  menuItems: [
-    { label: '图片排版', route: 'image-paddler', icon: 'Picture' },
-  ],
+  menuItems: [{ label: '图片排版', route: 'image-paddler', icon: 'Picture' }],
 
   homeCards: [
     {
