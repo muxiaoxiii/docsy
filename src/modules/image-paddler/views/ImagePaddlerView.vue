@@ -253,13 +253,13 @@
 </template>
 
 <script setup>
-import { computed, ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, reactive, watch, onBeforeUnmount } from 'vue'
 import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
-import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { ElMessage } from 'element-plus'
 import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
 import { fileName as baseFileName } from '../../../core/filePath.js'
+import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
 const folder = ref('')
 const folders = ref([])
@@ -269,7 +269,6 @@ const analysis = ref(null)
 const generatedResult = ref(null)
 const previewSources = reactive({})
 const pageZoom = ref(100)
-let unlistenDragDrop = null
 let analyzeTimer = null
 let analysisRequestId = 0
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
@@ -698,32 +697,24 @@ watch(previewImages, () => {
   preloadVisibleImages()
 })
 
-onMounted(async () => {
-  unlistenDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
-    if (event.payload.type === 'enter' || event.payload.type === 'over') {
+useWindowFileDrop({
+  onDrop: async (paths) => {
+    if (!paths.length) return
+    const accepted = paths.filter(isImageOrFolderCandidate)
+    if (!accepted.length) {
+      ElMessage.warning('请拖入图片文件或文件夹')
       return
     }
-    if (event.payload.type === 'drop') {
-      const paths = event.payload.paths || []
-      if (paths.length) {
-        const accepted = paths.filter(isImageOrFolderCandidate)
-        if (!accepted.length) {
-          ElMessage.warning('请拖入图片文件或文件夹')
-          return
-        }
-        if (accepted.length < paths.length) {
-          ElMessage.warning('已忽略不支持的文件类型')
-        }
-        folders.value = accepted
-        folder.value = accepted[0]
-        scheduleAnalyze()
-      }
+    if (accepted.length < paths.length) {
+      ElMessage.warning('已忽略不支持的文件类型')
     }
-  })
+    folders.value = accepted
+    folder.value = accepted[0]
+    scheduleAnalyze()
+  },
 })
 
 onBeforeUnmount(() => {
-  if (unlistenDragDrop) unlistenDragDrop()
   if (analyzeTimer) clearTimeout(analyzeTimer)
 })
 

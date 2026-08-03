@@ -10,6 +10,7 @@ pub struct InspectResult {
 
 pub struct UnlockResult {
     pub output_path: String,
+    pub skipped: bool,
 }
 
 pub struct PdfOutputResult {
@@ -55,6 +56,13 @@ fn looks_like_qpdf_hard_error(stderr: &[u8]) -> bool {
 }
 
 pub fn unlock(input: &Path) -> Result<UnlockResult> {
+    if !is_encrypted(&input.to_string_lossy())? {
+        return Ok(UnlockResult {
+            output_path: input.display().to_string(),
+            skipped: true,
+        });
+    }
+
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
 
@@ -72,6 +80,7 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
 
     Ok(UnlockResult {
         output_path: output_path.display().to_string(),
+        skipped: false,
     })
 }
 

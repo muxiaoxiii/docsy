@@ -393,12 +393,7 @@
                                     删除
                                   </el-button>
                                 </div>
-                                <el-button
-                                  size="small"
-                                  @click="addSelectOption(row)"
-                                >
-                                  添加选项
-                                </el-button>
+                                <el-button size="small" @click="addSelectOption(row)"> 添加选项 </el-button>
                               </div>
                             </el-form-item>
                           </template>
@@ -608,7 +603,9 @@
               </div>
               <el-button type="success" :loading="rendering" @click="renderTemplate">生成 Word</el-button>
               <el-dropdown @command="handleBatchCommand" trigger="click">
-                <el-button :loading="batchProcessing">批量填写 <el-icon class="el-icon--right"><arrow-down /></el-icon></el-button>
+                <el-button :loading="batchProcessing"
+                  >批量填写 <el-icon class="el-icon--right"><arrow-down /></el-icon
+                ></el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item command="export">导出字段表</el-dropdown-item>
@@ -3904,27 +3901,19 @@ async function showValidationDialog(validation) {
 
   try {
     if (hasErrors) {
-      await ElMessageBox.confirm(
-        lines.join('\n'),
-        title,
-        {
-          confirmButtonText: '跳过错误行继续',
-          cancelButtonText: '取消',
-          type,
-          customStyle: { whiteSpace: 'pre-line' },
-        },
-      )
+      await ElMessageBox.confirm(lines.join('\n'), title, {
+        confirmButtonText: '跳过错误行继续',
+        cancelButtonText: '取消',
+        type,
+        customStyle: { whiteSpace: 'pre-line' },
+      })
     } else {
-      await ElMessageBox.confirm(
-        lines.join('\n'),
-        title,
-        {
-          confirmButtonText: '开始生成',
-          cancelButtonText: '取消',
-          type,
-          customStyle: { whiteSpace: 'pre-line' },
-        },
-      )
+      await ElMessageBox.confirm(lines.join('\n'), title, {
+        confirmButtonText: '开始生成',
+        cancelButtonText: '取消',
+        type,
+        customStyle: { whiteSpace: 'pre-line' },
+      })
     }
     return { proceed: true, skipRows: Array.from(errorRowSet) }
   } catch {

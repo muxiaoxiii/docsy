@@ -1,5 +1,8 @@
 <template>
-  <div class="pdf-tools-view">
+  <div class="pdf-tools-view" :class="{ 'is-file-dragging': pdfDragging }">
+    <div v-if="pdfDragging" class="pdf-drop-overlay">
+      <div class="pdf-drop-message">松开以添加 PDF 文件</div>
+    </div>
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
       <el-tab-pane label="解锁" name="unlock" lazy>
         <ToolWorkspaceShell title="PDF 解锁" description="移除 PDF 文件的密码保护，原文件旁会生成已解锁副本。">
@@ -17,8 +20,13 @@
             </template>
           </FileQueuePanel>
           <template #actions>
-            <el-button type="success" @click="batchUnlock" :loading="unlocking" :disabled="!unlockFiles.length">
-              批量解锁
+            <el-button
+              type="success"
+              @click="batchUnlock"
+              :loading="unlocking"
+              :disabled="unlockReadyCount === 0 || unlockInspecting"
+            >
+              解锁 {{ unlockReadyCount }} 个加密文件
             </el-button>
           </template>
         </ToolWorkspaceShell>
@@ -31,14 +39,12 @@
           </template>
           <FileQueuePanel
             :items="mergeFiles"
+            sortable
             empty-text="添加至少两个需要合并的 PDF 文件"
             @clear="clearMergeFiles"
             @remove="removeMergeFile"
-          >
-            <template #leading>
-              <el-icon class="drag-handle"><Rank /></el-icon>
-            </template>
-          </FileQueuePanel>
+            @reorder="reorderMergeFiles"
+          />
           <template #actions>
             <el-button type="success" @click="doMerge" :loading="merging" :disabled="mergeFiles.length < 2">
               合并为一个 PDF
@@ -253,6 +259,7 @@ import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vu
 import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
 import { getPdfPageCount, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { fileName, stripPdf } from '../../../core/filePath.js'
+import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import {
   buildRangeAfter,
   insertRangeAfter,
@@ -264,9 +271,12 @@ import {
 } from '../../../core/pdfUtils.js'
 
 const activeTab = ref('unlock')
+const pdfDragging = ref(false)
 
 const unlockFiles = ref([])
 const unlocking = ref(false)
+const unlockReadyCount = computed(() => unlockFiles.value.filter((file) => file.encrypted === true).length)
+const unlockInspecting = computed(() => unlockFiles.value.some((file) => file.inspecting))
 
 async function selectUnlockFiles() {
   const selected = await open({
@@ -275,8 +285,48 @@ async function selectUnlockFiles() {
   })
   if (selected) {
     const paths = Array.isArray(selected) ? selected : [selected]
-    unlockFiles.value = makeQueueItems(paths)
+    addUnlockFiles(paths, true)
   }
+}
+
+function addUnlockFiles(paths, replace = false) {
+  const existing = replace ? new Set() : new Set(unlockFiles.value.map((file) => file.path))
+  const candidates = [...new Set(paths)].filter((path) => !existing.has(path))
+  const items = makeQueueItems(candidates).map((item) => ({
+    ...item,
+    encrypted: null,
+    inspecting: true,
+    statusText: '检测中',
+  }))
+  unlockFiles.value = replace ? items : [...unlockFiles.value, ...items]
+  if (items.length) void inspectUnlockFiles(items)
+}
+
+async function inspectUnlockFiles(items) {
+  let nextIndex = 0
+  const workerCount = Math.min(4, items.length)
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex]
+      nextIndex += 1
+      const result = await tauriCallSafe('inspect_pdf', { input: item.path })
+      item.inspecting = false
+      if (!result.ok) {
+        item.encrypted = null
+        item.statusText = result.error || '检测失败'
+        item.statusType = 'danger'
+      } else if (result.data.encrypted) {
+        item.encrypted = true
+        item.statusText = '已加密，待解锁'
+        item.statusType = 'warning'
+      } else {
+        item.encrypted = false
+        item.statusText = '未加密，无需处理'
+        item.statusType = 'info'
+      }
+    }
+  })
+  await Promise.all(workers)
 }
 
 function clearUnlockFiles() {
@@ -288,15 +338,36 @@ function removeUnlockFile(index) {
 }
 
 async function batchUnlock() {
-  unlocking.value = true
-  for (const file of unlockFiles.value) {
-    file.statusText = '处理中'
-    file.statusType = 'warning'
-    const result = await tauriCallSafe('unlock_pdf', { input: file.path })
-    file.statusText = result.ok ? '成功' : result.error || '失败'
-    file.statusType = result.ok ? 'success' : 'danger'
+  const encryptedFiles = unlockFiles.value.filter((file) => file.encrypted === true)
+  if (!encryptedFiles.length) {
+    ElMessage.info('所选文件均未加密，无需处理')
+    return
   }
-  unlocking.value = false
+  unlocking.value = true
+  let successCount = 0
+  try {
+    for (const file of encryptedFiles) {
+      file.statusText = '处理中'
+      file.statusType = 'warning'
+      const result = await tauriCallSafe('unlock_pdf', { input: file.path })
+      if (result.ok && !result.data.skipped) {
+        file.statusText = '解锁成功'
+        file.statusType = 'success'
+        file.encrypted = false
+        successCount += 1
+      } else if (result.ok) {
+        file.statusText = '未加密，已跳过'
+        file.statusType = 'info'
+        file.encrypted = false
+      } else {
+        file.statusText = result.error || '解锁失败'
+        file.statusType = 'danger'
+      }
+    }
+  } finally {
+    unlocking.value = false
+  }
+  if (successCount) ElMessage.success(`已解锁 ${successCount} 个文件`)
 }
 
 const mergeFiles = ref([])
@@ -335,9 +406,14 @@ async function selectMergeFiles() {
   })
   if (selected) {
     const paths = Array.isArray(selected) ? selected : [selected]
-    const existing = new Set(mergeFiles.value.map((file) => file.path))
-    mergeFiles.value.push(...makeQueueItems(paths.filter((path) => !existing.has(path))))
+    addMergeFiles(paths)
   }
+}
+
+function addMergeFiles(paths) {
+  const existing = new Set(mergeFiles.value.map((file) => file.path))
+  const candidates = [...new Set(paths)].filter((path) => !existing.has(path))
+  mergeFiles.value.push(...makeQueueItems(candidates))
 }
 
 function clearMergeFiles() {
@@ -346,6 +422,12 @@ function clearMergeFiles() {
 
 function removeMergeFile(index) {
   mergeFiles.value.splice(index, 1)
+}
+
+function reorderMergeFiles({ from, to }) {
+  if (from === to || from < 0 || to < 0 || from >= mergeFiles.value.length || to >= mergeFiles.value.length) return
+  const [item] = mergeFiles.value.splice(from, 1)
+  mergeFiles.value.splice(to, 0, item)
 }
 
 async function doMerge() {
@@ -377,7 +459,11 @@ async function selectExtractFile() {
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   })
   if (!selected) return
-  extractFile.value = normalizeSelectedPath(selected)
+  await loadExtractFile(normalizeSelectedPath(selected))
+}
+
+async function loadExtractFile(path) {
+  extractFile.value = path
   extractPageText.value = ''
   extractTotalPages.value = 0
   const pageCount = await getPdfPageCount(extractFile.value)
@@ -447,24 +533,26 @@ async function selectSplitFile() {
     multiple: false,
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   })
-  if (selected) {
-    splitFile.value = selected
-    splitPreviewPage.value = 1
-    splitTotalPages.value = 1
-    splitRunWarnings.value = []
-    const pageCount = await getPdfPageCount(selected)
-    if (pageCount.ok) {
-      splitTotalPages.value = pageCount.data || 1
-    }
-    splitRanges.value = [
-      {
-        name: stripPdf(fileName(selected)),
-        pageStart: 1,
-        pageEnd: splitTotalPages.value,
-      },
-    ]
-    selectedSplitRangeIndex.value = 0
+  if (selected) await loadSplitFile(normalizeSelectedPath(selected))
+}
+
+async function loadSplitFile(path) {
+  splitFile.value = path
+  splitPreviewPage.value = 1
+  splitTotalPages.value = 1
+  splitRunWarnings.value = []
+  const pageCount = await getPdfPageCount(path)
+  if (pageCount.ok) {
+    splitTotalPages.value = pageCount.data || 1
   }
+  splitRanges.value = [
+    {
+      name: stripPdf(fileName(path)),
+      pageStart: 1,
+      pageEnd: splitTotalPages.value,
+    },
+  ]
+  selectedSplitRangeIndex.value = 0
 }
 
 async function selectSplitOutputDir() {
@@ -475,6 +563,41 @@ async function selectSplitOutputDir() {
 function normalizeSelectedPath(value) {
   return Array.isArray(value) ? value[0] : value
 }
+
+function isPdfPath(path) {
+  return /\.pdf$/i.test(String(path || ''))
+}
+
+async function handleDroppedPdfPaths(paths) {
+  const pdfPaths = [...new Set((paths || []).filter(isPdfPath))]
+  if (!pdfPaths.length) {
+    ElMessage.warning('请拖入 PDF 文件')
+    return
+  }
+  if (pdfPaths.length < (paths || []).length) ElMessage.warning('已忽略非 PDF 文件')
+
+  if (activeTab.value === 'unlock') {
+    addUnlockFiles(pdfPaths)
+  } else if (activeTab.value === 'merge') {
+    addMergeFiles(pdfPaths)
+  } else {
+    if (pdfPaths.length > 1) ElMessage.info('当前工具一次处理一个 PDF，已使用第一个文件')
+    const path = pdfPaths[0]
+    if (activeTab.value === 'extract') await loadExtractFile(path)
+    if (activeTab.value === 'compress') compressFile.value = path
+    if (activeTab.value === 'split') await loadSplitFile(path)
+  }
+}
+
+useWindowFileDrop({
+  onEnter: () => {
+    pdfDragging.value = true
+  },
+  onLeave: () => {
+    pdfDragging.value = false
+  },
+  onDrop: handleDroppedPdfPaths,
+})
 
 function addSplitRange() {
   const item = buildRangeAfter(splitRanges.value, splitRanges.value.length - 1, splitPreviewMaxPage.value)
@@ -563,10 +686,32 @@ function splitRangeStatus(row) {
 
 <style scoped>
 .pdf-tools-view {
+  position: relative;
   height: 100%;
   min-height: 0;
   overflow: hidden;
   background: var(--docsy-surface);
+}
+
+.pdf-drop-overlay {
+  position: absolute;
+  z-index: 30;
+  display: grid;
+  inset: 12px;
+  pointer-events: none;
+  border: 2px dashed var(--docsy-primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--docsy-surface) 88%, transparent);
+  place-items: center;
+}
+
+.pdf-drop-message {
+  padding: 12px 18px;
+  color: var(--docsy-primary);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  background: var(--docsy-primary-soft);
 }
 
 .pdf-tabs {
@@ -603,24 +748,8 @@ h3 {
   margin: 0 0 16px;
 }
 
-.file-list,
-.merge-list,
 .range-table {
   margin-top: 16px;
-}
-
-.file-list,
-.merge-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: min(52vh, 460px);
-  overflow: auto;
-  padding-right: 4px;
-}
-
-.file-list-action {
-  margin-top: 12px;
 }
 
 .toolbar-row {
@@ -755,11 +884,6 @@ h3 {
 .file-name {
   flex: 1;
   font-size: 13px;
-}
-
-.drag-handle {
-  cursor: move;
-  color: var(--docsy-text-muted);
 }
 
 @media (max-width: 1180px) {

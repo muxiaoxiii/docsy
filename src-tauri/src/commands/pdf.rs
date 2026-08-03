@@ -46,6 +46,7 @@ pub async fn inspect_pdf(input: String) -> Result<InspectResult, String> {
 #[derive(Debug, Serialize)]
 pub struct UnlockResult {
     pub output_path: String,
+    pub skipped: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,6 +60,7 @@ pub async fn unlock_pdf(input: String) -> Result<UnlockResult, String> {
         run_blocking(move || crate::pdf::qpdf::unlock(&std::path::PathBuf::from(&input))).await?;
     Ok(UnlockResult {
         output_path: result.output_path,
+        skipped: result.skipped,
     })
 }
 

@@ -30,7 +30,9 @@ fn run_process_with_interactive_timeout(
         .spawn()
         .context("启动转换进程失败")?;
 
-    conversion_state.pid.store(child.id() as u64, Ordering::SeqCst);
+    conversion_state
+        .pid
+        .store(child.id() as u64, Ordering::SeqCst);
 
     let timeout = initial_timeout;
     let start = std::time::Instant::now();
@@ -420,10 +422,12 @@ fn convert_word_to_pdf(
 
     if cfg!(windows) || cfg!(target_os = "macos") {
         match crate::external::WordTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_word(doc_path, &conversion_dir, conversion_state) {
-                Ok(path) => return Ok(path),
-                Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
-            },
+            Ok(_) => {
+                match convert_doc_to_pdf_with_word(doc_path, &conversion_dir, conversion_state) {
+                    Ok(path) => return Ok(path),
+                    Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
+                }
+            }
             Err(err) => attempts.push(format!("未检测到 Microsoft Word: {err}")),
         }
     } else {
@@ -432,7 +436,8 @@ fn convert_word_to_pdf(
 
     if cfg!(windows) {
         match crate::external::WpsTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir, conversion_state) {
+            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir, conversion_state)
+            {
                 Ok(path) => return Ok(path),
                 Err(err) => attempts.push(format!("WPS Writer 转换失败: {err}")),
             },
@@ -502,8 +507,7 @@ fn convert_doc_to_pdf_with_word(
         &script,
     ]);
 
-    let app = crate::get_app_handle()
-        .ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
     let output_result = run_process_with_interactive_timeout(
         &mut cmd,
         std::time::Duration::from_secs(60),
@@ -563,8 +567,7 @@ fn convert_doc_to_pdf_with_wps(
         &script,
     ]);
 
-    let app = crate::get_app_handle()
-        .ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
     let output_result = run_process_with_interactive_timeout(
         &mut cmd,
         std::time::Duration::from_secs(60),

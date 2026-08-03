@@ -119,15 +119,11 @@ onMounted(() => {
   // Listen for conversion timeout events from the backend
   listen('docsy-conversion-timeout', async () => {
     try {
-      await ElMessageBox.confirm(
-        '文档转换耗时较长，可能是大文件或 Office 响应慢。是否继续等待？',
-        '转换超时',
-        {
-          confirmButtonText: '继续等待',
-          cancelButtonText: '取消转换',
-          type: 'warning',
-        },
-      )
+      await ElMessageBox.confirm('文档转换耗时较长，可能是大文件或 Office 响应慢。是否继续等待？', '转换超时', {
+        confirmButtonText: '继续等待',
+        cancelButtonText: '取消转换',
+        type: 'warning',
+      })
       // User chose to continue
       await tauriCallSafe('respond_conversion_timeout', { continueWaiting: true })
     } catch {

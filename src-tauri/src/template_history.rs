@@ -440,7 +440,12 @@ fn ensure_template_meta(
         "UPDATE template_meta
          SET template_name = ?2, template_path = ?3, updated_at = ?4
          WHERE template_id = ?1",
-        params![manifest.template.id, manifest.template.name, template_path, now],
+        params![
+            manifest.template.id,
+            manifest.template.name,
+            template_path,
+            now
+        ],
     )?;
     if updated == 0 {
         // Record doesn't exist yet; insert with trashed = 0

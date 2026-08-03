@@ -478,7 +478,10 @@ pub(super) fn validate_manifest(manifest: &TemplateManifest) -> Result<()> {
         }
         for option in &field.options {
             // select 类型的 options 不需要 marker_mark_id，只有勾选类型才需要
-            if matches!(field.field_type.as_str(), "checkbox" | "radio_group" | "checkbox_group") {
+            if matches!(
+                field.field_type.as_str(),
+                "checkbox" | "radio_group" | "checkbox_group"
+            ) {
                 if option.id.trim().is_empty() || option.marker_mark_id.trim().is_empty() {
                     anyhow::bail!("勾选字段“{}”包含不完整选项", field.label);
                 }

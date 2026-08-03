@@ -1,5 +1,5 @@
 <template>
-  <section class="file-queue-panel" :style="{ '--queue-max-height': maxHeight }">
+  <section class="file-queue-panel">
     <div class="queue-summary">
       <span>{{ items.length }} 个文件</span>
       <el-button v-if="items.length && clearable" link size="small" type="danger" @click="$emit('clear')">
@@ -7,9 +7,28 @@
       </el-button>
     </div>
 
-    <el-scrollbar v-if="items.length" class="queue-scrollbar">
+    <el-scrollbar v-if="items.length" class="queue-scrollbar" :max-height="maxHeight">
       <div class="queue-list">
-        <article v-for="(item, index) in items" :key="itemKey(item, index)" class="queue-item">
+        <article
+          v-for="(item, index) in items"
+          :key="itemKey(item, index)"
+          class="queue-item"
+          :class="{ 'is-dragging': dragFrom === index, 'is-drag-over': dragOver === index }"
+          @dragover.prevent="onDragOver(index)"
+          @drop.prevent="onDrop(index)"
+        >
+          <button
+            v-if="sortable"
+            type="button"
+            class="queue-drag-handle"
+            draggable="true"
+            title="拖动调整顺序"
+            aria-label="拖动调整顺序"
+            @dragstart.stop="onDragStart(index, $event)"
+            @dragend="resetDrag"
+          >
+            <el-icon><Rank /></el-icon>
+          </button>
           <slot name="leading" :item="item" :index="index" />
           <div class="queue-item-main">
             <div class="queue-item-name" :title="itemLabel(item)">{{ itemLabel(item) }}</div>
@@ -35,6 +54,9 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
+import { Rank } from '@element-plus/icons-vue'
+
 defineProps({
   items: {
     type: Array,
@@ -56,9 +78,40 @@ defineProps({
     type: Boolean,
     default: true,
   },
+  sortable: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-defineEmits(['clear', 'remove'])
+const emit = defineEmits(['clear', 'remove', 'reorder'])
+const dragFrom = ref(-1)
+const dragOver = ref(-1)
+
+function onDragStart(index, event) {
+  dragFrom.value = index
+  dragOver.value = index
+  if (event?.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(index))
+  }
+}
+
+function onDragOver(index) {
+  if (dragFrom.value >= 0) dragOver.value = index
+}
+
+function onDrop(index) {
+  if (dragFrom.value >= 0 && dragFrom.value !== index) {
+    emit('reorder', { from: dragFrom.value, to: index })
+  }
+  resetDrag()
+}
+
+function resetDrag() {
+  dragFrom.value = -1
+  dragOver.value = -1
+}
 
 function itemLabel(item) {
   return String(item?.name || item?.path || item || '')
@@ -89,10 +142,6 @@ function itemKey(item, index) {
   background: var(--docsy-surface-elevated);
 }
 
-.queue-scrollbar {
-  max-height: var(--queue-max-height);
-}
-
 .queue-list {
   display: grid;
   gap: 1px;
@@ -106,6 +155,31 @@ function itemKey(item, index) {
   min-width: 0;
   padding: 10px 12px;
   background: var(--docsy-surface-elevated);
+}
+
+.queue-item.is-dragging {
+  opacity: 0.55;
+}
+
+.queue-item.is-drag-over {
+  box-shadow: inset 0 2px 0 var(--docsy-primary);
+}
+
+.queue-drag-handle {
+  display: inline-grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--docsy-text-muted);
+  cursor: grab;
+  border: 0;
+  background: transparent;
+  place-items: center;
+}
+
+.queue-drag-handle:active {
+  cursor: grabbing;
 }
 
 .queue-item-main {

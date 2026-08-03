@@ -66,7 +66,8 @@ fn find_windows_word_from_registry() -> Result<PathBuf> {
     ] {
         let mut command = std::process::Command::new("reg");
         command.args(["query", root, "/ve"]);
-        let output = super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))?;
+        let output =
+            super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))?;
         if !output.status.success() {
             continue;
         }

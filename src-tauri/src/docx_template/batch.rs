@@ -1,7 +1,7 @@
 //! Batch fill: export template fields to xlsx, validate import, batch render.
 
 use anyhow::{Context, Result};
-use calamine::{Reader, Xlsx, open_workbook};
+use calamine::{open_workbook, Reader, Xlsx};
 use rust_xlsxwriter::Workbook;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,7 +34,10 @@ pub fn export_fields_xlsx(
     ws.set_row_hidden(0)?;
     for (col, field) in renderable.iter().enumerate() {
         let col = col as u16;
-        let meta = format!("{}\t{}\t{}", manifest.template.id, field.id, field.field_type);
+        let meta = format!(
+            "{}\t{}\t{}",
+            manifest.template.id, field.id, field.field_type
+        );
         ws.write_string(0, col, &meta)?;
     }
 
@@ -67,10 +70,7 @@ pub fn export_fields_xlsx(
 }
 
 fn is_renderable(field_type: &str) -> bool {
-    !matches!(
-        field_type,
-        "delete_text" | "prefix" | "suffix" | "ignore"
-    )
+    !matches!(field_type, "delete_text" | "prefix" | "suffix" | "ignore")
 }
 
 fn value_to_display(value: &serde_json::Value) -> String {
@@ -89,10 +89,7 @@ fn value_to_display(value: &serde_json::Value) -> String {
                             .or_else(|| obj.get("text"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
-                        let suffix = obj
-                            .get("suffix")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
+                        let suffix = obj.get("suffix").and_then(|v| v.as_str()).unwrap_or("");
                         format!("{text}{suffix}")
                     }
                     _ => String::new(),
@@ -205,10 +202,15 @@ pub fn validate_imported_xlsx(
             });
         } else {
             // No metadata — try matching by label from row 1
-            let label = cell_to_string(&rows[1].get(col_idx).cloned().unwrap_or(calamine::Data::Empty));
-            let matched_field = renderable.iter().find(|f| {
-                f.label == label || f.name == label
-            });
+            let label = cell_to_string(
+                &rows[1]
+                    .get(col_idx)
+                    .cloned()
+                    .unwrap_or(calamine::Data::Empty),
+            );
+            let matched_field = renderable
+                .iter()
+                .find(|f| f.label == label || f.name == label);
             column_mapping.push(ColumnMapping {
                 col: col_idx,
                 field_id: matched_field.map(|f| f.id.clone()).unwrap_or_default(),
@@ -266,7 +268,10 @@ pub fn validate_imported_xlsx(
             if !mapping.matched {
                 continue;
             }
-            let cell_value = row.get(mapping.col).cloned().unwrap_or(calamine::Data::Empty);
+            let cell_value = row
+                .get(mapping.col)
+                .cloned()
+                .unwrap_or(calamine::Data::Empty);
             let text = cell_to_string(&cell_value);
 
             // Check required fields

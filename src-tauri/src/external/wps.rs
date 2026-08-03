@@ -40,7 +40,9 @@ impl ExternalTool for WpsTool {
             // Fallback: try 'where wps' command
             let mut cmd = std::process::Command::new("where");
             cmd.arg("wps");
-            if let Ok(output) = super::command_output_with_timeout(&mut cmd, std::time::Duration::from_secs(2)) {
+            if let Ok(output) =
+                super::command_output_with_timeout(&mut cmd, std::time::Duration::from_secs(2))
+            {
                 if output.status.success() {
                     let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if let Some(first_line) = path_str.lines().next() {
@@ -62,11 +64,10 @@ fn find_wps_exe_from_registry() -> Result<PathBuf> {
     // Try CLSID/LocalServer32 first (the canonical COM registration location)
     for clsid in ["KWPS.Application", "kwps.Application"] {
         let mut command = std::process::Command::new("reg");
-        command.args([
-            "query",
-            &format!(r"HKCR\{}\CLSID", clsid),
-        ]);
-        if let Ok(output) = super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5)) {
+        command.args(["query", &format!(r"HKCR\{}\CLSID", clsid)]);
+        if let Ok(output) =
+            super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))
+        {
             if output.status.success() {
                 let text = String::from_utf8_lossy(&output.stdout);
                 // Extract CLSID value
@@ -75,11 +76,11 @@ fn find_wps_exe_from_registry() -> Result<PathBuf> {
                         let clsid_val = line[pos + 6..].trim().to_string();
                         // Now query LocalServer32 for that CLSID
                         let mut cmd2 = std::process::Command::new("reg");
-                        cmd2.args([
-                            "query",
-                            &format!(r"HKCR\CLSID\{}\LocalServer32", clsid_val),
-                        ]);
-                        if let Ok(out2) = super::command_output_with_timeout(&mut cmd2, std::time::Duration::from_secs(5)) {
+                        cmd2.args(["query", &format!(r"HKCR\CLSID\{}\LocalServer32", clsid_val)]);
+                        if let Ok(out2) = super::command_output_with_timeout(
+                            &mut cmd2,
+                            std::time::Duration::from_secs(5),
+                        ) {
                             if out2.status.success() {
                                 let text2 = String::from_utf8_lossy(&out2.stdout);
                                 if let Some(path) = extract_reg_path(&text2) {
@@ -96,7 +97,9 @@ fn find_wps_exe_from_registry() -> Result<PathBuf> {
     // Fallback: shell\open\command
     let mut command = std::process::Command::new("reg");
     command.args(["query", r"HKCR\KWPS.Application\shell\open\command"]);
-    if let Ok(output) = super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5)) {
+    if let Ok(output) =
+        super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))
+    {
         if output.status.success() {
             let text = String::from_utf8_lossy(&output.stdout);
             if let Some(path) = extract_reg_path(&text) {

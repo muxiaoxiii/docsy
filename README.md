@@ -2,7 +2,7 @@
 
 轻量本地文档处理工具箱。基于 **Tauri 2 + Vue 3 + Rust**。
 
-当前开发分支：`codex/template-quickxml-0.8`（0.8.2）
+当前开发分支：`codex/template-quickxml-0.8`（0.8.4）
 
 ## 功能模块
 

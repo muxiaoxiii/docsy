@@ -13,7 +13,9 @@
           <div v-else-if="ffmpegStatus.available" class="status-row status-ok">
             <el-icon><CircleCheckFilled /></el-icon>
             <span>可用</span>
-            <el-tag size="small" type="info">{{ ffmpegStatus.version }}</el-tag>
+            <el-tag v-if="ffmpegStatus.version" size="small" type="info" :title="ffmpegStatus.version">
+              FFmpeg {{ shortFfmpegVersion(ffmpegStatus.version) }}
+            </el-tag>
             <el-tag size="small" :type="ffmpegStatus.has_drawtext ? 'success' : 'warning'">
               {{ ffmpegStatus.has_drawtext ? 'drawtext 可用' : 'drawtext 不可用' }}
             </el-tag>
@@ -217,14 +219,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
-import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { Loading, CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
 import { fileName } from '../../../core/filePath.js'
+import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
 const ffmpegLoading = ref(true)
 const ffmpegStatus = reactive({ available: false, path: null, version: null, has_drawtext: false })
@@ -254,8 +256,14 @@ const settings = reactive({
 const extracting = ref(false)
 const extractResult = ref(null)
 const resultImages = ref([])
-let unlistenDragDrop = null
 const VIDEO_EXTENSIONS = new Set(['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'])
+
+function shortFfmpegVersion(value) {
+  const text = String(value || '').trim()
+  const version = text.match(/ffmpeg\s+version\s+(\d+(?:\.\d+){1,3})/i)
+  if (version) return version[1]
+  return text.replace(/^ffmpeg\s+version\s+/i, '').split(/\s+/)[0] || '可用'
+}
 
 async function checkFfmpeg() {
   ffmpegLoading.value = true
@@ -434,24 +442,18 @@ function formatSize(bytes) {
   return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
 }
 
-onMounted(async () => {
+onMounted(() => {
   checkFfmpeg()
-  unlistenDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
-    if (event.payload.type === 'enter' || event.payload.type === 'over') {
-      dragging.value = true
-    } else if (event.payload.type === 'drop') {
-      dragging.value = false
-      await handleDroppedPaths(event.payload.paths)
-    } else {
-      dragging.value = false
-    }
-  })
 })
 
-onBeforeUnmount(() => {
-  if (unlistenDragDrop) {
-    unlistenDragDrop()
-  }
+useWindowFileDrop({
+  onEnter: () => {
+    dragging.value = true
+  },
+  onLeave: () => {
+    dragging.value = false
+  },
+  onDrop: handleDroppedPaths,
 })
 </script>
 
@@ -556,7 +558,9 @@ onBeforeUnmount(() => {
 .status-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
   font-size: 13px;
   color: var(--docsy-text);
 }

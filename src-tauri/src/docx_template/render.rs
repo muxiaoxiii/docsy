@@ -394,18 +394,14 @@ fn apply_structure_override(
     let rule = optional_rule_for_slot(field, slot);
 
     // User override takes priority; fall back to optionalRule prefix/suffix
-    let effective_prefix = override_
-        .and_then(|o| o.prefix.as_deref())
-        .or_else(|| {
-            rule.map(|r| r.remove_empty_prefix.as_str())
-                .filter(|s| !s.is_empty())
-        });
-    let effective_suffix = override_
-        .and_then(|o| o.suffix.as_deref())
-        .or_else(|| {
-            rule.map(|r| r.remove_empty_suffix.as_str())
-                .filter(|s| !s.is_empty())
-        });
+    let effective_prefix = override_.and_then(|o| o.prefix.as_deref()).or_else(|| {
+        rule.map(|r| r.remove_empty_prefix.as_str())
+            .filter(|s| !s.is_empty())
+    });
+    let effective_suffix = override_.and_then(|o| o.suffix.as_deref()).or_else(|| {
+        rule.map(|r| r.remove_empty_suffix.as_str())
+            .filter(|s| !s.is_empty())
+    });
 
     let ref_count = field.mark_refs.len();
     let index = slot.unwrap_or(0);
