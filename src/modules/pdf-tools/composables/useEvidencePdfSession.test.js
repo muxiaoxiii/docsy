@@ -21,7 +21,7 @@ import {
 
 const baseRules = {
   normalizeA4: false,
-  a4Orientation: 'auto',
+  a4Orientation: 'preserve',
   rasterDpi: 200,
   cleanupHeaderEnabled: true,
   cleanupFooterEnabled: true,

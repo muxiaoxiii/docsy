@@ -17,7 +17,7 @@ pub fn probe_video(path: &str) -> Result<serde_json::Value> {
         .unwrap_or(&std::path::PathBuf::from("."))
         .join(ffprobe_name);
 
-    let mut command = std::process::Command::new(&ffprobe);
+    let mut command = crate::external::hidden_command(&ffprobe);
     command
         .args([
             "-v",

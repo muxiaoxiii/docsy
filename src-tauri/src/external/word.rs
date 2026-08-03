@@ -64,7 +64,7 @@ fn find_windows_word_from_registry() -> Result<PathBuf> {
         r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe",
         r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe",
     ] {
-        let mut command = std::process::Command::new("reg");
+        let mut command = super::hidden_command("reg");
         command.args(["query", root, "/ve"]);
         let output =
             super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))?;
@@ -100,7 +100,7 @@ fn find_windows_word_from_registry() -> Result<PathBuf> {
 
 #[cfg(windows)]
 fn find_windows_word_from_path() -> Result<PathBuf> {
-    let mut command = std::process::Command::new("where");
+    let mut command = super::hidden_command("where");
     command.arg("winword");
     let output =
         super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(2))?;
@@ -122,7 +122,7 @@ fn find_windows_word_from_path() -> Result<PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn find_macos_word_with_mdfind() -> Result<PathBuf> {
-    let mut command = std::process::Command::new("mdfind");
+    let mut command = super::hidden_command("mdfind");
     command.arg("kMDItemCFBundleIdentifier == 'com.microsoft.Word'");
     let output =
         super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(2))?;

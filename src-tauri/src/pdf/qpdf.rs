@@ -3,6 +3,10 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
+pub(crate) fn status_is_success(status: &ExitStatus) -> bool {
+    status.success() || status.code() == Some(3)
+}
+
 pub struct InspectResult {
     pub encrypted: bool,
     pub pages: Option<u32>,
@@ -27,7 +31,7 @@ pub fn inspect(path: &str) -> Result<InspectResult> {
 fn is_encrypted(path: &str) -> Result<bool> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let output = std::process::Command::new(&bin)
+    let output = crate::external::hidden_command(&bin)
         .arg("--is-encrypted")
         .arg(path)
         .output()
@@ -67,14 +71,14 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
     let bin = qpdf.binary_path()?;
 
     let output_path = unique_output_path(input, "_unlocked");
-    let status = std::process::Command::new(&bin)
+    let status = crate::external::hidden_command(&bin)
         .arg("--decrypt")
         .arg("--password=")
         .arg(input)
         .arg(&output_path)
         .status()?;
 
-    if !status.success() {
+    if !status_is_success(&status) {
         anyhow::bail!("qpdf 解锁失败");
     }
 
@@ -89,7 +93,7 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     let bin = qpdf.binary_path()?;
     let output_path = unique_available_path(Path::new(output));
 
-    let mut cmd = std::process::Command::new(&bin);
+    let mut cmd = crate::external::hidden_command(&bin);
     add_optimization_args(&mut cmd);
     cmd.arg("--empty").arg("--pages");
     for input in inputs {
@@ -98,7 +102,7 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     cmd.arg("--").arg(&output_path);
 
     let status = cmd.status()?;
-    if !status.success() {
+    if !status_is_success(&status) {
         anyhow::bail!("qpdf 合并失败");
     }
 
@@ -108,7 +112,7 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
 pub fn optimize_to(input: &Path, output: &Path) -> Result<()> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let mut command = std::process::Command::new(&bin);
+    let mut command = crate::external::hidden_command(&bin);
     add_optimization_args(&mut command);
     let command_output = command
         .arg(input)
@@ -116,9 +120,12 @@ pub fn optimize_to(input: &Path, output: &Path) -> Result<()> {
         .output()
         .context("执行 qpdf 压缩整理失败")?;
 
-    if !command_output.status.success() {
-        let stderr = String::from_utf8_lossy(&command_output.stderr);
-        anyhow::bail!("qpdf 压缩整理失败: {}", stderr.trim());
+    if !status_is_success(&command_output.status) {
+        anyhow::bail!(
+            "qpdf 压缩整理失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&command_output)
+        );
     }
 
     Ok(())
@@ -159,7 +166,7 @@ pub fn extract_pages(
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let output_path = unique_output_path_in_dir(input_path, output_dir, "_pages");
-    let mut command = std::process::Command::new(&bin);
+    let mut command = crate::external::hidden_command(&bin);
     command.arg("--empty").arg("--pages").arg(input_path);
     for page in pages {
         command.arg(page.to_string());
@@ -167,9 +174,12 @@ pub fn extract_pages(
     command.arg("--").arg(&output_path);
 
     let command_output = command.output().context("执行 qpdf 页面提取失败")?;
-    if !command_output.status.success() {
-        let stderr = String::from_utf8_lossy(&command_output.stderr);
-        anyhow::bail!("qpdf 页面提取失败: {}", stderr.trim());
+    if !status_is_success(&command_output.status) {
+        anyhow::bail!(
+            "qpdf 页面提取失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&command_output)
+        );
     }
     if !output_path.exists() {
         anyhow::bail!("qpdf 未生成页面提取输出文件");
@@ -230,14 +240,17 @@ pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {
     let pages = page_count(input)?;
     let token = unique_suffix();
     let output_pattern = Path::new(output_dir).join(format!("{stem}-split-{token}-%d.pdf"));
-    let command_output = std::process::Command::new(&bin)
+    let command_output = crate::external::hidden_command(&bin)
         .arg("--split-pages")
         .arg(input)
         .arg(&output_pattern)
         .output()?;
-    if !command_output.status.success() {
-        let stderr = String::from_utf8_lossy(&command_output.stderr);
-        anyhow::bail!("qpdf 拆分失败: {}", stderr.trim());
+    if !status_is_success(&command_output.status) {
+        anyhow::bail!(
+            "qpdf 拆分失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&command_output)
+        );
     }
 
     let prefix = format!("{stem}-split-{token}-");
@@ -267,18 +280,28 @@ pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {
 pub fn page_count(input: &str) -> Result<u32> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let output = std::process::Command::new(&bin)
+    let output = crate::external::hidden_command(&bin)
         .arg("--show-npages")
         .arg(input)
         .output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("qpdf 读取页数失败: {}", stderr.trim());
+    if status_is_success(&output.status) {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(count) = stdout.trim().parse::<u32>() {
+            return Ok(count);
+        }
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let count = stdout.trim().parse::<u32>()?;
-    Ok(count)
+    // Some repaired PDFs return no value for --show-npages even though the
+    // richer JSON command can still resolve every page correctly.
+    if let Ok(page_infos) = super::page_info::get_page_infos(input) {
+        return u32::try_from(page_infos.len()).context("PDF 页数超过支持范围");
+    }
+
+    anyhow::bail!(
+        "qpdf 读取页数失败（{}）：{}",
+        bin.display(),
+        crate::external::command_failure_detail(&output)
+    )
 }
 
 fn unique_output_path(input: &Path, suffix: &str) -> PathBuf {
@@ -345,5 +368,12 @@ mod tests {
         assert!(parse_is_encrypted_status(exit_status(0), b"").unwrap());
         assert!(!parse_is_encrypted_status(exit_status(2), b"").unwrap());
         assert!(parse_is_encrypted_status(exit_status(2), b"missing file").is_err());
+    }
+
+    #[test]
+    fn accepts_qpdf_warning_exit_status() {
+        assert!(status_is_success(&exit_status(0)));
+        assert!(status_is_success(&exit_status(3)));
+        assert!(!status_is_success(&exit_status(2)));
     }
 }

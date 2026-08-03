@@ -567,7 +567,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 
 pub fn find_on_path(binary: &str) -> Option<PathBuf> {
     let command = if cfg!(windows) { "where" } else { "which" };
-    let mut command = std::process::Command::new(command);
+    let mut command = super::hidden_command(command);
     command.arg(binary);
     let output = super::command_output_with_timeout(&mut command, Duration::from_secs(2)).ok()?;
     if !output.status.success() {

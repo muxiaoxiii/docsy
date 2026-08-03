@@ -33,8 +33,11 @@ pub async fn install_external_tool_from_package(
     tool_name: String,
     package_path: String,
 ) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::external::managed::install_tool_from_package(&tool_name, &package_path)
+    tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<String> {
+        let installed =
+            crate::external::managed::install_tool_from_package(&tool_name, &package_path)?;
+        crate::external::validate_tool(&tool_name)?;
+        Ok(installed)
     })
     .await
     .map_err(|e| e.to_string())?

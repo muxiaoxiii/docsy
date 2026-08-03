@@ -32,7 +32,7 @@ pub fn list_system_fonts() -> Result<Vec<String>> {
 
 pub fn has_drawtext() -> Result<bool> {
     let bin = crate::external::FfmpegTool.binary_path()?;
-    let output = std::process::Command::new(bin)
+    let output = crate::external::hidden_command(bin)
         .arg("-hide_banner")
         .arg("-filters")
         .output()?;

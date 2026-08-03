@@ -1,6 +1,6 @@
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { logWarn } from '../../../services/appLogger.js'
 import { bboxOverlayStyle, textOverlayStyle } from './pdfPreviewCoordinates.js'
 import { candidateKey } from './useEvidencePdfDetection.js'
@@ -285,7 +285,7 @@ export function useEvidencePdfPreview({
       truePreview.value = result.data
       previewData.value = result.data
     } else {
-      ElMessage.error(result.error || '真实预览生成失败')
+      ElMessage.error(userFacingError(result.error, '真实预览生成失败'))
     }
     if (requestSeq === truePreviewRequestSeq) {
       truePreviewLoading.value = false
@@ -298,7 +298,7 @@ export function useEvidencePdfPreview({
 
   function handlePreviewError(message) {
     previewData.value = {}
-    ElMessage.error(message)
+    ElMessage.error(userFacingError(message, 'PDF 预览失败'))
   }
 
   function buildCandidatePreviewMarker(candidate) {

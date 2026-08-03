@@ -7,7 +7,10 @@
       <template #header>
         <div class="card-header">
           <span>外部工具状态</span>
-          <el-button size="small" @click="openManagedToolsDir">打开 Docsy 工具目录</el-button>
+          <div class="card-header-actions">
+            <el-button size="small" :loading="checkingTools" @click="checkTools">重新检测</el-button>
+            <el-button size="small" @click="openManagedToolsDir">打开 Docsy 工具目录</el-button>
+          </div>
         </div>
       </template>
       <p class="section-desc">
@@ -51,6 +54,9 @@
               本地 zip 安装
             </el-button>
             <el-button size="small" @click="openToolDownload(tool)"> 下载页 </el-button>
+            <el-button v-if="tool.runtimeUrl" size="small" @click="openExternalUrl(tool.runtimeUrl)">
+              VC++ 运行库
+            </el-button>
           </div>
         </div>
       </div>
@@ -161,6 +167,7 @@ const settings = ref({
   tool_manifest_url: '',
 })
 const managedToolsDir = ref('')
+const checkingTools = ref(false)
 const menuModules = getMenuModules()
 const menuSettingsItems = computed(() =>
   normalizedMenuOrder()
@@ -190,6 +197,7 @@ const tools = reactive([
     installingLocal: false,
     autoInstall: true,
     downloadUrl: 'https://github.com/oschwartz10612/poppler-windows/releases',
+    runtimeUrl: 'https://aka.ms/vc14/vc_redist.x64.exe',
   },
   {
     name: 'ffmpeg',
@@ -380,17 +388,26 @@ function setMenuVisible(id, value) {
 }
 
 async function checkTools() {
-  await Promise.all(
-    tools.map(async (tool) => {
+  if (checkingTools.value) return
+  checkingTools.value = true
+  try {
+    // Run probes one at a time. They remain asynchronous, while avoiding a
+    // burst of Windows process launches when the settings page opens.
+    for (const tool of tools) {
       tool.checking = true
-      const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
-      if (result.ok) {
-        tool.status = result.data
+      try {
+        const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
+        if (result.ok) {
+          tool.status = result.data
+        }
+      } finally {
+        tool.checking = false
       }
-      tool.checking = false
-    }),
-  )
-  syncDiagnosticToolStatus()
+    }
+    syncDiagnosticToolStatus()
+  } finally {
+    checkingTools.value = false
+  }
 }
 
 async function loadManagedToolsDir() {
@@ -516,6 +533,14 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .managed-dir {

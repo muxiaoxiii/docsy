@@ -90,5 +90,16 @@ export function getPdfPageCount(input) {
   return tauriCallSafe('get_pdf_page_count', { input })
 }
 
+export function userFacingError(error, fallback = '操作失败', maxLength = 220) {
+  const message = String(error || '').trim()
+  if (!message) return fallback
+  if (/qpdf --json.*WARNING:.*object has offset 0.*handled correctly by qpdf/is.test(message)) {
+    return `${fallback}：PDF 结构存在可修复警告，详细信息已写入日志`
+  }
+  const compact = message.replace(/\s+/g, ' ')
+  if (compact.length <= maxLength) return compact
+  return `${compact.slice(0, maxLength).trim()}…（详情见日志）`
+}
+
 // Re-export manual loading animation API for single-import convenience
 export { showLoading, hideLoading } from './loading.js'

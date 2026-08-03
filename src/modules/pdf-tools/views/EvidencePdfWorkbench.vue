@@ -135,10 +135,11 @@
           <div class="rule-item">
             <label>A4 方向</label>
             <el-select v-model="a4Orientation" :disabled="!normalizeA4">
-              <el-option label="自动" value="auto" />
+              <el-option label="保持原页方向" value="preserve" />
               <el-option label="纵向" value="portrait" />
               <el-option label="横向" value="landscape" />
             </el-select>
+            <span class="field-hint">保持不判断内容方向；横向或纵向会先旋转整页</span>
           </div>
           <div class="rule-item">
             <label>删除批注对象</label>
@@ -488,7 +489,10 @@
         </el-table-column>
         <el-table-column label="状态" prop="status" sortable="custom" width="92">
           <template #default="{ row }">
-            <el-tag :type="row.statusType" size="small">{{ row.statusText }}</el-tag>
+            <el-tooltip v-if="row.statusDetail" :content="row.statusDetail" placement="top" :show-after="250">
+              <el-tag :type="row.statusType" size="small">{{ row.statusText }}</el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="row.statusType" size="small">{{ row.statusText }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
@@ -702,7 +706,7 @@ import { useEvidencePdfDetection } from '../composables/useEvidencePdfDetection.
 import { useEvidencePdfPreview } from '../composables/useEvidencePdfPreview.js'
 import { useEvidencePdfMergedImport } from '../composables/useEvidencePdfMergedImport.js'
 import { useEvidencePdfExistingEditing } from '../composables/useEvidencePdfExistingEditing.js'
-import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 
 const props = defineProps({
   workflow: {
@@ -754,7 +758,7 @@ const DEFAULT_RASTER_DPI = 200
 const HORIZONTAL_OFFSET_LIMIT_MM = 120
 
 const normalizeA4 = ref(false)
-const a4Orientation = ref('auto')
+const a4Orientation = ref('preserve')
 const rasterDpi = ref(DEFAULT_RASTER_DPI)
 const removeAnnotations = ref(false)
 const annotationKinds = ref([
@@ -1356,11 +1360,12 @@ async function applySplitHeaderFooterReplacement() {
     overlayRows.value.forEach((file) => {
       file.statusText = '替换中'
       file.statusType = 'warning'
+      file.statusDetail = ''
     })
 
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
     if (!result.ok) {
-      ElMessage.error(result.error || '页眉页码替换失败')
+      ElMessage.error(userFacingError(result.error, '页眉页码替换失败'))
       overlayFiles.value.forEach((file) => {
         file.statusText = '失败'
         file.statusType = 'danger'
@@ -1378,11 +1383,13 @@ async function applySplitHeaderFooterReplacement() {
         file.outputPath = success.outputPath
         file.name = fileName(success.outputPath)
         const warnings = success.warnings || []
+        file.statusDetail = warnings.join('；')
         file.statusText = warnings.length ? '已替换，需注意' : '已替换'
         file.statusType = warnings.length ? 'warning' : 'success'
       } else if (failed) {
         file.statusText = '失败'
         file.statusType = 'danger'
+        file.statusDetail = userFacingError(failed.message, '处理失败', 300)
       }
     })
     overlayOutputDir.value = outputDir
@@ -1397,12 +1404,12 @@ async function applySplitHeaderFooterReplacement() {
     if (failedCount) {
       ElMessage.warning(`已替换 ${successCount} 个，失败 ${failedCount} 个`)
     } else if (warningCount) {
-      ElMessage.warning(`已替换 ${successCount} 个 PDF，其中 ${warningCount} 个有字体降级提示`)
+      ElMessage.warning(`已替换 ${successCount} 个 PDF，其中 ${warningCount} 个有处理提示`)
     } else {
       ElMessage.success(`已替换 ${successCount} 个 PDF`)
     }
   } catch (err) {
-    ElMessage.error(`页眉页码替换失败：${String(err?.message || err || '未知错误')}`)
+    ElMessage.error(userFacingError(err?.message || err, '页眉页码替换失败'))
   } finally {
     overlaying.value = false
   }
@@ -1416,11 +1423,12 @@ async function applyHeaderFooter() {
     overlayRows.value.forEach((file) => {
       file.statusText = '处理中'
       file.statusType = 'warning'
+      file.statusDetail = ''
     })
 
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
     if (!result.ok) {
-      ElMessage.error(result.error || 'PDF 处理失败')
+      ElMessage.error(userFacingError(result.error, 'PDF 处理失败'))
       overlayFiles.value.forEach((file) => {
         file.statusText = '失败'
         file.statusType = 'danger'
@@ -1436,11 +1444,13 @@ async function applyHeaderFooter() {
       if (success) {
         file.outputPath = success.outputPath
         const warnings = success.warnings || []
+        file.statusDetail = warnings.join('；')
         file.statusText = warnings.length ? '完成，需注意' : '完成'
         file.statusType = warnings.length ? 'warning' : 'success'
       } else if (failed) {
         file.statusText = '失败'
         file.statusType = 'danger'
+        file.statusDetail = userFacingError(failed.message, '处理失败', 300)
       }
     })
 
@@ -1451,19 +1461,19 @@ async function applyHeaderFooter() {
     if (merge?.status === 'done') {
       const cleanupText =
         merge.outputMode === 'merge_only' ? `，已清理 ${merge.removedIntermediates || 0} 个中间副本` : ''
-      const warningText = warningCount ? `，其中 ${warningCount} 个有字体降级提示` : ''
+      const warningText = warningCount ? `，其中 ${warningCount} 个有处理提示` : ''
       ElMessage.success(`已完成 ${successCount} 个 PDF，并已合并${cleanupText}${warningText}`)
     } else if (failedCount) {
       ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个`)
     } else if (warningCount) {
-      ElMessage.warning(`已完成 ${successCount} 个 PDF，其中 ${warningCount} 个有字体降级提示`)
+      ElMessage.warning(`已完成 ${successCount} 个 PDF，其中 ${warningCount} 个有处理提示`)
     } else if (merge?.status === 'skipped') {
       ElMessage.warning(`已完成 ${successCount} 个 PDF，${merge.message || '未合并'}`)
     } else {
       ElMessage.success(`已完成 ${successCount} 个 PDF`)
     }
   } catch (err) {
-    ElMessage.error(`PDF 处理失败：${String(err?.message || err || '未知错误')}`)
+    ElMessage.error(userFacingError(err?.message || err, 'PDF 处理失败'))
     overlayFiles.value.forEach((file) => {
       file.statusText = '失败'
       file.statusType = 'danger'

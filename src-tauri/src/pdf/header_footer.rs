@@ -190,7 +190,7 @@ fn default_text_color() -> String {
 }
 
 fn default_a4_orientation() -> String {
-    "auto".to_string()
+    "preserve".to_string()
 }
 
 pub fn overlay_text(args: &serde_json::Value) -> Result<serde_json::Value> {
@@ -330,6 +330,17 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         .map(|(path, _)| path.as_path())
         .unwrap_or(semantic_input);
     let semantic_removed = artifact_removed + plain_removed;
+    if (args.cleanup.header_enabled
+        || args.cleanup.footer_enabled
+        || !args.cleanup.plain_header_targets.is_empty()
+        || !args.cleanup.plain_footer_targets.is_empty())
+        && semantic_removed == 0
+    {
+        warnings.push(
+            "已请求删除现有页眉页脚，但没有找到可安全删除的匹配内容；原文未被遮盖或改写"
+                .to_string(),
+        );
+    }
     let semantic_rebuild_overlays = artifact_rebuild_overlays(args, semantic_deleted_path.as_ref());
 
     let normalized_path = if args.normalize_a4 {
@@ -354,15 +365,6 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     if total_pages < end_page {
         anyhow::bail!("全局总页数 {total_pages} 小于当前 PDF 的结束页码 {end_page}");
     }
-    let skip_header_pages = semantic_deleted_path
-        .as_ref()
-        .map(|result| result.removed_header_pages.clone())
-        .unwrap_or_default();
-    let skip_footer_pages = semantic_deleted_path
-        .as_ref()
-        .map(|result| result.removed_footer_pages.clone())
-        .unwrap_or_default();
-
     let cleaned = args.cleanup.header_enabled || args.cleanup.footer_enabled;
     if args.header.is_none()
         && args.footer.is_none()
@@ -392,8 +394,6 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         &page_infos,
         page_start,
         total_pages,
-        &skip_header_pages,
-        &skip_footer_pages,
     )?;
     warnings.append(&mut overlay_warnings);
     let overlay_path = TempPathGuard::new(temp_named_path("docsy_overlay", "pdf"));
@@ -402,7 +402,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     let qpdf_tool = crate::external::QpdfTool;
     let bin = qpdf_tool.binary_path()?;
     let overlay_output = TempPathGuard::new(temp_named_path("docsy_overlay_result", "pdf"));
-    let command_output = std::process::Command::new(&bin)
+    let command_output = crate::external::hidden_command(&bin)
         .arg(work_input)
         .arg("--overlay")
         .arg(overlay_path.path())
@@ -415,7 +415,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     cleanup_plain_text_temp(plain_deleted_path);
     cleanup_semantic_temp(semantic_deleted_path);
 
-    if !command_output.status.success() {
+    if !super::qpdf::status_is_success(&command_output.status) {
         let stderr = String::from_utf8_lossy(&command_output.stderr);
         anyhow::bail!("qpdf overlay 失败: {}", stderr.trim());
     }
@@ -739,8 +739,6 @@ fn build_overlay_pdf(
     pages: &[PageSize],
     page_start: u32,
     total_pages: u32,
-    skip_header_pages: &BTreeSet<usize>,
-    skip_footer_pages: &BTreeSet<usize>,
 ) -> Result<(Vec<u8>, Vec<String>)> {
     let mut doc = Document::with_version("1.6");
     let mut warnings = Vec::new();
@@ -760,7 +758,6 @@ fn build_overlay_pdf(
         "Subtype" => "Type1",
         "BaseFont" => "Courier",
     });
-    let cjk_fallback_id = add_standard_cjk_font(&mut doc);
     let embedded_fonts = prepare_embedded_overlay_fonts(
         &mut doc,
         header,
@@ -775,7 +772,6 @@ fn build_overlay_pdf(
     font_resources.set("F1", helvetica_id);
     font_resources.set("FTimes", times_id);
     font_resources.set("FCourier", courier_id);
-    font_resources.set("FCJKFallback", cjk_fallback_id);
     for font in embedded_fonts.values() {
         font_resources.set(font.resource_name.as_str(), font.object_id);
     }
@@ -789,9 +785,7 @@ fn build_overlay_pdf(
         let local_page = index as u32 + 1;
         let mut operations = Vec::new();
 
-        if let Some(config) = header.filter(|config| {
-            !skip_header_pages.contains(&index) && overlay_applies_to_page(config, local_page)
-        }) {
+        if let Some(config) = header.filter(|config| overlay_applies_to_page(config, local_page)) {
             append_overlay_text_ops(
                 &mut operations,
                 config,
@@ -800,12 +794,10 @@ fn build_overlay_pdf(
                 current_page,
                 total_pages,
                 &embedded_fonts,
-            );
+            )?;
         }
 
-        if let Some(config) = footer.filter(|config| {
-            !skip_footer_pages.contains(&index) && overlay_applies_to_page(config, local_page)
-        }) {
+        if let Some(config) = footer.filter(|config| overlay_applies_to_page(config, local_page)) {
             append_overlay_text_ops(
                 &mut operations,
                 config,
@@ -814,7 +806,7 @@ fn build_overlay_pdf(
                 current_page,
                 total_pages,
                 &embedded_fonts,
-            );
+            )?;
         }
 
         for config in extra_overlays {
@@ -830,7 +822,7 @@ fn build_overlay_pdf(
                 current_page,
                 total_pages,
                 &embedded_fonts,
-            );
+            )?;
         }
 
         let content = Content { operations };
@@ -900,7 +892,6 @@ struct FontCandidate {
 enum OverlayFontRef<'a> {
     Builtin(&'static str),
     Embedded(&'a EmbeddedOverlayFont),
-    StandardCjk,
 }
 
 fn overlay_region(value: &str) -> OverlayRegion {
@@ -909,27 +900,6 @@ fn overlay_region(value: &str) -> OverlayRegion {
     } else {
         OverlayRegion::Footer
     }
-}
-
-fn add_standard_cjk_font(doc: &mut Document) -> ObjectId {
-    let descendant_id = doc.add_object(dictionary! {
-        "Type" => "Font",
-        "Subtype" => "CIDFontType0",
-        "BaseFont" => "STSong-Light",
-        "CIDSystemInfo" => dictionary! {
-            "Registry" => Object::string_literal("Adobe"),
-            "Ordering" => Object::string_literal("GB1"),
-            "Supplement" => 2,
-        },
-        "DW" => 1000,
-    });
-    doc.add_object(dictionary! {
-        "Type" => "Font",
-        "Subtype" => "Type0",
-        "BaseFont" => "STSong-Light",
-        "Encoding" => "UniGB-UCS2-H",
-        "DescendantFonts" => vec![descendant_id.into()],
-    })
 }
 
 #[allow(clippy::too_many_arguments)] // the font plan depends on each overlay source and page set
@@ -976,7 +946,7 @@ fn prepare_embedded_overlay_fonts(
                 fonts.insert(family, choice.font);
             }
             Err(err) => warnings.push(format!(
-                "字体「{}」及相近字体均无法按子集嵌入，已降级为 PDF 标准中文字体：{}",
+                "字体「{}」及相近字体均无法按子集嵌入：{}",
                 display_font_family(&family),
                 err
             )),
@@ -1090,6 +1060,7 @@ fn try_create_embedded_overlay_font(
         subset_bytes,
         to_unicode,
         widths,
+        char_to_subset_gid.values().copied().max().unwrap_or(0),
     );
     Ok(EmbeddedOverlayFont {
         resource_name: resource_name.to_string(),
@@ -1105,24 +1076,20 @@ fn add_subset_font_to_doc(
     font_bytes: Vec<u8>,
     to_unicode: String,
     widths: Vec<Object>,
+    max_cid: u16,
 ) -> ObjectId {
     let font_name = font
         .font_name
         .clone()
         .unwrap_or_else(|| resource_name.to_string())
         .replace(' ', "");
-    let face_name = format!("DOCSY+{font_name}");
+    let face_name = format!("{}+{font_name}", subset_font_prefix(resource_name));
     let (subtype, font_file_key, font_stream) = match &font.font_type {
         FontType::OpenTypeCFF(_) => (
             "CIDFontType0",
             "FontFile3",
-            Stream::new(
-                dictionary! {
-                    "Subtype" => "CIDFontType0C",
-                },
-                font_bytes,
-            )
-            .with_compression(false),
+            Stream::new(dictionary! { "Subtype" => "OpenType" }, font_bytes)
+                .with_compression(false),
         ),
         FontType::TrueType => (
             "CIDFontType2",
@@ -1132,24 +1099,28 @@ fn add_subset_font_to_doc(
     };
     let font_file_id = doc.add_object(font_stream);
     let to_unicode_id = doc.add_object(Stream::new(Dictionary::new(), to_unicode.into_bytes()));
+    let cid_set_id = doc.add_object(Stream::new(Dictionary::new(), contiguous_cid_set(max_cid)));
+    let units_per_em = font.pdf_font_metrics.units_per_em.max(1) as f32;
+    let normalize_metric = |value: f32| (value * 1000.0 / units_per_em).round() as i64;
     let descriptor_id = doc.add_object(dictionary! {
         "Type" => "FontDescriptor",
         "FontName" => Object::Name(face_name.as_bytes().to_vec()),
-        "Ascent" => font.font_metrics.ascent as i64,
-        "Descent" => font.font_metrics.descent as i64,
-        "CapHeight" => font.font_metrics.ascent as i64,
+        "Ascent" => normalize_metric(font.font_metrics.ascent),
+        "Descent" => normalize_metric(font.font_metrics.descent),
+        "CapHeight" => normalize_metric(font.font_metrics.ascent),
         "ItalicAngle" => 0,
         "Flags" => 32,
         "StemV" => 80,
+        "CIDSet" => cid_set_id,
         font_file_key => font_file_id,
         "FontBBox" => vec![
-            (font.pdf_font_metrics.x_min as i64).into(),
-            (font.pdf_font_metrics.y_min as i64).into(),
-            (font.pdf_font_metrics.x_max as i64).into(),
-            (font.pdf_font_metrics.y_max as i64).into(),
+            normalize_metric(font.pdf_font_metrics.x_min as f32).into(),
+            normalize_metric(font.pdf_font_metrics.y_min as f32).into(),
+            normalize_metric(font.pdf_font_metrics.x_max as f32).into(),
+            normalize_metric(font.pdf_font_metrics.y_max as f32).into(),
         ],
     });
-    let descendant = Object::Dictionary(dictionary! {
+    let descendant_id = doc.add_object(dictionary! {
         "Type" => "Font",
         "Subtype" => subtype,
         "BaseFont" => Object::Name(face_name.as_bytes().to_vec()),
@@ -1168,8 +1139,28 @@ fn add_subset_font_to_doc(
         "BaseFont" => Object::Name(face_name.as_bytes().to_vec()),
         "Encoding" => "Identity-H",
         "ToUnicode" => to_unicode_id,
-        "DescendantFonts" => vec![descendant],
+        "DescendantFonts" => vec![Object::Reference(descendant_id)],
     })
+}
+
+fn subset_font_prefix(resource_name: &str) -> String {
+    let index = resource_name
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>()
+        .parse::<usize>()
+        .unwrap_or(1)
+        .saturating_sub(1);
+    let suffix = (b'A' + (index % 26) as u8) as char;
+    format!("DCSYA{suffix}")
+}
+
+fn contiguous_cid_set(max_cid: u16) -> Vec<u8> {
+    let mut bytes = vec![0_u8; max_cid as usize / 8 + 1];
+    for cid in 0..=max_cid as usize {
+        bytes[cid / 8] |= 1 << (7 - cid % 8);
+    }
+    bytes
 }
 
 fn append_overlay_text_ops(
@@ -1180,52 +1171,52 @@ fn append_overlay_text_ops(
     current_page: u32,
     total_pages: u32,
     embedded_fonts: &BTreeMap<String, EmbeddedOverlayFont>,
-) {
+) -> Result<()> {
     let text = expand_placeholders(&config.text, current_page, total_pages);
     if text.is_empty() {
-        return;
+        return Ok(());
     }
     let y = match region {
         OverlayRegion::Header => size.height_pt - mm_to_pt(config.margin_mm),
         OverlayRegion::Footer => mm_to_pt(config.margin_mm),
     };
-    let font_ref = overlay_font_ref(config, &text, embedded_fonts);
-    let use_embedded = matches!(
-        font_ref,
-        OverlayFontRef::Embedded(_) | OverlayFontRef::StandardCjk
-    );
+    let font_ref = overlay_font_ref(config, &text, embedded_fonts)?;
+    let use_embedded = matches!(font_ref, OverlayFontRef::Embedded(_));
     let x = compute_x(config, &text, use_embedded, size.width_pt);
     ops.extend(text_ops(
         &font_ref,
+        region,
         config.font_size,
         x,
         y,
         &config.color,
         text,
     ));
+    Ok(())
 }
 
 fn overlay_font_ref<'a>(
     config: &OverlayTextConfig,
     text: &str,
     embedded_fonts: &'a BTreeMap<String, EmbeddedOverlayFont>,
-) -> OverlayFontRef<'a> {
+) -> Result<OverlayFontRef<'a>> {
     if requires_embedded_font(text) {
         let key = font_family_key(&config.font_family);
         if let Some(font) = embedded_fonts.get(&key) {
-            return OverlayFontRef::Embedded(font);
+            return Ok(OverlayFontRef::Embedded(font));
         }
-        return OverlayFontRef::StandardCjk;
+        anyhow::bail!("没有可嵌入的中文字体，已停止生成，避免写入 Acrobat 无法编辑的损坏字体资源");
     }
-    match config.font_family.trim().to_lowercase().as_str() {
+    Ok(match config.font_family.trim().to_lowercase().as_str() {
         "times" | "times new roman" | "times-roman" => OverlayFontRef::Builtin("FTimes"),
         "courier" | "courier new" => OverlayFontRef::Builtin("FCourier"),
         _ => OverlayFontRef::Builtin("F1"),
-    }
+    })
 }
 
 fn text_ops(
     font_ref: &OverlayFontRef<'_>,
+    region: OverlayRegion,
     font_size: f32,
     x: f32,
     y: f32,
@@ -1242,12 +1233,24 @@ fn text_ops(
                 StringFormat::Hexadecimal,
             ),
         ),
-        OverlayFontRef::StandardCjk => (
-            "FCJKFallback",
-            Object::String(encode_utf16be_text(&text), StringFormat::Hexadecimal),
-        ),
+    };
+    let (subtype, attached) = match region {
+        OverlayRegion::Header => ("Header", "Top"),
+        OverlayRegion::Footer => ("Footer", "Bottom"),
     };
     vec![
+        Operation::new(
+            "BDC",
+            vec![
+                Object::Name(b"Artifact".to_vec()),
+                Object::Dictionary(dictionary! {
+                    "Type" => "Pagination",
+                    "Subtype" => subtype,
+                    "Attached" => vec![Object::Name(attached.as_bytes().to_vec())],
+                    "Docsy" => Object::Boolean(true),
+                }),
+            ],
+        ),
         Operation::new("q", vec![]),
         Operation::new("BT", vec![]),
         Operation::new(
@@ -1265,13 +1268,8 @@ fn text_ops(
         Operation::new("Tj", vec![text_object]),
         Operation::new("ET", vec![]),
         Operation::new("Q", vec![]),
+        Operation::new("EMC", vec![]),
     ]
-}
-
-fn encode_utf16be_text(text: &str) -> Vec<u8> {
-    text.encode_utf16()
-        .flat_map(|unit| unit.to_be_bytes())
-        .collect()
 }
 
 fn encode_subset_glyph_text(text: &str, char_to_gid: &BTreeMap<char, u16>) -> Vec<u8> {
@@ -1629,23 +1627,73 @@ mod tests {
             page_start: None,
             page_end: None,
         };
-        let (bytes, _warnings) = build_overlay_pdf(
-            Some(&header),
-            None,
-            &[],
-            &pages,
-            1,
-            1,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-        )
-        .unwrap();
+        let (bytes, _warnings) = build_overlay_pdf(Some(&header), None, &[], &pages, 1, 1).unwrap();
 
         assert!(
             bytes.len() < 500_000,
             "overlay PDF too large: {}",
             bytes.len()
         );
+        let document = Document::load_mem(&bytes).unwrap();
+        assert!(document
+            .objects
+            .values()
+            .all(|object| !format!("{object:?}").contains("STSong-Light")));
+        let page_id = document.get_pages().into_values().next().unwrap();
+        let content = document.get_and_decode_page_content(page_id).unwrap();
+        assert!(content.operations.iter().any(|operation| {
+            operation.operator == "BDC"
+                && operation
+                    .operands
+                    .get(1)
+                    .and_then(|object| object.as_dict().ok())
+                    .and_then(|dict| dict.get(b"Subtype").ok())
+                    .and_then(|object| object.as_name().ok())
+                    == Some(b"Header")
+        }));
+        let descriptor = document
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .find(|dict| dict.get_type().ok() == Some(b"FontDescriptor"))
+            .unwrap();
+        let bbox = descriptor.get(b"FontBBox").unwrap().as_array().unwrap();
+        let bbox_values = bbox
+            .iter()
+            .map(|value| value.as_i64().unwrap())
+            .collect::<Vec<_>>();
+        assert!(bbox_values[2] - bbox_values[0] >= 500);
+        assert!(bbox_values
+            .iter()
+            .all(|value| (-2_000..=2_000).contains(value)));
+        let font_name = descriptor.get(b"FontName").unwrap().as_name().unwrap();
+        assert_eq!(font_name.iter().position(|byte| *byte == b'+'), Some(6));
+        let type0_font = document
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .find(|dict| {
+                dict.get(b"Subtype")
+                    .ok()
+                    .and_then(|value| value.as_name().ok())
+                    == Some(b"Type0")
+                    && dict
+                        .get(b"BaseFont")
+                        .ok()
+                        .and_then(|value| value.as_name().ok())
+                        .map(|name| name.starts_with(b"DCSYA"))
+                        .unwrap_or(false)
+            })
+            .unwrap();
+        assert!(matches!(
+            type0_font
+                .get(b"DescendantFonts")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .first(),
+            Some(Object::Reference(_))
+        ));
     }
 
     #[test]
@@ -1695,7 +1743,7 @@ mod tests {
     }
 
     #[test]
-    fn font_fallback_sequence_tries_similar_families_before_standard_cjk() {
+    fn font_fallback_sequence_tries_similar_embeddable_families() {
         let families = font_candidate_sequence("songti")
             .into_iter()
             .map(|candidate| candidate.family)
@@ -1715,6 +1763,7 @@ mod tests {
         }
         let input = temp_named_path("docsy_hf_process_input", "pdf");
         let output = temp_named_path("docsy_hf_process_output", "pdf");
+        let deleted = temp_named_path("docsy_hf_process_deleted", "pdf");
         create_simple_test_pdf(&input);
 
         let result = process_job(&HeaderFooterJob {
@@ -1749,7 +1798,23 @@ mod tests {
             "processed PDF too large: {}",
             output_size
         );
-        if let Ok(text_output) = std::process::Command::new("pdftotext")
+        let processed = Document::load(&result.output_path).unwrap();
+        assert!(processed
+            .objects
+            .values()
+            .all(|object| !format!("{object:?}").contains("STSong-Light")));
+        let check =
+            crate::external::hidden_command(crate::external::QpdfTool.binary_path().unwrap())
+                .arg("--check")
+                .arg(&result.output_path)
+                .output()
+                .unwrap();
+        assert!(
+            check.status.success(),
+            "{}",
+            String::from_utf8_lossy(&check.stderr)
+        );
+        if let Ok(text_output) = crate::external::hidden_command("pdftotext")
             .arg(&result.output_path)
             .arg("-")
             .output()
@@ -1763,9 +1828,30 @@ mod tests {
                 );
             }
         }
+        let deleted_result = artifacts::delete_header_footer_artifacts_file(
+            &result.output_path,
+            &deleted.to_string_lossy(),
+            artifacts::HeaderFooterArtifactTargets {
+                header: true,
+                footer: false,
+            },
+        )
+        .unwrap();
+        assert!(deleted_result.removed_header > 0);
+        if let Ok(text_output) = crate::external::hidden_command("pdftotext")
+            .arg(&deleted)
+            .arg("-")
+            .output()
+        {
+            if text_output.status.success() {
+                let extracted = String::from_utf8_lossy(&text_output.stdout);
+                assert!(!extracted.contains("测试页眉3"));
+            }
+        }
         let _ = fs::remove_file(input);
         let _ = fs::remove_file(result.output_path);
         let _ = fs::remove_file(output);
+        let _ = fs::remove_file(deleted);
     }
 
     fn create_simple_test_pdf(path: &Path) {

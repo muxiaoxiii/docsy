@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId};
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -105,22 +105,155 @@ fn delete_plain_header_footer_file(
             continue;
         }
         let (operations, page_result) = filter_page_operations(&content.operations, &page_plan);
-        if page_result.removed() == 0 {
+        let direct_changed = page_result.removed() > 0;
+        let mut combined_result = page_result;
+        let xobjects = super::artifacts::page_xobjects(&doc, page_id);
+        if !xobjects.is_empty() {
+            let nested_result = filter_referenced_form_text(
+                &mut doc,
+                &content.operations,
+                &xobjects,
+                &page_plan,
+                &mut HashSet::new(),
+            )?;
+            combined_result.removed_header += nested_result.removed_header;
+            combined_result.removed_footer += nested_result.removed_footer;
+        }
+        if combined_result.removed() == 0 {
             continue;
         }
-        let encoded = Content { operations }
-            .encode()
-            .context("编码删除普通文本页眉页脚后的内容流失败")?;
-        doc.change_page_content(page_id, encoded)
-            .context("写回删除普通文本页眉页脚后的内容流失败")?;
-        result.removed_header += page_result.removed_header;
-        result.removed_footer += page_result.removed_footer;
+        if direct_changed {
+            let encoded = Content { operations }
+                .encode()
+                .context("编码删除普通文本页眉页脚后的内容流失败")?;
+            doc.change_page_content(page_id, encoded)
+                .context("写回删除普通文本页眉页脚后的内容流失败")?;
+        }
+        result.removed_header += combined_result.removed_header;
+        result.removed_footer += combined_result.removed_footer;
     }
 
     doc.prune_objects();
     doc.save(output_path)
         .context("保存删除普通文本页眉页脚后的 PDF 失败")?;
     Ok(result)
+}
+
+fn filter_referenced_form_text(
+    doc: &mut Document,
+    operations: &[Operation],
+    xobjects: &Dictionary,
+    plan: &PagePlainTextPlan,
+    visited: &mut HashSet<ObjectId>,
+) -> Result<PlainTextCleanupResult> {
+    let mut result = PlainTextCleanupResult::default();
+    for operation in operations
+        .iter()
+        .filter(|operation| operation.operator == "Do")
+    {
+        let Some(name) = operation
+            .operands
+            .first()
+            .and_then(|object| object.as_name().ok())
+        else {
+            continue;
+        };
+        let Some(object_id) = xobjects
+            .get(name)
+            .ok()
+            .and_then(super::artifacts::object_reference)
+        else {
+            continue;
+        };
+        if !visited.insert(object_id) {
+            continue;
+        }
+        let Some((stream_content, stream_dict)) = doc
+            .get_object(object_id)
+            .ok()
+            .and_then(|object| object.as_stream().ok())
+            .filter(|stream| {
+                stream
+                    .dict
+                    .get(b"Subtype")
+                    .ok()
+                    .and_then(|object| object.as_name().ok())
+                    == Some(b"Form")
+            })
+            .and_then(|stream| {
+                stream
+                    .get_plain_content()
+                    .ok()
+                    .map(|content| (content, stream.dict.clone()))
+            })
+        else {
+            continue;
+        };
+        let Ok(content) = Content::decode(&stream_content) else {
+            continue;
+        };
+        let (filtered, form_result) = filter_page_operations(&content.operations, plan);
+        let direct_changed = form_result.removed() > 0;
+        let resources =
+            super::artifacts::resource_dictionary(doc, stream_dict.get(b"Resources").ok());
+        let nested_xobjects = super::artifacts::xobjects_from_resources(doc, resources.as_ref());
+        let mut combined_result = form_result;
+        if !nested_xobjects.is_empty() {
+            let nested_result = filter_referenced_form_text(
+                doc,
+                &content.operations,
+                &nested_xobjects,
+                plan,
+                visited,
+            )?;
+            combined_result.removed_header += nested_result.removed_header;
+            combined_result.removed_footer += nested_result.removed_footer;
+        }
+        if direct_changed {
+            let encoded = Content {
+                operations: filtered.clone(),
+            }
+            .encode()
+            .context("编码 Form XObject 中的普通文本页眉页脚失败")?;
+            doc.get_object_mut(object_id)
+                .and_then(Object::as_stream_mut)
+                .context("写回 Form XObject 普通文本页眉页脚失败")?
+                .set_plain_content(encoded);
+            if !operations_use_font(&filtered, b"FCJKFallback") {
+                remove_direct_form_font_resource(doc, object_id, b"FCJKFallback");
+            }
+        }
+        result.removed_header += combined_result.removed_header;
+        result.removed_footer += combined_result.removed_footer;
+    }
+    Ok(result)
+}
+
+fn operations_use_font(operations: &[Operation], font_name: &[u8]) -> bool {
+    operations.iter().any(|operation| {
+        operation.operator == "Tf"
+            && operation
+                .operands
+                .first()
+                .and_then(|object| object.as_name().ok())
+                == Some(font_name)
+    })
+}
+
+fn remove_direct_form_font_resource(doc: &mut Document, object_id: ObjectId, font_name: &[u8]) {
+    let Ok(stream) = doc
+        .get_object_mut(object_id)
+        .and_then(Object::as_stream_mut)
+    else {
+        return;
+    };
+    let Ok(Object::Dictionary(resources)) = stream.dict.get_mut(b"Resources") else {
+        return;
+    };
+    let Ok(Object::Dictionary(fonts)) = resources.get_mut(b"Font") else {
+        return;
+    };
+    fonts.remove(font_name);
 }
 
 struct PagePlainTextPlan<'a> {
@@ -630,6 +763,44 @@ mod tests {
         let _ = std::fs::remove_file(output);
     }
 
+    #[test]
+    fn deletes_confirmed_plain_header_inside_form_xobject() {
+        let input = temp_named_path("docsy_plain_form_input", "pdf");
+        let output = temp_named_path("docsy_plain_form_output", "pdf");
+        create_plain_text_form_test_pdf(&input);
+        let plan = PlainTextCleanupPlan {
+            header_targets: vec![PlainTextTarget {
+                text: "Legacy Docsy Header".to_string(),
+                normalized_text: "Legacy Docsy Header".to_string(),
+                page_start: 1,
+                page_end: 1,
+                bbox: None,
+            }],
+            header_zone_mm: 25.0,
+            footer_zone_mm: 25.0,
+            ..Default::default()
+        };
+
+        let result =
+            delete_plain_header_footer_file(&input.to_string_lossy(), &output, &plan).unwrap();
+
+        assert_eq!(result.removed_header, 1);
+        let document = Document::load(&output).unwrap();
+        assert!(document.objects.values().all(|object| {
+            !format!("{object:?}").contains("STSong-Light")
+                && object
+                    .as_stream()
+                    .ok()
+                    .and_then(|stream| stream.get_plain_content().ok())
+                    .map(|content| {
+                        !String::from_utf8_lossy(&content).contains("Legacy Docsy Header")
+                    })
+                    .unwrap_or(true)
+        }));
+        let _ = std::fs::remove_file(input);
+        let _ = std::fs::remove_file(output);
+    }
+
     fn create_plain_text_test_pdf(path: &Path) {
         let mut doc = Document::with_version("1.7");
         let pages_id = doc.new_object_id();
@@ -697,6 +868,74 @@ mod tests {
             "Type" => "Catalog",
             "Pages" => pages_id,
         });
+        doc.trailer.set("Root", catalog_id);
+        doc.save(path).unwrap();
+    }
+
+    fn create_plain_text_form_test_pdf(path: &Path) {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let fallback_font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type0",
+            "BaseFont" => "STSong-Light",
+            "Encoding" => "UniGB-UCS2-H",
+        });
+        let form_content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new(
+                    "Tm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        460.into(),
+                        812.into(),
+                    ],
+                ),
+                Operation::new("Tj", vec![Object::string_literal("Legacy Docsy Header")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let form_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+                "Resources" => dictionary! {
+                    "Font" => dictionary! { "FCJKFallback" => fallback_font_id },
+                },
+            },
+            form_content.encode().unwrap(),
+        ));
+        let resources_id = doc.add_object(dictionary! {
+            "XObject" => dictionary! { "Fx1" => form_id },
+        });
+        let page_content = Content {
+            operations: vec![Operation::new("Do", vec![Object::Name(b"Fx1".to_vec())])],
+        };
+        let content_id = doc.add_object(Stream::new(
+            Dictionary::new(),
+            page_content.encode().unwrap(),
+        ));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
         doc.trailer.set("Root", catalog_id);
         doc.save(path).unwrap();
     }

@@ -21,12 +21,12 @@ pub struct DeleteHeaderFooterArtifactsArgs {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteHeaderFooterArtifactsResult {
-    input_path: String,
-    output_path: String,
-    removed: usize,
-    removed_header: usize,
-    removed_footer: usize,
-    pages_touched: usize,
+    pub(crate) input_path: String,
+    pub(crate) output_path: String,
+    pub(crate) removed: usize,
+    pub(crate) removed_header: usize,
+    pub(crate) removed_footer: usize,
+    pub(crate) pages_touched: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -143,19 +143,38 @@ pub fn delete_header_footer_artifacts_file(
         let properties = page_properties(&doc, page_id);
         let (filtered, removed_on_page) =
             remove_target_artifact_ranges(&content.operations, targets, &properties);
-        if removed_on_page.total() == 0 {
-            continue;
+        let mut nested_result = HeaderFooterArtifactEditResult::default();
+        let xobjects = page_xobjects(&doc, page_id);
+        if !xobjects.is_empty() {
+            let plan = HeaderFooterArtifactEditPlan {
+                remove_header: targets.header,
+                remove_footer: targets.footer,
+                ..Default::default()
+            };
+            nested_result = edit_referenced_form_artifacts(
+                &mut doc,
+                &content.operations,
+                &xobjects,
+                &plan,
+                0,
+                &mut BTreeSet::new(),
+            )?;
         }
-        let encoded = Content {
-            operations: filtered,
+        if removed_on_page.total() > 0 {
+            let encoded = Content {
+                operations: filtered,
+            }
+            .encode()
+            .context("编码删除标准页眉页脚后的内容流失败")?;
+            doc.change_page_content(page_id, encoded)
+                .context("写回删除标准页眉页脚后的内容流失败")?;
         }
-        .encode()
-        .context("编码删除标准页眉页脚后的内容流失败")?;
-        doc.change_page_content(page_id, encoded)
-            .context("写回删除标准页眉页脚后的内容流失败")?;
-        removed.header += removed_on_page.header;
-        removed.footer += removed_on_page.footer;
-        pages_touched += 1;
+        let nested_removed = nested_result.removed_header + nested_result.removed_footer;
+        if removed_on_page.total() > 0 || nested_removed > 0 {
+            removed.header += removed_on_page.header + nested_result.removed_header;
+            removed.footer += removed_on_page.footer + nested_result.removed_footer;
+            pages_touched += 1;
+        }
     }
 
     doc.prune_objects();
@@ -204,16 +223,31 @@ fn edit_header_footer_artifacts_file(
             Err(_) => continue,
         };
         let properties = page_properties(&doc, page_id);
-        let (edited, page_result) =
+        let (edited, mut page_result) =
             edit_target_artifact_ranges(&content.operations, plan, &properties, page_index);
+        let direct_changed = page_result.changed_count() > 0;
+        let xobjects = page_xobjects(&doc, page_id);
+        if !xobjects.is_empty() {
+            let nested_result = edit_referenced_form_artifacts(
+                &mut doc,
+                &content.operations,
+                &xobjects,
+                plan,
+                page_index,
+                &mut BTreeSet::new(),
+            )?;
+            merge_edit_result(&mut page_result, nested_result);
+        }
         if page_result.changed_count() == 0 {
             continue;
         }
-        let encoded = Content { operations: edited }
-            .encode()
-            .context("编码编辑标准页眉页脚后的内容流失败")?;
-        doc.change_page_content(page_id, encoded)
-            .context("写回编辑标准页眉页脚后的内容流失败")?;
+        if direct_changed {
+            let encoded = Content { operations: edited }
+                .encode()
+                .context("编码编辑标准页眉页脚后的内容流失败")?;
+            doc.change_page_content(page_id, encoded)
+                .context("写回编辑标准页眉页脚后的内容流失败")?;
+        }
         merge_edit_result(&mut result, page_result);
     }
 
@@ -494,6 +528,132 @@ fn artifact_subtype<'a>(property: &'a Object, properties: &'a Dictionary) -> Opt
             .and_then(|dict| dict.get(b"Subtype").ok())
             .and_then(name_bytes),
         _ => None,
+    }
+}
+
+fn edit_referenced_form_artifacts(
+    doc: &mut Document,
+    operations: &[Operation],
+    xobjects: &Dictionary,
+    plan: &HeaderFooterArtifactEditPlan,
+    page_index: usize,
+    visited: &mut BTreeSet<ObjectId>,
+) -> Result<HeaderFooterArtifactEditResult> {
+    let mut result = HeaderFooterArtifactEditResult::default();
+    for operation in operations
+        .iter()
+        .filter(|operation| operation.operator == "Do")
+    {
+        let Some(name) = operation.operands.first().and_then(name_bytes) else {
+            continue;
+        };
+        let Some(object_id) = xobjects.get(name).ok().and_then(object_reference) else {
+            continue;
+        };
+        if !visited.insert(object_id) {
+            continue;
+        }
+
+        let Some((stream_content, stream_dict)) = doc
+            .get_object(object_id)
+            .ok()
+            .and_then(|object| object.as_stream().ok())
+            .filter(|stream| stream.dict.get(b"Subtype").ok().and_then(name_bytes) == Some(b"Form"))
+            .and_then(|stream| {
+                stream
+                    .get_plain_content()
+                    .ok()
+                    .map(|content| (content, stream.dict.clone()))
+            })
+        else {
+            continue;
+        };
+        let Ok(content) = Content::decode(&stream_content) else {
+            continue;
+        };
+        let resources = resource_dictionary(doc, stream_dict.get(b"Resources").ok());
+        let properties = properties_from_resources(doc, resources.as_ref());
+        let nested_xobjects = xobjects_from_resources(doc, resources.as_ref());
+        let (edited, mut form_result) =
+            edit_target_artifact_ranges(&content.operations, plan, &properties, page_index);
+        let direct_changed = form_result.changed_count() > 0;
+        if !nested_xobjects.is_empty() {
+            let nested_result = edit_referenced_form_artifacts(
+                doc,
+                &content.operations,
+                &nested_xobjects,
+                plan,
+                page_index,
+                visited,
+            )?;
+            merge_edit_result(&mut form_result, nested_result);
+        }
+        if direct_changed {
+            let encoded = Content { operations: edited }
+                .encode()
+                .context("编码 Form XObject 中的页眉页脚失败")?;
+            doc.get_object_mut(object_id)
+                .and_then(Object::as_stream_mut)
+                .context("写回 Form XObject 页眉页脚失败")?
+                .set_plain_content(encoded);
+        }
+        merge_edit_result(&mut result, form_result);
+    }
+    Ok(result)
+}
+
+pub(crate) fn object_reference(object: &Object) -> Option<ObjectId> {
+    object.as_reference().ok()
+}
+
+pub(crate) fn resource_dictionary(doc: &Document, object: Option<&Object>) -> Option<Dictionary> {
+    match object? {
+        Object::Dictionary(dictionary) => Some(dictionary.clone()),
+        Object::Reference(id) => doc.get_dictionary(*id).ok().cloned(),
+        _ => None,
+    }
+}
+
+fn properties_from_resources(doc: &Document, resources: Option<&Dictionary>) -> Dictionary {
+    let mut properties = Dictionary::new();
+    if let Some(resources) = resources {
+        merge_properties(doc, resources, &mut properties);
+    }
+    properties
+}
+
+pub(crate) fn xobjects_from_resources(
+    doc: &Document,
+    resources: Option<&Dictionary>,
+) -> Dictionary {
+    let Some(resources) = resources else {
+        return Dictionary::new();
+    };
+    resource_dictionary(doc, resources.get(b"XObject").ok()).unwrap_or_default()
+}
+
+pub(crate) fn page_xobjects(doc: &Document, page_id: ObjectId) -> Dictionary {
+    let mut xobjects = Dictionary::new();
+    let Ok((direct_resources, resource_ids)) = doc.get_page_resources(page_id) else {
+        return xobjects;
+    };
+    for resource_id in resource_ids.into_iter().rev() {
+        if let Ok(resources) = doc.get_dictionary(resource_id) {
+            merge_xobjects(doc, resources, &mut xobjects);
+        }
+    }
+    if let Some(resources) = direct_resources {
+        merge_xobjects(doc, resources, &mut xobjects);
+    }
+    xobjects
+}
+
+fn merge_xobjects(doc: &Document, resources: &Dictionary, output: &mut Dictionary) {
+    let Some(xobjects) = resource_dictionary(doc, resources.get(b"XObject").ok()) else {
+        return;
+    };
+    for (name, value) in xobjects.iter() {
+        output.set(name.clone(), value.clone());
     }
 }
 

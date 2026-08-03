@@ -54,11 +54,11 @@ impl ExternalTool for LibreOfficeTool {
         }
 
         let mut command = if cfg!(windows) {
-            let mut command = std::process::Command::new("where");
+            let mut command = super::hidden_command("where");
             command.arg("soffice");
             command
         } else {
-            let mut command = std::process::Command::new("which");
+            let mut command = super::hidden_command("which");
             command.arg("soffice");
             command
         };

@@ -38,7 +38,7 @@ impl ExternalTool for WpsTool {
                 return Ok(path);
             }
             // Fallback: try 'where wps' command
-            let mut cmd = std::process::Command::new("where");
+            let mut cmd = super::hidden_command("where");
             cmd.arg("wps");
             if let Ok(output) =
                 super::command_output_with_timeout(&mut cmd, std::time::Duration::from_secs(2))
@@ -63,7 +63,7 @@ impl ExternalTool for WpsTool {
 fn find_wps_exe_from_registry() -> Result<PathBuf> {
     // Try CLSID/LocalServer32 first (the canonical COM registration location)
     for clsid in ["KWPS.Application", "kwps.Application"] {
-        let mut command = std::process::Command::new("reg");
+        let mut command = super::hidden_command("reg");
         command.args(["query", &format!(r"HKCR\{}\CLSID", clsid)]);
         if let Ok(output) =
             super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))
@@ -75,7 +75,7 @@ fn find_wps_exe_from_registry() -> Result<PathBuf> {
                     if let Some(pos) = line.find("REG_SZ") {
                         let clsid_val = line[pos + 6..].trim().to_string();
                         // Now query LocalServer32 for that CLSID
-                        let mut cmd2 = std::process::Command::new("reg");
+                        let mut cmd2 = super::hidden_command("reg");
                         cmd2.args(["query", &format!(r"HKCR\CLSID\{}\LocalServer32", clsid_val)]);
                         if let Ok(out2) = super::command_output_with_timeout(
                             &mut cmd2,
@@ -95,7 +95,7 @@ fn find_wps_exe_from_registry() -> Result<PathBuf> {
     }
 
     // Fallback: shell\open\command
-    let mut command = std::process::Command::new("reg");
+    let mut command = super::hidden_command("reg");
     command.args(["query", r"HKCR\KWPS.Application\shell\open\command"]);
     if let Ok(output) =
         super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))

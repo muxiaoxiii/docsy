@@ -42,7 +42,7 @@ pub fn extract(args: &serde_json::Value) -> Result<serde_json::Value> {
         filters.push(drawtext);
     }
 
-    let mut cmd = std::process::Command::new(&bin);
+    let mut cmd = crate::external::hidden_command(&bin);
     cmd.arg("-hide_banner").arg("-y");
     if let Some(start) = time_range.start {
         cmd.arg("-ss").arg(format_seconds_arg(start));

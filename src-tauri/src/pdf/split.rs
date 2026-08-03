@@ -163,7 +163,7 @@ fn extract_range(
         output_path.clone()
     };
     let range = format!("{}-{}", item.page_start, item.page_end);
-    let status = std::process::Command::new(&bin)
+    let status = crate::external::hidden_command(&bin)
         .arg("--empty")
         .arg("--pages")
         .arg(input_path)
@@ -173,7 +173,7 @@ fn extract_range(
         .status()
         .context("执行 qpdf 页段拆分失败")?;
 
-    if !status.success() {
+    if !super::qpdf::status_is_success(&status) {
         anyhow::bail!("qpdf 页段拆分失败");
     }
     if cleanup.header_enabled || cleanup.footer_enabled {

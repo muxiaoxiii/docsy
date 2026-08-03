@@ -498,7 +498,7 @@ fn convert_doc_to_pdf_with_word(
         output = powershell_escape(&output.display().to_string()),
     );
 
-    let mut cmd = std::process::Command::new("powershell");
+    let mut cmd = crate::external::hidden_command("powershell");
     cmd.args([
         "-NoProfile",
         "-ExecutionPolicy",
@@ -558,7 +558,7 @@ fn convert_doc_to_pdf_with_wps(
         output = powershell_escape(&output.display().to_string()),
     );
 
-    let mut cmd = std::process::Command::new("powershell");
+    let mut cmd = crate::external::hidden_command("powershell");
     cmd.args([
         "-NoProfile",
         "-ExecutionPolicy",
@@ -628,7 +628,7 @@ on run argv
 end run
 "#;
 
-    let status = std::process::Command::new("osascript")
+    let status = crate::external::hidden_command("osascript")
         .arg("-e")
         .arg(script)
         .arg(input.display().to_string())
@@ -658,7 +658,7 @@ fn convert_doc_to_pdf_with_libreoffice(
     doc_path: &str,
     output_dir: &Path,
 ) -> Result<String> {
-    let status = std::process::Command::new(lo_bin)
+    let status = crate::external::hidden_command(lo_bin)
         .arg("--headless")
         .arg("--convert-to")
         .arg("pdf")
@@ -696,7 +696,7 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
         anyhow::bail!("没有可合并的 PDF");
     }
 
-    let status = std::process::Command::new(qpdf_bin)
+    let status = crate::external::hidden_command(qpdf_bin)
         .arg("--empty")
         .arg("--pages")
         .args(inputs)
@@ -706,7 +706,7 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
         .stderr(std::process::Stdio::null())
         .status()?;
 
-    if !status.success() {
+    if !super::qpdf::status_is_success(&status) {
         anyhow::bail!("qpdf 合并失败");
     }
 
@@ -714,11 +714,11 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
 }
 
 fn qpdf_page_count(qpdf_bin: &Path, path: &str) -> Result<u32> {
-    let output = std::process::Command::new(qpdf_bin)
+    let output = crate::external::hidden_command(qpdf_bin)
         .arg("--show-npages")
         .arg(path)
         .output()?;
-    if !output.status.success() {
+    if !super::qpdf::status_is_success(&output.status) {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("qpdf 读取页数失败 {}: {}", path, stderr.trim());
     }
@@ -849,7 +849,7 @@ fn apply_overlay_single(
     );
     fs::write(&temp_overlay, &overlay_bytes)?;
 
-    let status = std::process::Command::new(qpdf_bin)
+    let status = crate::external::hidden_command(qpdf_bin)
         .arg(input)
         .arg("--overlay")
         .arg(&temp_overlay)
@@ -862,7 +862,7 @@ fn apply_overlay_single(
     let _ = fs::remove_file(&temp_overlay);
     let status = status?;
 
-    if !status.success() {
+    if !super::qpdf::status_is_success(&status) {
         anyhow::bail!("qpdf overlay 失败: {}", input);
     }
 

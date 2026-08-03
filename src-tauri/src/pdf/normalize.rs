@@ -47,6 +47,7 @@ fn a4_page_size(source: &PageSize, orientation: &str) -> (f32, f32) {
     match orientation {
         "portrait" => (A4_WIDTH_PT, A4_HEIGHT_PT),
         "landscape" => (A4_HEIGHT_PT, A4_WIDTH_PT),
+        "preserve" if source.width_pt > source.height_pt => (A4_HEIGHT_PT, A4_WIDTH_PT),
         _ if source.width_pt > source.height_pt => (A4_HEIGHT_PT, A4_WIDTH_PT),
         _ => (A4_WIDTH_PT, A4_HEIGHT_PT),
     }
@@ -242,7 +243,7 @@ mod tests {
             raw_height_pt: 842.0,
             rotate: 90,
         };
-        let transform = a4_transform(&source, "auto");
+        let transform = a4_transform(&source, "preserve");
 
         assert_eq!(
             (transform.page_w, transform.page_h),

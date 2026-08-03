@@ -19,15 +19,18 @@ pub fn get_page_infos(input: &str) -> Result<Vec<PageSize>> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
 
-    let output = std::process::Command::new(&bin)
+    let output = crate::external::hidden_command(&bin)
         .arg("--json")
         .arg(input)
         .output()
         .context("执行 qpdf --json 失败")?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("qpdf --json 失败: {}", stderr.trim());
+    if !super::qpdf::status_is_success(&output.status) {
+        anyhow::bail!(
+            "qpdf --json 失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&output)
+        );
     }
 
     let json: Value = serde_json::from_slice(&output.stdout).context("解析 qpdf JSON 失败")?;

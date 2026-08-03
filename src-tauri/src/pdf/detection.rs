@@ -277,7 +277,7 @@ fn inspect_artifacts(input: &Path) -> Result<ArtifactSummary> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let qdf = temp_named_path("docsy_artifact_scan", "pdf");
-    let mut command = Command::new(&bin);
+    let mut command = crate::external::hidden_command(&bin);
     command
         .arg("--qdf")
         .arg("--object-streams=disable")
@@ -285,7 +285,7 @@ fn inspect_artifacts(input: &Path) -> Result<ArtifactSummary> {
         .arg(&qdf);
     let output = run_command_output(command, "qpdf Artifact 检测")?;
 
-    if !output.status.success() {
+    if !super::qpdf::status_is_success(&output.status) {
         let _ = fs::remove_file(&qdf);
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("qpdf Artifact 检测失败: {}", stderr.trim());
@@ -312,7 +312,7 @@ fn parse_artifact_summary(text: &str) -> ArtifactSummary {
 
 fn run_pdftotext_bbox(input: &Path, max_pages: u32) -> Result<String> {
     let pdftotext = find_pdftotext().context("未找到 pdftotext，无法检测页眉页脚")?;
-    let mut command = Command::new(pdftotext);
+    let mut command = crate::external::hidden_command(pdftotext);
     command
         .arg("-bbox")
         .arg("-f")
@@ -330,6 +330,7 @@ fn run_pdftotext_bbox(input: &Path, max_pages: u32) -> Result<String> {
 }
 
 fn run_command_output(mut command: Command, label: &str) -> Result<Output> {
+    crate::external::hide_command_window(&mut command);
     command
         .output()
         .with_context(|| format!("执行 {label} 失败"))

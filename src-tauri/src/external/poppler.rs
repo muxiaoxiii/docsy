@@ -40,30 +40,31 @@ impl ExternalTool for PopplerTool {
         let pdftotext = Self::binary_path_for("pdftotext");
         match (pdftoppm, pdftotext) {
             (Ok(pdftoppm), Ok(pdftotext)) => {
-                let mut command = std::process::Command::new(&pdftoppm);
-                command.arg("-v");
-                let output =
-                    super::command_output_with_timeout(&mut command, Duration::from_secs(2));
-                let version = output.ok().and_then(|out| {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    stderr.lines().next().map(ToString::to_string)
-                });
-                ToolStatus {
-                    available: true,
-                    path: Some(format!(
-                        "pdftoppm: {}; pdftotext: {}",
-                        pdftoppm.display(),
-                        pdftotext.display()
-                    )),
-                    version,
-                    install_hint: String::new(),
-                    managed: is_managed_path(&pdftoppm) && is_managed_path(&pdftotext),
-                    source: if is_managed_path(&pdftoppm) && is_managed_path(&pdftotext) {
-                        "docsy"
-                    } else {
-                        "system"
-                    }
-                    .into(),
+                let path_text = format!(
+                    "pdftoppm: {}; pdftotext: {}",
+                    pdftoppm.display(),
+                    pdftotext.display()
+                );
+                let managed = is_managed_path(&pdftoppm) && is_managed_path(&pdftotext);
+                match probe_binary(&pdftoppm)
+                    .and_then(|version| probe_binary(&pdftotext).map(|_| version))
+                {
+                    Ok(version) => ToolStatus {
+                        available: true,
+                        path: Some(path_text),
+                        version: Some(version),
+                        install_hint: String::new(),
+                        managed,
+                        source: if managed { "docsy" } else { "system" }.into(),
+                    },
+                    Err(error) => ToolStatus {
+                        available: false,
+                        path: Some(path_text),
+                        version: None,
+                        install_hint: error,
+                        managed,
+                        source: "broken".into(),
+                    },
                 }
             }
             _ => ToolStatus {
@@ -84,6 +85,30 @@ impl ExternalTool for PopplerTool {
     fn binary_path(&self) -> Result<PathBuf> {
         Self::binary_path_for("pdftoppm")
     }
+}
+
+fn probe_binary(path: &std::path::Path) -> std::result::Result<String, String> {
+    let mut command = super::hidden_command(path);
+    command.arg("-v");
+    let output = super::command_output_with_timeout(&mut command, Duration::from_secs(8))
+        .map_err(|error| format!("{} 存在但无法执行：{error}", path.display()))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{} 存在但启动失败：{}",
+            path.display(),
+            super::command_failure_detail(&output)
+        ));
+    }
+    let version_output = if output.stderr.is_empty() {
+        &output.stdout
+    } else {
+        &output.stderr
+    };
+    Ok(String::from_utf8_lossy(version_output)
+        .lines()
+        .next()
+        .unwrap_or("Poppler（版本未知）")
+        .to_string())
 }
 
 fn binary_name(name: &str) -> &str {
