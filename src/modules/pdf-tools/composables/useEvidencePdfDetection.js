@@ -1,28 +1,17 @@
 import { ElMessage } from 'element-plus'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 import { candidateTargetRange } from './useEvidencePdfSession.js'
+import { candidateIdentity, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
 
 const DETECTION_SCAN_MAX_PAGES = 20
-const PAGE_NUMBER_MIN_BOTTOM_RATIO = 0.9
-const PAGE_NUMBER_MIN_CONFIDENCE = 0.75
 const ROMAN_PAGE_SCORE_PENALTY = -0.25
-const NON_PAGE_FOOTER_MIN_CONFIDENCE = 0.65
+
+export function headerFooterDetectionZoneMm(value) {
+  return Math.max(25, Math.min(60, Number(value || 0) || 25))
+}
 
 export function candidateKey(candidate) {
-  if (!candidate) return ''
-  if (candidate.candidateKey) return candidate.candidateKey
-  const bbox = candidate.bbox || {}
-  const range = candidate.pageRange || {}
-  return [
-    candidate.region || 'footer',
-    candidate.normalizedText || candidate.text || '',
-    range.start || bbox.page || 1,
-    range.end || range.start || bbox.page || 1,
-    Math.round(Number(bbox.x0 || 0)),
-    Math.round(Number(bbox.y0 || 0)),
-    Math.round(Number(bbox.x1 || 0)),
-    Math.round(Number(bbox.y1 || 0)),
-  ].join('|')
+  return candidateIdentity(candidate)
 }
 
 export function useEvidencePdfDetection({
@@ -75,21 +64,35 @@ export function useEvidencePdfDetection({
       args: {
         inputPath: file.path,
         maxPages: DETECTION_SCAN_MAX_PAGES,
-        headerZoneMm: cleanupHeaderHeightMm.value,
-        footerZoneMm: cleanupFooterHeightMm.value,
+        headerZoneMm: headerFooterDetectionZoneMm(cleanupHeaderHeightMm.value),
+        footerZoneMm: headerFooterDetectionZoneMm(cleanupFooterHeightMm.value),
       },
     })
   }
 
   function applyDetectionResultToFile(file, data) {
-    const header = data.headerCandidates?.[0]
+    const totalPages = file.pages || data.pages?.length || data.pagesAnalyzed || 1
+    const headerCandidates = data.headerCandidates || []
     const footerCandidates = data.footerCandidates || []
-    const pageNumber = bestReliablePageNumberCandidate(
-      footerCandidates,
-      file.pages || data.pages?.length || data.pagesAnalyzed || 1,
+    const pageNumberCandidates = [...headerCandidates, ...footerCandidates].filter(isPageNumberCandidate)
+    const header = bestReliableHeaderCandidate(
+      headerCandidates.filter((candidate) => !isPageNumberCandidate(candidate)),
+      totalPages,
     )
+    const pageNumber = bestReliablePageNumberCandidate(pageNumberCandidates, totalPages)
     const footer = footerCandidates.find(isStrongNonPageFooterCandidate) || null
-    const candidates = [...(data.headerCandidates || []).slice(0, 6), ...(data.footerCandidates || []).slice(0, 6)]
+    const candidates = [...headerCandidates.slice(0, 12), ...footerCandidates.slice(0, 12)]
+    const detectedElements = [
+      ...headerCandidates
+        .filter((candidate) => !isPageNumberCandidate(candidate))
+        .filter((candidate) => bestReliableHeaderCandidate([candidate], totalPages))
+        .map((candidate, index) => detectedElementFromCandidate(candidate, 'header', index)),
+      ...footerCandidates
+        .filter((candidate) => !isPageNumberCandidate(candidate) && isStrongNonPageFooterCandidate(candidate))
+        .map((candidate, index) => detectedElementFromCandidate(candidate, 'footerText', index)),
+      ...pageNumberCandidates.map((candidate, index) => detectedElementFromCandidate(candidate, 'pageNumber', index)),
+    ]
+    file.existingElements = mergeExistingElements(file.existingElements || [], detectedElements)
     const parts = []
     if (data.artifact?.hasHeader) parts.push(`发现结构化页眉 ${data.artifact.headerCount} 处`)
     if (data.artifact?.hasFooter) parts.push(`发现结构化页脚 ${data.artifact.footerCount} 处`)
@@ -118,7 +121,9 @@ export function useEvidencePdfDetection({
     }))
     file.existingFooterCandidateKey = footer ? candidateKey(footer) : ''
     file.existingPageNumberCandidateKey = pageNumber ? candidateKey(pageNumber) : ''
-    file.ignoredFooterCandidateKeys = []
+    file.ignoredFooterCandidateKeys = file.existingElements
+      .filter((element) => element.decision === 'ignore')
+      .map((element) => element.id)
     const headerTargetRange = candidateTargetRange(header, file.pages)
     const footerTargetRange = candidateTargetRange(footer, file.pages)
     const pageNumberTargetRange = candidateTargetRange(pageNumber, file.pages)
@@ -128,8 +133,11 @@ export function useEvidencePdfDetection({
     file.existingFooterPageEnd = footerTargetRange.end
     file.existingPageNumberPageStart = pageNumberTargetRange.start
     file.existingPageNumberPageEnd = pageNumberTargetRange.end
-    file.existingHeaderArtifact = Boolean(data.artifact?.hasHeader)
-    file.existingFooterArtifact = Boolean(data.artifact?.hasFooter)
+    // A document-level Artifact summary cannot prove that a text candidate is
+    // inside that marked-content range. Only object-linked candidates may use
+    // the lossless Artifact edit path.
+    file.existingHeaderArtifact = header?.source === 'artifact'
+    file.existingFooterArtifact = footer?.source === 'artifact'
     file.existingHeaderEdited = false
     file.existingFooterEdited = false
     file.existingPageNumberEdited = false
@@ -153,6 +161,17 @@ export function useEvidencePdfDetection({
     )
   }
 
+  function bestReliableHeaderCandidate(candidates = [], totalPages = 1) {
+    if (Number(totalPages || 1) <= 1) return candidates[0] || null
+    return (
+      candidates.find(
+        (candidate) =>
+          candidate?.source === 'artifact' ||
+          (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2),
+      ) || null
+    )
+  }
+
   function bestPageNumberCandidate(candidates = []) {
     return (
       candidates
@@ -169,21 +188,17 @@ export function useEvidencePdfDetection({
 
   function isReliablePageNumberCandidate(candidate, totalPages = 1) {
     if (!isPageNumberCandidate(candidate)) return false
-    const normalized = String(candidate?.normalizedText || '')
     const count = Number(candidate?.count || 0)
     const pageRange = candidate?.pageRange || {}
     const rangeLength = Math.max(0, Number(pageRange.end || 0) - Number(pageRange.start || 0) + 1)
-    if (Number(totalPages || 1) <= 1) return true
-    if (normalized.includes('{total}')) return true
-    if (count >= 2 || rangeLength >= 2) return true
-    const bbox = candidate?.bbox || {}
-    const pageHeight = Number(bbox.height || 0)
-    const yBottomRatio = pageHeight ? Number(bbox.y1 || 0) / pageHeight : 0
-    const isArabic = normalized === '{page}' || normalized.includes('{page}')
+    if (candidate?.source === 'artifact') return true
+    if (Number(totalPages || 1) <= 1) return false
     return (
-      isArabic &&
-      yBottomRatio >= PAGE_NUMBER_MIN_BOTTOM_RATIO &&
-      Number(candidate?.confidence || 0) >= PAGE_NUMBER_MIN_CONFIDENCE
+      count >= 2 &&
+      rangeLength >= 2 &&
+      candidate?.repeating === true &&
+      candidate?.positionStable !== false &&
+      candidate?.sequenceStable !== false
     )
   }
 
@@ -212,9 +227,10 @@ export function useEvidencePdfDetection({
 
   function isStrongNonPageFooterCandidate(candidate) {
     if (!candidate || isPageNumberCandidate(candidate)) return false
-    if (candidate.repeating || Number(candidate.count || 0) >= 2) return true
-    if (candidate.labels?.length) return true
-    return Number(candidate.confidence || 0) >= NON_PAGE_FOOTER_MIN_CONFIDENCE
+    return (
+      candidate?.source === 'artifact' ||
+      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2)
+    )
   }
 
   function footerCandidateMeta(candidate) {
@@ -284,11 +300,17 @@ export function useEvidencePdfDetection({
     const file = selectedOverlayFile.value
     if (!file || !candidate) return
     const key = candidateKey(candidate)
+    const element = (file.existingElements || []).find((item) => item.id.includes(`|${key}|`))
     if (role === 'ignore') {
+      if (element) element.decision = 'ignore'
       file.ignoredFooterCandidateKeys = [...new Set([...(file.ignoredFooterCandidateKeys || []), key])]
       if (key === file.existingFooterCandidateKey) clearExistingFooter(file)
       if (key === file.existingPageNumberCandidateKey) clearExistingPageNumber(file)
     } else {
+      if (element) {
+        element.decision = 'keep'
+        element.kind = role === 'footer' ? 'footerText' : 'pageNumber'
+      }
       file.ignoredFooterCandidateKeys = (file.ignoredFooterCandidateKeys || []).filter((item) => item !== key)
       if (role === 'footer') {
         if (key === file.existingPageNumberCandidateKey) clearExistingPageNumber(file)
@@ -402,6 +424,7 @@ export function useEvidencePdfDetection({
     detectFileHeaderFooter,
     applyDetectionResultToFile,
     isPageNumberCandidate,
+    bestReliableHeaderCandidate,
     bestPageNumberCandidate,
     bestReliablePageNumberCandidate,
     pageNumberCandidateScore,

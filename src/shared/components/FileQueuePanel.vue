@@ -13,19 +13,19 @@
           v-for="(item, index) in items"
           :key="itemKey(item, index)"
           class="queue-item"
-          :class="{ 'is-dragging': dragFrom === index, 'is-drag-over': dragOver === index }"
-          @dragover.prevent="onDragOver(index)"
-          @drop.prevent="onDrop(index)"
+          :data-reorder-index="index"
+          :class="itemClasses(index)"
         >
           <button
             v-if="sortable"
             type="button"
             class="queue-drag-handle"
-            draggable="true"
             title="拖动调整顺序"
             aria-label="拖动调整顺序"
-            @dragstart.stop="onDragStart(index, $event)"
-            @dragend="resetDrag"
+            @pointerdown.stop="start(index, $event)"
+            @pointermove.stop="move"
+            @pointerup.stop="finish"
+            @pointercancel.stop="reset"
           >
             <el-icon><Rank /></el-icon>
           </button>
@@ -54,10 +54,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
 import { Rank } from '@element-plus/icons-vue'
+import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
 
-defineProps({
+const props = defineProps({
   items: {
     type: Array,
     default: () => [],
@@ -85,33 +85,10 @@ defineProps({
 })
 
 const emit = defineEmits(['clear', 'remove', 'reorder'])
-const dragFrom = ref(-1)
-const dragOver = ref(-1)
-
-function onDragStart(index, event) {
-  dragFrom.value = index
-  dragOver.value = index
-  if (event?.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', String(index))
-  }
-}
-
-function onDragOver(index) {
-  if (dragFrom.value >= 0) dragOver.value = index
-}
-
-function onDrop(index) {
-  if (dragFrom.value >= 0 && dragFrom.value !== index) {
-    emit('reorder', { from: dragFrom.value, to: index })
-  }
-  resetDrag()
-}
-
-function resetDrag() {
-  dragFrom.value = -1
-  dragOver.value = -1
-}
+const { start, move, finish, reset, itemClasses } = usePointerReorder({
+  itemCount: () => props.items.length,
+  onReorder: (payload) => emit('reorder', payload),
+})
 
 function itemLabel(item) {
   return String(item?.name || item?.path || item || '')
@@ -157,12 +134,16 @@ function itemKey(item, index) {
   background: var(--docsy-surface-elevated);
 }
 
-.queue-item.is-dragging {
+.queue-item.is-reorder-dragging {
   opacity: 0.55;
 }
 
-.queue-item.is-drag-over {
+.queue-item.is-reorder-before {
   box-shadow: inset 0 2px 0 var(--docsy-primary);
+}
+
+.queue-item.is-reorder-after {
+  box-shadow: inset 0 -2px 0 var(--docsy-primary);
 }
 
 .queue-drag-handle {
@@ -173,6 +154,8 @@ function itemKey(item, index) {
   padding: 0;
   color: var(--docsy-text-muted);
   cursor: grab;
+  touch-action: none;
+  user-select: none;
   border: 0;
   background: transparent;
   place-items: center;

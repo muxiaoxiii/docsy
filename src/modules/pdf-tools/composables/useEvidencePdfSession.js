@@ -2,6 +2,7 @@ import { expandSplitNameTokens } from './splitFileName.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { toChineseNumber } from '../../../core/numberFormat.js'
 import { ptToMm } from '../../../core/unitConversion.js'
+import { pageNumberOverlaysForFile } from './pdfPageNumberRules.js'
 
 export { fileName, parentDir, stripPdf, toChineseNumber }
 
@@ -179,15 +180,35 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
   const rangedFiles = assignPageRanges(files)
   const total = totalPages(rangedFiles)
   return rangedFiles.map((file, index) => {
+    const legacyFooterMode = rules.footerTextEnabled === undefined && rules.pageNumberEnabled === undefined
     const header = buildHeaderText(file, index, rules)
     const outputPath = buildOverlayOutputPath(file.path, outputDir)
-    const continuousFooter = rules.footerContinuous !== false
-    const pageStart = continuousFooter ? file.pageStart : 1
-    const jobTotalPages = continuousFooter ? total : file.pages || 1
-    const footerText = file.footer ?? rules.footerText
+    const pageNumberEnabled = rules.pageNumberEnabled ?? rules.footerEnabled
+    const pageNumberSequence =
+      rules.pageNumberSequence || (rules.footerContinuous === false ? 'per-file' : 'continuous')
+    const continuousPageNumber = pageNumberSequence !== 'per-file'
+    const pageStart = continuousPageNumber ? file.pageStart : 1
+    const jobTotalPages = continuousPageNumber ? total : file.pages || 1
     const existingHeaderReplacement = standardArtifactReplacementConfig(file, 'header', rules)
     const existingFooterReplacement = standardArtifactReplacementConfig(file, 'footer', rules)
-    const extraOverlays = convertedExistingOverlays(file, rules)
+    const pageNumberOverlays = legacyFooterMode
+      ? []
+      : pageNumberOverlaysForFile(file, {
+          enabled: pageNumberEnabled,
+          totalPages: total,
+          sequence: pageNumberSequence,
+          template: rules.pageNumberTemplate || rules.footerText || '{page}/{total}',
+          style: rules.pageNumberStyle || 'arabic',
+          region: rules.pageNumberRegion || 'footer',
+          align: rules.pageNumberAlign || rules.footerAlign,
+          fontSize: rules.pageNumberFontSize || rules.footerFontSize,
+          fontFamily: rules.pageNumberFontFamily || rules.footerFontFamily,
+          marginMm: rules.pageNumberMarginMm || rules.footerMarginMm,
+          offsetXMm: rules.pageNumberOffsetXMm ?? rules.footerOffsetXMm,
+          color: rules.pageNumberColor || rules.footerColor,
+          overrides: rules.pageNumberOverrides || [],
+        })
+    const extraOverlays = [...convertedExistingOverlays(file, rules), ...pageNumberOverlays]
     file.outputPath = outputPath
     return {
       inputPath: file.path,
@@ -198,10 +219,12 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       a4Orientation: rules.a4Orientation,
       rasterDpi: rules.rasterDpi,
       cleanup: {
-        headerEnabled: Boolean(file.removeExistingHeader || existingHeaderReplacement),
-        footerEnabled: Boolean(file.removeExistingFooter || file.removeExistingPageNumber || existingFooterReplacement),
-        forceDeleteHeader: Boolean(file.removeExistingHeader),
-        forceDeleteFooter: Boolean(file.removeExistingFooter),
+        headerEnabled: Boolean(hasArtifactDecision(file, ['header'], 'delete') || existingHeaderReplacement),
+        footerEnabled: Boolean(
+          hasArtifactDecision(file, ['footerText', 'pageNumber'], 'delete') || existingFooterReplacement,
+        ),
+        forceDeleteHeader: Boolean(hasArtifactDecision(file, ['header'], 'delete')),
+        forceDeleteFooter: Boolean(hasArtifactDecision(file, ['footerText', 'pageNumber'], 'delete')),
         headerHeightMm: rules.cleanupHeaderHeightMm,
         footerHeightMm: rules.cleanupFooterHeightMm,
         plainHeaderTargets: buildPlainTextTargets(file, 'header'),
@@ -210,13 +233,50 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         footerReplacement: existingFooterReplacement,
       },
       header: header ? overlayConfigForFile(file, 'header', header, rules) : null,
-      footer: rules.footerEnabled && footerText ? overlayConfigForFile(file, 'footer', footerText, rules) : null,
+      footer:
+        legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
+          ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules)
+          : rules.footerTextEnabled && rules.footerTextContent
+            ? footerTextOverlayConfig(rules.footerTextContent, rules)
+            : null,
       extraOverlays,
     }
   })
 }
 
+function footerTextOverlayConfig(text, rules) {
+  return {
+    text,
+    region: 'footer',
+    artifactKind: 'FooterText',
+    fontSize: rules.footerTextFontSize || 9,
+    fontFamily: rules.footerTextFontFamily || 'auto',
+    marginMm: rules.footerTextMarginMm || 10,
+    align: rules.footerTextAlign || 'left',
+    offsetXMm: rules.footerTextOffsetXMm || 0,
+    color: rules.footerTextColor || '#000000',
+  }
+}
+
 function buildPlainTextTargets(file, region) {
+  if (Array.isArray(file.existingElements) && file.existingElements.length) {
+    const kinds = region === 'header' ? ['header'] : ['footerText', 'pageNumber']
+    return file.existingElements
+      .filter(
+        (element) =>
+          kinds.includes(element.kind) &&
+          element.source !== 'artifact' &&
+          ['delete', 'edit'].includes(element.decision),
+      )
+      .map((element) => ({
+        text: element.detectedText,
+        normalizedText: element.normalizedText || element.detectedText,
+        pageStart: element.pageStart || 1,
+        pageEnd: element.pageEnd || file.pages || 1,
+        bbox: element.bbox || null,
+      }))
+      .filter((target) => target.text)
+  }
   if (region === 'header') return [plainTextTarget(file, 'header')].filter(Boolean)
   return [plainTextTarget(file, 'footer'), plainTextTarget(file, 'pageNumber')].filter(Boolean)
 }
@@ -255,6 +315,7 @@ function overlayConfigForFile(file, region, text, rules) {
   const base = isHeader
     ? {
         region: 'header',
+        artifactKind: 'HeaderText',
         text,
         fontFamily: rules.headerFontFamily || 'auto',
         fontSize: rules.headerFontSize,
@@ -265,6 +326,7 @@ function overlayConfigForFile(file, region, text, rules) {
       }
     : {
         region: 'footer',
+        artifactKind: region === 'pageNumber' ? 'PageNumber' : 'FooterText',
         text,
         fontFamily: rules.footerFontFamily || 'auto',
         fontSize: rules.footerFontSize,
@@ -309,6 +371,12 @@ function inferDetectedFontSize(bbox, fallback, text = '') {
 }
 
 function convertedExistingOverlays(file, rules) {
+  if (Array.isArray(file.existingElements) && file.existingElements.length) {
+    return file.existingElements
+      .filter((element) => element.source !== 'artifact' && element.decision === 'edit')
+      .map((element) => overlayConfigForDetectedElement(element, rules))
+      .filter(Boolean)
+  }
   const overlays = []
   if (file.convertPlainHeader && !file.removeExistingHeader) {
     const text = String(file.existingHeaderText || '').trim()
@@ -323,6 +391,59 @@ function convertedExistingOverlays(file, rules) {
     if (text) overlays.push(overlayConfigForFile(file, 'pageNumber', text, rules))
   }
   return overlays
+}
+
+function hasArtifactDecision(file, kinds, decision) {
+  if (!Array.isArray(file.existingElements) || !file.existingElements.length) {
+    if (decision !== 'delete') return false
+    if (kinds.includes('header')) return Boolean(file.existingHeaderArtifact && file.removeExistingHeader)
+    return Boolean(
+      (file.existingFooterArtifact && file.removeExistingFooter) ||
+      (file.existingPageNumberArtifact && file.removeExistingPageNumber),
+    )
+  }
+  return (file.existingElements || []).some(
+    (element) => kinds.includes(element.kind) && element.source === 'artifact' && element.decision === decision,
+  )
+}
+
+function overlayConfigForDetectedElement(element, rules) {
+  const isHeader = element.kind === 'header'
+  const bbox = element.bbox || null
+  const pageWidth = Number(bbox?.width || 0)
+  const pageHeight = Number(bbox?.height || 0)
+  const centerX = bbox ? (Number(bbox.x0) + Number(bbox.x1)) / 2 : 0
+  const align = !bbox
+    ? isHeader
+      ? rules.headerAlign
+      : rules.footerAlign
+    : centerX < pageWidth * 0.36
+      ? 'left'
+      : centerX > pageWidth * 0.64
+        ? 'right'
+        : 'center'
+  const anchorX = !bbox ? 0 : align === 'left' ? Number(bbox.x0) : align === 'right' ? Number(bbox.x1) : centerX
+  const baseX = align === 'left' ? 0 : align === 'right' ? pageWidth : pageWidth / 2
+  const fallbackFontSize = isHeader ? rules.headerFontSize : rules.footerFontSize
+  return {
+    text: String(element.editedText || element.detectedText || ''),
+    region: isHeader ? 'header' : 'footer',
+    artifactKind: isHeader ? 'HeaderText' : element.kind === 'pageNumber' ? 'PageNumber' : 'FooterText',
+    pageStart: element.pageStart || 1,
+    pageEnd: element.pageEnd || 1,
+    fontFamily: isHeader ? rules.headerFontFamily || 'auto' : rules.footerFontFamily || 'auto',
+    fontSize: Number(element.fontSize || inferDetectedFontSize(bbox, fallbackFontSize, element.editedText)),
+    align,
+    offsetXMm: bbox ? ptToMm(anchorX - baseX) : 0,
+    marginMm: bbox
+      ? isHeader
+        ? ptToMm(pageHeight - Number(bbox.y1 || 0))
+        : ptToMm(Number(bbox.y0 || 0))
+      : isHeader
+        ? rules.headerMarginMm
+        : rules.footerMarginMm,
+    color: isHeader ? rules.headerColor || '#000000' : rules.footerColor || '#000000',
+  }
 }
 
 function existingTargetText(file, region) {
@@ -376,6 +497,7 @@ function standardArtifactReplacementConfig(file, region, rules) {
   return isHeader
     ? {
         text,
+        artifactKind: 'HeaderText',
         fontSize: rules.headerFontSize,
         fontFamily: rules.headerFontFamily || 'auto',
         marginMm: rules.headerMarginMm,
@@ -385,6 +507,7 @@ function standardArtifactReplacementConfig(file, region, rules) {
       }
     : {
         text,
+        artifactKind: 'FooterText',
         fontSize: rules.footerFontSize,
         fontFamily: rules.footerFontFamily || 'auto',
         marginMm: rules.footerMarginMm,
@@ -428,15 +551,28 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         color: rules.headerColor || '#000000',
       },
       footerRule: {
-        enabled: rules.footerEnabled,
-        text: rules.footerText,
-        continuous: rules.footerContinuous !== false,
-        align: rules.footerAlign,
-        fontSize: rules.footerFontSize,
-        fontFamily: rules.footerFontFamily || 'auto',
-        marginMm: rules.footerMarginMm,
-        offsetXmm: rules.footerOffsetXMm || 0,
-        color: rules.footerColor || '#000000',
+        enabled: Boolean(rules.footerTextEnabled),
+        text: rules.footerTextContent || '',
+        align: rules.footerTextAlign || 'left',
+        fontSize: rules.footerTextFontSize || 9,
+        fontFamily: rules.footerTextFontFamily || 'auto',
+        marginMm: rules.footerTextMarginMm || 10,
+        offsetXmm: rules.footerTextOffsetXMm || 0,
+        color: rules.footerTextColor || '#000000',
+      },
+      pageNumberRule: {
+        enabled: rules.pageNumberEnabled ?? rules.footerEnabled,
+        template: rules.pageNumberTemplate || rules.footerText || '{page}/{total}',
+        style: rules.pageNumberStyle || 'arabic',
+        sequence: rules.pageNumberSequence || (rules.footerContinuous === false ? 'per-file' : 'continuous'),
+        region: rules.pageNumberRegion || 'footer',
+        align: rules.pageNumberAlign || rules.footerAlign,
+        fontSize: rules.pageNumberFontSize || rules.footerFontSize,
+        fontFamily: rules.pageNumberFontFamily || rules.footerFontFamily || 'auto',
+        marginMm: rules.pageNumberMarginMm || rules.footerMarginMm,
+        offsetXmm: rules.pageNumberOffsetXMm ?? rules.footerOffsetXMm ?? 0,
+        color: rules.pageNumberColor || rules.footerColor || '#000000',
+        overrides: rules.pageNumberOverrides || [],
       },
       cleanupRule: {
         headerEnabled: rules.cleanupHeaderEnabled,

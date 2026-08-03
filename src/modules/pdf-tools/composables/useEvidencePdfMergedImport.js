@@ -14,6 +14,7 @@ import {
 import { createEvidenceFile, sortByNatural } from './useEvidencePdfSession.js'
 import { formatSplitFileName } from './splitFileName.js'
 import { splitRangeWarnings } from './usePdfSplitRanges.js'
+import { headerFooterDetectionZoneMm } from './useEvidencePdfDetection.js'
 
 const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
 
@@ -93,8 +94,8 @@ export function useEvidencePdfMergedImport({
           `该 PDF 共 ${totalPages} 页，为避免卡顿，先自动识别前 ${MERGED_IMPORT_AUTO_SCAN_PAGES} 页；后续页段可手动补充。`,
         )
       }
-      const headerScanMm = mergedImportScanZoneMm(cleanupHeaderHeightMm.value)
-      const footerScanMm = mergedImportScanZoneMm(cleanupFooterHeightMm.value)
+      const headerScanMm = headerFooterDetectionZoneMm(cleanupHeaderHeightMm.value)
+      const footerScanMm = headerFooterDetectionZoneMm(cleanupFooterHeightMm.value)
       const inspect = await tauriCallSafe('inspect_merged_evidence_pdf', {
         args: {
           inputPath: input,
@@ -439,10 +440,6 @@ export function useEvidencePdfMergedImport({
     return '页眉'
   }
 
-  function mergedImportScanZoneMm(value) {
-    return Math.max(25, Math.min(60, Number(value || 0) || 25))
-  }
-
   function sourcePageRangeKey(item) {
     return `${Number(item.pageStart || 0)}-${Number(item.pageEnd || 0)}`
   }
@@ -481,7 +478,7 @@ export function useEvidencePdfMergedImport({
     mergedImportRangePageCount: pageCount,
     mergedImportSourceType,
     mergedImportSourceText,
-    mergedImportScanZoneMm,
+    headerFooterDetectionZoneMm,
     sourcePageRangeKey,
     hasSplitWarning,
   }

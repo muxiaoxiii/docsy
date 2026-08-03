@@ -101,26 +101,46 @@
           </div>
         </div>
         <div class="existing-summary-grid">
-          <div class="summary-pill">
+          <button v-if="existingHeaderCount" type="button" class="summary-pill" @click="openExistingElements('header')">
             <span>原页眉</span>
             <strong>{{ existingHeaderCount }}</strong>
-          </div>
-          <div class="summary-pill">
-            <span>原页脚</span>
+          </button>
+          <button
+            v-if="existingFooterCount"
+            type="button"
+            class="summary-pill"
+            @click="openExistingElements('footerText')"
+          >
+            <span>原页脚文字</span>
             <strong>{{ existingFooterCount }}</strong>
-          </div>
-          <div class="summary-pill">
+          </button>
+          <button
+            v-if="existingPageNumberCount"
+            type="button"
+            class="summary-pill"
+            @click="openExistingElements('pageNumber')"
+          >
             <span>原页码</span>
             <strong>{{ existingPageNumberCount }}</strong>
-          </div>
-          <div class="summary-pill warning" :class="{ active: hasExistingRemovalRule }">
+          </button>
+          <button
+            v-if="existingRemovalCount"
+            type="button"
+            class="summary-pill warning active"
+            @click="openExistingElements('delete')"
+          >
             <span>待删除</span>
             <strong>{{ existingRemovalCount }}</strong>
-          </div>
-          <div class="summary-pill" :class="{ active: existingEditCount || existingConvertCount }">
-            <span>待编辑/转换</span>
-            <strong>{{ existingEditCount + existingConvertCount }}</strong>
-          </div>
+          </button>
+          <button
+            v-if="existingEditCount"
+            type="button"
+            class="summary-pill active"
+            @click="openExistingElements('edit')"
+          >
+            <span>待编辑</span>
+            <strong>{{ existingEditCount }}</strong>
+          </button>
         </div>
       </div>
 
@@ -150,7 +170,7 @@
 
       <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title-row">
-          <div class="block-title">插入新页眉页脚</div>
+          <div class="block-title">插入新页眉、页脚文字和页码</div>
           <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
         </div>
         <HeaderFooterRuleFields
@@ -166,15 +186,27 @@
           v-model:header-margin-mm="headerMarginMm"
           v-model:header-offset-x-mm="headerOffsetXMm"
           v-model:header-color="headerColor"
-          v-model:footer-enabled="footerEnabled"
-          v-model:footer-continuous="footerContinuous"
-          v-model:footer-text="footerText"
-          v-model:footer-align="footerAlign"
-          v-model:footer-font-size="footerFontSize"
-          v-model:footer-font-family="footerFontFamily"
-          v-model:footer-margin-mm="footerMarginMm"
-          v-model:footer-offset-x-mm="footerOffsetXMm"
-          v-model:footer-color="footerColor"
+          v-model:footer-text-enabled="footerTextEnabled"
+          v-model:footer-text-content="footerTextContent"
+          v-model:footer-text-align="footerTextAlign"
+          v-model:footer-text-font-size="footerTextFontSize"
+          v-model:footer-text-font-family="footerTextFontFamily"
+          v-model:footer-text-margin-mm="footerTextMarginMm"
+          v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
+          v-model:footer-text-color="footerTextColor"
+          v-model:page-number-enabled="footerEnabled"
+          v-model:page-number-sequence="pageNumberSequence"
+          v-model:page-number-style="pageNumberStyle"
+          v-model:page-number-template="footerText"
+          v-model:page-number-region="pageNumberRegion"
+          v-model:page-number-align="footerAlign"
+          v-model:page-number-font-size="footerFontSize"
+          v-model:page-number-font-family="footerFontFamily"
+          v-model:page-number-margin-mm="footerMarginMm"
+          v-model:page-number-offset-x-mm="footerOffsetXMm"
+          v-model:page-number-color="footerColor"
+          :page-number-override-count="pageNumberOverrides.length"
+          @edit-page-number-rules="pageNumberRulesVisible = true"
           :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
         />
         <el-alert
@@ -302,6 +334,22 @@
           @row-click="selectMergedImportRange"
           @sort-change="sortMergedImportItems"
         >
+          <el-table-column width="42" align="center">
+            <template #default="{ $index }">
+              <button
+                type="button"
+                class="table-drag-handle"
+                :data-merged-reorder-index="$index"
+                title="拖动调整页段顺序"
+                @pointerdown.stop="startMergedReorder($index, $event)"
+                @pointermove.stop="moveMergedReorder"
+                @pointerup.stop="finishMergedReorder"
+                @pointercancel.stop="resetMergedReorder"
+              >
+                <el-icon><Rank /></el-icon>
+              </button>
+            </template>
+          </el-table-column>
           <el-table-column type="index" label="#" width="44" />
           <el-table-column label="文件名" prop="name" sortable="custom" min-width="160">
             <template #default="{ row }">
@@ -363,78 +411,28 @@
         @row-click="selectPreviewRow"
         @sort-change="sortOverlayFiles"
       >
-        <el-table-column type="index" label="#" width="44" />
-        <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <button class="file-link" type="button" @click.stop="openEvidenceFile(row)">
-              {{ row.name }}
+        <el-table-column width="42" align="center">
+          <template #default="{ $index }">
+            <button
+              type="button"
+              class="table-drag-handle"
+              :data-reorder-index="$index"
+              title="拖动调整处理顺序"
+              @pointerdown.stop="startOverlayReorder($index, $event)"
+              @pointermove.stop="moveOverlayReorder"
+              @pointerup.stop="finishOverlayReorder"
+              @pointercancel.stop="resetOverlayReorder"
+            >
+              <el-icon><Rank /></el-icon>
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="原页眉" prop="existingHeader" sortable="custom" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-input
-              v-if="isEditingExistingHeader(row)"
-              v-model="row.existingHeaderText"
-              size="small"
-              @click.stop
-              @blur="finishExistingHeaderEdit(row)"
-              @keyup.enter="finishExistingHeaderEdit(row)"
-            />
-            <span
-              v-else
-              class="table-text editable-text"
-              :class="{ 'deleted-existing-text': row.removeExistingHeader }"
-              @dblclick.stop="startExistingHeaderEdit(row)"
-            >
-              {{ displayExistingHeader(row) || '-' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="原页脚" prop="existingFooter" sortable="custom" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-input
-              v-if="isEditingExistingFooter(row)"
-              v-model="row.existingFooterText"
-              size="small"
-              @click.stop
-              @blur="finishExistingFooterEdit(row)"
-              @keyup.enter="finishExistingFooterEdit(row)"
-            />
-            <span
-              v-else
-              class="table-text editable-text"
-              :class="{ 'deleted-existing-text': row.removeExistingFooter }"
-              @dblclick.stop="startExistingFooterEdit(row)"
-            >
-              {{ displayExistingFooter(row) || '-' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column
-          label="原页码"
-          prop="existingPageNumber"
-          sortable="custom"
-          min-width="120"
-          show-overflow-tooltip
-        >
-          <template #default="{ row }">
-            <el-input
-              v-if="isEditingExistingPageNumber(row)"
-              v-model="row.existingPageNumberText"
-              size="small"
-              @click.stop
-              @blur="finishExistingPageNumberEdit(row)"
-              @keyup.enter="finishExistingPageNumberEdit(row)"
-            />
-            <span
-              v-else
-              class="table-text editable-text"
-              :class="{ 'deleted-existing-text': row.removeExistingPageNumber }"
-              @dblclick.stop="startExistingPageNumberEdit(row)"
-            >
-              {{ displayExistingPageNumber(row) || '-' }}
-            </span>
+        <el-table-column type="index" label="#" width="44" />
+        <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip>
+          <template #default="{ row, $index }">
+            <button class="file-link" type="button" :data-reorder-index="$index" @click.stop="openEvidenceFile(row)">
+              {{ row.name }}
+            </button>
           </template>
         </el-table-column>
         <el-table-column label="新页眉" prop="header" sortable="custom" min-width="160" show-overflow-tooltip>
@@ -452,7 +450,10 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="新页脚" prop="footer" sortable="custom" min-width="135" show-overflow-tooltip>
+        <el-table-column v-if="footerTextEnabled" label="新页脚文字" min-width="135" show-overflow-tooltip>
+          <template #default>{{ footerTextContent || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="新页码" prop="footer" sortable="custom" min-width="135" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingFooter(row)"
@@ -463,7 +464,7 @@
               @keyup.enter="finishFooterEdit(row)"
             />
             <span v-else class="table-text editable-text" @dblclick.stop="startFooterEdit(row, $index)">
-              {{ displayRowFooter(row, $index) || '-' }}
+              {{ rowPageNumberPreview(row) || '-' }}
             </span>
           </template>
         </el-table-column>
@@ -473,11 +474,6 @@
         <el-table-column label="页码范围" prop="pageRange" sortable="custom" width="105">
           <template #default="{ row }">{{ pageRangeText(row) }}</template>
         </el-table-column>
-        <el-table-column label="现有处理" prop="existingHandling" sortable="custom" width="150">
-          <template #default="{ row }">
-            <span class="table-text">{{ headerFooterHandlingText(row) }}</span>
-          </template>
-        </el-table-column>
         <el-table-column
           v-if="workflowMode === 'split'"
           label="来源页段"
@@ -486,14 +482,6 @@
           width="105"
         >
           <template #default="{ row }">{{ sourceRangeText(row) }}</template>
-        </el-table-column>
-        <el-table-column label="状态" prop="status" sortable="custom" width="92">
-          <template #default="{ row }">
-            <el-tooltip v-if="row.statusDetail" :content="row.statusDetail" placement="top" :show-after="250">
-              <el-tag :type="row.statusType" size="small">{{ row.statusText }}</el-tag>
-            </el-tooltip>
-            <el-tag v-else :type="row.statusType" size="small">{{ row.statusText }}</el-tag>
-          </template>
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ $index }">
@@ -533,16 +521,27 @@
         v-model:header-margin-mm="headerMarginMm"
         v-model:header-offset-x-mm="headerOffsetXMm"
         v-model:header-color="headerColor"
-        v-model:footer-enabled="footerEnabled"
-        v-model:footer-continuous="footerContinuous"
-        v-model:footer-text="footerText"
-        v-model:footer-align="footerAlign"
-        v-model:footer-font-size="footerFontSize"
-        v-model:footer-font-family="footerFontFamily"
-        v-model:footer-margin-mm="footerMarginMm"
-        v-model:footer-offset-x-mm="footerOffsetXMm"
-        v-model:footer-color="footerColor"
-        :show-footer-continuous="true"
+        v-model:footer-text-enabled="footerTextEnabled"
+        v-model:footer-text-content="footerTextContent"
+        v-model:footer-text-align="footerTextAlign"
+        v-model:footer-text-font-size="footerTextFontSize"
+        v-model:footer-text-font-family="footerTextFontFamily"
+        v-model:footer-text-margin-mm="footerTextMarginMm"
+        v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
+        v-model:footer-text-color="footerTextColor"
+        v-model:page-number-enabled="footerEnabled"
+        v-model:page-number-sequence="pageNumberSequence"
+        v-model:page-number-style="pageNumberStyle"
+        v-model:page-number-template="footerText"
+        v-model:page-number-region="pageNumberRegion"
+        v-model:page-number-align="footerAlign"
+        v-model:page-number-font-size="footerFontSize"
+        v-model:page-number-font-family="footerFontFamily"
+        v-model:page-number-margin-mm="footerMarginMm"
+        v-model:page-number-offset-x-mm="footerOffsetXMm"
+        v-model:page-number-color="footerColor"
+        :page-number-override-count="pageNumberOverrides.length"
+        @edit-page-number-rules="pageNumberRulesVisible = true"
         :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
       />
       <template #footer>
@@ -550,6 +549,14 @@
         <el-button type="primary" @click="applyHeaderFooterSettings">应用到预览</el-button>
       </template>
     </el-dialog>
+    <PageNumberRuleDialog v-model:visible="pageNumberRulesVisible" v-model:rules="pageNumberOverrides" />
+    <ExistingPdfElementsDialog
+      v-model:visible="existingElementsVisible"
+      :rows="existingElementRows"
+      :filter="existingElementsFilter"
+      @change="handleExistingElementChange"
+      @preview="previewExistingElement"
+    />
 
     <section class="preview-panel">
       <div class="preview-head">
@@ -685,15 +692,17 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
 import HeaderFooterRuleFields from '../components/HeaderFooterRuleFields.vue'
+import PageNumberRuleDialog from '../components/PageNumberRuleDialog.vue'
+import ExistingPdfElementsDialog from '../components/ExistingPdfElementsDialog.vue'
 import {
   buildEvidencePdfRulePayload,
   buildMergeOutputPath,
   buildOutputDir,
   createEvidenceFile,
-  expandPlaceholders,
   fileName,
   pageRangeText,
   parentDir,
@@ -706,6 +715,9 @@ import { useEvidencePdfDetection } from '../composables/useEvidencePdfDetection.
 import { useEvidencePdfPreview } from '../composables/useEvidencePdfPreview.js'
 import { useEvidencePdfMergedImport } from '../composables/useEvidencePdfMergedImport.js'
 import { useEvidencePdfExistingEditing } from '../composables/useEvidencePdfExistingEditing.js'
+import { renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
+import { elementIdentity } from '../composables/existingPdfElements.js'
+import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 
 const props = defineProps({
@@ -792,12 +804,25 @@ const headerColor = ref('#000000')
 const footerEnabled = ref(true)
 const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)
+const pageNumberSequence = ref('continuous')
+const pageNumberStyle = ref('arabic')
+const pageNumberRegion = ref('footer')
+const pageNumberOverrides = ref([])
+const pageNumberRulesVisible = ref(false)
 const footerAlign = ref('center')
 const footerFontSize = ref(9)
 const footerFontFamily = ref('auto')
 const footerMarginMm = ref(10)
 const footerOffsetXMm = ref(0)
 const footerColor = ref('#000000')
+const footerTextEnabled = ref(false)
+const footerTextContent = ref('')
+const footerTextAlign = ref('left')
+const footerTextFontSize = ref(9)
+const footerTextFontFamily = ref('auto')
+const footerTextMarginMm = ref(10)
+const footerTextOffsetXMm = ref(0)
+const footerTextColor = ref('#000000')
 const outputMode = ref('files_and_merge')
 const mergeFileName = ref('merged_evidence.pdf')
 const previewPage = ref(1)
@@ -812,6 +837,8 @@ const editingExistingHeaderPath = ref('')
 const editingExistingFooterPath = ref('')
 const editingExistingPageNumberPath = ref('')
 const selectedFooterCandidateKey = ref('')
+const existingElementsVisible = ref(false)
+const existingElementsFilter = ref('all')
 
 watch(
   headerMode,
@@ -832,10 +859,33 @@ watch(
   { immediate: true },
 )
 
+watch(pageNumberSequence, (value) => {
+  footerContinuous.value = value !== 'per-file'
+})
+
 applyWorkflowDefaults()
 
 const overlayRows = computed(() => {
   return updatePageRanges(overlayFiles.value)
+})
+const {
+  start: startOverlayReorder,
+  move: moveOverlayReorder,
+  finish: finishOverlayReorder,
+  reset: resetOverlayReorder,
+} = usePointerReorder({
+  itemCount: () => overlayFiles.value.length,
+  onReorder: ({ from, to }) => reorderOverlayFiles(from, to),
+})
+const {
+  start: startMergedReorder,
+  move: moveMergedReorder,
+  finish: finishMergedReorder,
+  reset: resetMergedReorder,
+} = usePointerReorder({
+  itemCount: () => mergedImportPlan.value?.items?.length || 0,
+  itemAttribute: 'data-merged-reorder-index',
+  onReorder: ({ from, to }) => reorderMergedImportItems(from, to),
 })
 const hasSourceSplitRanges = computed(() => overlayFiles.value.some((file) => Number(file.sourcePageStart || 0) > 0))
 const hasMergedBatchImports = computed(
@@ -863,10 +913,11 @@ const firstFooterPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
   if (!first || !footerEnabled.value || !footerText.value || !totalOverlayPages.value) return ''
-  return expandPlaceholders(
+  return renderPageNumberTemplate(
     footerText.value,
     footerContinuous.value ? first.pageStart || 1 : 1,
     footerContinuous.value ? totalOverlayPages.value : first.pages || 1,
+    pageNumberStyle.value,
   )
 })
 const processingNotes = computed(() => {
@@ -929,23 +980,30 @@ const autoCleanupFooterEnabled = computed(() =>
   ),
 )
 const hasDetectedExistingHeaderFooter = computed(() => overlayFiles.value.some((file) => hasExistingHeaderFooter(file)))
-const existingHeaderCount = computed(() => overlayFiles.value.filter((file) => hasExistingHeader(file)).length)
-const existingFooterCount = computed(() => overlayFiles.value.filter((file) => hasExistingFooter(file)).length)
-const existingPageNumberCount = computed(() => overlayFiles.value.filter((file) => hasExistingPageNumber(file)).length)
-const hasExistingRemovalRule = computed(() =>
-  overlayFiles.value.some(
-    (file) => file.removeExistingHeader || file.removeExistingFooter || file.removeExistingPageNumber,
+const existingElementRows = computed(() =>
+  overlayFiles.value.flatMap((file) =>
+    (file.existingElements || []).map((element) => ({
+      key: `${file.path}|${elementIdentity(element)}`,
+      file,
+      fileName: file.name,
+      element,
+    })),
   ),
 )
-const existingRemovalCount = computed(() =>
-  overlayFiles.value.reduce(
-    (sum, file) =>
-      sum +
-      Number(Boolean(file.removeExistingHeader)) +
-      Number(Boolean(file.removeExistingFooter)) +
-      Number(Boolean(file.removeExistingPageNumber)),
-    0,
-  ),
+const existingHeaderCount = computed(
+  () => existingElementRows.value.filter((row) => row.element.kind === 'header').length,
+)
+const existingFooterCount = computed(
+  () => existingElementRows.value.filter((row) => row.element.kind === 'footerText').length,
+)
+const existingPageNumberCount = computed(
+  () => existingElementRows.value.filter((row) => row.element.kind === 'pageNumber').length,
+)
+const hasExistingRemovalRule = computed(() =>
+  existingElementRows.value.some((row) => row.element.decision === 'delete'),
+)
+const existingRemovalCount = computed(
+  () => existingElementRows.value.filter((row) => row.element.decision === 'delete').length,
 )
 const hasExistingEditRule = computed(() =>
   overlayFiles.value.some(
@@ -962,24 +1020,8 @@ const hasExistingConvertRule = computed(() =>
       (file.convertPlainPageNumber && !file.removeExistingPageNumber),
   ),
 )
-const existingEditCount = computed(() =>
-  overlayFiles.value.reduce(
-    (sum, file) =>
-      sum +
-      Number(Boolean(file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader)) +
-      Number(Boolean(file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter)),
-    0,
-  ),
-)
-const existingConvertCount = computed(() =>
-  overlayFiles.value.reduce(
-    (sum, file) =>
-      sum +
-      Number(Boolean(file.convertPlainHeader && !file.removeExistingHeader)) +
-      Number(Boolean(file.convertPlainFooter && !file.removeExistingFooter)) +
-      Number(Boolean(file.convertPlainPageNumber && !file.removeExistingPageNumber)),
-    0,
-  ),
+const existingEditCount = computed(
+  () => existingElementRows.value.filter((row) => row.element.decision === 'edit').length,
 )
 const hasUnresolvedExistingOverlapRisk = computed(() => {
   const insertsHeader = insertHeaderFooterEnabled.value && headerMode.value !== 'none'
@@ -1008,7 +1050,8 @@ const hasApplicableProcessingRule = computed(
     hasExistingEditRule.value ||
     hasExistingConvertRule.value ||
     hasExistingRemovalRule.value ||
-    (insertHeaderFooterEnabled.value && (headerMode.value !== 'none' || footerEnabled.value)),
+    (insertHeaderFooterEnabled.value &&
+      (headerMode.value !== 'none' || footerTextEnabled.value || footerEnabled.value)),
 )
 
 const currentRules = computed(() => ({
@@ -1041,6 +1084,26 @@ const currentRules = computed(() => ({
   footerMarginMm: footerMarginMm.value,
   footerOffsetXMm: footerOffsetXMm.value,
   footerColor: footerColor.value,
+  footerTextEnabled: insertHeaderFooterEnabled.value && footerTextEnabled.value,
+  footerTextContent: footerTextContent.value,
+  footerTextAlign: footerTextAlign.value,
+  footerTextFontSize: footerTextFontSize.value,
+  footerTextFontFamily: footerTextFontFamily.value,
+  footerTextMarginMm: footerTextMarginMm.value,
+  footerTextOffsetXMm: footerTextOffsetXMm.value,
+  footerTextColor: footerTextColor.value,
+  pageNumberEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
+  pageNumberSequence: pageNumberSequence.value,
+  pageNumberStyle: pageNumberStyle.value,
+  pageNumberTemplate: footerText.value,
+  pageNumberRegion: pageNumberRegion.value,
+  pageNumberAlign: footerAlign.value,
+  pageNumberFontSize: footerFontSize.value,
+  pageNumberFontFamily: footerFontFamily.value,
+  pageNumberMarginMm: footerMarginMm.value,
+  pageNumberOffsetXMm: footerOffsetXMm.value,
+  pageNumberColor: footerColor.value,
+  pageNumberOverrides: pageNumberOverrides.value,
   outputMode: outputMode.value,
   mergeAfterProcessing: outputMode.value !== 'files_only',
   mergeFileName: mergeFileName.value,
@@ -1331,7 +1394,8 @@ function applyReplacementPreset() {
 
 function hasReplacementRule() {
   return (
-    (insertHeaderFooterEnabled.value && (headerMode.value !== 'none' || footerEnabled.value)) ||
+    (insertHeaderFooterEnabled.value &&
+      (headerMode.value !== 'none' || footerTextEnabled.value || footerEnabled.value)) ||
     hasExistingEditRule.value ||
     hasExistingConvertRule.value ||
     hasExistingRemovalRule.value
@@ -1490,21 +1554,9 @@ const {
   isEditingFooter,
   startFooterEdit,
   finishFooterEdit,
-  isEditingExistingHeader,
-  startExistingHeaderEdit,
-  finishExistingHeaderEdit,
-  isEditingExistingFooter,
-  startExistingFooterEdit,
-  finishExistingFooterEdit,
-  isEditingExistingPageNumber,
-  startExistingPageNumberEdit,
-  finishExistingPageNumberEdit,
   rowHeaderPreview,
   displayRowHeader,
   displayRowFooter,
-  displayExistingHeader,
-  displayExistingFooter,
-  displayExistingPageNumber,
 } = useEvidencePdfExistingEditing({
   editingHeaderPath,
   editingFooterPath,
@@ -1529,6 +1581,53 @@ function hasExistingHeaderFooter(row) {
   return hasExistingHeader(row) || hasExistingFooter(row) || hasExistingPageNumber(row)
 }
 
+function openExistingElements(filter = 'all') {
+  existingElementsFilter.value = filter
+  existingElementsVisible.value = true
+}
+
+function handleExistingElementChange(row) {
+  const { file } = row
+  syncLegacyExistingElementState(file)
+  file.statusText = fileExistingStatus(file).text
+  file.statusType = fileExistingStatus(file).type
+  truePreview.value = null
+  refreshPreview()
+}
+
+function syncLegacyExistingElementState(file) {
+  const elements = file.existingElements || []
+  const applyKind = (kind, legacyName) => {
+    const matches = elements.filter((element) => element.kind === kind)
+    const edited = matches.find((element) => element.decision === 'edit')
+    const representative = edited || matches.find((element) => element.decision !== 'ignore') || matches[0]
+    file[`removeExisting${legacyName}`] = matches.some((element) => element.decision === 'delete')
+    file[`existing${legacyName}Text`] = representative
+      ? representative.decision === 'edit'
+        ? representative.editedText
+        : representative.detectedText
+      : ''
+    file[`existing${legacyName}Edited`] = matches.some(
+      (element) => element.decision === 'edit' && element.source === 'artifact',
+    )
+    file[`convertPlain${legacyName}`] = matches.some(
+      (element) => element.decision === 'edit' && element.source !== 'artifact',
+    )
+  }
+  applyKind('header', 'Header')
+  applyKind('footerText', 'Footer')
+  applyKind('pageNumber', 'PageNumber')
+}
+
+function previewExistingElement(row) {
+  const index = overlayFiles.value.findIndex((file) => file.path === row.file.path)
+  if (index >= 0) selectedOverlayIndex.value = index
+  previewPage.value = Math.max(1, Number(row.element.pageStart || 1))
+  selectedFooterCandidateKey.value = row.element.id
+  truePreview.value = null
+  refreshPreview()
+}
+
 async function markRemoveExistingHeaderFooter() {
   const targets = overlayFiles.value.filter(hasExistingHeaderFooter)
   if (!targets.length) {
@@ -1549,6 +1648,10 @@ async function markRemoveExistingHeaderFooter() {
     return
   }
   targets.forEach((file) => {
+    ;(file.existingElements || []).forEach((element) => {
+      element.decision = 'delete'
+    })
+    syncLegacyExistingElementState(file)
     if (hasExistingHeader(file)) {
       file.removeExistingHeader = true
       file.existingHeaderEdited = false
@@ -1571,9 +1674,11 @@ async function markRemoveExistingHeaderFooter() {
 
 function restoreExistingHeaderFooterMarks() {
   overlayFiles.value.forEach((file) => {
-    file.removeExistingHeader = false
-    file.removeExistingFooter = false
-    file.removeExistingPageNumber = false
+    ;(file.existingElements || []).forEach((element) => {
+      element.decision = 'keep'
+      element.editedText = element.detectedText
+    })
+    syncLegacyExistingElementState(file)
     const status = fileExistingStatus(file)
     file.statusText = status.text
     file.statusType = status.type
@@ -1582,30 +1687,16 @@ function restoreExistingHeaderFooterMarks() {
   refreshPreview()
 }
 
-function headerFooterHandlingText(row) {
-  const parts = []
-  if (row?.removeExistingHeader) parts.push('页眉删除')
-  else if (row?.existingHeaderEdited) parts.push('页眉已编辑')
-  else if (row?.existingHeaderArtifact) parts.push('页眉可编辑')
-  else if (row?.existingHeaderText && row?.convertPlainHeader) parts.push('页眉转换')
-  else if (row?.existingHeaderText) parts.push('页眉可转换')
-  else parts.push('页眉新增')
-  if (row?.removeExistingFooter) parts.push('页脚删除')
-  else if (row?.existingFooterEdited) parts.push('页脚已编辑')
-  else if (row?.existingFooterArtifact) parts.push('页脚可编辑')
-  else if (row?.existingFooterText && row?.convertPlainFooter) parts.push('页脚转换')
-  else if (row?.existingFooterText) parts.push('页脚可转换')
-  else parts.push('页脚新增')
-  if (row?.removeExistingPageNumber) parts.push('页码删除')
-  else if (row?.existingPageNumberEdited) parts.push('页码已编辑')
-  else if (row?.existingPageNumberText && row?.convertPlainPageNumber) parts.push('页码转换')
-  else if (row?.existingPageNumberText) parts.push('页码可转换')
-  return parts.join(' / ')
-}
-
 function sourceRangeText(row) {
   if (!row.sourcePageStart || !row.sourcePageEnd) return '-'
   return `${row.sourcePageStart}-${row.sourcePageEnd}`
+}
+
+function rowPageNumberPreview(row) {
+  if (!insertHeaderFooterEnabled.value || !footerEnabled.value) return ''
+  const page = pageNumberSequence.value === 'per-file' ? 1 : Number(row.pageStart || 1)
+  const total = pageNumberSequence.value === 'per-file' ? Number(row.pages || 1) : totalOverlayPages.value
+  return renderPageNumberTemplate(row.footer || footerText.value, page, total, pageNumberStyle.value)
 }
 
 function sortOverlayFiles({ prop, order }) {
@@ -1624,16 +1715,11 @@ function sortOverlayFiles({ prop, order }) {
 }
 
 function overlaySortValue(row, prop, index) {
-  if (prop === 'existingHeader') return displayExistingHeader(row)
-  if (prop === 'existingFooter') return displayExistingFooter(row)
-  if (prop === 'existingPageNumber') return displayExistingPageNumber(row)
   if (prop === 'header') return displayRowHeader(row, index)
   if (prop === 'footer') return displayRowFooter(row, index)
   if (prop === 'pages') return Number(row?.pages || 0)
   if (prop === 'pageRange') return Number(row?.pageStart || 0)
-  if (prop === 'existingHandling') return headerFooterHandlingText(row)
   if (prop === 'sourceRange') return Number(row?.sourcePageStart || 0)
-  if (prop === 'status') return row?.statusText || ''
   return row?.[prop] ?? ''
 }
 
@@ -1646,6 +1732,31 @@ function moveOverlayFile(index, direction) {
   overlayFiles.value = items
   selectedOverlayIndex.value = target
   refreshPreview()
+}
+
+function reorderOverlayFiles(from, to) {
+  if (from === to || from < 0 || to < 0 || from >= overlayFiles.value.length || to >= overlayFiles.value.length) return
+  const selectedPath = selectedOverlayFile.value?.path
+  const items = [...overlayFiles.value]
+  const [item] = items.splice(from, 1)
+  items.splice(to, 0, item)
+  overlayFiles.value = items
+  selectedOverlayIndex.value = selectedPath
+    ? Math.max(
+        0,
+        items.findIndex((file) => file.path === selectedPath),
+      )
+    : to
+  truePreview.value = null
+  refreshPreview()
+}
+
+function reorderMergedImportItems(from, to) {
+  const items = mergedImportPlan.value?.items
+  if (!items || from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) return
+  const [item] = items.splice(from, 1)
+  items.splice(to, 0, item)
+  selectedMergedImportIndex.value = to
 }
 
 function removeOverlayFile(index) {
@@ -1826,11 +1937,19 @@ h3 {
 }
 
 .summary-pill {
+  appearance: none;
   min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
   background: var(--docsy-surface-elevated);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.summary-pill:hover {
+  border-color: var(--docsy-primary);
 }
 
 .summary-pill span {
@@ -1980,6 +2099,24 @@ h3 {
 .file-link:hover {
   color: var(--docsy-primary-hover);
   text-decoration: underline;
+}
+
+.table-drag-handle {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--docsy-text-muted);
+  cursor: grab;
+  touch-action: none;
+  place-items: center;
+}
+
+.table-drag-handle:active {
+  cursor: grabbing;
+  color: var(--docsy-primary);
 }
 
 .dialog-rule-grid {

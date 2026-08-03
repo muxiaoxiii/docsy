@@ -122,6 +122,7 @@
               <el-option label="Z 字" value="z" />
               <el-option label="N 字" value="n" />
               <el-option label="倒 N 字" value="reverse_n" />
+              <el-option label="自定义顺序" value="custom" />
             </el-select>
           </el-form-item>
 
@@ -238,11 +239,12 @@
             <div class="section-head">
               <h4>图片预览</h4>
             </div>
-            <ImagePreviewGrid
+            <ReorderableImageGrid
               :items="orderedImages"
               :name-resolver="imageItemName"
               :meta-resolver="imageItemMeta"
               empty-description="暂无图片"
+              @reorder="reorderLayoutImages"
             />
           </div>
         </template>
@@ -257,7 +259,8 @@ import { computed, ref, reactive, watch, onBeforeUnmount } from 'vue'
 import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage } from 'element-plus'
-import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
+import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
+import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { fileName as baseFileName } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
@@ -404,6 +407,7 @@ async function run() {
     args: {
       folder: folder.value,
       folders: folders.value,
+      image_paths: settings.order_mode === 'custom' ? orderedImages.value.map((image) => image.path) : undefined,
       ...settings,
       orientation: resolvedOrientation.value,
     },
@@ -420,6 +424,16 @@ async function run() {
     ElMessage.error(result.error || '生成失败')
   }
   generating.value = false
+}
+
+function reorderLayoutImages({ from, to }) {
+  if (!analysis.value) return
+  analysis.value = {
+    ...analysis.value,
+    images: moveItem(orderedImages.value, from, to),
+  }
+  settings.order_mode = 'custom'
+  generatedResult.value = null
 }
 
 async function openGeneratedOutput() {

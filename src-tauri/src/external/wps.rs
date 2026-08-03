@@ -1,12 +1,14 @@
 use super::{ExternalTool, ToolStatus};
 use anyhow::Result;
 use std::path::PathBuf;
+#[cfg(windows)]
+use std::time::Duration;
 
 pub struct WpsTool;
 
 impl ExternalTool for WpsTool {
     fn check(&self) -> ToolStatus {
-        match self.binary_path() {
+        match wps_installation() {
             Ok(path) => ToolStatus {
                 available: true,
                 path: Some(path.display().to_string()),
@@ -31,59 +33,67 @@ impl ExternalTool for WpsTool {
     }
 
     fn binary_path(&self) -> Result<PathBuf> {
-        #[cfg(windows)]
-        {
-            // Try to find the actual wps.exe executable via registry
-            if let Ok(path) = find_wps_exe_from_registry() {
-                return Ok(path);
-            }
-            // Fallback: try 'where wps' command
-            let mut cmd = super::hidden_command("where");
-            cmd.arg("wps");
-            if let Ok(output) =
-                super::command_output_with_timeout(&mut cmd, std::time::Duration::from_secs(2))
-            {
-                if output.status.success() {
-                    let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if let Some(first_line) = path_str.lines().next() {
-                        let path = PathBuf::from(first_line.trim());
-                        if path.exists() {
-                            return Ok(path);
-                        }
+        wps_installation()
+    }
+}
+
+fn wps_installation() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        if let Ok(path) = find_wps_exe_from_registry() {
+            return Ok(path);
+        }
+        if let Some(path) = find_wps_in_known_locations() {
+            return Ok(path);
+        }
+        let mut cmd = super::hidden_command("where");
+        cmd.arg("wps");
+        if let Ok(output) = super::command_output_with_timeout(&mut cmd, Duration::from_secs(2)) {
+            if output.status.success() {
+                let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if let Some(first_line) = path_str.lines().next() {
+                    let path = PathBuf::from(first_line.trim());
+                    if path.exists() {
+                        return Ok(path);
                     }
                 }
             }
         }
-
-        anyhow::bail!("WPS Writer 未找到")
+        if windows_com_registered("KWPS.Application") || windows_com_registered("kwps.Application")
+        {
+            return Ok(PathBuf::from("KWPS.Application (COM)"));
+        }
     }
+
+    anyhow::bail!("WPS Writer 未找到")
 }
 
 #[cfg(windows)]
 fn find_wps_exe_from_registry() -> Result<PathBuf> {
-    // Try CLSID/LocalServer32 first (the canonical COM registration location)
-    for clsid in ["KWPS.Application", "kwps.Application"] {
-        let mut command = super::hidden_command("reg");
-        command.args(["query", &format!(r"HKCR\{}\CLSID", clsid)]);
-        if let Ok(output) =
-            super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))
-        {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                // Extract CLSID value
-                for line in text.lines() {
-                    if let Some(pos) = line.find("REG_SZ") {
-                        let clsid_val = line[pos + 6..].trim().to_string();
-                        // Now query LocalServer32 for that CLSID
-                        let mut cmd2 = super::hidden_command("reg");
-                        cmd2.args(["query", &format!(r"HKCR\CLSID\{}\LocalServer32", clsid_val)]);
-                        if let Ok(out2) = super::command_output_with_timeout(
-                            &mut cmd2,
-                            std::time::Duration::from_secs(5),
-                        ) {
-                            if out2.status.success() {
-                                let text2 = String::from_utf8_lossy(&out2.stdout);
-                                if let Some(path) = extract_reg_path(&text2) {
+    for prog_id in ["KWPS.Application", "kwps.Application"] {
+        for view in ["/reg:64", "/reg:32"] {
+            let mut command = super::hidden_command("reg");
+            command.args(["query", &format!(r"HKCR\{}\CLSID", prog_id), "/ve", view]);
+            if let Ok(output) =
+                super::command_output_with_timeout(&mut command, Duration::from_secs(5))
+            {
+                if output.status.success() {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    if let Some(clsid) = registry_value(&text) {
+                        let mut server = super::hidden_command("reg");
+                        server.args([
+                            "query",
+                            &format!(r"HKCR\CLSID\{}\LocalServer32", clsid),
+                            "/ve",
+                            view,
+                        ]);
+                        if let Ok(server_output) =
+                            super::command_output_with_timeout(&mut server, Duration::from_secs(5))
+                        {
+                            if server_output.status.success() {
+                                if let Some(path) = extract_reg_path(&String::from_utf8_lossy(
+                                    &server_output.stdout,
+                                )) {
                                     return Ok(path);
                                 }
                             }
@@ -94,16 +104,20 @@ fn find_wps_exe_from_registry() -> Result<PathBuf> {
         }
     }
 
-    // Fallback: shell\open\command
-    let mut command = super::hidden_command("reg");
-    command.args(["query", r"HKCR\KWPS.Application\shell\open\command"]);
-    if let Ok(output) =
-        super::command_output_with_timeout(&mut command, std::time::Duration::from_secs(5))
-    {
-        if output.status.success() {
-            let text = String::from_utf8_lossy(&output.stdout);
-            if let Some(path) = extract_reg_path(&text) {
-                return Ok(path);
+    for view in ["/reg:64", "/reg:32"] {
+        let mut command = super::hidden_command("reg");
+        command.args([
+            "query",
+            r"HKCR\KWPS.Application\shell\open\command",
+            "/ve",
+            view,
+        ]);
+        if let Ok(output) = super::command_output_with_timeout(&mut command, Duration::from_secs(5))
+        {
+            if output.status.success() {
+                if let Some(path) = extract_reg_path(&String::from_utf8_lossy(&output.stdout)) {
+                    return Ok(path);
+                }
             }
         }
     }
@@ -115,35 +129,97 @@ fn find_wps_exe_from_registry() -> Result<PathBuf> {
 /// Handles both "C:\...\wps.exe" "%1" (quoted) and C:\...\wps.exe (unquoted).
 #[cfg(windows)]
 fn extract_reg_path(text: &str) -> Option<PathBuf> {
+    let value = registry_value(text)?;
+    let path = executable_path_from_command(&value)?;
+    path.is_file().then_some(path)
+}
+
+#[cfg(any(windows, test))]
+fn registry_value(text: &str) -> Option<String> {
     for line in text.lines() {
-        if !line.contains("REG_") {
-            continue;
-        }
-        let value_part = if let Some(pos) = line.rfind("REG_SZ") {
-            line[pos + 6..].trim()
-        } else if let Some(pos) = line.rfind("REG_EXPAND_SZ") {
-            line[pos + 13..].trim()
-        } else {
-            continue;
-        };
-        // Try quoted path first: "C:\...\wps.exe" "%1"
-        if let Some(start) = value_part.find('"') {
-            let rest = &value_part[start + 1..];
-            if let Some(end) = rest.find('"') {
-                let path = PathBuf::from(&rest[..end]);
-                if path.exists() {
-                    return Some(path);
+        for value_type in ["REG_EXPAND_SZ", "REG_SZ"] {
+            if let Some(position) = line.find(value_type) {
+                let value = line[position + value_type.len()..].trim();
+                if !value.is_empty() {
+                    return Some(value.to_string());
                 }
-            }
-        }
-        // Try unquoted path: take everything before first space that looks like an arg
-        let first_token = value_part.split_whitespace().next().unwrap_or("");
-        if !first_token.is_empty() {
-            let path = PathBuf::from(first_token);
-            if path.exists() {
-                return Some(path);
             }
         }
     }
     None
+}
+
+#[cfg(any(windows, test))]
+fn executable_path_from_command(value: &str) -> Option<PathBuf> {
+    let value = value.trim();
+    if let Some(rest) = value.strip_prefix('"') {
+        let end = rest.find('"')?;
+        return Some(PathBuf::from(&rest[..end]));
+    }
+    let lower = value.to_ascii_lowercase();
+    let end = lower.find(".exe").map(|position| position + 4)?;
+    Some(PathBuf::from(value[..end].trim()))
+}
+
+#[cfg(windows)]
+fn windows_com_registered(prog_id: &str) -> bool {
+    let escaped = prog_id.replace('\'', "''");
+    let script = format!(
+        "$type=[type]::GetTypeFromProgID('{escaped}',$false); if ($null -eq $type) {{ exit 1 }}"
+    );
+    let mut command = super::hidden_command("powershell");
+    command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+    super::command_output_with_timeout(&mut command, Duration::from_secs(5))
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn find_wps_in_known_locations() -> Option<PathBuf> {
+    let mut roots = Vec::new();
+    for name in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+        if let Some(value) = std::env::var_os(name) {
+            roots.push(PathBuf::from(value));
+        }
+    }
+    let fixed = roots
+        .into_iter()
+        .flat_map(|root| [root.join("Kingsoft/WPS Office/office6/wps.exe")]);
+    fixed.into_iter().find(|path| path.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{executable_path_from_command, registry_value};
+
+    #[test]
+    fn parses_quoted_wps_local_server_command() {
+        let value = r#""C:\Program Files\Kingsoft\WPS Office\office6\wps.exe" /Automation"#;
+        assert_eq!(
+            executable_path_from_command(value)
+                .unwrap()
+                .to_string_lossy(),
+            r"C:\Program Files\Kingsoft\WPS Office\office6\wps.exe"
+        );
+    }
+
+    #[test]
+    fn parses_unquoted_wps_command_with_spaces() {
+        let value = r"C:\Program Files\Kingsoft\WPS Office\office6\wps.exe /Automation";
+        assert_eq!(
+            executable_path_from_command(value)
+                .unwrap()
+                .to_string_lossy(),
+            r"C:\Program Files\Kingsoft\WPS Office\office6\wps.exe"
+        );
+    }
+
+    #[test]
+    fn extracts_registry_value() {
+        let output = r#"    (Default)    REG_SZ    "C:\WPS\wps.exe" /Automation"#;
+        assert_eq!(
+            registry_value(output).as_deref(),
+            Some(r#""C:\WPS\wps.exe" /Automation"#)
+        );
+    }
 }

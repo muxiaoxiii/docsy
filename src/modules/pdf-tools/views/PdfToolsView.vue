@@ -154,6 +154,22 @@
                 highlight-current-row
                 @row-click="previewSplitRange"
               >
+                <el-table-column width="42" align="center">
+                  <template #default="{ $index }">
+                    <button
+                      type="button"
+                      class="range-drag-handle"
+                      :data-split-reorder-index="$index"
+                      title="拖动调整页段顺序"
+                      @pointerdown.stop="splitReorder.start($index, $event)"
+                      @pointermove.stop="splitReorder.move"
+                      @pointerup.stop="splitReorder.finish"
+                      @pointercancel.stop="splitReorder.reset"
+                    >
+                      <el-icon><Rank /></el-icon>
+                    </button>
+                  </template>
+                </el-table-column>
                 <el-table-column type="index" label="#" width="44" />
                 <el-table-column label="文件名" min-width="170">
                   <template #default="{ row }">
@@ -252,6 +268,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
@@ -260,6 +277,7 @@ import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
 import { getPdfPageCount, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { fileName, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
+import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import {
   buildRangeAfter,
   insertRangeAfter,
@@ -272,6 +290,11 @@ import {
 
 const activeTab = ref('unlock')
 const pdfDragging = ref(false)
+const splitReorder = usePointerReorder({
+  itemCount: () => splitRanges.value.length,
+  itemAttribute: 'data-split-reorder-index',
+  onReorder: ({ from, to }) => reorderSplitRanges(from, to),
+})
 
 const unlockFiles = ref([])
 const unlocking = ref(false)
@@ -632,6 +655,13 @@ function removeSplitRange(index) {
   selectedSplitRangeIndex.value = removeRangeAt(splitRanges.value, index, selectedSplitRangeIndex.value)
 }
 
+function reorderSplitRanges(from, to) {
+  if (from === to || from < 0 || to < 0 || from >= splitRanges.value.length || to >= splitRanges.value.length) return
+  const [item] = splitRanges.value.splice(from, 1)
+  splitRanges.value.splice(to, 0, item)
+  selectedSplitRangeIndex.value = to
+}
+
 async function doSplitMerged() {
   if (!splitFile.value || !splitOutputDir.value || !splitRanges.value.length) return
   const warnings = splitRangeWarnings(splitRanges.value, splitTotalPages.value)
@@ -750,6 +780,24 @@ h3 {
 
 .range-table {
   margin-top: 16px;
+}
+
+.range-drag-handle {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--docsy-text-muted);
+  cursor: grab;
+  touch-action: none;
+  place-items: center;
+}
+
+.range-drag-handle:active {
+  color: var(--docsy-primary);
+  cursor: grabbing;
 }
 
 .toolbar-row {

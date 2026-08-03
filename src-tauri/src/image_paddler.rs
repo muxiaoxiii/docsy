@@ -2,7 +2,7 @@ use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::sort_utils::natural_cmp;
@@ -68,6 +68,8 @@ pub struct RunArgs {
     pub folder: String,
     #[serde(default)]
     pub folders: Option<Vec<String>>,
+    #[serde(default)]
+    pub image_paths: Option<Vec<String>>,
     pub output_format: String,
     pub layout: String,
     pub orientation: String,
@@ -388,6 +390,20 @@ pub fn analyze(args: &AnalyzeArgs) -> Result<AnalyzeResult> {
 }
 
 pub fn run(args: &RunArgs) -> Result<RunResult> {
+    if let Some(paths) = explicit_image_paths(args) {
+        if args.output_mode.as_deref() == Some("per_folder") {
+            return run_explicit_images_per_folder(args, paths);
+        }
+        let first = paths
+            .first()
+            .cloned()
+            .unwrap_or_else(|| args.folder.clone());
+        let images = paths
+            .iter()
+            .filter_map(|path| image_info_from_path(Path::new(path)).ok().flatten())
+            .collect::<Vec<_>>();
+        return run_images(args, images, &image_output_dir(&first));
+    }
     let sources = folders_from_args(&args.folder, &args.folders);
     if args.output_mode.as_deref() == Some("per_folder") && sources.len() > 1 {
         let mut outputs = Vec::new();
@@ -424,6 +440,57 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
         .cloned()
         .unwrap_or_else(|| args.folder.clone());
     run_images(args, images, &image_output_dir(&first_source))
+}
+
+fn explicit_image_paths(args: &RunArgs) -> Option<Vec<String>> {
+    let paths = args
+        .image_paths
+        .as_ref()?
+        .iter()
+        .filter(|path| !path.trim().is_empty() && Path::new(path).is_file())
+        .cloned()
+        .collect::<Vec<_>>();
+    (!paths.is_empty()).then_some(paths)
+}
+
+fn run_explicit_images_per_folder(args: &RunArgs, paths: Vec<String>) -> Result<RunResult> {
+    let mut groups: Vec<(PathBuf, Vec<ImageInfo>)> = Vec::new();
+    for path in paths {
+        let source = Path::new(&path);
+        let parent = source
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let Some(info) = image_info_from_path(source)? else {
+            continue;
+        };
+        if let Some((_, images)) = groups.iter_mut().find(|(folder, _)| *folder == parent) {
+            images.push(info);
+        } else {
+            groups.push((parent, vec![info]));
+        }
+    }
+    let mut outputs = Vec::new();
+    let mut pages = 0_u32;
+    let mut image_count = 0_u32;
+    let mut warnings = Vec::new();
+    for (folder, images) in groups {
+        let result = run_images(args, images, &folder.join("_docsy_image_out"))?;
+        pages = pages.saturating_add(result.pages);
+        image_count = image_count.saturating_add(result.images);
+        warnings.extend(result.warnings);
+        outputs.push(result.output_path);
+    }
+    let Some(output_path) = outputs.first().cloned() else {
+        anyhow::bail!("显式图片列表中没有可排版的图片");
+    };
+    Ok(RunResult {
+        output_path,
+        output_paths: outputs,
+        pages,
+        images: image_count,
+        warnings,
+    })
 }
 
 fn scan_image_source(source: &str) -> Result<Vec<ImageInfo>> {
@@ -1364,6 +1431,49 @@ mod tests {
     }
 
     #[test]
+    fn explicit_image_paths_preserve_user_order() {
+        let root = std::env::temp_dir().join(format!(
+            "docsy_image_order_test_{}_{}",
+            std::process::id(),
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let first = root.join("img_10.png");
+        let second = root.join("img_2.png");
+        std::fs::write(&first, b"x").unwrap();
+        std::fs::write(&second, b"x").unwrap();
+        let args = RunArgs {
+            folder: root.display().to_string(),
+            folders: None,
+            image_paths: Some(vec![
+                first.display().to_string(),
+                second.display().to_string(),
+            ]),
+            output_format: "pdf".into(),
+            layout: "1".into(),
+            orientation: "portrait".into(),
+            dpi: 300,
+            scale_mode: "fit".into(),
+            custom_rows: None,
+            custom_cols: None,
+            margin_mm: None,
+            show_filename: None,
+            filename_without_ext: None,
+            filename_remove_text: None,
+            filename_rules: None,
+            order_mode: None,
+            border_enabled: None,
+            border_color: None,
+            output_mode: None,
+        };
+        assert_eq!(
+            explicit_image_paths(&args).unwrap(),
+            vec![first.display().to_string(), second.display().to_string()]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn generated_docx_has_valid_package_parts_and_unique_name() {
         let root = std::env::temp_dir().join(format!(
             "docsy_image_paddler_test_{}_{}",
@@ -1380,6 +1490,7 @@ mod tests {
         let args = RunArgs {
             folder: root.display().to_string(),
             folders: None,
+            image_paths: None,
             output_format: "docx".into(),
             layout: "1".into(),
             orientation: "portrait".into(),

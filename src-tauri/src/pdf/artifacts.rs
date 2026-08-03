@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary, Document, Object, ObjectId, StringFormat};
+use lopdf::{decode_text_string, Dictionary, Document, Object, ObjectId, StringFormat};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -41,6 +41,38 @@ pub(crate) struct ArtifactRemovalStats {
     pub footer: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HeaderFooterArtifactInspection {
+    pub header_count: usize,
+    pub footer_count: usize,
+    pub occurrences: Vec<HeaderFooterArtifactOccurrence>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HeaderFooterArtifactOccurrence {
+    pub id: String,
+    pub page: u32,
+    pub region: &'static str,
+    pub text: Option<String>,
+    pub docsy_kind: Option<String>,
+    pub docsy_id: Option<String>,
+}
+
+impl HeaderFooterArtifactInspection {
+    fn add_region(&mut self, region: ArtifactRegion) {
+        match region {
+            ArtifactRegion::Header => self.header_count += 1,
+            ArtifactRegion::Footer => self.footer_count += 1,
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.header_count += other.header_count;
+        self.footer_count += other.footer_count;
+        self.occurrences.extend(other.occurrences);
+    }
+}
+
 impl ArtifactRemovalStats {
     fn total(self) -> usize {
         self.header + self.footer
@@ -58,6 +90,261 @@ impl ArtifactRemovalStats {
 enum ArtifactRegion {
     Header,
     Footer,
+}
+
+pub(crate) fn inspect_meaningful_header_footer_artifacts(
+    input_path: &Path,
+    max_pages: u32,
+) -> Result<HeaderFooterArtifactInspection> {
+    let doc = Document::load(input_path).context("读取 PDF 标准页眉页脚结构失败")?;
+    let mut result = HeaderFooterArtifactInspection::default();
+    for (page_index, page_id) in doc
+        .get_pages()
+        .into_values()
+        .take(max_pages.max(1) as usize)
+        .enumerate()
+    {
+        let Ok(content) = doc.get_and_decode_page_content(page_id) else {
+            continue;
+        };
+        let properties = page_properties(&doc, page_id);
+        result.merge(inspect_artifact_operations_detailed(
+            &content.operations,
+            &properties,
+            page_index as u32 + 1,
+            &format!("page:{}", page_id.0),
+        ));
+        let xobjects = page_xobjects(&doc, page_id);
+        inspect_referenced_form_artifacts(
+            &doc,
+            &content.operations,
+            &xobjects,
+            0,
+            &mut BTreeSet::new(),
+            &mut result,
+            page_index as u32 + 1,
+            &format!("page:{}", page_id.0),
+        );
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+fn inspect_artifact_operations(
+    operations: &[Operation],
+    properties: &Dictionary,
+) -> HeaderFooterArtifactInspection {
+    inspect_artifact_operations_detailed(operations, properties, 0, "content")
+}
+
+fn inspect_artifact_operations_detailed(
+    operations: &[Operation],
+    properties: &Dictionary,
+    page: u32,
+    path: &str,
+) -> HeaderFooterArtifactInspection {
+    let mut result = HeaderFooterArtifactInspection::default();
+    let targets = HeaderFooterArtifactTargets {
+        header: true,
+        footer: true,
+    };
+    let mut index = 0_usize;
+    while index < operations.len() {
+        if let Some(region) = target_artifact_region(&operations[index], targets, properties) {
+            if let Some(end) = matching_marked_content_end(operations, index) {
+                if artifact_range_has_meaningful_text(&operations[index + 1..end]) {
+                    result.add_region(region);
+                    let property = artifact_property_dictionary(&operations[index], properties);
+                    let text = property
+                        .and_then(|dict| dict.get(b"ActualText").ok())
+                        .and_then(decode_pdf_string)
+                        .or_else(|| artifact_range_text(&operations[index + 1..end]));
+                    let docsy_kind = property
+                        .and_then(|dict| dict.get(b"DocsyKind").ok())
+                        .and_then(name_bytes)
+                        .and_then(|value| String::from_utf8(value.to_vec()).ok());
+                    let docsy_id = property
+                        .and_then(|dict| dict.get(b"DocsyId").ok())
+                        .and_then(decode_pdf_string);
+                    result.occurrences.push(HeaderFooterArtifactOccurrence {
+                        id: docsy_id
+                            .clone()
+                            .unwrap_or_else(|| format!("{path}:artifact:{index}")),
+                        page,
+                        region: match region {
+                            ArtifactRegion::Header => "header",
+                            ArtifactRegion::Footer => "footer",
+                        },
+                        text,
+                        docsy_kind,
+                        docsy_id,
+                    });
+                }
+                index = end + 1;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    result
+}
+
+fn artifact_property_dictionary<'a>(
+    operation: &'a Operation,
+    properties: &'a Dictionary,
+) -> Option<&'a Dictionary> {
+    let property = operation.operands.get(1)?;
+    match property {
+        Object::Dictionary(dict) => Some(dict),
+        Object::Name(name) => properties.get(name).ok()?.as_dict().ok(),
+        _ => None,
+    }
+}
+
+pub(crate) fn decode_pdf_string(object: &Object) -> Option<String> {
+    let Object::String(bytes, _) = object else {
+        return None;
+    };
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        let units = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        return String::from_utf16(&units).ok();
+    }
+    String::from_utf8(bytes.clone())
+        .ok()
+        .or_else(|| decode_text_string(object).ok())
+}
+
+fn artifact_range_text(operations: &[Operation]) -> Option<String> {
+    let mut text = String::new();
+    for operation in operations {
+        match operation.operator.as_str() {
+            "Tj" | "'" => {
+                if let Some(value) = operation.operands.first().and_then(decode_pdf_string) {
+                    text.push_str(&value);
+                }
+            }
+            "\"" => {
+                if let Some(value) = operation.operands.get(2).and_then(decode_pdf_string) {
+                    text.push_str(&value);
+                }
+            }
+            "TJ" => {
+                if let Some(items) = operation
+                    .operands
+                    .first()
+                    .and_then(|value| value.as_array().ok())
+                {
+                    for item in items {
+                        if let Some(value) = decode_pdf_string(item) {
+                            text.push_str(&value);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let text = text.trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+fn artifact_range_has_meaningful_text(operations: &[Operation]) -> bool {
+    operations
+        .iter()
+        .any(|operation| match operation.operator.as_str() {
+            "Tj" | "'" => operation
+                .operands
+                .first()
+                .is_some_and(text_object_has_meaningful_bytes),
+            "\"" => operation
+                .operands
+                .get(2)
+                .is_some_and(text_object_has_meaningful_bytes),
+            "TJ" => operation
+                .operands
+                .first()
+                .and_then(|object| object.as_array().ok())
+                .is_some_and(|items| items.iter().any(text_object_has_meaningful_bytes)),
+            _ => false,
+        })
+}
+
+fn text_object_has_meaningful_bytes(object: &Object) -> bool {
+    let Object::String(bytes, _) = object else {
+        return false;
+    };
+    bytes
+        .iter()
+        .any(|byte| !byte.is_ascii_whitespace() && *byte != 0)
+}
+
+fn inspect_referenced_form_artifacts(
+    doc: &Document,
+    operations: &[Operation],
+    xobjects: &Dictionary,
+    depth: usize,
+    visited: &mut BTreeSet<ObjectId>,
+    result: &mut HeaderFooterArtifactInspection,
+    page: u32,
+    path: &str,
+) {
+    if depth >= 8 {
+        return;
+    }
+    for operation in operations
+        .iter()
+        .filter(|operation| operation.operator == "Do")
+    {
+        let Some(name) = operation.operands.first().and_then(name_bytes) else {
+            continue;
+        };
+        let Some(object_id) = xobjects.get(name).ok().and_then(object_reference) else {
+            continue;
+        };
+        if !visited.insert(object_id) {
+            continue;
+        }
+        let Some((stream_content, stream_dict)) = doc
+            .get_object(object_id)
+            .ok()
+            .and_then(|object| object.as_stream().ok())
+            .filter(|stream| stream.dict.get(b"Subtype").ok().and_then(name_bytes) == Some(b"Form"))
+            .and_then(|stream| {
+                stream
+                    .get_plain_content()
+                    .ok()
+                    .map(|content| (content, stream.dict.clone()))
+            })
+        else {
+            continue;
+        };
+        let Ok(content) = Content::decode(&stream_content) else {
+            continue;
+        };
+        let resources = resource_dictionary(doc, stream_dict.get(b"Resources").ok());
+        let properties = properties_from_resources(doc, resources.as_ref());
+        let nested_path = format!("{path}/form:{}", object_id.0);
+        result.merge(inspect_artifact_operations_detailed(
+            &content.operations,
+            &properties,
+            page,
+            &nested_path,
+        ));
+        let nested_xobjects = xobjects_from_resources(doc, resources.as_ref());
+        inspect_referenced_form_artifacts(
+            doc,
+            &content.operations,
+            &nested_xobjects,
+            depth + 1,
+            visited,
+            result,
+            page,
+            &nested_path,
+        );
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1101,5 +1388,42 @@ mod tests {
         });
         doc.trailer.set("Root", catalog_id);
         doc.save(path).unwrap();
+    }
+
+    #[test]
+    fn artifact_inspection_ignores_blank_header_and_counts_visible_footer() {
+        let operations = vec![
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Type" => "Pagination",
+                        "Subtype" => "Header",
+                    }),
+                ],
+            ),
+            Operation::new("Tj", vec![Object::string_literal(" ")]),
+            Operation::new("EMC", vec![]),
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Type" => "Pagination",
+                        "Subtype" => "Footer",
+                    }),
+                ],
+            ),
+            Operation::new(
+                "TJ",
+                vec![Object::Array(vec![Object::string_literal("1 / 14")])],
+            ),
+            Operation::new("EMC", vec![]),
+        ];
+
+        let result = inspect_artifact_operations(&operations, &Dictionary::new());
+        assert_eq!(result.header_count, 0);
+        assert_eq!(result.footer_count, 1);
     }
 }

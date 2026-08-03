@@ -35,7 +35,7 @@ fn run_process_with_interactive_timeout(
         .store(child.id() as u64, Ordering::SeqCst);
 
     let timeout = initial_timeout;
-    let start = std::time::Instant::now();
+    let mut wait_started = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_secs(1);
 
     loop {
@@ -68,15 +68,14 @@ fn run_process_with_interactive_timeout(
         }
 
         // Check timeout
-        if start.elapsed() >= timeout {
+        if wait_started.elapsed() >= timeout {
             // Ask user whether to continue
             let should_continue = conversion_state.wait_for_user_response(app);
             if !should_continue {
                 let _ = child.kill();
                 anyhow::bail!("用户取消了转换");
             }
-            // User chose to continue — reset start time for another round
-            // (loop continues, effectively extending the timeout)
+            wait_started = std::time::Instant::now();
         }
 
         std::thread::sleep(poll_interval);
@@ -420,34 +419,34 @@ fn convert_word_to_pdf(
     ));
     fs::create_dir_all(&conversion_dir).context("创建 Word 转换工作目录失败")?;
 
-    if cfg!(windows) || cfg!(target_os = "macos") {
-        match crate::external::WordTool.binary_path() {
-            Ok(_) => {
-                match convert_doc_to_pdf_with_word(doc_path, &conversion_dir, conversion_state) {
-                    Ok(path) => return Ok(path),
-                    Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
-                }
-            }
-            Err(err) => attempts.push(format!("未检测到 Microsoft Word: {err}")),
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        match convert_doc_to_pdf_with_word(doc_path, &conversion_dir, conversion_state) {
+            Ok(path) => return Ok(path),
+            Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
         }
-    } else {
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
         attempts.push("当前平台不支持 Microsoft Word 自动转换".to_string());
     }
 
-    if cfg!(windows) {
-        match crate::external::WpsTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir, conversion_state)
-            {
-                Ok(path) => return Ok(path),
-                Err(err) => attempts.push(format!("WPS Writer 转换失败: {err}")),
-            },
-            Err(err) => attempts.push(format!("未检测到 WPS Writer: {err}")),
+    #[cfg(windows)]
+    {
+        match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir, conversion_state) {
+            Ok(path) => return Ok(path),
+            Err(err) => attempts.push(format!("WPS Writer 转换失败: {err}")),
         }
     }
 
     match crate::external::LibreOfficeTool.binary_path() {
-        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, &conversion_dir)
-        {
+        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(
+            &lo_bin,
+            doc_path,
+            &conversion_dir,
+            conversion_state,
+        ) {
             Ok(path) => Ok(path),
             Err(err) => {
                 attempts.push(format!("LibreOffice 转换失败: {err}"));
@@ -517,7 +516,10 @@ fn convert_doc_to_pdf_with_word(
     .context("Microsoft Word 转换失败")?;
 
     if !output_result.status.success() || !output.exists() {
-        anyhow::bail!("Microsoft Word 转 PDF 失败: {doc_path}");
+        anyhow::bail!(
+            "Microsoft Word 转 PDF 失败: {doc_path}（{}）",
+            crate::external::command_failure_detail(&output_result)
+        );
     }
     Ok(output.display().to_string())
 }
@@ -577,25 +579,19 @@ fn convert_doc_to_pdf_with_wps(
     .context("WPS Writer 转换失败")?;
 
     if !output_result.status.success() || !output.exists() {
-        anyhow::bail!("WPS Writer 转 PDF 失败: {doc_path}");
+        anyhow::bail!(
+            "WPS Writer 转 PDF 失败: {doc_path}（{}）",
+            crate::external::command_failure_detail(&output_result)
+        );
     }
     Ok(output.display().to_string())
-}
-
-#[cfg(not(windows))]
-fn convert_doc_to_pdf_with_wps(
-    _doc_path: &str,
-    _output_dir: &Path,
-    _conversion_state: &Arc<ConversionState>,
-) -> Result<String> {
-    anyhow::bail!("当前平台不支持 WPS Writer 自动转换")
 }
 
 #[cfg(target_os = "macos")]
 fn convert_doc_to_pdf_with_word(
     doc_path: &str,
     output_dir: &Path,
-    _conversion_state: &Arc<ConversionState>,
+    conversion_state: &Arc<ConversionState>,
 ) -> Result<String> {
     let input = std::fs::canonicalize(doc_path)
         .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
@@ -628,18 +624,26 @@ on run argv
 end run
 "#;
 
-    let status = crate::external::hidden_command("osascript")
+    let mut command = crate::external::hidden_command("osascript");
+    command
         .arg("-e")
         .arg(script)
         .arg(input.display().to_string())
-        .arg(output.display().to_string())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .context("启动 Microsoft Word 转换失败")?;
+        .arg(output.display().to_string());
+    let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let result = run_process_with_interactive_timeout(
+        &mut command,
+        std::time::Duration::from_secs(60),
+        conversion_state,
+        app,
+    )
+    .context("启动 Microsoft Word 转换失败")?;
 
-    if !status.success() || !output.exists() {
-        anyhow::bail!("Microsoft Word 转 PDF 失败: {doc_path}");
+    if !result.status.success() || !output.exists() {
+        anyhow::bail!(
+            "Microsoft Word 转 PDF 失败: {doc_path}（{}）",
+            crate::external::command_failure_detail(&result)
+        );
     }
     Ok(output.display().to_string())
 }
@@ -657,20 +661,30 @@ fn convert_doc_to_pdf_with_libreoffice(
     lo_bin: &Path,
     doc_path: &str,
     output_dir: &Path,
+    conversion_state: &Arc<ConversionState>,
 ) -> Result<String> {
-    let status = crate::external::hidden_command(lo_bin)
+    let mut command = crate::external::hidden_command(lo_bin);
+    command
         .arg("--headless")
         .arg("--convert-to")
         .arg("pdf")
         .arg("--outdir")
         .arg(output_dir)
-        .arg(doc_path)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
+        .arg(doc_path);
+    let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let result = run_process_with_interactive_timeout(
+        &mut command,
+        std::time::Duration::from_secs(60),
+        conversion_state,
+        app,
+    )?;
 
-    if !status.success() {
-        anyhow::bail!("Word 文件转换失败: {}", doc_path);
+    if !result.status.success() {
+        anyhow::bail!(
+            "Word 文件转换失败: {}（{}）",
+            doc_path,
+            crate::external::command_failure_detail(&result)
+        );
     }
 
     let stem = Path::new(doc_path)

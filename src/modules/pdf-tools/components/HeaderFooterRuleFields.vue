@@ -1,5 +1,6 @@
 <template>
   <div>
+    <div class="rule-item section-label"><strong>页眉文字</strong></div>
     <div class="rule-item">
       <label>页眉来源</label>
       <el-select v-model="headerModeModel">
@@ -9,124 +10,115 @@
         <el-option label="固定文本" value="custom" />
       </el-select>
     </div>
-    <div class="rule-item" v-if="headerMode === 'custom'">
+    <div v-if="headerMode === 'custom'" class="rule-item">
       <label>页眉文本</label>
-      <el-input v-model="headerTextModel" placeholder="可写固定文字，也可用 [##]、[序号]、[文件名]、[YYYYMMDD]" />
+      <el-input v-model="headerTextModel" placeholder="可用 [##]、[序号]、[文件名]、[YYYYMMDD]" />
     </div>
     <div class="rule-item">
-      <label>页眉前缀</label>
-      <el-input v-model="headerPrefixModel" placeholder="例如 证据[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+      <label>页眉前缀</label><el-input v-model="headerPrefixModel" :disabled="headerMode === 'none'" />
     </div>
     <div class="rule-item">
-      <label>页眉后缀</label>
-      <el-input v-model="headerSuffixModel" placeholder="例如 -[##]、[YYYYMMDD]" :disabled="headerMode === 'none'" />
+      <label>页眉后缀</label><el-input v-model="headerSuffixModel" :disabled="headerMode === 'none'" />
+    </div>
+    <TextPlacementFields
+      prefix="页眉"
+      :disabled="headerMode === 'none'"
+      v-model:align="headerAlignModel"
+      v-model:font-size="headerFontSizeModel"
+      v-model:font-family="headerFontFamilyModel"
+      v-model:margin-mm="headerMarginMmModel"
+      v-model:offset-x-mm="headerOffsetXMmModel"
+      v-model:color="headerColorModel"
+      :offset-limit-mm="offsetLimitMm"
+      margin-label="距顶"
+    />
+
+    <div class="rule-item section-label"><strong>页脚文字</strong></div>
+    <div class="rule-item">
+      <label>插入页脚文字</label>
+      <el-switch v-model="footerTextEnabledModel" active-text="启用" inactive-text="关闭" />
     </div>
     <div class="rule-item">
-      <label>页眉位置</label>
-      <el-select v-model="headerAlignModel" :disabled="headerMode === 'none'">
-        <el-option label="居中" value="center" />
-        <el-option label="左侧" value="left" />
-        <el-option label="右侧" value="right" />
+      <label>页脚文本</label>
+      <el-input v-model="footerTextContentModel" :disabled="!footerTextEnabled" placeholder="固定文字，不用于页码" />
+    </div>
+    <TextPlacementFields
+      prefix="页脚"
+      :disabled="!footerTextEnabled"
+      v-model:align="footerTextAlignModel"
+      v-model:font-size="footerTextFontSizeModel"
+      v-model:font-family="footerTextFontFamilyModel"
+      v-model:margin-mm="footerTextMarginMmModel"
+      v-model:offset-x-mm="footerTextOffsetXMmModel"
+      v-model:color="footerTextColorModel"
+      :offset-limit-mm="offsetLimitMm"
+      margin-label="距底"
+    />
+
+    <div class="rule-item section-label"><strong>页码</strong></div>
+    <div class="rule-item">
+      <label>插入页码</label>
+      <el-switch v-model="pageNumberEnabledModel" active-text="启用" inactive-text="关闭" />
+    </div>
+    <div class="rule-item">
+      <label>连续方式</label>
+      <el-select v-model="pageNumberSequenceModel" :disabled="!pageNumberEnabled">
+        <el-option label="全部文件连续" value="continuous" />
+        <el-option label="每个文件单独编号" value="per-file" />
       </el-select>
     </div>
     <div class="rule-item">
-      <label>页眉字号</label>
-      <el-input-number v-model="headerFontSizeModel" :min="6" :max="24" :step="1" :disabled="headerMode === 'none'" />
-    </div>
-    <div class="rule-item">
-      <label>页眉字体</label>
-      <el-select v-model="headerFontFamilyModel" :disabled="headerMode === 'none'">
-        <el-option label="自动" value="auto" />
-        <el-option label="宋体" value="songti" />
-        <el-option label="黑体" value="heiti" />
-        <el-option label="楷体" value="kaiti" />
-        <el-option label="仿宋" value="fangsong" />
-        <el-option label="Helvetica" value="helvetica" />
-        <el-option label="Times" value="times" />
-        <el-option label="Courier" value="courier" />
+      <label>数字样式</label>
+      <el-select v-model="pageNumberStyleModel" :disabled="!pageNumberEnabled">
+        <el-option
+          v-for="style in PAGE_NUMBER_STYLES"
+          :key="style.value"
+          :value="style.value"
+          :label="`${style.label} · ${style.sample}`"
+        />
       </el-select>
     </div>
     <div class="rule-item">
-      <label>页眉距顶 mm</label>
-      <el-input-number v-model="headerMarginMmModel" :min="3" :max="60" :step="1" :disabled="headerMode === 'none'" />
-    </div>
-    <div class="rule-item">
-      <label>页眉水平偏移 mm</label>
-      <el-input-number
-        v-model="headerOffsetXMmModel"
-        :min="-offsetLimitMm"
-        :max="offsetLimitMm"
-        :step="1"
-        :disabled="headerMode === 'none'"
+      <label>页码格式</label>
+      <el-input
+        v-model="pageNumberTemplateModel"
+        :disabled="!pageNumberEnabled"
+        placeholder="例如 {page}/{total}、-{page}-"
       />
     </div>
     <div class="rule-item">
-      <label>页眉颜色</label>
-      <el-color-picker v-model="headerColorModel" :disabled="headerMode === 'none'" />
-    </div>
-    <div class="rule-item">
-      <label>页脚页码</label>
-      <el-switch v-model="footerEnabledModel" active-text="启用" inactive-text="关闭" />
-    </div>
-    <div class="rule-item" v-if="showFooterContinuous">
-      <label>页码方式</label>
-      <el-select v-model="footerContinuousModel" :disabled="!footerEnabled">
-        <el-option :value="true" label="拼接连续页码" />
-        <el-option :value="false" label="每个文件单独页码" />
+      <label>页码区域</label>
+      <el-select v-model="pageNumberRegionModel" :disabled="!pageNumberEnabled">
+        <el-option label="页脚区域" value="footer" />
+        <el-option label="页眉区域" value="header" />
       </el-select>
     </div>
+    <TextPlacementFields
+      prefix="页码"
+      :disabled="!pageNumberEnabled"
+      v-model:align="pageNumberAlignModel"
+      v-model:font-size="pageNumberFontSizeModel"
+      v-model:font-family="pageNumberFontFamilyModel"
+      v-model:margin-mm="pageNumberMarginMmModel"
+      v-model:offset-x-mm="pageNumberOffsetXMmModel"
+      v-model:color="pageNumberColorModel"
+      :offset-limit-mm="offsetLimitMm"
+      :margin-label="pageNumberRegion === 'header' ? '距顶' : '距底'"
+    />
     <div class="rule-item">
-      <label>页脚格式</label>
-      <el-input v-model="footerTextModel" :disabled="!footerEnabled" />
-    </div>
-    <div class="rule-item">
-      <label>页脚位置</label>
-      <el-select v-model="footerAlignModel" :disabled="!footerEnabled">
-        <el-option label="居中" value="center" />
-        <el-option label="左侧" value="left" />
-        <el-option label="右侧" value="right" />
-      </el-select>
-    </div>
-    <div class="rule-item">
-      <label>页脚字号</label>
-      <el-input-number v-model="footerFontSizeModel" :min="6" :max="24" :step="1" :disabled="!footerEnabled" />
-    </div>
-    <div class="rule-item">
-      <label>页脚字体</label>
-      <el-select v-model="footerFontFamilyModel" :disabled="!footerEnabled">
-        <el-option label="自动" value="auto" />
-        <el-option label="宋体" value="songti" />
-        <el-option label="黑体" value="heiti" />
-        <el-option label="楷体" value="kaiti" />
-        <el-option label="仿宋" value="fangsong" />
-        <el-option label="Helvetica" value="helvetica" />
-        <el-option label="Times" value="times" />
-        <el-option label="Courier" value="courier" />
-      </el-select>
-    </div>
-    <div class="rule-item">
-      <label>页脚距底 mm</label>
-      <el-input-number v-model="footerMarginMmModel" :min="3" :max="60" :step="1" :disabled="!footerEnabled" />
-    </div>
-    <div class="rule-item">
-      <label>页脚水平偏移 mm</label>
-      <el-input-number
-        v-model="footerOffsetXMmModel"
-        :min="-offsetLimitMm"
-        :max="offsetLimitMm"
-        :step="1"
-        :disabled="!footerEnabled"
-      />
-    </div>
-    <div class="rule-item">
-      <label>页脚颜色</label>
-      <el-color-picker v-model="footerColorModel" :disabled="!footerEnabled" />
+      <label>分段与例外</label>
+      <el-button :disabled="!pageNumberEnabled" @click="$emit('editPageNumberRules')">
+        设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
+      </el-button>
+      <span class="field-hint">可排除首页，或让指定页段使用不同样式、位置和起始编号</span>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import TextPlacementFields from './TextPlacementFields.vue'
+import { PAGE_NUMBER_STYLES } from '../composables/pdfPageNumberRules.js'
 
 const props = defineProps({
   headerMode: { type: String, required: true },
@@ -139,65 +131,103 @@ const props = defineProps({
   headerMarginMm: { type: Number, required: true },
   headerOffsetXMm: { type: Number, required: true },
   headerColor: { type: String, required: true },
-  footerEnabled: { type: Boolean, required: true },
-  footerContinuous: { type: Boolean, required: true },
-  footerText: { type: String, required: true },
-  footerAlign: { type: String, required: true },
-  footerFontSize: { type: Number, required: true },
-  footerFontFamily: { type: String, required: true },
-  footerMarginMm: { type: Number, required: true },
-  footerOffsetXMm: { type: Number, required: true },
-  footerColor: { type: String, required: true },
-  showFooterContinuous: { type: Boolean, default: false },
+  footerTextEnabled: { type: Boolean, required: true },
+  footerTextContent: { type: String, required: true },
+  footerTextAlign: { type: String, required: true },
+  footerTextFontSize: { type: Number, required: true },
+  footerTextFontFamily: { type: String, required: true },
+  footerTextMarginMm: { type: Number, required: true },
+  footerTextOffsetXMm: { type: Number, required: true },
+  footerTextColor: { type: String, required: true },
+  pageNumberEnabled: { type: Boolean, required: true },
+  pageNumberSequence: { type: String, required: true },
+  pageNumberStyle: { type: String, required: true },
+  pageNumberTemplate: { type: String, required: true },
+  pageNumberRegion: { type: String, required: true },
+  pageNumberAlign: { type: String, required: true },
+  pageNumberFontSize: { type: Number, required: true },
+  pageNumberFontFamily: { type: String, required: true },
+  pageNumberMarginMm: { type: Number, required: true },
+  pageNumberOffsetXMm: { type: Number, required: true },
+  pageNumberColor: { type: String, required: true },
+  pageNumberOverrideCount: { type: Number, default: 0 },
   offsetLimitMm: { type: Number, default: 120 },
 })
 
 const emit = defineEmits([
-  'update:headerMode',
-  'update:headerText',
-  'update:headerPrefix',
-  'update:headerSuffix',
-  'update:headerAlign',
-  'update:headerFontSize',
-  'update:headerFontFamily',
-  'update:headerMarginMm',
-  'update:headerOffsetXMm',
-  'update:headerColor',
-  'update:footerEnabled',
-  'update:footerContinuous',
-  'update:footerText',
-  'update:footerAlign',
-  'update:footerFontSize',
-  'update:footerFontFamily',
-  'update:footerMarginMm',
-  'update:footerOffsetXMm',
-  'update:footerColor',
+  'editPageNumberRules',
+  ...[
+    'headerMode',
+    'headerText',
+    'headerPrefix',
+    'headerSuffix',
+    'headerAlign',
+    'headerFontSize',
+    'headerFontFamily',
+    'headerMarginMm',
+    'headerOffsetXMm',
+    'headerColor',
+    'footerTextEnabled',
+    'footerTextContent',
+    'footerTextAlign',
+    'footerTextFontSize',
+    'footerTextFontFamily',
+    'footerTextMarginMm',
+    'footerTextOffsetXMm',
+    'footerTextColor',
+    'pageNumberEnabled',
+    'pageNumberSequence',
+    'pageNumberStyle',
+    'pageNumberTemplate',
+    'pageNumberRegion',
+    'pageNumberAlign',
+    'pageNumberFontSize',
+    'pageNumberFontFamily',
+    'pageNumberMarginMm',
+    'pageNumberOffsetXMm',
+    'pageNumberColor',
+  ].map((key) => `update:${key}`),
 ])
 
 function model(key) {
-  return computed({
-    get: () => props[key],
-    set: (value) => emit(`update:${key}`, value),
-  })
+  return computed({ get: () => props[key], set: (value) => emit(`update:${key}`, value) })
 }
-
-const headerModeModel = model('headerMode')
-const headerTextModel = model('headerText')
-const headerPrefixModel = model('headerPrefix')
-const headerSuffixModel = model('headerSuffix')
-const headerAlignModel = model('headerAlign')
-const headerFontSizeModel = model('headerFontSize')
-const headerFontFamilyModel = model('headerFontFamily')
-const headerMarginMmModel = model('headerMarginMm')
-const headerOffsetXMmModel = model('headerOffsetXMm')
-const headerColorModel = model('headerColor')
-const footerEnabledModel = model('footerEnabled')
-const footerContinuousModel = model('footerContinuous')
-const footerTextModel = model('footerText')
-const footerAlignModel = model('footerAlign')
-const footerFontSizeModel = model('footerFontSize')
-const footerFontFamilyModel = model('footerFontFamily')
-const footerMarginMmModel = model('footerMarginMm')
-const footerOffsetXMmModel = model('footerOffsetXMm')
-const footerColorModel = model('footerColor')
+const headerModeModel = model('headerMode'),
+  headerTextModel = model('headerText'),
+  headerPrefixModel = model('headerPrefix'),
+  headerSuffixModel = model('headerSuffix')
+const headerAlignModel = model('headerAlign'),
+  headerFontSizeModel = model('headerFontSize'),
+  headerFontFamilyModel = model('headerFontFamily'),
+  headerMarginMmModel = model('headerMarginMm'),
+  headerOffsetXMmModel = model('headerOffsetXMm'),
+  headerColorModel = model('headerColor')
+const footerTextEnabledModel = model('footerTextEnabled'),
+  footerTextContentModel = model('footerTextContent'),
+  footerTextAlignModel = model('footerTextAlign'),
+  footerTextFontSizeModel = model('footerTextFontSize'),
+  footerTextFontFamilyModel = model('footerTextFontFamily'),
+  footerTextMarginMmModel = model('footerTextMarginMm'),
+  footerTextOffsetXMmModel = model('footerTextOffsetXMm'),
+  footerTextColorModel = model('footerTextColor')
+const pageNumberEnabledModel = model('pageNumberEnabled'),
+  pageNumberSequenceModel = model('pageNumberSequence'),
+  pageNumberStyleModel = model('pageNumberStyle'),
+  pageNumberTemplateModel = model('pageNumberTemplate'),
+  pageNumberRegionModel = model('pageNumberRegion'),
+  pageNumberAlignModel = model('pageNumberAlign'),
+  pageNumberFontSizeModel = model('pageNumberFontSize'),
+  pageNumberFontFamilyModel = model('pageNumberFontFamily'),
+  pageNumberMarginMmModel = model('pageNumberMarginMm'),
+  pageNumberOffsetXMmModel = model('pageNumberOffsetXMm'),
+  pageNumberColorModel = model('pageNumberColor')
 </script>
+
+<style scoped>
+.section-label {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--docsy-border-subtle);
+}
+</style>

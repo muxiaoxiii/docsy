@@ -4,13 +4,10 @@ use lopdf::decode_text_string;
 use lopdf::{Document, Object};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fs;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::LazyLock;
-
-use crate::external::ExternalTool;
 
 // Full bbox XML plus content-stream inspection is intentionally bounded. A
 // merged evidence file can have thousands of scanned pages, and keeping every
@@ -119,12 +116,19 @@ pub struct HeaderFooterCandidate {
     page_range: PageRange,
     count: usize,
     repeating: bool,
+    position_stable: bool,
+    position_spread: f32,
+    sequence_stable: bool,
     labels: Vec<String>,
     confidence: f32,
     bbox: BBox,
     #[serde(skip_serializing_if = "Option::is_none")]
     font_size: Option<f32>,
     source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artifact_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    docsy_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -202,11 +206,15 @@ pub fn detect(args: &serde_json::Value) -> Result<DetectionResult> {
         anyhow::bail!("PDF 不存在: {}", input.display());
     }
 
-    let artifact = if args.scan_artifacts {
-        inspect_artifacts(input).unwrap_or_default()
+    let artifact_inspection = if args.scan_artifacts {
+        super::artifacts::inspect_meaningful_header_footer_artifacts(input, args.max_pages).ok()
     } else {
-        ArtifactSummary::default()
+        None
     };
+    let artifact = artifact_inspection
+        .as_ref()
+        .map(artifact_summary)
+        .unwrap_or_default();
     let xml = run_pdftotext_bbox(input, args.max_pages)?;
     let words = parse_pdftotext_bbox(&xml)?;
     let page_sizes = parse_pdftotext_page_sizes(&xml)?;
@@ -215,8 +223,29 @@ pub fn detect(args: &serde_json::Value) -> Result<DetectionResult> {
         attach_content_font_sizes(&mut pages, &samples);
     }
     let pages_analyzed = pages.len() as u32;
-    let header_candidates = build_candidates(&pages, "header", pages_analyzed);
-    let footer_candidates = build_candidates(&pages, "footer", pages_analyzed);
+    let content_headers = build_candidates(&pages, "header", pages_analyzed);
+    let content_footers = build_candidates(&pages, "footer", pages_analyzed);
+    let artifact_candidates = artifact_inspection
+        .as_ref()
+        .map(|inspection| {
+            build_artifact_candidates(inspection, &pages, &content_headers, &content_footers)
+        })
+        .unwrap_or_default();
+    let header_candidates = merge_artifact_first_candidates(
+        artifact_candidates
+            .iter()
+            .filter(|candidate| candidate.region == "header")
+            .cloned()
+            .collect(),
+        content_headers,
+    );
+    let footer_candidates = merge_artifact_first_candidates(
+        artifact_candidates
+            .into_iter()
+            .filter(|candidate| candidate.region == "footer")
+            .collect(),
+        content_footers,
+    );
 
     Ok(DetectionResult {
         input_path: args.input_path,
@@ -273,41 +302,140 @@ pub fn suggest_split_ranges(args: &serde_json::Value) -> Result<SplitSuggestionR
     })
 }
 
-fn inspect_artifacts(input: &Path) -> Result<ArtifactSummary> {
-    let qpdf = crate::external::QpdfTool;
-    let bin = qpdf.binary_path()?;
-    let qdf = temp_named_path("docsy_artifact_scan", "pdf");
-    let mut command = crate::external::hidden_command(&bin);
-    command
-        .arg("--qdf")
-        .arg("--object-streams=disable")
-        .arg(input)
-        .arg(&qdf);
-    let output = run_command_output(command, "qpdf Artifact 检测")?;
-
-    if !super::qpdf::status_is_success(&output.status) {
-        let _ = fs::remove_file(&qdf);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("qpdf Artifact 检测失败: {}", stderr.trim());
-    }
-
-    let bytes = fs::read(&qdf).context("读取 qdf 临时文件失败")?;
-    let _ = fs::remove_file(&qdf);
-    let text = String::from_utf8_lossy(&bytes);
-    Ok(parse_artifact_summary(&text))
-}
-
-fn parse_artifact_summary(text: &str) -> ArtifactSummary {
-    let header = Regex::new(r"(?is)/Artifact\b.*?/Subtype\s*/Header\b.*?BDC").unwrap();
-    let footer = Regex::new(r"(?is)/Artifact\b.*?/Subtype\s*/Footer\b.*?BDC").unwrap();
-    let header_count = header.find_iter(text).count();
-    let footer_count = footer.find_iter(text).count();
+fn artifact_summary(
+    inspection: &super::artifacts::HeaderFooterArtifactInspection,
+) -> ArtifactSummary {
+    let header_count = inspection.header_count;
+    let footer_count = inspection.footer_count;
     ArtifactSummary {
         has_header: header_count > 0,
         has_footer: footer_count > 0,
         header_count,
         footer_count,
     }
+}
+
+fn build_artifact_candidates(
+    inspection: &super::artifacts::HeaderFooterArtifactInspection,
+    pages: &[PageDetection],
+    content_headers: &[HeaderFooterCandidate],
+    content_footers: &[HeaderFooterCandidate],
+) -> Vec<HeaderFooterCandidate> {
+    let mut grouped: BTreeMap<String, Vec<&super::artifacts::HeaderFooterArtifactOccurrence>> =
+        BTreeMap::new();
+    for occurrence in &inspection.occurrences {
+        let normalized_text = occurrence
+            .text
+            .as_deref()
+            .map(normalize_header_footer_text)
+            .unwrap_or_default();
+        let key = format!(
+            "{}|{}|{}",
+            occurrence.region,
+            occurrence.docsy_kind.as_deref().unwrap_or("standard"),
+            normalized_text
+        );
+        grouped.entry(key).or_default().push(occurrence);
+    }
+    grouped
+        .into_values()
+        .filter_map(|occurrences| {
+            let first = *occurrences.first()?;
+            let page_start = occurrences.iter().map(|item| item.page).min()?;
+            let page_end = occurrences.iter().map(|item| item.page).max()?;
+            let region_candidates = if first.region == "header" {
+                content_headers
+            } else {
+                content_footers
+            };
+            let supporting = region_candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate.page_range.end >= page_start && candidate.page_range.start <= page_end
+                })
+                .max_by_key(|candidate| candidate.count);
+            let text = first
+                .text
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| supporting.map(|candidate| candidate.text.clone()))
+                .unwrap_or_else(|| {
+                    if first.region == "header" {
+                        "标准页眉".to_string()
+                    } else {
+                        "标准页脚".to_string()
+                    }
+                });
+            let normalized_text = normalize_header_footer_text(&text);
+            let mut labels = labels_for(&normalized_text);
+            if first.docsy_kind.as_deref() == Some("PageNumber")
+                && !labels.iter().any(|label| label == "page-number")
+            {
+                labels.push("page-number".to_string());
+            }
+            let bbox = supporting
+                .map(|candidate| candidate.bbox)
+                .or_else(|| approximate_artifact_bbox(pages, first.region, page_start))?;
+            let count = occurrences
+                .iter()
+                .map(|item| item.page)
+                .collect::<BTreeSet<_>>()
+                .len();
+            Some(HeaderFooterCandidate {
+                text,
+                normalized_text,
+                region: first.region.to_string(),
+                page_range: PageRange {
+                    start: page_start,
+                    end: page_end,
+                },
+                count,
+                repeating: count >= 2,
+                position_stable: true,
+                position_spread: 0.0,
+                sequence_stable: true,
+                labels,
+                confidence: 1.0,
+                bbox,
+                font_size: supporting.and_then(|candidate| candidate.font_size),
+                source: "artifact".to_string(),
+                artifact_id: first.docsy_id.clone().or_else(|| Some(first.id.clone())),
+                docsy_kind: first.docsy_kind.clone(),
+            })
+        })
+        .collect()
+}
+
+fn approximate_artifact_bbox(pages: &[PageDetection], region: &str, page: u32) -> Option<BBox> {
+    let page_info = pages.iter().find(|item| item.page == page)?;
+    let (y0, y1) = if region == "header" {
+        (0.0, page_info.height * 0.12)
+    } else {
+        (page_info.height * 0.88, page_info.height)
+    };
+    Some(BBox {
+        x0: 0.0,
+        y0,
+        x1: page_info.width,
+        y1,
+        page,
+        width: page_info.width,
+        height: page_info.height,
+    })
+}
+
+fn merge_artifact_first_candidates(
+    mut artifacts: Vec<HeaderFooterCandidate>,
+    content: Vec<HeaderFooterCandidate>,
+) -> Vec<HeaderFooterCandidate> {
+    let artifact_keys = artifacts
+        .iter()
+        .map(|candidate| (candidate.region.clone(), candidate.normalized_text.clone()))
+        .collect::<BTreeSet<_>>();
+    artifacts.extend(content.into_iter().filter(|candidate| {
+        !artifact_keys.contains(&(candidate.region.clone(), candidate.normalized_text.clone()))
+    }));
+    artifacts
 }
 
 fn run_pdftotext_bbox(input: &Path, max_pages: u32) -> Result<String> {
@@ -831,7 +959,7 @@ fn build_candidates(
     region: &str,
     pages_analyzed: u32,
 ) -> Vec<HeaderFooterCandidate> {
-    let mut grouped: BTreeMap<String, Vec<&TextLineDetection>> = BTreeMap::new();
+    let mut grouped: BTreeMap<(String, i32, i32), Vec<&TextLineDetection>> = BTreeMap::new();
     for page in pages {
         let lines = if region == "header" {
             &page.headers
@@ -842,8 +970,12 @@ fn build_candidates(
             if is_noise(&line.text, &line.normalized_text) {
                 continue;
             }
+            let center_x = (line.bbox.x0 + line.bbox.x1) / 2.0 / line.bbox.width.max(1.0);
+            let center_y = (line.bbox.y0 + line.bbox.y1) / 2.0 / line.bbox.height.max(1.0);
+            let x_bucket = (center_x * 20.0).round() as i32;
+            let y_bucket = (center_y * 40.0).round() as i32;
             grouped
-                .entry(line.normalized_text.clone())
+                .entry((line.normalized_text.clone(), x_bucket, y_bucket))
                 .or_default()
                 .push(line);
         }
@@ -851,9 +983,13 @@ fn build_candidates(
 
     let mut candidates: Vec<HeaderFooterCandidate> = grouped
         .into_iter()
-        .filter_map(|(normalized_text, lines)| {
+        .filter_map(|((normalized_text, _, _), lines)| {
             let first = *lines.first()?;
-            let count = lines.len();
+            let pages_seen = lines
+                .iter()
+                .map(|line| line.bbox.page)
+                .collect::<BTreeSet<_>>();
+            let count = pages_seen.len();
             let page_start = lines
                 .iter()
                 .map(|line| line.bbox.page)
@@ -865,20 +1001,24 @@ fn build_candidates(
                 .max()
                 .unwrap_or(first.bbox.page);
             let labels = labels_for(&normalized_text);
-            let repeating = count >= 2 || labels.iter().any(|label| label == "page-number");
+            let is_page_number = labels.iter().any(|label| label == "page-number");
+            let position_spread = normalized_position_spread(&lines);
+            let position_stable = position_spread <= 0.025;
+            let sequence_stable = !is_page_number || page_number_sequence_stable(&lines);
+            let repeating = count >= 2 && position_stable;
             let mut confidence = if pages_analyzed <= 1 {
-                0.45
+                0.25
             } else {
                 (count as f32 / pages_analyzed as f32).min(1.0)
             };
             if repeating {
                 confidence += 0.25;
             }
-            if labels.iter().any(|label| label == "page-number") {
-                confidence += 0.15;
+            if count >= 2 && !position_stable {
+                confidence *= 0.5;
             }
-            if normalized_text.contains("证据") {
-                confidence += 0.10;
+            if is_page_number && !sequence_stable {
+                confidence *= 0.5;
             }
             confidence = confidence.min(1.0);
             Some(HeaderFooterCandidate {
@@ -891,11 +1031,16 @@ fn build_candidates(
                 },
                 count,
                 repeating,
+                position_stable,
+                position_spread,
+                sequence_stable,
                 labels,
                 confidence,
                 bbox: first.bbox,
                 font_size: lines.iter().find_map(|line| line.font_size),
                 source: "content-text".to_string(),
+                artifact_id: None,
+                docsy_kind: None,
             })
         })
         .collect();
@@ -906,6 +1051,130 @@ fn build_candidates(
             .then_with(|| b.count.cmp(&a.count))
     });
     candidates
+}
+
+fn normalized_position_spread(lines: &[&TextLineDetection]) -> f32 {
+    if lines.len() <= 1 {
+        return 0.0;
+    }
+    let positions = lines
+        .iter()
+        .map(|line| {
+            let width = line.bbox.width.max(1.0);
+            let height = line.bbox.height.max(1.0);
+            (
+                ((line.bbox.x0 + line.bbox.x1) / 2.0) / width,
+                ((line.bbox.y0 + line.bbox.y1) / 2.0) / height,
+            )
+        })
+        .collect::<Vec<_>>();
+    let (mean_x, mean_y) = positions.iter().fold((0.0, 0.0), |(x, y), position| {
+        (x + position.0, y + position.1)
+    });
+    let count = positions.len() as f32;
+    let (mean_x, mean_y) = (mean_x / count, mean_y / count);
+    positions
+        .iter()
+        .map(|(x, y)| ((x - mean_x).powi(2) + (y - mean_y).powi(2)).sqrt())
+        .fold(0.0, f32::max)
+}
+
+fn page_number_sequence_stable(lines: &[&TextLineDetection]) -> bool {
+    let mut values = lines
+        .iter()
+        .filter_map(|line| {
+            parsed_page_number_value(&line.text).map(|value| (line.bbox.page, value))
+        })
+        .collect::<Vec<_>>();
+    values.sort_unstable_by_key(|item| item.0);
+    values.dedup_by_key(|item| item.0);
+    if values.len() < 2 {
+        return false;
+    }
+    let transitions = values.len() - 1;
+    let consecutive = values
+        .windows(2)
+        .filter(|pair| {
+            pair[1].1
+                == pair[0]
+                    .1
+                    .saturating_add(pair[1].0.saturating_sub(pair[0].0))
+        })
+        .count();
+    consecutive * 10 >= transitions * 7
+}
+
+fn parsed_page_number_value(text: &str) -> Option<u32> {
+    static RE_FIRST_NUMBER: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\d{1,6}").expect("valid page number regex"));
+    if let Some(value) = RE_FIRST_NUMBER.find(text) {
+        return value.as_str().parse().ok();
+    }
+    parse_roman_page_number(&text.trim().to_ascii_uppercase())
+        .or_else(|| parse_chinese_page_number(text))
+}
+
+fn parse_chinese_page_number(text: &str) -> Option<u32> {
+    let value = text
+        .chars()
+        .filter(|ch| {
+            matches!(
+                ch,
+                '零' | '〇'
+                    | '一'
+                    | '二'
+                    | '两'
+                    | '三'
+                    | '四'
+                    | '五'
+                    | '六'
+                    | '七'
+                    | '八'
+                    | '九'
+                    | '十'
+                    | '百'
+                    | '千'
+            )
+        })
+        .collect::<Vec<_>>();
+    if value.is_empty() {
+        return None;
+    }
+    let digit = |ch| match ch {
+        '零' | '〇' => Some(0),
+        '一' => Some(1),
+        '二' | '两' => Some(2),
+        '三' => Some(3),
+        '四' => Some(4),
+        '五' => Some(5),
+        '六' => Some(6),
+        '七' => Some(7),
+        '八' => Some(8),
+        '九' => Some(9),
+        _ => None,
+    };
+    if !value.iter().any(|ch| matches!(ch, '十' | '百' | '千')) {
+        return value.into_iter().try_fold(0_u32, |result, ch| {
+            digit(ch).map(|value| result * 10 + value)
+        });
+    }
+    let mut total = 0_u32;
+    let mut current = 0_u32;
+    for ch in value {
+        if let Some(value) = digit(ch) {
+            current = value;
+            continue;
+        }
+        let unit = match ch {
+            '十' => 10,
+            '百' => 100,
+            '千' => 1000,
+            _ => return None,
+        };
+        total += current.max(1) * unit;
+        current = 0;
+    }
+    Some(total + current)
 }
 
 fn normalize_header_footer_text(text: &str) -> String {
@@ -1101,15 +1370,6 @@ fn find_pdftotext() -> Option<PathBuf> {
     crate::external::PopplerTool::binary_path_for("pdftotext").ok()
 }
 
-fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1191,6 +1451,8 @@ mod tests {
         assert_eq!(normalize_header_footer_text("III"), "{roman-page}");
         assert_eq!(normalize_header_footer_text("mid"), "mid");
         assert_eq!(normalize_header_footer_text("IC"), "IC");
+        assert_eq!(parsed_page_number_value("第四页"), Some(4));
+        assert_eq!(parsed_page_number_value("第二十三页"), Some(23));
     }
 
     #[test]
@@ -1239,6 +1501,146 @@ mod tests {
         assert_eq!(candidates[0].normalized_text, "{page}");
         assert_eq!(candidates[0].count, 3);
         assert!(candidates[0].labels.contains(&"page-number".to_string()));
+        assert!(candidates[0].repeating);
+        assert!(candidates[0].position_stable);
+        assert!(candidates[0].sequence_stable);
+    }
+
+    #[test]
+    fn repeated_numbers_require_a_page_sequence() {
+        let page = |page: u32, value: &str| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![],
+            footers: vec![TextLineDetection {
+                text: value.to_string(),
+                normalized_text: "{page}".to_string(),
+                bbox: BBox {
+                    x0: 540.0,
+                    y0: 800.0,
+                    x1: 550.0,
+                    y1: 820.0,
+                    page,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+            }],
+        };
+        let candidates =
+            build_candidates(&[page(1, "10"), page(2, "50"), page(3, "3")], "footer", 3);
+        assert_eq!(candidates.len(), 1);
+        assert!(candidates[0].repeating);
+        assert!(!candidates[0].sequence_stable);
+    }
+
+    #[test]
+    fn page_number_shape_does_not_override_unstable_positions() {
+        let page = |page: u32, x0: f32| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![],
+            footers: vec![TextLineDetection {
+                text: page.to_string(),
+                normalized_text: "{page}".to_string(),
+                bbox: BBox {
+                    x0,
+                    y0: 800.0,
+                    x1: x0 + 10.0,
+                    y1: 820.0,
+                    page,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+            }],
+        };
+        let candidates = build_candidates(
+            &[page(1, 20.0), page(2, 290.0), page(3, 540.0)],
+            "footer",
+            3,
+        );
+        assert_eq!(candidates.len(), 3);
+        assert!(candidates.iter().all(|candidate| !candidate.repeating));
+    }
+
+    #[test]
+    fn standard_artifact_candidate_precedes_text_heuristics() {
+        let inspection = super::super::artifacts::HeaderFooterArtifactInspection {
+            header_count: 2,
+            footer_count: 0,
+            occurrences: vec![
+                super::super::artifacts::HeaderFooterArtifactOccurrence {
+                    id: "docsy-header-1".to_string(),
+                    page: 1,
+                    region: "header",
+                    text: Some("证据一".to_string()),
+                    docsy_kind: Some("HeaderText".to_string()),
+                    docsy_id: Some("docsy-header-1".to_string()),
+                },
+                super::super::artifacts::HeaderFooterArtifactOccurrence {
+                    id: "docsy-header-2".to_string(),
+                    page: 2,
+                    region: "header",
+                    text: Some("证据一".to_string()),
+                    docsy_kind: Some("HeaderText".to_string()),
+                    docsy_id: Some("docsy-header-2".to_string()),
+                },
+            ],
+        };
+        let pages = vec![
+            PageDetection {
+                page: 1,
+                width: 595.0,
+                height: 842.0,
+                headers: Vec::new(),
+                footers: Vec::new(),
+            },
+            PageDetection {
+                page: 2,
+                width: 595.0,
+                height: 842.0,
+                headers: Vec::new(),
+                footers: Vec::new(),
+            },
+        ];
+        let candidates = build_artifact_candidates(&inspection, &pages, &[], &[]);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].source, "artifact");
+        assert_eq!(candidates[0].artifact_id.as_deref(), Some("docsy-header-1"));
+        assert!(candidates[0].repeating);
+        assert!(candidates[0].position_stable);
+    }
+
+    #[test]
+    fn candidate_repetition_counts_distinct_pages() {
+        let line = |page: u32| TextLineDetection {
+            text: "证据一".to_string(),
+            normalized_text: "证据一".to_string(),
+            bbox: BBox {
+                x0: 500.0,
+                y0: 20.0,
+                x1: 550.0,
+                y1: 32.0,
+                page,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+        };
+        let pages = vec![PageDetection {
+            page: 1,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![line(1), line(1)],
+            footers: vec![],
+        }];
+
+        let candidates = build_candidates(&pages, "header", 1);
+        assert_eq!(candidates[0].count, 1);
+        assert!(!candidates[0].repeating);
     }
 
     #[test]
@@ -1350,15 +1752,6 @@ mod tests {
             encoded.extend(unit.to_be_bytes());
         }
         encoded
-    }
-
-    #[test]
-    fn detects_artifact_summary() {
-        let text = "/Artifact << /Type /Pagination /Subtype /Header >> BDC q Q EMC";
-        let summary = parse_artifact_summary(text);
-        assert!(summary.has_header);
-        assert_eq!(summary.header_count, 1);
-        assert!(!summary.has_footer);
     }
 
     #[test]

@@ -204,12 +204,13 @@
           <p>正在抽帧...</p>
         </div>
 
-        <ImagePreviewGrid
+        <ReorderableImageGrid
           v-else-if="resultImages.length > 0"
           class="results-preview"
           :items="resultImages"
           :name-resolver="frameName"
           empty-description="暂无抽帧结果"
+          @reorder="reorderResultImages"
         />
 
         <el-empty v-else description="选择视频并开始抽帧" :image-size="80" />
@@ -224,7 +225,8 @@ import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Loading, CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
+import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
+import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { fileName } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
@@ -410,6 +412,10 @@ function frameName(img) {
   return fileName(img?.path || '')
 }
 
+function reorderResultImages({ from, to }) {
+  resultImages.value = moveItem(resultImages.value, from, to)
+}
+
 function normalizeSelectedPath(value) {
   return Array.isArray(value) ? value[0] : value
 }
@@ -532,7 +538,7 @@ useWindowFileDrop({
   overflow: hidden;
 }
 
-.results-preview :deep(.image-preview-scroll) {
+.results-preview :deep(.reorder-image-scroll) {
   flex: 1;
   min-height: 0;
   max-height: none;

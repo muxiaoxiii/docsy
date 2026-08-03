@@ -124,6 +124,14 @@ struct OverlayTextConfig {
     page_start: Option<u32>,
     #[serde(default)]
     page_end: Option<u32>,
+    #[serde(default)]
+    number_style: String,
+    #[serde(default)]
+    number_offset: i32,
+    #[serde(default)]
+    number_total: Option<u32>,
+    #[serde(default)]
+    artifact_kind: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -727,7 +735,7 @@ fn artifact_replacement_texts(
     let page_start = page_start.max(1);
     let total_pages = total_pages.unwrap_or(page_count as u32);
     (0..page_count)
-        .map(|index| expand_placeholders(&config.text, page_start + index as u32, total_pages))
+        .map(|index| expand_config_placeholders(config, page_start + index as u32, total_pages))
         .collect()
 }
 
@@ -921,7 +929,7 @@ fn prepare_embedded_overlay_fonts(
             .chain(footer)
             .chain(extra_overlays.iter())
         {
-            let text = expand_placeholders(&config.text, current_page, total_pages);
+            let text = expand_config_placeholders(config, current_page, total_pages);
             if requires_embedded_font(&text) {
                 texts_by_family
                     .entry(font_family_key(&config.font_family))
@@ -1172,7 +1180,7 @@ fn append_overlay_text_ops(
     total_pages: u32,
     embedded_fonts: &BTreeMap<String, EmbeddedOverlayFont>,
 ) -> Result<()> {
-    let text = expand_placeholders(&config.text, current_page, total_pages);
+    let text = expand_config_placeholders(config, current_page, total_pages);
     if text.is_empty() {
         return Ok(());
     }
@@ -1185,7 +1193,9 @@ fn append_overlay_text_ops(
     let x = compute_x(config, &text, use_embedded, size.width_pt);
     ops.extend(text_ops(
         &font_ref,
+        config,
         region,
+        current_page,
         config.font_size,
         x,
         y,
@@ -1216,7 +1226,9 @@ fn overlay_font_ref<'a>(
 
 fn text_ops(
     font_ref: &OverlayFontRef<'_>,
+    config: &OverlayTextConfig,
     region: OverlayRegion,
+    current_page: u32,
     font_size: f32,
     x: f32,
     y: f32,
@@ -1225,7 +1237,7 @@ fn text_ops(
 ) -> Vec<Operation> {
     let (r, g, b) = parse_hex_color(color).unwrap_or((0.0, 0.0, 0.0));
     let (font_name, text_object) = match font_ref {
-        OverlayFontRef::Builtin(name) => (*name, Object::string_literal(text)),
+        OverlayFontRef::Builtin(name) => (*name, Object::string_literal(text.clone())),
         OverlayFontRef::Embedded(font) => (
             font.resource_name.as_str(),
             Object::String(
@@ -1238,6 +1250,24 @@ fn text_ops(
         OverlayRegion::Header => ("Header", "Top"),
         OverlayRegion::Footer => ("Footer", "Bottom"),
     };
+    let kind = if config.artifact_kind.is_empty() {
+        if config.text.contains("{page}")
+            || config.text.contains("{total}")
+            || config.text.contains("{range}")
+        {
+            "PageNumber"
+        } else if matches!(region, OverlayRegion::Header) {
+            "HeaderText"
+        } else {
+            "FooterText"
+        }
+    } else {
+        config.artifact_kind.as_str()
+    };
+    let docsy_id = format!(
+        "docsy-{kind}-{current_page}-{:016x}",
+        fnv1a_hash(&format!("{}|{}|{}|{}", config.text, config.align, x, y))
+    );
     vec![
         Operation::new(
             "BDC",
@@ -1248,6 +1278,10 @@ fn text_ops(
                     "Subtype" => subtype,
                     "Attached" => vec![Object::Name(attached.as_bytes().to_vec())],
                     "Docsy" => Object::Boolean(true),
+                    "DocsyVersion" => 1,
+                    "DocsyKind" => Object::Name(kind.as_bytes().to_vec()),
+                    "DocsyId" => Object::string_literal(docsy_id),
+                    "ActualText" => Object::String(utf16be_pdf_text(&text), StringFormat::Hexadecimal),
                 }),
             ],
         ),
@@ -1270,6 +1304,23 @@ fn text_ops(
         Operation::new("Q", vec![]),
         Operation::new("EMC", vec![]),
     ]
+}
+
+fn utf16be_pdf_text(text: &str) -> Vec<u8> {
+    let mut bytes = vec![0xfe, 0xff];
+    for unit in text.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    bytes
+}
+
+fn fnv1a_hash(value: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn encode_subset_glyph_text(text: &str, char_to_gid: &BTreeMap<char, u16>) -> Vec<u8> {
@@ -1425,11 +1476,104 @@ fn parse_hex_color(value: &str) -> Option<(f32, f32, f32)> {
     Some((r, g, b))
 }
 
+#[cfg(test)]
 fn expand_placeholders(template: &str, page: u32, total: u32) -> String {
     template
         .replace("{page}", &page.to_string())
         .replace("{total}", &total.to_string())
         .replace("{range}", &format!("{page}/{total}"))
+}
+
+fn expand_config_placeholders(
+    config: &OverlayTextConfig,
+    current_page: u32,
+    total_pages: u32,
+) -> String {
+    let page = (current_page as i64 + config.number_offset as i64).max(1) as u32;
+    let total = config.number_total.unwrap_or(total_pages).max(1);
+    let page_text = format_page_number(page, &config.number_style);
+    let total_text = format_page_number(total, &config.number_style);
+    config
+        .text
+        .replace("{page}", &page_text)
+        .replace("{total}", &total_text)
+        .replace("{range}", &format!("{page_text}/{total_text}"))
+}
+
+fn format_page_number(value: u32, style: &str) -> String {
+    match style {
+        "chinese" => chinese_page_number(value),
+        "roman-upper" => roman_page_number(value),
+        "roman-lower" => roman_page_number(value).to_lowercase(),
+        "circled" if value <= 20 => char::from_u32(0x2460 + value - 1)
+            .unwrap_or('?')
+            .to_string(),
+        "dingbat" if value <= 10 => char::from_u32(0x2775 + value).unwrap_or('?').to_string(),
+        "dingbat" if value <= 20 => char::from_u32(0x24E0 + value).unwrap_or('?').to_string(),
+        _ => value.to_string(),
+    }
+}
+
+fn roman_page_number(value: u32) -> String {
+    const PAIRS: &[(u32, &str)] = &[
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut remaining = value;
+    let mut result = String::new();
+    for (amount, token) in PAIRS {
+        while remaining >= *amount {
+            result.push_str(token);
+            remaining -= *amount;
+        }
+    }
+    result
+}
+
+fn chinese_page_number(value: u32) -> String {
+    const DIGITS: [&str; 10] = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+    const UNITS: [&str; 4] = ["", "十", "百", "千"];
+    if value > 9999 {
+        return value.to_string();
+    }
+    let chars: Vec<u32> = value
+        .to_string()
+        .chars()
+        .filter_map(|ch| ch.to_digit(10))
+        .collect();
+    let mut result = String::new();
+    let mut pending_zero = false;
+    for (index, digit) in chars.iter().copied().enumerate() {
+        let unit_index = chars.len() - index - 1;
+        if digit == 0 {
+            pending_zero = !result.is_empty() && chars[index + 1..].iter().any(|next| *next != 0);
+            continue;
+        }
+        if pending_zero {
+            result.push_str(DIGITS[0]);
+        }
+        pending_zero = false;
+        if !(digit == 1 && unit_index == 1 && result.is_empty()) {
+            result.push_str(DIGITS[digit as usize]);
+        }
+        result.push_str(UNITS[unit_index]);
+    }
+    if result.is_empty() {
+        DIGITS[0].to_string()
+    } else {
+        result
+    }
 }
 
 fn compute_x(config: &OverlayTextConfig, text: &str, use_cjk: bool, page_width: f32) -> f32 {
@@ -1568,6 +1712,34 @@ mod tests {
     }
 
     #[test]
+    fn expands_styled_page_numbers_with_offset_and_total_override() {
+        let config = OverlayTextConfig {
+            text: "-{page}-/{total}".to_string(),
+            region: "footer".to_string(),
+            font_family: "auto".to_string(),
+            font_size: 9.0,
+            margin_mm: 10.0,
+            align: "center".to_string(),
+            offset_x_mm: 0.0,
+            color: "#000000".to_string(),
+            page_start: None,
+            page_end: None,
+            number_style: "roman-upper".to_string(),
+            number_offset: -2,
+            number_total: Some(12),
+            artifact_kind: "PageNumber".to_string(),
+        };
+        assert_eq!(expand_config_placeholders(&config, 5, 99), "-III-/XII");
+    }
+
+    #[test]
+    fn formats_large_chinese_and_dingbat_page_numbers() {
+        assert_eq!(format_page_number(101, "chinese"), "一百零一");
+        assert_eq!(format_page_number(2000, "chinese"), "二千");
+        assert_eq!(format_page_number(11, "dingbat"), "⓫");
+    }
+
+    #[test]
     fn rejects_same_paths() {
         assert!(same_path(Path::new("/tmp/a.pdf"), Path::new("/tmp/a.pdf")));
         assert!(!same_path(
@@ -1598,6 +1770,10 @@ mod tests {
             color: "#000000".to_string(),
             page_start: None,
             page_end: None,
+            number_style: String::new(),
+            number_offset: 0,
+            number_total: None,
+            artifact_kind: String::new(),
         };
 
         assert!((compute_x(&config, "abc", false, 200.0) - mm_to_pt(10.0)).abs() < 0.01);
@@ -1626,6 +1802,10 @@ mod tests {
             color: "#000000".to_string(),
             page_start: None,
             page_end: None,
+            number_style: String::new(),
+            number_offset: 0,
+            number_total: None,
+            artifact_kind: "HeaderText".to_string(),
         };
         let (bytes, _warnings) = build_overlay_pdf(Some(&header), None, &[], &pages, 1, 1).unwrap();
 
@@ -1641,16 +1821,26 @@ mod tests {
             .all(|object| !format!("{object:?}").contains("STSong-Light")));
         let page_id = document.get_pages().into_values().next().unwrap();
         let content = document.get_and_decode_page_content(page_id).unwrap();
-        assert!(content.operations.iter().any(|operation| {
-            operation.operator == "BDC"
-                && operation
-                    .operands
-                    .get(1)
-                    .and_then(|object| object.as_dict().ok())
-                    .and_then(|dict| dict.get(b"Subtype").ok())
-                    .and_then(|object| object.as_name().ok())
-                    == Some(b"Header")
-        }));
+        let artifact = content
+            .operations
+            .iter()
+            .find(|operation| operation.operator == "BDC")
+            .and_then(|operation| operation.operands.get(1))
+            .and_then(|object| object.as_dict().ok())
+            .unwrap();
+        assert_eq!(
+            artifact.get(b"Subtype").unwrap().as_name().unwrap(),
+            b"Header"
+        );
+        assert_eq!(
+            artifact.get(b"DocsyKind").unwrap().as_name().unwrap(),
+            b"HeaderText"
+        );
+        assert!(artifact.get(b"DocsyId").is_ok());
+        assert_eq!(
+            super::artifacts::decode_pdf_string(artifact.get(b"ActualText").unwrap()).as_deref(),
+            Some("测试页眉3")
+        );
         let descriptor = document
             .objects
             .values()
@@ -1709,6 +1899,10 @@ mod tests {
             color: "#000000".to_string(),
             page_start: Some(2),
             page_end: Some(3),
+            number_style: String::new(),
+            number_offset: 0,
+            number_total: None,
+            artifact_kind: "FooterText".to_string(),
         };
 
         assert!(!overlay_applies_to_page(&config, 1));
@@ -1730,6 +1924,10 @@ mod tests {
             color: "#000000".to_string(),
             page_start: None,
             page_end: None,
+            number_style: String::new(),
+            number_offset: 0,
+            number_total: None,
+            artifact_kind: "HeaderText".to_string(),
         };
         let pages = BTreeSet::from([0_usize, 2, 3]);
 
@@ -1786,6 +1984,10 @@ mod tests {
                 color: "#000000".to_string(),
                 page_start: None,
                 page_end: None,
+                number_style: String::new(),
+                number_offset: 0,
+                number_total: None,
+                artifact_kind: "HeaderText".to_string(),
             }),
             footer: None,
             extra_overlays: Vec::new(),

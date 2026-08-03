@@ -23,7 +23,9 @@
           <div class="tool-info">
             <span class="tool-name">{{ tool.label }}</span>
             <el-tag v-if="tool.checking" type="info" size="small">检测中</el-tag>
+            <el-tag v-else-if="tool.probeState === 'pending'" type="info" size="small">尚未检测</el-tag>
             <el-tag v-else-if="tool.status.available" type="success" size="small">可用</el-tag>
+            <el-tag v-else-if="tool.probeState === 'error'" type="danger" size="small">检测失败</el-tag>
             <el-tag v-else type="danger" size="small">未安装</el-tag>
             <el-tag v-if="tool.status.available" size="small" :type="tool.status.managed ? 'primary' : 'info'">
               {{ tool.status.managed ? 'Docsy 托管' : '系统工具' }}
@@ -34,6 +36,10 @@
             <span class="tool-version" v-if="tool.status.version">{{ tool.status.version }}</span>
           </div>
           <div class="tool-desc">{{ tool.description }}</div>
+          <div v-if="tool.probeState === 'error'" class="install-hint">{{ tool.probeError }}</div>
+          <div class="tool-actions">
+            <el-button size="small" :loading="tool.checking" @click="checkTool(tool)">检测此工具</el-button>
+          </div>
           <div class="tool-actions" v-if="!tool.status.available">
             <span class="install-hint">{{ tool.status.install_hint }}</span>
             <el-button
@@ -181,6 +187,8 @@ const tools = reactive([
     label: 'qpdf',
     description: 'PDF 合并、拆分、叠加和结构处理',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
@@ -192,6 +200,8 @@ const tools = reactive([
     label: 'Poppler',
     description: 'PDF 预览渲染和页眉页脚文本检测',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
@@ -204,6 +214,8 @@ const tools = reactive([
     label: 'FFmpeg',
     description: '视频信息读取、抽帧和时间戳水印',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
@@ -215,6 +227,8 @@ const tools = reactive([
     label: 'Microsoft Word',
     description: 'Word 文件转 PDF 的首选引擎；Windows 使用 COM，macOS 使用 AppleScript',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
@@ -226,6 +240,8 @@ const tools = reactive([
     label: 'WPS Writer',
     description: 'Windows 下 Word 不可用时的第二转换引擎，使用 WPS COM 导出 PDF',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
@@ -237,6 +253,8 @@ const tools = reactive([
     label: 'LibreOffice',
     description: 'Word 文件转 PDF 的备用引擎；没有 Word 或 Word 转换失败时使用',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
@@ -391,22 +409,30 @@ async function checkTools() {
   if (checkingTools.value) return
   checkingTools.value = true
   try {
-    // Run probes one at a time. They remain asynchronous, while avoiding a
-    // burst of Windows process launches when the settings page opens.
-    for (const tool of tools) {
-      tool.checking = true
-      try {
-        const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
-        if (result.ok) {
-          tool.status = result.data
-        }
-      } finally {
-        tool.checking = false
-      }
-    }
+    await Promise.all(tools.map(checkTool))
     syncDiagnosticToolStatus()
   } finally {
     checkingTools.value = false
+  }
+}
+
+async function checkTool(tool) {
+  if (!tool || tool.checking) return
+  tool.checking = true
+  tool.probeState = 'checking'
+  tool.probeError = ''
+  try {
+    const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
+    if (result.ok) {
+      tool.status = result.data
+      tool.probeState = result.data?.available ? 'available' : 'unavailable'
+    } else {
+      tool.status = defaultToolStatus()
+      tool.probeState = 'error'
+      tool.probeError = result.error || '工具检测调用失败'
+    }
+  } finally {
+    tool.checking = false
   }
 }
 
