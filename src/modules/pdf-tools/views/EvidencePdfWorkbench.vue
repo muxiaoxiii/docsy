@@ -433,14 +433,14 @@
           </template>
         </el-table-column>
         <el-table-column type="index" label="#" width="44" />
-        <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip>
+        <el-table-column label="文件" prop="name" sortable="custom" min-width="150" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <button class="file-link" type="button" :data-reorder-index="$index" @click.stop="openEvidenceFile(row)">
               {{ row.name }}
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="新页眉" prop="header" sortable="custom" min-width="160" show-overflow-tooltip>
+        <el-table-column label="新页眉" prop="header" sortable="custom" min-width="130" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingHeader(row)"
@@ -455,10 +455,10 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column v-if="footerTextEnabled" label="新页脚文字" min-width="135" show-overflow-tooltip>
+        <el-table-column v-if="footerTextEnabled" label="新页脚文字" min-width="110" show-overflow-tooltip>
           <template #default>{{ footerTextContent || '-' }}</template>
         </el-table-column>
-        <el-table-column label="新页码" prop="footer" sortable="custom" min-width="135" show-overflow-tooltip>
+        <el-table-column label="新页码" prop="footer" sortable="custom" min-width="110" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <el-input
               v-if="isEditingFooter(row)"
@@ -476,7 +476,7 @@
         <el-table-column label="页数" prop="pages" sortable="custom" width="70">
           <template #default="{ row }">{{ row.pages || '-' }}</template>
         </el-table-column>
-        <el-table-column label="状态" prop="statusText" sortable="custom" width="130">
+        <el-table-column label="状态" prop="statusText" sortable="custom" width="100">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.statusDetail"
@@ -505,7 +505,7 @@
         >
           <template #default="{ row }">{{ sourceRangeText(row) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ $index }">
             <el-button link size="small" :disabled="$index === 0" @click.stop="moveOverlayFile($index, -1)"
               >上移</el-button
@@ -1809,11 +1809,11 @@ function removeOverlayFile(index) {
 <style scoped>
 .hf-workbench {
   display: grid;
-  grid-template-columns: minmax(420px, 0.95fr) minmax(340px, 1.05fr);
-  gap: 16px;
+  grid-template-columns: minmax(560px, 1.4fr) minmax(320px, 0.6fr);
+  gap: 14px;
   height: 100%;
   min-height: 0;
-  padding: 20px 22px;
+  padding: 18px 20px;
   overflow: hidden;
   background: var(--docsy-canvas);
 }
@@ -2018,8 +2018,8 @@ h3 {
 
 .rule-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
 }
 
 .rule-item {
@@ -2199,7 +2199,8 @@ h3 {
 }
 
 .overlay-table {
-  margin-top: 10px;
+  margin-top: 0;
+  width: 100%;
 }
 
 .preview-controls {
