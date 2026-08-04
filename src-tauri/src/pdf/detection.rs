@@ -1137,6 +1137,29 @@ fn build_candidates(
         })
         .collect();
 
+    // Merge candidates with same normalized_text and very close positions (±2 buckets).
+    // Different pages may place the same header at slightly different y positions,
+    // causing them to land in adjacent buckets. These should be one group.
+    let mut merged: Vec<HeaderFooterCandidate> = Vec::new();
+    for cand in candidates {
+        if let Some(existing) = merged.iter_mut().find(|m| {
+            m.normalized_text == cand.normalized_text
+                && m.region == cand.region
+                && (m.bbox.x0 - cand.bbox.x0).abs() < 20.0
+                && (m.bbox.y0 - cand.bbox.y0).abs() < 15.0
+        }) {
+            // Merge: extend page range, increase count, keep higher confidence
+            existing.page_range.start = existing.page_range.start.min(cand.page_range.start);
+            existing.page_range.end = existing.page_range.end.max(cand.page_range.end);
+            existing.count = existing.count.max(cand.count);
+            existing.confidence = existing.confidence.max(cand.confidence);
+            existing.repeating = existing.repeating || cand.repeating;
+        } else {
+            merged.push(cand);
+        }
+    }
+    candidates = merged;
+
     candidates.sort_by(|a, b| {
         b.confidence
             .total_cmp(&a.confidence)

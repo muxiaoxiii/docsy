@@ -490,7 +490,10 @@ function addAntiOcrFiles(paths) {
 async function inspectAntiOcrFiles(items) {
   for (const item of items) {
     try {
-      const result = await tauriCallSafe('detect_anti_ocr', { input: item.path })
+      const result = await Promise.race([
+        tauriCallSafe('detect_anti_ocr', { input: item.path }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
+      ])
       if (!result.ok) {
         item.statusText = result.error || '检测失败'
         item.statusType = 'danger'
@@ -745,6 +748,8 @@ async function handleDroppedPdfPaths(paths) {
 
   if (activeTab.value === 'unlock') {
     addUnlockFiles(pdfPaths)
+  } else if (activeTab.value === 'anti-ocr') {
+    addAntiOcrFiles(pdfPaths)
   } else if (activeTab.value === 'merge') {
     addMergeFiles(pdfPaths)
   } else {
