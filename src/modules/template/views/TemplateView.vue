@@ -4338,7 +4338,7 @@ function todayText() {
 }
 
 .template-view {
-  padding: 20px 24px 36px;
+  padding: 20px 24px 32px;
   background: var(--docsy-canvas);
 }
 

@@ -577,9 +577,9 @@ onMounted(() => {
 
 <style scoped>
 .settings-view {
-  max-width: 980px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 24px 28px 40px;
+  padding: 20px 24px 32px;
 }
 
 .settings-view h2 {

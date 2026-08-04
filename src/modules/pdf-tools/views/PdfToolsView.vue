@@ -756,8 +756,8 @@ function splitRangeStatus(row) {
 
 .tab-content {
   min-height: 100%;
-  padding: 22px 24px 28px;
-  max-width: 820px;
+  padding: 20px 24px 32px;
+  max-width: 1040px;
   background: var(--docsy-surface);
 }
 
