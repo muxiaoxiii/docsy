@@ -311,7 +311,7 @@ import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import { splitRangeWarnings } from '../composables/usePdfSplitRanges.js'
 import { getPdfPageCount, tauriCallSafe } from '../../../core/tauriBridge.js'
-import { fileName, stripPdf } from '../../../core/filePath.js'
+import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import {
@@ -547,7 +547,10 @@ async function batchAntiOcrApply() {
     const dir = parentDir(file.path)
     const stem = stripPdf(file.name)
     const output = `${dir}/${stem}_anti_ocr.pdf`
-    const result = await tauriCallSafe('apply_anti_ocr', { input: file.path, output })
+    const result = await Promise.race([
+      tauriCallSafe('apply_anti_ocr', { input: file.path, output }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)),
+    ]).catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
     if (!result.ok) {
       file.statusText = userFacingError(result.error, '处理失败')
       file.statusType = 'danger'
@@ -569,7 +572,10 @@ async function batchAntiOcrRemove() {
     const dir = parentDir(file.path)
     const stem = stripPdf(file.name)
     const output = `${dir}/${stem}_restored.pdf`
-    const result = await tauriCallSafe('remove_anti_ocr', { input: file.path, output })
+    const result = await Promise.race([
+      tauriCallSafe('remove_anti_ocr', { input: file.path, output }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)),
+    ]).catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
     if (!result.ok) {
       file.statusText = userFacingError(result.error, '处理失败')
       file.statusType = 'danger'
