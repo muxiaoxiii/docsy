@@ -57,6 +57,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         settings::install_external_tool_from_package,
         settings::get_managed_tools_dir,
         settings::open_managed_tools_dir,
+        settings::remove_managed_tool,
         // system
         system::open_path,
         system::open_external_url,

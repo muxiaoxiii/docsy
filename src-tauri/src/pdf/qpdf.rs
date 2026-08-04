@@ -71,15 +71,19 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
     let bin = qpdf.binary_path()?;
 
     let output_path = unique_output_path(input, "_unlocked");
-    let status = crate::external::hidden_command(&bin)
+    let output = crate::external::hidden_command(&bin)
         .arg("--decrypt")
         .arg("--password=")
         .arg(input)
         .arg(&output_path)
-        .status()?;
+        .output()?;
 
-    if !status_is_success(&status) {
-        anyhow::bail!("qpdf 解锁失败");
+    if !status_is_success(&output.status) {
+        anyhow::bail!(
+            "qpdf 解锁失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&output)
+        );
     }
 
     Ok(UnlockResult {
@@ -101,9 +105,13 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     }
     cmd.arg("--").arg(&output_path);
 
-    let status = cmd.status()?;
-    if !status_is_success(&status) {
-        anyhow::bail!("qpdf 合并失败");
+    let output = cmd.output()?;
+    if !status_is_success(&output.status) {
+        anyhow::bail!(
+            "qpdf 合并失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&output)
+        );
     }
 
     Ok(output_path.display().to_string())

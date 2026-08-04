@@ -53,3 +53,14 @@ pub fn get_managed_tools_dir() -> String {
 pub fn open_managed_tools_dir() -> Result<(), String> {
     crate::external::managed::open_tools_root().map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn remove_managed_tool(tool_name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        crate::external::managed::remove_managed_tool(&tool_name)
+            .map_err(|e| e.to_string())?;
+        Ok(format!("已清除 {} 的托管安装", tool_name))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

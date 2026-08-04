@@ -93,12 +93,49 @@ export function getPdfPageCount(input) {
 export function userFacingError(error, fallback = '操作失败', maxLength = 220) {
   const message = String(error || '').trim()
   if (!message) return fallback
+
+  // Suppress noisy qpdf warnings that don't affect output
   if (/qpdf --json.*WARNING:.*object has offset 0.*handled correctly by qpdf/is.test(message)) {
     return `${fallback}：PDF 结构存在可修复警告，详细信息已写入日志`
   }
+
+  // Detect which external tool caused the failure and prefix with tool name
+  const toolMatch = message.match(/(?:执行 |使用 )?(qpdf|poppler|pdftoppm|pdftotext|ffmpeg|ffprobe|Word|WPS|LibreOffice)/i)
+  let prefix = ''
+  if (toolMatch) {
+    const tool = toolMatch[1].toLowerCase()
+    const toolNames = {
+      qpdf: 'qpdf（PDF 处理引擎）',
+      poppler: 'Poppler（PDF 文本检测）',
+      pdftoppm: 'Poppler（PDF 渲染）',
+      pdftotext: 'Poppler（PDF 文本提取）',
+      ffmpeg: 'FFmpeg（视频处理）',
+      ffprobe: 'FFmpeg（视频信息读取）',
+      word: 'Microsoft Word',
+      wps: 'WPS Writer',
+      libreoffice: 'LibreOffice',
+    }
+    prefix = (toolNames[tool] || tool) + '报错：'
+  }
+
+  // Extract the most useful part of qpdf error messages
+  const qpdfDetail = message.match(/退出码\s*(\d+)[:：]\s*(.+)/)
+  if (qpdfDetail) {
+    const code = qpdfDetail[1]
+    const detail = qpdfDetail[2].trim()
+    // Exit code 2 = encrypted, 3 = warnings (ok), others = real errors
+    if (code === '2' && !detail.toLowerCase().includes('error')) {
+      return `${prefix || fallback}：PDF 文件可能已加密或受保护`
+    }
+    return `${prefix || fallback}：${detail}`
+  }
+
+  // Clean up "context" chains from anyhow — keep the most relevant message
+  const parts = message.split(/[:：]/).map(s => s.trim()).filter(Boolean)
   const compact = message.replace(/\s+/g, ' ')
-  if (compact.length <= maxLength) return compact
-  return `${compact.slice(0, maxLength).trim()}…（详情见日志）`
+
+  if (compact.length <= maxLength) return `${prefix}${compact}`
+  return `${prefix}${compact.slice(0, maxLength).trim()}…（详情见日志）`
 }
 
 // Re-export manual loading animation API for single-import convenience

@@ -15,7 +15,7 @@
       </template>
       <p class="section-desc">
         qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；Word 文件转 PDF 会优先使用 Microsoft
-        Word，失败后使用 LibreOffice。
+        Word，失败后使用 LibreOffice。如果某个工具出现问题（如 qpdf 处理失败），可以清除托管版本后重新下载安装，或手动下载新版本放到 Docsy 工具目录。
       </p>
       <div v-if="managedToolsDir" class="managed-dir">{{ managedToolsDir }}</div>
       <div class="tool-list">
@@ -39,6 +39,15 @@
           <div v-if="tool.probeState === 'error'" class="install-hint">{{ tool.probeError }}</div>
           <div class="tool-actions">
             <el-button size="small" :loading="tool.checking" @click="checkTool(tool)">检测此工具</el-button>
+            <el-button
+              v-if="tool.status.available && tool.status.managed && tool.autoInstall"
+              size="small"
+              type="danger"
+              :loading="tool.removing"
+              @click="removeManagedTool(tool)"
+            >
+              清除此工具
+            </el-button>
           </div>
           <div class="tool-actions" v-if="!tool.status.available">
             <span class="install-hint">{{ tool.status.install_hint }}</span>
@@ -192,6 +201,7 @@ const tools = reactive([
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: true,
     downloadUrl: 'https://github.com/qpdf/qpdf/releases',
   },
@@ -205,6 +215,7 @@ const tools = reactive([
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: true,
     downloadUrl: 'https://github.com/oschwartz10612/poppler-windows/releases',
     runtimeUrl: 'https://aka.ms/vc14/vc_redist.x64.exe',
@@ -219,6 +230,7 @@ const tools = reactive([
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: true,
     downloadUrl: 'https://www.gyan.dev/ffmpeg/builds/',
   },
@@ -232,6 +244,7 @@ const tools = reactive([
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: false,
     downloadUrl: 'https://www.microsoft.com/microsoft-365/word',
   },
@@ -245,6 +258,7 @@ const tools = reactive([
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: false,
     downloadUrl: 'https://www.wps.cn/',
   },
@@ -258,6 +272,7 @@ const tools = reactive([
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: false,
     downloadUrl: 'https://www.libreoffice.org/download/',
   },
@@ -517,6 +532,30 @@ async function openManagedToolsDir() {
   const result = await tauriCallSafe('open_managed_tools_dir')
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开工具目录')
+  }
+}
+
+async function removeManagedTool(tool) {
+  try {
+    await ElMessageBox.confirm(
+      `清除 Docsy 托管的 ${tool.label}？清除后将使用系统已安装的版本（如有）。`,
+      '清除托管工具',
+      { confirmButtonText: '清除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  tool.removing = true
+  try {
+    const result = await tauriCallSafe('remove_managed_tool', { toolName: tool.name })
+    if (result.ok) {
+      ElMessage.success(result.data || '已清除')
+      await checkTool(tool)
+    } else {
+      ElMessage.error(result.error || '清除失败')
+    }
+  } finally {
+    tool.removing = false
   }
 }
 
