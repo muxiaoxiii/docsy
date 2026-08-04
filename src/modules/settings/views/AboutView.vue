@@ -14,10 +14,15 @@
           <el-icon><Link /></el-icon>
           GitHub
         </a>
-        <a href="https://www.xiaohongshu.com/user/profile/待填写" target="_blank" class="about-link">
+        <a href="http://xhslink.com/m/A3Ibe0w27UC" target="_blank" class="about-link">
           <el-icon><Link /></el-icon>
           小红书
         </a>
+      </div>
+
+      <div class="about-qr">
+        <img src="../../../assets/docsy-qrcode.png" alt="小红书二维码" class="about-qr-img" />
+        <span class="about-qr-label">扫码关注小红书</span>
       </div>
 
       <el-divider />
@@ -34,7 +39,7 @@
 <script setup>
 import { Link } from '@element-plus/icons-vue'
 
-const version = '0.9.1'
+const version = '0.9.2'
 </script>
 
 <style scoped>
@@ -88,6 +93,7 @@ const version = '0.9.1'
 .about-links {
   display: flex;
   gap: 24px;
+  margin-bottom: 24px;
 }
 
 .about-link {
@@ -102,6 +108,27 @@ const version = '0.9.1'
 
 .about-link:hover {
   opacity: 0.7;
+}
+
+.about-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.about-qr-img {
+  width: 180px;
+  height: 180px;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+.about-qr-label {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
 }
 
 .about-legal {

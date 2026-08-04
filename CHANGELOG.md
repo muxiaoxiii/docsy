@@ -2,6 +2,33 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.2] - 2026-08-04
+
+### 新增
+- **一键清除页眉页脚**：新增流水线按钮，自动检测→弹窗选择→确认→输出到 `_cleaned` 文件夹
+- **关于页面**：GitHub 链接、小红书链接及二维码、版权声明、MIT 协议
+- **页码格式预设**：5 种预设样式（1/35、第1页共35页、-1-、— 1 —、1）
+- **显示总页数开关**：关闭后预设自动切换为不含 total 的样式
+- **页眉/页脚独立开关**：可单独控制页眉、页脚文字、页码的插入
+- **原有内容弹窗增强**：文件筛选下拉框、"同文件"批量选择按钮
+
+### 修复
+- **H1 取消功能接线**：SubprocessRegistry 现在注册 qpdf 子进程 PID，取消按钮生效
+- **H2 run 索引统一**：save.rs 的 run_has_text() 匹配 scan.rs 行为，修复空 `<w:t>` 导致的字段错位
+- **M6 中文数字统一**：core/numberFormat.js 支持 0-9999，消除两套实现的不一致
+- **M7 页码预览样式一致**：预览现在正确显示中文/罗马/带圈数字样式
+- **Per-file 页码偏移修复**：每个文件单独编号时，后续文件页码不再全部显示为 1
+- **布局优化**：左侧面板加宽、预览面板可拖拽调整宽度、全局 padding/max-width 统一
+- **L9 正则缓存**：batch.rs 日期正则改为 LazyLock 静态缓存
+- **L10 死代码清理**：删除未使用的 getModule/getModuleSettings/get_module_registry
+- **L12 恒等操作修复**：TemplateView 恒等三元表达式
+
+### 文档
+- README：修正字段类型数量（7→8）、补充实心带圈数字
+- architecture.md：版本更新到 v0.9.2
+- pdf-evidence-processing-design.md：修正区域覆盖兜底、A4 规范化、对象层删除描述
+- template-system-design.md：补充 reference 字段类型
+
 ## [0.9.1] - 2026-08-04
 
 ### 打磨
