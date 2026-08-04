@@ -1,5 +1,6 @@
 /// Module registry — returns descriptors for all registered modules.
 /// Frontend uses this to build menus, routes, and home cards.
+#[allow(dead_code)]
 pub fn all_descriptors() -> Vec<serde_json::Value> {
     vec![
         serde_json::json!({

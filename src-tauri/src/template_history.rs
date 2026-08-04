@@ -402,6 +402,7 @@ fn ensure_field_history_id_column(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn upsert_template_meta(
     conn: &Connection,
     manifest: &TemplateManifest,

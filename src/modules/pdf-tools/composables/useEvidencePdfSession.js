@@ -92,7 +92,15 @@ export function pageNumberTemplateWithShowTotal(template, showTotal) {
   if (showTotal === false) {
     return String(template || '{page}')
       .replaceAll('{range}', '{page}')
+      // Strip Chinese total pattern: 共{total}页
+      .replace(/共\s*\{total\}\s*页/g, '')
+      // Strip English 'of {total}' pattern
+      .replace(/\bof\s*\{total\}/gi, '')
+      // Strip remaining {total}
       .replaceAll('{total}', '')
+      // Clean up trailing punctuation/spaces
+      .replace(/[，,]\s*$/, '')
+      .replace(/\s+$/, '')
       .replaceAll('//', '/')
       .replace(/\/+$/, '')
   }

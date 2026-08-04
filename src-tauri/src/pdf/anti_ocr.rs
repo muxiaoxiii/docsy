@@ -18,6 +18,7 @@ pub enum AntiCopyMethod {
 }
 
 impl AntiCopyMethod {
+    #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
             Self::CmapScramble => "CMap 篡改",
@@ -301,6 +302,7 @@ fn page_fonts(doc: &Document, page_id: ObjectId) -> Vec<ObjectId> {
     fonts
 }
 
+#[allow(dead_code)]
 fn get_font_name(doc: &Document, font_id: ObjectId) -> String {
     if let Ok(dict) = doc.get_dictionary(font_id) {
         if let Ok(Object::Name(name)) = dict.get(b"BaseFont") {

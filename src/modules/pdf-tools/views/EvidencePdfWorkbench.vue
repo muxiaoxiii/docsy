@@ -544,21 +544,6 @@
         <el-table-column v-if="footerInsertEnabled" label="新页脚文字" min-width="110" show-overflow-tooltip>
           <template #default>{{ footerTextContent || '-' }}</template>
         </el-table-column>
-        <el-table-column label="新页码" prop="footer" sortable="custom" min-width="110" show-overflow-tooltip>
-          <template #default="{ row, $index }">
-            <el-input
-              v-if="isEditingFooter(row)"
-              v-model="row.footer"
-              size="small"
-              @click.stop
-              @blur="finishFooterEdit(row)"
-              @keyup.enter="finishFooterEdit(row)"
-            />
-            <span v-else class="table-text editable-text" @dblclick.stop="startFooterEdit(row, $index)">
-              {{ rowPageNumberPreview(row) || '-' }}
-            </span>
-          </template>
-        </el-table-column>
         <el-table-column label="页数" prop="pages" sortable="custom" width="70">
           <template #default="{ row }">{{ row.pages || '-' }}</template>
         </el-table-column>
@@ -1186,7 +1171,14 @@ const firstFooterPreview = computed(() => {
   if (!first || !footerEnabled.value || !pnGroup || !totalOverlayPages.value) return ''
   const continuous = (pnGroup.sequence || 'continuous') !== 'per-file'
   let tpl = pnGroup.template || '{page}/{total}'
-  if (!pageNumberShowTotal.value) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
+  if (!pageNumberShowTotal.value) tpl = tpl
+    .replace(/共\s*\{total\}\s*页/g, '')
+    .replace(/\bof\s*\{total\}/gi, '')
+    .replaceAll('{total}', '')
+    .replace(/[，,]\s*$/, '')
+    .replace(/\s+$/, '')
+    .replaceAll('//', '/')
+    .replace(/\/+$/, '')
   return renderPageNumberTemplate(
     tpl,
     continuous ? first.pageStart || 1 : 1,
@@ -1325,7 +1317,7 @@ const hasApplicableProcessingRule = computed(
     hasExistingConvertRule.value ||
     hasExistingRemovalRule.value ||
     (insertHeaderFooterEnabled.value &&
-      (headerMode.value !== 'none' || footerInsertEnabled.value || footerEnabled.value)),
+      ((headerInsertEnabled.value && headerMode.value !== 'none') || footerInsertEnabled.value || footerEnabled.value)),
 )
 
 const currentRules = computed(() => ({
@@ -1967,8 +1959,10 @@ async function finishQuickCleanupPipeline() {
     )
     const cleanupRules = {
       headerMode: 'none',
-      footerTextEnabled: false,
+      headerInsertEnabled: false,
+      footerInsertEnabled: false,
       pageNumberEnabled: false,
+      footerEnabled: false,
       normalizeA4: false,
       removeAnnotations: false,
       outputMode: 'files_only',
@@ -2152,7 +2146,14 @@ function rowPageNumberPreview(row) {
   const page = pageNumberSequence.value === 'per-file' ? 1 : Number(row.pageStart || 1)
   const total = pageNumberSequence.value === 'per-file' ? Number(row.pages || 1) : totalOverlayPages.value
   let tpl = row.footer || footerText.value
-  if (!pageNumberShowTotal.value) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
+  if (!pageNumberShowTotal.value) tpl = tpl
+    .replace(/共\s*\{total\}\s*页/g, '')
+    .replace(/\bof\s*\{total\}/gi, '')
+    .replaceAll('{total}', '')
+    .replace(/[，,]\s*$/, '')
+    .replace(/\s+$/, '')
+    .replaceAll('//', '/')
+    .replace(/\/+$/, '')
   return renderPageNumberTemplate(tpl, page, total, pageNumberStyle.value)
 }
 

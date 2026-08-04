@@ -87,7 +87,7 @@ impl SubprocessRegistry {
         operation_id: &str,
         mut cmd: std::process::Command,
     ) -> std::io::Result<std::process::Output> {
-        let mut child = cmd.spawn()?;
+        let child = cmd.spawn()?;
         let pid = child.id();
         self.register(operation_id, pid);
         let result = child.wait_with_output();

@@ -115,12 +115,17 @@ export function useEvidencePdfMergedImport({
       const planTotalPages = Math.max(1, detectedTotalPages || totalPages || 1)
       const items = detectedItems
         .filter((item) => Number(item.pageStart) > 0 && Number(item.pageEnd) >= Number(item.pageStart))
-        .map((item, index) => ({
-          name: String(item.name || '').trim() || defaultMergedImportName(input, index),
-          pageStart: Number(item.pageStart),
-          pageEnd: Number(item.pageEnd),
-          source: item.source || 'unknown',
-        }))
+        .map((item, index) => {
+          const segment = {
+            name: String(item.name || '').trim() || defaultMergedImportName(input, index),
+            pageStart: Number(item.pageStart),
+            pageEnd: Number(item.pageEnd),
+            source: item.source || 'unknown',
+          }
+          segment.existingPageNumberHasTotal = item.hasTotal || false
+          segment.existingPageNumberSequenceForm = item.sequenceForm || ''
+          return segment
+        })
       if (!items.length) {
         items.push(defaultMergedImportRange(input, planTotalPages))
         warnings.push('未识别到可用页眉页段，已生成一个覆盖全文的手动页段')

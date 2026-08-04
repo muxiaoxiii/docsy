@@ -76,6 +76,10 @@ pub struct SplitSuggestionItem {
     page_start: u32,
     page_end: u32,
     source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    has_total: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sequence_form: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -283,6 +287,7 @@ pub fn suggest_split_ranges(args: &serde_json::Value) -> Result<SplitSuggestionR
         "scanArtifacts": false
     }))?;
     let items = build_split_suggestions_from_pages(&detection.pages);
+    let items = augment_splits_with_page_number_boundaries(items, &detection.pages);
     let header_pages = count_split_header_pages(&detection.pages);
     let page_number_footer_pages = count_page_number_footers(&detection.pages);
     let mut warnings = split_suggestion_warnings(
@@ -1294,6 +1299,11 @@ fn page_number_sequence_stable(lines: &[&TextLineDetection]) -> bool {
 }
 
 fn parsed_page_number_value(text: &str) -> Option<u32> {
+    // Normalize full-width slash/digits to half-width before matching
+    let text = text.replace('／', "/").replace('０', "0").replace('１', "1")
+        .replace('２', "2").replace('３', "3").replace('４', "4")
+        .replace('５', "5").replace('６', "6").replace('７', "7")
+        .replace('８', "8").replace('９', "9");
     let trimmed = text.trim();
     // Match the page-number pattern itself (N/M, Page N of M, 第N页, trailing
     // bare number) instead of the first number anywhere, so case numbers like
@@ -1584,11 +1594,15 @@ fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSugge
                 let name = current_name
                     .take()
                     .unwrap_or_else(|| format!("文件{}", items.len() + 1));
+                let (has_total, sequence_form) =
+                    page_number_meta_for_range(pages, current_start, previous_page);
                 items.push(SplitSuggestionItem {
                     name,
                     page_start: current_start,
                     page_end: previous_page,
                     source: current_source.clone(),
+                    has_total,
+                    sequence_form,
                 });
                 current_start = page.page;
                 current_name = Some(header);
@@ -1600,15 +1614,115 @@ fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSugge
 
     if previous_page > 0 {
         let name = current_name.unwrap_or_else(|| format!("文件{}", items.len() + 1));
+        let (has_total, sequence_form) =
+            page_number_meta_for_range(pages, current_start, previous_page);
         items.push(SplitSuggestionItem {
             name,
             page_start: current_start,
             page_end: previous_page,
             source: current_source,
+            has_total,
+            sequence_form,
         });
     }
 
     items
+}
+
+/// Extract page-number has_total and sequence_form from the footers of a page range.
+fn page_number_meta_for_range(
+    pages: &[PageDetection],
+    page_start: u32,
+    page_end: u32,
+) -> (Option<bool>, Option<String>) {
+    for page in pages {
+        if page.page >= page_start && page.page <= page_end {
+            for line in &page.footers {
+                let labels = labels_for(&line.normalized_text);
+                if labels.iter().any(|l| l == "page-number") {
+                    return (
+                        Some(text_has_total(&line.text)),
+                        Some(sequence_form_of(&line.text).to_string()),
+                    );
+                }
+            }
+        }
+    }
+    (None, None)
+}
+
+/// If a page-number sequence boundary (where the total value changes) falls
+/// between two header-based splits, add it as an additional split point.
+fn augment_splits_with_page_number_boundaries(
+    items: Vec<SplitSuggestionItem>,
+    pages: &[PageDetection],
+) -> Vec<SplitSuggestionItem> {
+    // Collect boundary pages where the page-number total changes
+    let mut prev_total: Option<u32> = None;
+    let mut boundaries: Vec<u32> = Vec::new();
+    for page in pages {
+        let page_total = page.footers.iter().find_map(|line| {
+            let labels = labels_for(&line.normalized_text);
+            if labels.iter().any(|l| l == "page-number") {
+                parsed_page_number_total(&line.text)
+            } else {
+                None
+            }
+        });
+        if let Some(total) = page_total {
+            if prev_total.is_some() && prev_total != Some(total) {
+                boundaries.push(page.page);
+            }
+            prev_total = Some(total);
+        }
+    }
+
+    if boundaries.is_empty() {
+        return items;
+    }
+
+    // For each boundary, split the existing range that contains it
+    let mut new_items: Vec<SplitSuggestionItem> = Vec::new();
+    for item in &items {
+        let mut cursor = item.page_start;
+        let mut boundary_pages_in_range: Vec<u32> = boundaries
+            .iter()
+            .copied()
+            .filter(|&p| p > item.page_start && p <= item.page_end)
+            .collect();
+        boundary_pages_in_range.sort_unstable();
+        boundary_pages_in_range.dedup();
+
+        for boundary in boundary_pages_in_range {
+            if cursor < boundary {
+                let (has_total, sequence_form) =
+                    page_number_meta_for_range(pages, cursor, boundary - 1);
+                new_items.push(SplitSuggestionItem {
+                    name: item.name.clone(),
+                    page_start: cursor,
+                    page_end: boundary - 1,
+                    source: item.source.clone(),
+                    has_total,
+                    sequence_form,
+                });
+            }
+            cursor = boundary;
+        }
+        if cursor <= item.page_end {
+            let (has_total, sequence_form) =
+                page_number_meta_for_range(pages, cursor, item.page_end);
+            new_items.push(SplitSuggestionItem {
+                name: item.name.clone(),
+                page_start: cursor,
+                page_end: item.page_end,
+                source: item.source.clone(),
+                has_total,
+                sequence_form,
+            });
+        }
+    }
+
+    new_items
 }
 
 fn count_page_number_footers(pages: &[PageDetection]) -> usize {
@@ -2106,12 +2220,16 @@ mod tests {
                     page_start: 1,
                     page_end: 2,
                     source: "header".to_string(),
+                    has_total: None,
+                    sequence_form: None,
                 },
                 SplitSuggestionItem {
                     name: "证据二".to_string(),
                     page_start: 3,
                     page_end: 3,
                     source: "header".to_string(),
+                    has_total: None,
+                    sequence_form: None,
                 },
             ]
         );
