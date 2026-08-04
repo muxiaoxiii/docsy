@@ -2757,9 +2757,6 @@ h3 {
   }
 }
 
-
-}
-
 .evidence-drop-overlay {
   position: fixed;
   inset: 0;
