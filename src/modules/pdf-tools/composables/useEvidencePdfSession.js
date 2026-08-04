@@ -264,6 +264,45 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         }
       }
     }
+    // Add footer text group overlays (skip first group since it's already the main footer text)
+    const footerTextGroups = rules.footerTextGroups || []
+    if (footerInsertEnabled && footerTextGroups.length > 1) {
+      for (let gi = 1; gi < footerTextGroups.length; gi++) {
+        const g = footerTextGroups[gi]
+        if (!g.enabled) continue
+        if (g.text) {
+          extraOverlays.push(footerTextOverlayConfigForGroup(g.text, g))
+        }
+      }
+    }
+    // Add page number group overlays (skip first group since it's already the main page number)
+    const pageNumberGroups = rules.pageNumberGroups || []
+    if (pageNumberEnabled && pageNumberGroups.length > 1) {
+      for (let gi = 1; gi < pageNumberGroups.length; gi++) {
+        const g = pageNumberGroups[gi]
+        if (!g.enabled) continue
+        const pnSequence = g.sequence || pageNumberSequence
+        const pnContinuous = pnSequence !== 'per-file'
+        const pnStart = pnContinuous ? file.pageStart : 1
+        const pnTotal = pnContinuous ? total : file.pages || 1
+        const pnOverlays = pageNumberOverlaysForFile(file, {
+          enabled: true,
+          totalPages: pnTotal,
+          sequence: pnSequence,
+          template: g.template || '{page}/{total}',
+          style: g.style || 'arabic',
+          region: g.region || 'footer',
+          align: g.align || 'center',
+          fontSize: g.fontSize || 9,
+          fontFamily: g.fontFamily || 'auto',
+          marginMm: g.marginMm || 10,
+          offsetXMm: g.offsetXMm || 0,
+          color: g.color || '#000000',
+          overrides: rules.pageNumberOverrides || [],
+        })
+        extraOverlays.push(...pnOverlays)
+      }
+    }
     file.outputPath = outputPath
     return {
       inputPath: file.path,
@@ -310,6 +349,20 @@ function footerTextOverlayConfig(text, rules) {
     align: rules.footerTextAlign || 'left',
     offsetXMm: rules.footerTextOffsetXMm || 0,
     color: rules.footerTextColor || '#000000',
+  }
+}
+
+function footerTextOverlayConfigForGroup(text, group) {
+  return {
+    text,
+    region: 'footer',
+    artifactKind: 'FooterText',
+    fontSize: group.fontSize || 9,
+    fontFamily: group.fontFamily || 'auto',
+    marginMm: group.marginMm || 10,
+    align: group.align || 'left',
+    offsetXMm: group.offsetXMm || 0,
+    color: group.color || '#000000',
   }
 }
 
@@ -615,6 +668,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         marginMm: rules.footerTextMarginMm || 10,
         offsetXmm: rules.footerTextOffsetXMm || 0,
         color: rules.footerTextColor || '#000000',
+        groups: rules.footerTextGroups || [],
       },
       pageNumberRule: {
         enabled: rules.pageNumberEnabled ?? rules.footerEnabled,
@@ -629,6 +683,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         offsetXmm: rules.pageNumberOffsetXMm ?? rules.footerOffsetXMm ?? 0,
         color: rules.pageNumberColor || rules.footerColor || '#000000',
         overrides: rules.pageNumberOverrides || [],
+        groups: rules.pageNumberGroups || [],
       },
       cleanupRule: {
         headerEnabled: rules.cleanupHeaderEnabled,

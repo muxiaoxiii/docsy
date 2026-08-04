@@ -111,6 +111,59 @@ export function useEvidencePdfPreview({
       .filter(Boolean)
   })
 
+  // Multiple footer text group overlays for preview
+  const previewFooterTextGroupOverlays = computed(() => {
+    if (!insertHeaderFooterEnabled.value || !footerInsertEnabled.value || !selectedOverlayFile.value) return []
+    const groups = currentRules.value.footerTextGroups || []
+    if (!groups.length) return []
+    return groups
+      .filter((g) => g.enabled && g.text)
+      .map((g) => ({
+        key: g.id,
+        text: g.text,
+        style: textOverlayStyle('footer', previewData.value, {
+          align: g.align,
+          marginMm: g.marginMm,
+          fontSize: g.fontSize,
+          fontFamily: g.fontFamily,
+          offsetXMm: g.offsetXMm,
+          color: g.color,
+        }),
+      }))
+  })
+
+  // Multiple page number group overlays for preview
+  const previewPageNumberGroupOverlays = computed(() => {
+    if (!insertHeaderFooterEnabled.value || !pageNumberEnabled.value || !selectedOverlayFile.value) return []
+    const groups = currentRules.value.pageNumberGroups || []
+    if (!groups.length) return []
+    return groups
+      .filter((g) => g.enabled)
+      .map((g) => {
+        const page = (g.sequence || 'continuous') === 'per-file'
+          ? previewPage.value
+          : (selectedOverlayFile.value.pageStart || 1) + previewPage.value - 1
+        const total = (g.sequence || 'continuous') === 'per-file'
+          ? selectedOverlayFile.value.pages || 1
+          : totalOverlayPages.value || 1
+        let tpl = g.template || '{page}/{total}'
+        if (!pageNumberShowTotal.value) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
+        const text = renderPageNumberTemplate(tpl, page, total, g.style || 'arabic')
+        return {
+          key: g.id,
+          text,
+          style: textOverlayStyle(g.region || 'footer', previewData.value, {
+            align: g.align,
+            marginMm: g.marginMm,
+            fontSize: g.fontSize,
+            fontFamily: g.fontFamily,
+            offsetXMm: g.offsetXMm,
+            color: g.color,
+          }),
+        }
+      })
+  })
+
   const previewFooterStyle = computed(() =>
     textOverlayStyle('footer', previewData.value, {
       align: footerAlign.value,
@@ -401,6 +454,8 @@ export function useEvidencePdfPreview({
     previewFooterText,
     previewHeaderStyle,
     previewHeaderGroupOverlays,
+    previewFooterTextGroupOverlays,
+    previewPageNumberGroupOverlays,
     previewFooterStyle,
     truePreviewFrameStyle,
     selectedFooterCandidates,

@@ -78,7 +78,12 @@
 
     <div class="rule-item section-label">
       <strong>页脚文字</strong>
-      <el-switch v-model="footerInsertEnabledModel" size="small" />
+      <div class="section-actions">
+        <el-switch v-model="footerInsertEnabledModel" size="small" />
+        <el-button size="small" circle :disabled="!footerInsertEnabled" @click="addFooterTextGroup">
+          <el-icon><i-ep-plus /></el-icon>
+        </el-button>
+      </div>
     </div>
     <div class="rule-item">
       <label>页脚文本</label>
@@ -99,7 +104,12 @@
 
     <div class="rule-item section-label">
       <strong>页码</strong>
-      <el-switch v-model="pageNumberEnabledModel" size="small" />
+      <div class="section-actions">
+        <el-switch v-model="pageNumberEnabledModel" size="small" />
+        <el-button size="small" circle :disabled="!pageNumberEnabled" @click="addPageNumberGroup">
+          <el-icon><i-ep-plus /></el-icon>
+        </el-button>
+      </div>
     </div>
     <div class="rule-item">
       <label>连续方式</label>
@@ -217,6 +227,8 @@ const props = defineProps({
   headerMarginMm: { type: Number, required: true },
   headerOffsetXMm: { type: Number, required: true },
   headerColor: { type: String, required: true },
+  footerTextGroups: { type: Array, default: () => [] },
+  selectedFooterTextGroupId: { type: String, default: '' },
   footerInsertEnabled: { type: Boolean, default: true },
   footerTextContent: { type: String, required: true },
   footerTextAlign: { type: String, required: true },
@@ -225,6 +237,8 @@ const props = defineProps({
   footerTextMarginMm: { type: Number, required: true },
   footerTextOffsetXMm: { type: Number, required: true },
   footerTextColor: { type: String, required: true },
+  pageNumberGroups: { type: Array, default: () => [] },
+  selectedPageNumberGroupId: { type: String, default: '' },
   pageNumberEnabled: { type: Boolean, required: true },
   pageNumberSequence: { type: String, required: true },
   pageNumberStyle: { type: String, required: true },
@@ -248,6 +262,10 @@ const emit = defineEmits([
   'update:pageNumberShowTotal',
   'update:headerGroups',
   'update:selectedHeaderGroupId',
+  'update:footerTextGroups',
+  'update:selectedFooterTextGroupId',
+  'update:pageNumberGroups',
+  'update:selectedPageNumberGroupId',
   ...[
     'headerMode',
     'headerInsertEnabled',
@@ -400,6 +418,63 @@ function removeGroup(id) {
   emit('update:headerGroups', updated)
   if (props.selectedHeaderGroupId === id) {
     emit('update:selectedHeaderGroupId', updated[0].id)
+  }
+}
+
+function addFooterTextGroup() {
+  const newGroup = {
+    id: `ft${Date.now()}`,
+    label: `页脚文字 ${props.footerTextGroups.length + 1}`,
+    enabled: true,
+    text: '',
+    align: 'left',
+    fontSize: 9,
+    fontFamily: 'auto',
+    marginMm: 10,
+    offsetXMm: 0,
+    color: '#000000',
+  }
+  const updated = [...props.footerTextGroups, newGroup]
+  emit('update:footerTextGroups', updated)
+  emit('update:selectedFooterTextGroupId', newGroup.id)
+}
+
+function removeFooterTextGroup(id) {
+  if (props.footerTextGroups.length <= 1) return
+  const updated = props.footerTextGroups.filter((g) => g.id !== id)
+  emit('update:footerTextGroups', updated)
+  if (props.selectedFooterTextGroupId === id) {
+    emit('update:selectedFooterTextGroupId', updated[0].id)
+  }
+}
+
+function addPageNumberGroup() {
+  const newGroup = {
+    id: `pn${Date.now()}`,
+    label: `页码 ${props.pageNumberGroups.length + 1}`,
+    enabled: true,
+    sequence: 'continuous',
+    style: 'arabic',
+    template: '{page}/{total}',
+    region: 'footer',
+    align: 'center',
+    fontSize: 9,
+    fontFamily: 'auto',
+    marginMm: 10,
+    offsetXMm: 0,
+    color: '#000000',
+  }
+  const updated = [...props.pageNumberGroups, newGroup]
+  emit('update:pageNumberGroups', updated)
+  emit('update:selectedPageNumberGroupId', newGroup.id)
+}
+
+function removePageNumberGroup(id) {
+  if (props.pageNumberGroups.length <= 1) return
+  const updated = props.pageNumberGroups.filter((g) => g.id !== id)
+  emit('update:pageNumberGroups', updated)
+  if (props.selectedPageNumberGroupId === id) {
+    emit('update:selectedPageNumberGroupId', updated[0].id)
   }
 }
 </script>

@@ -200,6 +200,8 @@
           v-model:header-margin-mm="headerMarginMm"
           v-model:header-offset-x-mm="headerOffsetXMm"
           v-model:header-color="headerColor"
+          v-model:footer-text-groups="footerTextGroups"
+          v-model:selected-footer-text-group-id="selectedFooterTextGroupId"
           v-model:footer-insert-enabled="footerInsertEnabled"
           v-model:footer-text-content="footerTextContent"
           v-model:footer-text-align="footerTextAlign"
@@ -208,6 +210,8 @@
           v-model:footer-text-margin-mm="footerTextMarginMm"
           v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
           v-model:footer-text-color="footerTextColor"
+          v-model:page-number-groups="pageNumberGroups"
+          v-model:selected-page-number-group-id="selectedPageNumberGroupId"
           v-model:page-number-enabled="footerEnabled"
           v-model:page-number-sequence="pageNumberSequence"
           v-model:page-number-style="pageNumberStyle"
@@ -558,7 +562,8 @@
         v-model:header-margin-mm="headerMarginMm"
         v-model:header-offset-x-mm="headerOffsetXMm"
         v-model:header-color="headerColor"
-        v-model:footer-text-enabled="footerTextEnabled"
+        v-model:footer-text-groups="footerTextGroups"
+        v-model:selected-footer-text-group-id="selectedFooterTextGroupId"
         v-model:footer-insert-enabled="footerInsertEnabled"
         v-model:footer-text-content="footerTextContent"
         v-model:footer-text-align="footerTextAlign"
@@ -567,6 +572,8 @@
         v-model:footer-text-margin-mm="footerTextMarginMm"
         v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
         v-model:footer-text-color="footerTextColor"
+        v-model:page-number-groups="pageNumberGroups"
+        v-model:selected-page-number-group-id="selectedPageNumberGroupId"
         v-model:page-number-enabled="footerEnabled"
         v-model:page-number-sequence="pageNumberSequence"
         v-model:page-number-style="pageNumberStyle"
@@ -981,25 +988,35 @@ const pageNumberRegion = computed({
 const footerEnabled = ref(false)
 const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)
-const pageNumberSequence = ref('continuous')
-const pageNumberStyle = ref('arabic')
-const pageNumberRegion = ref('footer')
+// pageNumberSequence, pageNumberStyle, pageNumberRegion are computed from selectedPageNumberGroup above
 const pageNumberOverrides = ref([])
 const pageNumberRulesVisible = ref(false)
-const footerAlign = ref('center')
-const footerFontSize = ref(9)
-const footerFontFamily = ref('auto')
-const footerMarginMm = ref(10)
-const footerOffsetXMm = ref(0)
-const footerColor = ref('#000000')
-// footerTextEnabled merged into footerInsertEnabled
-const footerTextContent = ref('')
-const footerTextAlign = ref('left')
-const footerTextFontSize = ref(9)
-const footerTextFontFamily = ref('auto')
-const footerTextMarginMm = ref(10)
-const footerTextOffsetXMm = ref(0)
-const footerTextColor = ref('#000000')
+// footerAlign..footerColor are page number placement, backed by selectedPageNumberGroup
+const footerAlign = computed({
+  get: () => selectedPageNumberGroup.value.align,
+  set: (v) => { selectedPageNumberGroup.value.align = v },
+})
+const footerFontSize = computed({
+  get: () => selectedPageNumberGroup.value.fontSize,
+  set: (v) => { selectedPageNumberGroup.value.fontSize = v },
+})
+const footerFontFamily = computed({
+  get: () => selectedPageNumberGroup.value.fontFamily,
+  set: (v) => { selectedPageNumberGroup.value.fontFamily = v },
+})
+const footerMarginMm = computed({
+  get: () => selectedPageNumberGroup.value.marginMm,
+  set: (v) => { selectedPageNumberGroup.value.marginMm = v },
+})
+const footerOffsetXMm = computed({
+  get: () => selectedPageNumberGroup.value.offsetXMm,
+  set: (v) => { selectedPageNumberGroup.value.offsetXMm = v },
+})
+const footerColor = computed({
+  get: () => selectedPageNumberGroup.value.color,
+  set: (v) => { selectedPageNumberGroup.value.color = v },
+})
+// footerTextContent..footerTextColor are computed from selectedFooterTextGroup above
 const outputMode = ref('files_and_merge')
 const mergeFileName = ref('merged_evidence.pdf')
 const previewPage = ref(1)
@@ -1266,6 +1283,8 @@ const currentRules = computed(() => ({
   headerOffsetXMm: headerOffsetXMm.value,
   headerColor: headerColor.value,
   headerGroups: insertHeaderFooterEnabled.value ? headerGroups.value : [],
+  footerTextGroups: insertHeaderFooterEnabled.value && footerInsertEnabled.value ? footerTextGroups.value : [],
+  pageNumberGroups: insertHeaderFooterEnabled.value && footerEnabled.value ? pageNumberGroups.value : [],
   footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,
@@ -1591,13 +1610,15 @@ function applyReplacementPreset() {
   // Reset header groups to single default
   headerGroups.value = [{ ...defaultHeaderGroup(), id: 'h1', label: '页眉 1', mode: workflowMode.value === 'split' ? 'per_file' : 'filename' }]
   selectedHeaderGroupId.value = 'h1'
+  // Reset footer text groups to single default
+  footerTextGroups.value = [{ ...defaultFooterTextGroup(), id: 'ft1', label: '页脚文字 1' }]
+  selectedFooterTextGroupId.value = 'ft1'
+  // Reset page number groups to single default
+  pageNumberGroups.value = [{ ...defaultPageNumberGroup(), id: 'pn1', label: '页码 1' }]
+  selectedPageNumberGroupId.value = 'pn1'
   footerEnabled.value = true
   footerContinuous.value = true
   footerText.value = '{page}/{total}'
-  footerAlign.value = 'center'
-  footerFontSize.value = 9
-  footerFontFamily.value = 'auto'
-  footerMarginMm.value = 10
   outputMode.value = 'files_and_merge'
   refreshPreview()
 }
@@ -1605,7 +1626,7 @@ function applyReplacementPreset() {
 function hasReplacementRule() {
   return (
     (insertHeaderFooterEnabled.value &&
-      (headerMode.value !== 'none' || footerTextEnabled.value || footerEnabled.value)) ||
+      (headerMode.value !== 'none' || footerInsertEnabled.value || footerEnabled.value)) ||
     hasExistingEditRule.value ||
     hasExistingConvertRule.value ||
     hasExistingRemovalRule.value
@@ -2124,7 +2145,7 @@ function removeOverlayFile(index) {
 <style scoped>
 .hf-workbench {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 0;
   height: 100%;
   min-height: 0;
@@ -2135,20 +2156,21 @@ function removeOverlayFile(index) {
 
 .hf-panel {
   flex: 1 1 0;
-  min-height: 0;
+  min-width: 400px;
+  max-width: 55%;
   overflow: auto;
   scrollbar-gutter: stable;
   padding-right: 8px;
 }
 
 .preview-panel {
-  flex: 0 0 auto;
-  min-height: 50vh;
+  flex: 1.3 1 0;
+  min-width: 320px;
   overflow: auto;
   scrollbar-gutter: stable;
-  padding-top: 14px;
-  border-top: 1px solid var(--docsy-border-subtle);
-  resize: vertical;
+  padding-left: 14px;
+  border-left: 1px solid var(--docsy-border-subtle);
+  resize: horizontal;
 }
 
 .section-head,
@@ -2714,15 +2736,7 @@ h3 {
   border-radius: 6px;
 }
 
-@media (max-width: 1280px) {
-  .hf-workbench {
-    height: auto;
-    overflow: visible;
-  }
 
-  .hf-panel {
-    min-width: 0;
-  }
 
   .preview-panel {
     flex: 0 0 auto;
@@ -2743,16 +2757,7 @@ h3 {
   }
 }
 
-@media (max-width: 760px) {
-  .hf-workbench {
-    padding: 16px;
-  }
 
-  .session-summary,
-  .existing-summary-grid,
-  .dialog-rule-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .evidence-drop-overlay {
