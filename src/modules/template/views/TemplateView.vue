@@ -3720,7 +3720,10 @@ async function renderTemplate() {
   ElMessage.success('Word 文书已生成')
   await loadHistoryContext(false)
   await loadTemplateHistoryRuns()
-  await openPath(result.data)
+  const openResult = await openPath(result.data)
+  if (!openResult.ok) {
+    ElMessage.warning('文书已生成但无法自动打开，请到保存目录查看')
+  }
 }
 
 // ── Batch Fill ──────────────────────────────────────────────────────────────
@@ -3755,7 +3758,10 @@ async function exportBatchTemplate() {
     return
   }
   ElMessage.success('字段表已导出')
-  await openPath(result.data)
+  const openResult = await openPath(result.data)
+  if (!openResult.ok) {
+    ElMessage.warning('字段表已导出但无法自动打开，请到保存目录查看')
+  }
 }
 
 async function importAndBatchRender() {
@@ -3823,7 +3829,10 @@ async function importAndBatchRender() {
   ElMessage.success(msg)
 
   if (r.outputs?.length) {
-    await openPath(r.outputs[0])
+    const openResult = await openPath(r.outputs[0])
+    if (!openResult.ok) {
+      ElMessage.warning('文书已生成但无法自动打开，请到输出目录查看')
+    }
   }
 }
 
