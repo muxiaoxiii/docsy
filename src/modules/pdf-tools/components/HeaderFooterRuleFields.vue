@@ -349,6 +349,21 @@ const overlapWarnings = computed(() => {
       }
     }
   }
+  // Check header vs footer collision (page height ~297mm for A4)
+  const pageHeight = 297
+  const headerBottom = groups.filter(g => g.enabled).map(g => g.marginMm + (g.fontSize || 10) * 0.4)
+  const footerTop = pageHeight - (props.pageNumberMarginMm || 10) - (props.pageNumberFontSize || 9) * 0.4
+  for (const hb of headerBottom) {
+    if (hb > footerTop - 5) {
+      warnings.push(`页眉底部（${hb.toFixed(1)}mm）与页码区域可能碰撞`)
+    }
+  }
+  // Check footer text vs page number overlap
+  const ftMargin = props.footerTextMarginMm || 10
+  const pnMargin = props.pageNumberMarginMm || 10
+  if (props.footerInsertEnabled && props.pageNumberEnabled && Math.abs(ftMargin - pnMargin) <= 3) {
+    warnings.push('页脚文字与页码的距底距离接近，可能重叠')
+  }
   return warnings
 })
 
