@@ -1808,9 +1808,8 @@ function removeOverlayFile(index) {
 
 <style scoped>
 .hf-workbench {
-  display: grid;
-  grid-template-columns: minmax(560px, 1.4fr) minmax(320px, 0.6fr);
-  gap: 14px;
+  display: flex;
+  gap: 0;
   height: 100%;
   min-height: 0;
   padding: 18px 20px;
@@ -1818,19 +1817,25 @@ function removeOverlayFile(index) {
   background: var(--docsy-canvas);
 }
 
-.hf-panel,
-.preview-panel {
+.hf-panel {
+  flex: 1 1 0;
+  min-width: 480px;
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
-}
-
-.hf-panel {
-  padding-right: 4px;
+  padding-right: 8px;
 }
 
 .preview-panel {
-  padding-left: 2px;
+  flex: 0 0 400px;
+  min-width: 320px;
+  max-width: 50vw;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding-left: 14px;
+  border-left: 1px solid var(--docsy-border-subtle);
+  resize: horizontal;
 }
 
 .section-head,
@@ -2018,7 +2023,7 @@ h3 {
 
 .rule-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 8px 12px;
 }
 
@@ -2398,19 +2403,28 @@ h3 {
 
 @media (max-width: 1280px) {
   .hf-workbench {
-    grid-template-columns: 1fr;
+    flex-direction: column;
     height: auto;
     overflow: visible;
+  }
+
+  .hf-panel {
+    min-width: 0;
+  }
+
+  .preview-panel {
+    flex: 0 0 auto;
+    max-width: none;
+    min-width: 0;
+    margin-top: 14px;
+    padding-left: 0;
+    border-left: 0;
+    resize: none;
   }
 
   .hf-panel,
   .preview-panel {
     overflow: visible;
-  }
-
-  .preview-panel {
-    margin-top: 16px;
-    padding-left: 0;
   }
 
   .session-summary {
