@@ -14,6 +14,12 @@ export default {
       component: () => import('./views/SettingsView.vue'),
       meta: { title: '设置', moduleId: 'settings' },
     },
+    {
+      path: '/about',
+      name: 'about',
+      component: () => import('./views/AboutView.vue'),
+      meta: { title: '关于', moduleId: 'settings' },
+    },
   ],
 
   menuItems: [],

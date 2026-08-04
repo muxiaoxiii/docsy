@@ -5,6 +5,7 @@ import { logWarn } from '../../../services/appLogger.js'
 import { bboxOverlayStyle, textOverlayStyle } from './pdfPreviewCoordinates.js'
 import { candidateKey } from './useEvidencePdfDetection.js'
 import { buildHeaderFooterItems, expandPlaceholders, buildHeaderText } from './useEvidencePdfSession.js'
+import { renderPageNumberTemplate } from './pdfPageNumberRules.js'
 
 const TRUE_PREVIEW_DPI = 120
 const PREVIEW_CHAR_WIDTH = {
@@ -45,6 +46,7 @@ export function useEvidencePdfPreview({
   footerOffsetXMm,
   footerColor,
   footerText,
+  pageNumberStyle,
   removeAnnotations,
   annotationKinds,
   cleanupHeaderHeightMm,
@@ -69,7 +71,7 @@ export function useEvidencePdfPreview({
       ? selectedOverlayFile.value.pageStart + previewPage.value - 1
       : previewPage.value
     const total = footerContinuous.value ? totalOverlayPages.value : selectedOverlayFile.value.pages || 1
-    return expandPlaceholders(footerTemplate, page, total)
+    return renderPageNumberTemplate(footerTemplate, page, total, pageNumberStyle.value)
   })
 
   const previewHeaderStyle = computed(() =>
@@ -181,13 +183,22 @@ export function useEvidencePdfPreview({
       return {
         key: `${selectedOverlayFile.value.path}-converted-${index}`,
         region,
-        text: expandPlaceholders(
-          overlay.text,
-          footerContinuous.value ? selectedOverlayFile.value.pageStart + previewPage.value - 1 : previewPage.value,
-          footerContinuous.value
-            ? totalOverlayPages.value || selectedOverlayFile.value.pages || 1
-            : selectedOverlayFile.value.pages || 1,
-        ),
+        text: overlay.artifactKind === 'PageNumber'
+          ? renderPageNumberTemplate(
+              overlay.text,
+              footerContinuous.value ? selectedOverlayFile.value.pageStart + previewPage.value - 1 : previewPage.value,
+              footerContinuous.value
+                ? totalOverlayPages.value || selectedOverlayFile.value.pages || 1
+                : selectedOverlayFile.value.pages || 1,
+              overlay.numberStyle || pageNumberStyle.value,
+            )
+          : expandPlaceholders(
+              overlay.text,
+              footerContinuous.value ? selectedOverlayFile.value.pageStart + previewPage.value - 1 : previewPage.value,
+              footerContinuous.value
+                ? totalOverlayPages.value || selectedOverlayFile.value.pages || 1
+                : selectedOverlayFile.value.pages || 1,
+            ),
         style: textOverlayStyle(region, previewData.value, {
           align: overlay.align,
           marginMm: overlay.marginMm,

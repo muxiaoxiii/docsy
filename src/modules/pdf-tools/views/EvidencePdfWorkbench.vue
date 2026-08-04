@@ -1214,6 +1214,7 @@ const {
   footerOffsetXMm,
   footerColor,
   footerText,
+  pageNumberStyle,
   removeAnnotations,
   annotationKinds,
   cleanupHeaderHeightMm,

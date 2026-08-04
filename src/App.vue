@@ -14,9 +14,19 @@
         </template>
       </el-menu>
       <div class="sidebar-footer">
+        <el-tooltip content="关于" placement="right">
+          <el-button
+            class="footer-btn"
+            :class="{ active: route.name === 'about' }"
+            circle
+            @click="router.push({ name: 'about' })"
+          >
+            <el-icon><InfoFilled /></el-icon>
+          </el-button>
+        </el-tooltip>
         <el-tooltip content="设置" placement="right">
           <el-button
-            class="settings-shortcut"
+            class="footer-btn"
             :class="{ active: route.name === 'settings' }"
             circle
             @click="router.push({ name: 'settings' })"
@@ -53,7 +63,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Setting } from '@element-plus/icons-vue'
+import { Setting, InfoFilled } from '@element-plus/icons-vue'
 import { getMenuItems } from './core/moduleRegistry.js'
 import { tauriCallSafe } from './core/tauriBridge.js'
 import { listen } from '@tauri-apps/api/event'
@@ -289,12 +299,13 @@ onBeforeUnmount(() => {
 .sidebar-footer {
   display: flex;
   justify-content: center;
+  gap: 8px;
   padding: 12px 0 16px;
   border-top: 1px solid var(--docsy-border-subtle);
   background: rgba(255, 253, 250, 0.42);
 }
 
-.settings-shortcut.active {
+.footer-btn.active {
   color: var(--docsy-primary);
   border-color: var(--docsy-primary);
   background: var(--docsy-primary-soft);

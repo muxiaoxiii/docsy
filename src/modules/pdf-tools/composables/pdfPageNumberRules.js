@@ -1,3 +1,5 @@
+import { toChineseNumber } from '../../../core/numberFormat.js'
+
 const CIRCLED = ['', '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳']
 const DINGBAT = ['', '❶', '❷', '❸', '❹', '❺', '❻', '❼', '❽', '❾', '❿', '⓫', '⓬', '⓭', '⓮', '⓯', '⓰', '⓱', '⓲', '⓳', '⓴']
 
@@ -136,23 +138,3 @@ function toRoman(value) {
   return result
 }
 
-function toChineseNumber(value) {
-  if (value > 9999) return String(value)
-  const digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
-  const units = ['', '十', '百', '千']
-  const chars = String(value).split('').map(Number)
-  let result = ''
-  let pendingZero = false
-  chars.forEach((digit, index) => {
-    const unitIndex = chars.length - index - 1
-    if (digit === 0) {
-      pendingZero = result.length > 0 && chars.slice(index + 1).some((next) => next !== 0)
-      return
-    }
-    if (pendingZero) result += '零'
-    pendingZero = false
-    if (!(digit === 1 && unitIndex === 1 && result === '')) result += digits[digit]
-    result += units[unitIndex]
-  })
-  return result || '零'
-}
