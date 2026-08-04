@@ -1220,6 +1220,17 @@ fn labels_for(normalized_text: &str) -> Vec<String> {
     {
         labels.push("page-number".to_string());
     }
+    // Recognize actual page number formats: "1/3 页", "第2页/共19页", "Page 5 of 20", "2/19"
+    static PAGE_NUM_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?ix)
+            \d+\s*/\s*\d+\s*页?$
+            | 第\s*\d+\s*页\s*/\s*共\s*\d+\s*页
+            | page\s*\d+\s*(?:of|/)\s*\d+
+        ").unwrap()
+    });
+    if !labels.contains(&"page-number".to_string()) && PAGE_NUM_RE.is_match(normalized_text) {
+        labels.push("page-number".to_string());
+    }
     if normalized_text.contains("证据") {
         labels.push("evidence-label".to_string());
     }
@@ -1929,5 +1940,23 @@ mod tests {
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[1].page, 2);
         assert!(pages[1].headers.is_empty());
+    }
+
+    #[test]
+    fn labels_for_page_number_patterns() {
+        // Template markers
+        assert!(labels_for("{page}/{total}").contains(&"page-number".to_string()));
+        // With 页
+        assert!(labels_for("CN 117457788 B 1/3 页").contains(&"page-number".to_string()));
+        // Without 页
+        assert!(labels_for("CN 117457788 B 1/3").contains(&"page-number".to_string()));
+        // 第X页/共Y页
+        assert!(labels_for("第2页/共19页").contains(&"page-number".to_string()));
+        // English
+        assert!(labels_for("Page 5 of 20").contains(&"page-number".to_string()));
+        // Pure number - should NOT be page-number (ambiguous)
+        assert!(!labels_for("2").contains(&"page-number".to_string()));
+        // Regular header text
+        assert!(!labels_for("说 明 书").contains(&"page-number".to_string()));
     }
 }
