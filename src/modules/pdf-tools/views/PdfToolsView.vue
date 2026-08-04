@@ -262,14 +262,14 @@
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="防OCR" name="anti-ocr" lazy>
-        <ToolWorkspaceShell title="防OCR处理" description="检测或添加 PDF 文字防提取保护。保留视觉效果，干扰自动化文字提取。">
+      <el-tab-pane label="防复制" name="anti-ocr" lazy>
+        <ToolWorkspaceShell title="防复制处理" description="防止 PDF 文字被复制提取。保留视觉效果，干扰文字选择和复制。">
           <template #toolbar>
             <el-button type="primary" @click="selectAntiOcrFiles">选择 PDF 文件</el-button>
           </template>
           <FileQueuePanel
             :items="antiOcrFiles"
-            empty-text="选择一个或多个 PDF 文件进行防OCR检测"
+            empty-text="选择一个或多个 PDF 文件进行防复制检测"
             @clear="clearAntiOcrFiles"
             @remove="removeAntiOcrFile"
           >
@@ -283,7 +283,11 @@
               type="success"
               @click="batchAntiOcrApply"
               :loading="antiOcrProcessing"
-              :disabled="antiOcrReadyCount === 0"
+              <el-select v-model="antiCopyMethod" size="small" style="width:120px">
+                            <el-option label="CMap 篡改" value="cmap_scramble" />
+                            <el-option label="CMap 移除" value="cmap_remove" />
+                          </el-select>
+                          <el-button :disabled="antiOcrReadyCount === 0"
             >
               添加防OCR {{ antiOcrReadyCount }} 个文件
             </el-button>
@@ -477,6 +481,7 @@ const selectedSplitRange = computed(() => splitRanges.value[selectedSplitRangeIn
 // Anti-OCR
 const antiOcrFiles = ref([])
 const antiOcrProcessing = ref(false)
+const antiCopyMethod = ref('cmap_scramble')
 const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => !f.hasAntiOcr).length)
 const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr).length)
 
@@ -499,7 +504,7 @@ async function inspectAntiOcrFiles(paths) {
   for (const path of paths) {
     try {
       const result = await Promise.race([
-        tauriCallSafe('detect_anti_ocr', { input: path }),
+        tauriCallSafe('detect_anti_copy', { input: path }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
       ])
       const item = reactive.find((f) => f.path === path)
@@ -546,9 +551,9 @@ async function batchAntiOcrApply() {
     file.statusType = 'warning'
     const dir = parentDir(file.path)
     const stem = stripPdf(file.name)
-    const output = `${dir}/${stem}_anti_ocr.pdf`
+    const output = `${dir}/${stem}_anti_copy.pdf`
     const result = await Promise.race([
-      tauriCallSafe('apply_anti_ocr', { input: file.path, output }),
+      tauriCallSafe('apply_anti_copy', { input: file.path, output, method: antiCopyMethod.value }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)),
     ]).catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
     if (!result.ok) {
@@ -573,7 +578,7 @@ async function batchAntiOcrRemove() {
     const stem = stripPdf(file.name)
     const output = `${dir}/${stem}_restored.pdf`
     const result = await Promise.race([
-      tauriCallSafe('remove_anti_ocr', { input: file.path, output }),
+      tauriCallSafe('remove_anti_copy', { input: file.path, output }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)),
     ]).catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
     if (!result.ok) {
@@ -1112,7 +1117,7 @@ h3 {
   }
 }
 
-.anti-ocr-content {
+.anti-copy-content {
   padding: 12px 0;
 }
 .file-path {
@@ -1121,28 +1126,28 @@ h3 {
   margin-bottom: 12px;
   word-break: break-all;
 }
-.anti-ocr-stats {
+.anti-copy-stats {
   display: flex;
   gap: 16px;
   margin: 12px 0;
   font-size: 13px;
   color: var(--docsy-text);
 }
-.anti-ocr-message {
+.anti-copy-message {
   margin-top: 12px;
   padding: 8px 12px;
   border-radius: 6px;
   font-size: 13px;
 }
-.anti-ocr-message.info {
+.anti-copy-message.info {
   background: var(--docsy-surface-muted);
   color: var(--docsy-text);
 }
-.anti-ocr-message.success {
+.anti-copy-message.success {
   background: #f0fdf4;
   color: #16a34a;
 }
-.anti-ocr-message.danger {
+.anti-copy-message.danger {
   background: #fef2f2;
   color: #dc2626;
 }

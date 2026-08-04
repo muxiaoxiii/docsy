@@ -1,180 +1,275 @@
 use anyhow::{Context, Result};
-use lopdf::{Document, Object, ObjectId, Stream};
-use std::collections::BTreeMap;
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-/// Result of anti-OCR detection
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct AntiOcrDetectionResult {
-    pub has_anti_ocr: bool,
-    pub total_pages: usize,
-    pub pages_with_valid_cmap: usize,
-    pub pages_with_scrambled_cmap: usize,
-    pub pages_without_cmap: usize,
-    pub details: Vec<PageAntiOcrStatus>,
+const BACKUP_KEY: &[u8] = b"DocsyAntiCopyBackup";
+const MARKER: &str = "% Docsy anti-copy protection";
+
+/// Anti-copy method
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum AntiCopyMethod {
+    /// Scramble ToUnicode CMap (map chars to PUA range)
+    CmapScramble,
+    /// Remove ToUnicode CMap entirely
+    CmapRemove,
+    /// Add invisible garbled text overlay on top
+    TextOverlay,
+}
+
+impl AntiCopyMethod {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::CmapScramble => "CMap 篡改",
+            Self::CmapRemove => "CMap 移除",
+            Self::TextOverlay => "文字覆盖",
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct PageAntiOcrStatus {
-    pub page: u32,
-    pub status: String,
-    pub extracted_text_preview: String,
+pub struct AntiCopyDetection {
+    pub has_protection: bool,
+    pub method: Option<String>,
+    pub total_fonts: usize,
+    pub protected_fonts: usize,
+    pub has_backup: bool,
 }
 
-/// Detect if a PDF has anti-OCR protection applied.
-/// Checks the ToUnicode CMap for each page's fonts.
-pub fn detect_anti_ocr(input: &Path) -> Result<AntiOcrDetectionResult> {
+/// Detect anti-copy protection on a PDF
+pub fn detect_anti_copy(input: &Path) -> Result<AntiCopyDetection> {
     let doc = Document::load(input).context("读取 PDF 失败")?;
     let page_ids = doc.get_pages();
+    let has_backup = get_backup_meta(&doc).is_some();
 
-    let mut details = Vec::new();
-    let mut pages_with_valid = 0;
-    let mut pages_with_scrambled = 0;
-    let mut pages_without = 0;
+    let mut total_fonts = 0;
+    let mut protected_fonts = 0;
+    let mut detected_method: Option<String> = None;
+    let mut seen: HashSet<ObjectId> = HashSet::new();
 
-    for (page_num, page_id) in &page_ids {
-        let fonts = page_fonts(&doc, *page_id);
-        let mut has_cmap = false;
-        let mut cmap_valid = true;
-        let mut text_preview = String::new();
-
-        if fonts.is_empty() {
-            pages_without += 1;
-            details.push(PageAntiOcrStatus {
-                page: *page_num,
-                status: "无字体信息".to_string(),
-                extracted_text_preview: String::new(),
-            });
-            continue;
-        }
-
-        for font_id in &fonts {
-            if let Some(cmap_stream) = get_tounicode_cmap(&doc, *font_id) {
-                has_cmap = true;
-                let cmap_text = String::from_utf8_lossy(&cmap_stream);
-                if is_scrambled_cmap(&cmap_text) {
-                    cmap_valid = false;
-                }
+    for (_, page_id) in &page_ids {
+        for font_id in page_fonts(&doc, *page_id) {
+            if !seen.insert(font_id) {
+                continue;
             }
-        }
+            total_fonts += 1;
 
-        // Try to extract a small text sample from the page content
-        if let Ok(content) = doc.get_and_decode_page_content(*page_id) {
-            text_preview = extract_text_sample(&content.operations, &doc, *page_id);
-        }
-
-        if !has_cmap {
-            pages_without += 1;
-            details.push(PageAntiOcrStatus {
-                page: *page_num,
-                status: "无 ToUnicode CMap".to_string(),
-                extracted_text_preview: text_preview,
-            });
-        } else if !cmap_valid {
-            pages_with_scrambled += 1;
-            details.push(PageAntiOcrStatus {
-                page: *page_num,
-                status: "CMap 已篡改（防OCR）".to_string(),
-                extracted_text_preview: text_preview,
-            });
-        } else {
-            pages_with_valid += 1;
-            details.push(PageAntiOcrStatus {
-                page: *page_num,
-                status: "正常".to_string(),
-                extracted_text_preview: text_preview,
-            });
+            if let Some(cmap_bytes) = get_tounicode_cmap(&doc, font_id) {
+                let cmap_text = String::from_utf8_lossy(&cmap_bytes);
+                if cmap_text.contains(MARKER) || has_pua_mappings(&cmap_text) {
+                    protected_fonts += 1;
+                    detected_method.get_or_insert_with(|| "CMap 篡改".to_string());
+                }
+            } else if has_backup {
+                // No CMap but we have backup → CMap was removed
+                protected_fonts += 1;
+                detected_method.get_or_insert_with(|| "CMap 移除".to_string());
+            }
         }
     }
 
-    let has_anti_ocr = pages_with_scrambled > 0;
-    let total = page_ids.len();
-
-    Ok(AntiOcrDetectionResult {
-        has_anti_ocr,
-        total_pages: total,
-        pages_with_valid_cmap: pages_with_valid,
-        pages_with_scrambled_cmap: pages_with_scrambled,
-        pages_without_cmap: pages_without,
-        details,
+    Ok(AntiCopyDetection {
+        has_protection: protected_fonts > 0 || has_backup,
+        method: detected_method,
+        total_fonts,
+        protected_fonts,
+        has_backup,
     })
 }
 
-/// Apply anti-OCR protection to a PDF by scrambling ToUnicode CMaps.
-/// The visual appearance is preserved (font glyphs unchanged),
-/// but text extraction will produce garbled output.
-pub fn apply_anti_ocr(input: &Path, output: &Path) -> Result<usize> {
+/// Apply anti-copy protection
+pub fn apply_anti_copy(
+    input: &Path,
+    output: &Path,
+    method: AntiCopyMethod,
+) -> Result<usize> {
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
-    let page_ids = doc.get_pages();
 
-    let mut modified_fonts = 0;
-    let mut seen_fonts: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
+    // Build backup data before modifying
+    let backup = build_backup(&doc);
+    store_backup_meta(&mut doc, &backup);
+
+    let page_ids = doc.get_pages();
+    let mut modified = 0;
+    let mut seen: HashSet<ObjectId> = HashSet::new();
 
     for (_, page_id) in &page_ids {
-        let fonts = page_fonts(&doc, *page_id);
-        for font_id in fonts {
-            if seen_fonts.contains(&font_id) {
-                continue;
-            }
-            seen_fonts.insert(font_id);
-
-            if let Some(cmap_stream) = get_tounicode_cmap(&doc, font_id) {
-                let cmap_text = String::from_utf8_lossy(&cmap_stream);
-                if !is_scrambled_cmap(&cmap_text) {
-                    let scrambled = scramble_cmap(&cmap_text);
-                    set_tounicode_cmap(&mut doc, font_id, scrambled.as_bytes());
-                    modified_fonts += 1;
+        match method {
+            AntiCopyMethod::CmapScramble => {
+                for font_id in page_fonts(&doc, *page_id) {
+                    if !seen.insert(font_id) {
+                        continue;
+                    }
+                    if let Some(cmap_bytes) = get_tounicode_cmap(&doc, font_id) {
+                        let cmap_text = String::from_utf8_lossy(&cmap_bytes);
+                        if !is_already_protected(&cmap_text) {
+                            let scrambled = scramble_cmap(&cmap_text);
+                            set_tounicode_cmap(&mut doc, font_id, scrambled.as_bytes());
+                            modified += 1;
+                        }
+                    }
                 }
             }
-        }
-    }
-
-    doc.save(output)
-        .context("保存防OCR处理后的PDF失败")?;
-    Ok(modified_fonts)
-}
-
-/// Remove anti-OCR protection by restoring valid ToUnicode CMaps.
-/// This is a best-effort restoration based on available font encoding data.
-pub fn remove_anti_ocr(input: &Path, output: &Path) -> Result<usize> {
-    let mut doc = Document::load(input).context("读取 PDF 失败")?;
-    let page_ids = doc.get_pages();
-
-    let mut restored_fonts = 0;
-    let mut seen_fonts: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
-
-    for (_, page_id) in &page_ids {
-        let fonts = page_fonts(&doc, *page_id);
-        for font_id in fonts {
-            if seen_fonts.contains(&font_id) {
-                continue;
-            }
-            seen_fonts.insert(font_id);
-
-            if let Some(cmap_stream) = get_tounicode_cmap(&doc, font_id) {
-                let cmap_text = String::from_utf8_lossy(&cmap_stream);
-                if is_scrambled_cmap(&cmap_text) {
-                    // Try to rebuild a valid CMap from the font's Encoding/BaseFont
-                    if let Some(restored) = try_restore_cmap(&doc, font_id, &cmap_text) {
-                        set_tounicode_cmap(&mut doc, font_id, restored.as_bytes());
-                        restored_fonts += 1;
-                    } else {
-                        // If we can't restore, remove the CMap entirely
-                        // so OCR tools can fall back to visual recognition
+            AntiCopyMethod::CmapRemove => {
+                for font_id in page_fonts(&doc, *page_id) {
+                    if !seen.insert(font_id) {
+                        continue;
+                    }
+                    if get_tounicode_cmap(&doc, font_id).is_some() {
                         remove_tounicode_cmap(&mut doc, font_id);
-                        restored_fonts += 1;
+                        modified += 1;
+                    }
+                }
+            }
+            AntiCopyMethod::TextOverlay => {
+                // TextOverlay: CMap removal + overlay is done in JS/Python layer
+                // because lopdf doesn't easily support adding content streams
+                for font_id in page_fonts(&doc, *page_id) {
+                    if !seen.insert(font_id) {
+                        continue;
+                    }
+                    if let Some(cmap_bytes) = get_tounicode_cmap(&doc, font_id) {
+                        let cmap_text = String::from_utf8_lossy(&cmap_bytes);
+                        if !is_already_protected(&cmap_text) {
+                            let scrambled = scramble_cmap(&cmap_text);
+                            set_tounicode_cmap(&mut doc, font_id, scrambled.as_bytes());
+                            modified += 1;
+                        }
                     }
                 }
             }
         }
     }
 
-    doc.save(output)
-        .context("保存移除防OCR后的PDF失败")?;
-    Ok(restored_fonts)
+    doc.save(output).context("保存防复制PDF失败")?;
+    Ok(modified)
 }
 
-// --- Helper functions ---
+/// Remove anti-copy protection (restore from backup)
+pub fn remove_anti_copy(input: &Path, output: &Path) -> Result<usize> {
+    let mut doc = Document::load(input).context("读取 PDF 失败")?;
+
+    let backup = get_backup_meta(&doc);
+    let page_ids = doc.get_pages();
+    let mut restored = 0;
+    let mut seen: HashSet<ObjectId> = HashSet::new();
+
+    for (_, page_id) in &page_ids {
+        for font_id in page_fonts(&doc, *page_id) {
+            if !seen.insert(font_id) {
+                continue;
+            }
+
+            // Try to restore from backup first
+            if let Some(ref backup_data) = backup {
+                let font_name = get_font_name(&doc, font_id);
+                if let Some(original_cmap) = backup_data.cmaps.get(&font_name) {
+                    set_tounicode_cmap(&mut doc, font_id, original_cmap.as_bytes());
+                    restored += 1;
+                    continue;
+                }
+            }
+
+            // If no backup for this font, just clean up our markers
+            if let Some(cmap_bytes) = get_tounicode_cmap(&doc, font_id) {
+                let cmap_text = String::from_utf8_lossy(&cmap_bytes);
+                if is_already_protected(&cmap_text) {
+                    // Can't restore original, remove corrupted CMap
+                    remove_tounicode_cmap(&mut doc, font_id);
+                    restored += 1;
+                }
+            }
+        }
+    }
+
+    // Remove backup metadata
+    if backup.is_some() {
+        remove_backup_meta(&mut doc);
+    }
+
+    doc.save(output).context("保存恢复后的PDF失败")?;
+    Ok(restored)
+}
+
+// --- Backup data stored in PDF metadata ---
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct BackupData {
+    cmaps: BTreeMap<String, String>, // font_name → original CMap text
+}
+
+fn build_backup(doc: &Document) -> BackupData {
+    let mut cmaps = BTreeMap::new();
+    let mut seen: HashSet<ObjectId> = HashSet::new();
+    let page_ids = doc.get_pages();
+
+    for (_, page_id) in &page_ids {
+        for font_id in page_fonts(doc, *page_id) {
+            if !seen.insert(font_id) {
+                continue;
+            }
+            let font_name = get_font_name(doc, font_id);
+            if let Some(cmap_bytes) = get_tounicode_cmap(doc, font_id) {
+                let cmap_text = String::from_utf8_lossy(&cmap_bytes).to_string();
+                cmaps.insert(font_name, cmap_text);
+            }
+        }
+    }
+
+    BackupData { cmaps }
+}
+
+fn store_backup_meta(doc: &mut Document, backup: &BackupData) {
+    let json = serde_json::to_string(backup).unwrap_or_default();
+    let json_bytes = json.as_bytes().to_vec();
+
+    // Try to use existing Info dictionary
+    let info_ref = doc.trailer.get(b"Info").ok().cloned();
+    if let Some(Object::Reference(info_id)) = info_ref {
+        if let Ok(obj) = doc.get_object_mut(info_id) {
+            if let Object::Dictionary(dict) = obj {
+                dict.set(BACKUP_KEY.to_vec(), Object::string_literal(json_bytes));
+                return;
+            }
+        }
+    }
+
+    // No Info dict - create one and add to trailer via indirect reference
+    let mut info_dict = Dictionary::new();
+    info_dict.set(BACKUP_KEY.to_vec(), Object::string_literal(json_bytes));
+    let info_id = doc.add_object(Object::Dictionary(info_dict));
+    // lopdf's trailer is a Dictionary - we can set directly
+    doc.trailer.set(b"Info", Object::Reference(info_id));
+}
+
+fn get_backup_meta(doc: &Document) -> Option<BackupData> {
+    let info_ref = doc.trailer.get(b"Info").ok()?;
+    let info_id = match info_ref {
+        Object::Reference(id) => *id,
+        _ => return None,
+    };
+    let info_dict = doc.get_dictionary(info_id).ok()?;
+    let backup_obj = info_dict.get(BACKUP_KEY).ok()?;
+    let json_bytes = match backup_obj {
+        Object::String(bytes, _) => bytes.clone(),
+        _ => return None,
+    };
+    let json = String::from_utf8_lossy(&json_bytes);
+    serde_json::from_str(&json).ok()
+}
+
+fn remove_backup_meta(doc: &mut Document) {
+    let info_ref = doc.trailer.get(b"Info").ok().cloned();
+    if let Some(Object::Reference(info_id)) = info_ref {
+        if let Ok(obj) = doc.get_object_mut(info_id) {
+            if let Object::Dictionary(dict) = obj {
+                dict.remove(BACKUP_KEY);
+            }
+        }
+    }
+}
+
+// --- Font helpers ---
 
 fn page_fonts(doc: &Document, page_id: ObjectId) -> Vec<ObjectId> {
     let mut fonts = Vec::new();
@@ -206,6 +301,15 @@ fn page_fonts(doc: &Document, page_id: ObjectId) -> Vec<ObjectId> {
     fonts
 }
 
+fn get_font_name(doc: &Document, font_id: ObjectId) -> String {
+    if let Ok(dict) = doc.get_dictionary(font_id) {
+        if let Ok(Object::Name(name)) = dict.get(b"BaseFont") {
+            return String::from_utf8_lossy(name).to_string();
+        }
+    }
+    format!("font_{:?}", font_id)
+}
+
 fn get_tounicode_cmap(doc: &Document, font_id: ObjectId) -> Option<Vec<u8>> {
     let font_dict = doc.get_dictionary(font_id).ok()?;
     let tounicode = font_dict.get(b"ToUnicode").ok()?;
@@ -221,10 +325,7 @@ fn set_tounicode_cmap(doc: &mut Document, font_id: ObjectId, data: &[u8]) {
     if let Ok(font_dict) = doc.get_dictionary(font_id) {
         if let Ok(Object::Reference(cmap_id)) = font_dict.get(b"ToUnicode") {
             if let Ok(Object::Stream(stream)) = doc.get_object_mut(*cmap_id) {
-                *stream = Stream::new(
-                    lopdf::Dictionary::new(),
-                    data.to_vec(),
-                );
+                *stream = Stream::new(Dictionary::new(), data.to_vec());
             }
         }
     }
@@ -236,58 +337,46 @@ fn remove_tounicode_cmap(doc: &mut Document, font_id: ObjectId) {
     }
 }
 
-/// Check if a CMap has been scrambled (anti-OCR applied).
-/// A scrambled CMap maps character codes to non-standard or random Unicode values.
-fn is_scrambled_cmap(cmap_text: &str) -> bool {
-    // Check for our scramble marker
-    if cmap_text.contains("% Anti-OCR protection applied") {
-        return true;
-    }
+// --- CMap analysis ---
 
-    // Check for suspicious patterns:
-    // 1. CMap maps to Private Use Area (PUA) characters
-    let pua_count = cmap_text.matches("<").count();
-    let pua_target_count = cmap_text
-        .lines()
-        .filter(|line| line.contains("beginbfchar") || line.contains("beginbfrange"))
-        .count();
-
-    // If there are many mappings and they target PUA range (U+E000-U+F8FF)
-    if pua_count > 10 && pua_target_count > 0 {
-        let mut pua_hits = 0;
-        for line in cmap_text.lines() {
-            // Look for mappings like <XX> <EXXX> (PUA range)
-            if line.contains("<E") || line.contains("<F") {
-                pua_hits += 1;
-            }
-        }
-        if pua_hits > pua_count / 3 {
-            return true;
-        }
-    }
-
-    false
+fn is_already_protected(cmap_text: &str) -> bool {
+    cmap_text.contains(MARKER)
 }
 
-/// Scramble a CMap by remapping character codes to random Unicode values.
-/// Uses a deterministic seed based on the original mapping for consistency.
+fn has_pua_mappings(cmap_text: &str) -> bool {
+    let mut pua_hits = 0;
+    let mut total_mappings = 0;
+    for line in cmap_text.lines() {
+        if line.contains("<") && line.contains(">") && !line.starts_with('%') {
+            total_mappings += 1;
+            // Check if any hex value maps to PUA range (E000-F8FF)
+            for part in line.split('<') {
+                if let Some(end) = part.find('>') {
+                    let hex = &part[..end];
+                    if let Ok(val) = u32::from_str_radix(hex, 16) {
+                        if (0xE000..=0xF8FF).contains(&val) {
+                            pua_hits += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    total_mappings > 5 && pua_hits > total_mappings / 3
+}
+
+// --- CMap scrambling ---
+
 fn scramble_cmap(original: &str) -> String {
     let mut result = String::new();
-    result.push_str("% Anti-OCR protection applied by Docsy\n");
-    result.push_str("% Original CMap has been scrambled to prevent text extraction\n");
+    result.push_str(&format!("{}\n", MARKER));
+    result.push_str("% Original CMap replaced with garbled mappings\n");
 
     for line in original.lines() {
-        if line.contains("beginbfchar") || line.contains("endbfchar") ||
-           line.contains("beginbfrange") || line.contains("endbfrange") ||
-           line.contains("begincmap") || line.contains("endcmap") ||
-           line.contains("CMapName") || line.contains("CMapType") ||
-           line.contains("WMode") || line.contains("codespacerange") ||
-           line.starts_with('%') || line.trim().is_empty()
-        {
+        if is_structural_line(line) {
             result.push_str(line);
             result.push('\n');
         } else if line.contains("<") && line.contains(">") {
-            // This is a character mapping line - scramble the target
             result.push_str(&scramble_mapping_line(line));
             result.push('\n');
         } else {
@@ -299,15 +388,29 @@ fn scramble_cmap(original: &str) -> String {
     result
 }
 
+fn is_structural_line(line: &str) -> bool {
+    line.contains("beginbfchar")
+        || line.contains("endbfchar")
+        || line.contains("beginbfrange")
+        || line.contains("endbfrange")
+        || line.contains("begincmap")
+        || line.contains("endcmap")
+        || line.contains("CMapName")
+        || line.contains("CMapType")
+        || line.contains("WMode")
+        || line.contains("codespacerange")
+        || line.starts_with('%')
+        || line.trim().is_empty()
+}
+
 fn scramble_mapping_line(line: &str) -> String {
-    // Parse patterns like: <XX> <YYYY> or <XX> <XX> <YYYY>
     let parts: Vec<&str> = line.split('<').collect();
     if parts.len() < 3 {
         return line.to_string();
     }
 
     let mut result = String::new();
-    result.push_str(parts[0]); // leading whitespace
+    result.push_str(parts[0]);
 
     for (i, part) in parts.iter().enumerate() {
         if i == 0 {
@@ -318,7 +421,6 @@ fn scramble_mapping_line(line: &str) -> String {
         let rest = &part[end..];
 
         if i == parts.len() - 1 {
-            // Last hex value - scramble it (this is the Unicode target)
             let scrambled = scramble_hex(hex_val);
             result.push_str(&format!("<{}>{}", scrambled, rest));
         } else {
@@ -330,27 +432,9 @@ fn scramble_mapping_line(line: &str) -> String {
 }
 
 fn scramble_hex(hex: &str) -> String {
-    // Map to Unicode Private Use Area: E000-EFFF
-    // Use a simple hash of the original value for determinism
-    let hash: u32 = hex.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    let hash: u32 = hex
+        .bytes()
+        .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     let pua_char = 0xE000 + (hash % 0x1000);
     format!("{:04X}", pua_char)
 }
-
-fn extract_text_sample(_operations: &[lopdf::content::Operation], _doc: &Document, _page_id: ObjectId) -> String {
-    // Simplified: just return empty for now
-    // A full implementation would decode text operators (Tj, TJ, etc.)
-    String::new()
-}
-
-fn try_restore_cmap(_doc: &Document, _font_id: ObjectId, scrambled: &str) -> Option<String> {
-    // If the CMap was scrambled by us, we could try to reverse it
-    // But since we use a hash-based scramble, it's not reversible
-    // Return None to signal "remove the CMap and let OCR handle it"
-    if scrambled.contains("% Anti-OCR protection applied") {
-        return None;
-    }
-    None
-}
-
-
