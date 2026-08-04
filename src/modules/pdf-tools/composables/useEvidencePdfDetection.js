@@ -37,15 +37,18 @@ export function useEvidencePdfDetection({
             const status = fileExistingStatus(file)
             file.statusText = status.text
             file.statusType = status.type
+            file.statusDetail = ''
             success += 1
-          } catch {
-            file.statusText = '检测失败'
+          } catch (applyErr) {
+            file.statusText = '检测结果处理失败'
             file.statusType = 'danger'
+            file.statusDetail = applyErr?.message || '数据解析错误'
             failed += 1
           }
         } else {
           file.statusText = '检测失败'
           file.statusType = 'danger'
+          file.statusDetail = result.error || '未知错误'
           failed += 1
         }
       }

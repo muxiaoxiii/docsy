@@ -471,6 +471,23 @@
         <el-table-column label="页数" prop="pages" sortable="custom" width="70">
           <template #default="{ row }">{{ row.pages || '-' }}</template>
         </el-table-column>
+        <el-table-column label="状态" prop="statusText" sortable="custom" width="130">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.statusDetail"
+              :content="row.statusDetail"
+              placement="top"
+              :show-after="300"
+            >
+              <el-tag :type="row.statusType || 'info'" size="small">
+                {{ row.statusText || '待处理' }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="row.statusType || 'info'" size="small">
+              {{ row.statusText || '待处理' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="页码范围" prop="pageRange" sortable="custom" width="105">
           <template #default="{ row }">{{ pageRangeText(row) }}</template>
         </el-table-column>
