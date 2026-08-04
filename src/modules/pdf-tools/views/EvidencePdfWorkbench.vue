@@ -1697,12 +1697,21 @@ async function finishQuickCleanupPipeline() {
   const firstFile = overlayFiles.value[0]
   if (!firstFile?.path) return
   const sourceDir = parentDir(firstFile.path)
-  const outputDir = `${sourceDir}_cleaned`
+  const outputDir = `${sourceDir}/_cleaned`
 
-  // Step 5: Process with minimal settings (only delete, no new headers/footers)
+  // Step 5: Sync element decisions to legacy flags the payload builder needs
+  overlayFiles.value.forEach((file) => syncLegacyExistingElementState(file))
+
+  // Step 6: Process with minimal settings (only delete, no new headers/footers)
   quickCleanupRunning.value = true
   overlaying.value = true
   try {
+    const hasHeaderDelete = overlayFiles.value.some(f =>
+      (f.existingElements || []).some(e => e.kind === 'header' && e.decision === 'delete'),
+    )
+    const hasFooterDelete = overlayFiles.value.some(f =>
+      (f.existingElements || []).some(e => (e.kind === 'footerText' || e.kind === 'pageNumber') && e.decision === 'delete'),
+    )
     const cleanupRules = {
       headerMode: 'none',
       footerTextEnabled: false,
@@ -1710,6 +1719,8 @@ async function finishQuickCleanupPipeline() {
       normalizeA4: false,
       removeAnnotations: false,
       outputMode: 'files_only',
+      cleanupHeaderEnabled: hasHeaderDelete,
+      cleanupFooterEnabled: hasFooterDelete,
       cleanupHeaderHeightMm: 18,
       cleanupFooterHeightMm: 18,
     }
