@@ -91,8 +91,9 @@ export function totalPages(files) {
   return files.reduce((sum, file) => sum + (file.pages || 0), 0)
 }
 
-export function pageRangeText(file) {
+export function pageRangeText(file, sequence) {
   if (!file.pages) return '-'
+  if (sequence === 'per-file') return `1-${file.pages}`
   const end = file.pageEnd || file.pageStart + file.pages - 1
   return `${file.pageStart}-${end}`
 }
@@ -181,7 +182,9 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
   const total = totalPages(rangedFiles)
   return rangedFiles.map((file, index) => {
     const legacyFooterMode = rules.footerTextEnabled === undefined && rules.pageNumberEnabled === undefined
-    const header = buildHeaderText(file, index, rules)
+    const headerInsertEnabled = rules.headerInsertEnabled !== false
+    const footerInsertEnabled = rules.footerInsertEnabled !== false
+    const header = headerInsertEnabled ? buildHeaderText(file, index, rules) : ''
     const outputPath = buildOverlayOutputPath(file.path, outputDir)
     const pageNumberEnabled = rules.pageNumberEnabled ?? rules.footerEnabled
     const pageNumberSequence =
@@ -235,8 +238,8 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       header: header ? overlayConfigForFile(file, 'header', header, rules) : null,
       footer:
         legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
-          ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules)
-          : rules.footerTextEnabled && rules.footerTextContent
+          ? (footerInsertEnabled ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules) : null)
+          : rules.footerTextEnabled && rules.footerTextContent && footerInsertEnabled
             ? footerTextOverlayConfig(rules.footerTextContent, rules)
             : null,
       extraOverlays,

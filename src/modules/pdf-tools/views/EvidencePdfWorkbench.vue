@@ -494,7 +494,7 @@
           </template>
         </el-table-column>
         <el-table-column label="页码范围" prop="pageRange" sortable="custom" width="105">
-          <template #default="{ row }">{{ pageRangeText(row) }}</template>
+          <template #default="{ row }">{{ pageRangeText(row, pageNumberSequence) }}</template>
         </el-table-column>
         <el-table-column
           v-if="workflowMode === 'split'"
@@ -534,6 +534,7 @@
         v-if="insertHeaderFooterEnabled"
         class="dialog-rule-grid"
         v-model:header-mode="headerMode"
+        v-model:header-insert-enabled="headerInsertEnabled"
         v-model:header-text="headerText"
         v-model:header-prefix="headerPrefix"
         v-model:header-suffix="headerSuffix"
@@ -544,6 +545,7 @@
         v-model:header-offset-x-mm="headerOffsetXMm"
         v-model:header-color="headerColor"
         v-model:footer-text-enabled="footerTextEnabled"
+        v-model:footer-insert-enabled="footerInsertEnabled"
         v-model:footer-text-content="footerTextContent"
         v-model:footer-text-align="footerTextAlign"
         v-model:footer-text-font-size="footerTextFontSize"
@@ -563,6 +565,9 @@
         v-model:page-number-offset-x-mm="footerOffsetXMm"
         v-model:page-number-color="footerColor"
         :page-number-override-count="pageNumberOverrides.length"
+        v-model:page-number-show-total="pageNumberShowTotal"
+        :page-number-sample-page="previewSamplePage"
+        :page-number-sample-total="totalOverlayPages"
         @edit-page-number-rules="pageNumberRulesVisible = true"
         :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
       />
@@ -939,8 +944,10 @@ const firstFooterPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
   if (!first || !footerEnabled.value || !footerText.value || !totalOverlayPages.value) return ''
+  let tpl = footerText.value
+  if (!pageNumberShowTotal.value) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
   return renderPageNumberTemplate(
-    footerText.value,
+    tpl,
     footerContinuous.value ? first.pageStart || 1 : 1,
     footerContinuous.value ? totalOverlayPages.value : first.pages || 1,
     pageNumberStyle.value,
@@ -1091,6 +1098,7 @@ const currentRules = computed(() => ({
   cleanupHeaderHeightMm: cleanupHeaderHeightMm.value,
   cleanupFooterHeightMm: cleanupFooterHeightMm.value,
   headerMode: insertHeaderFooterEnabled.value ? headerMode.value : 'none',
+  headerInsertEnabled: insertHeaderFooterEnabled.value && headerInsertEnabled.value,
   headerText: headerText.value,
   headerPrefix: headerPrefix.value,
   headerSuffix: headerSuffix.value,
@@ -1111,6 +1119,7 @@ const currentRules = computed(() => ({
   footerOffsetXMm: footerOffsetXMm.value,
   footerColor: footerColor.value,
   footerTextEnabled: insertHeaderFooterEnabled.value && footerTextEnabled.value,
+  footerInsertEnabled: insertHeaderFooterEnabled.value && footerInsertEnabled.value,
   footerTextContent: footerTextContent.value,
   footerTextAlign: footerTextAlign.value,
   footerTextFontSize: footerTextFontSize.value,
@@ -1722,7 +1731,9 @@ function rowPageNumberPreview(row) {
   if (!insertHeaderFooterEnabled.value || !footerEnabled.value) return ''
   const page = pageNumberSequence.value === 'per-file' ? 1 : Number(row.pageStart || 1)
   const total = pageNumberSequence.value === 'per-file' ? Number(row.pages || 1) : totalOverlayPages.value
-  return renderPageNumberTemplate(row.footer || footerText.value, page, total, pageNumberStyle.value)
+  let tpl = row.footer || footerText.value
+  if (!pageNumberShowTotal.value) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
+  return renderPageNumberTemplate(tpl, page, total, pageNumberStyle.value)
 }
 
 function sortOverlayFiles({ prop, order }) {
