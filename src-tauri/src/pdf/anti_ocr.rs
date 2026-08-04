@@ -162,8 +162,8 @@ pub fn remove_anti_copy(input: &Path, output: &Path) -> Result<usize> {
 
             // Try to restore from backup first
             if let Some(ref backup_data) = backup {
-                let font_name = get_font_name(&doc, font_id);
-                if let Some(original_cmap) = backup_data.cmaps.get(&font_name) {
+                let font_key = format!("{:?}", font_id);
+                if let Some(original_cmap) = backup_data.cmaps.get(&font_key) {
                     set_tounicode_cmap(&mut doc, font_id, original_cmap.as_bytes());
                     restored += 1;
                     continue;
@@ -195,7 +195,7 @@ pub fn remove_anti_copy(input: &Path, output: &Path) -> Result<usize> {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct BackupData {
-    cmaps: BTreeMap<String, String>, // font_name → original CMap text
+    cmaps: BTreeMap<String, String>, // "font_id:obj_num:gen_num" → original CMap text
 }
 
 fn build_backup(doc: &Document) -> BackupData {
@@ -208,10 +208,10 @@ fn build_backup(doc: &Document) -> BackupData {
             if !seen.insert(font_id) {
                 continue;
             }
-            let font_name = get_font_name(doc, font_id);
+            let font_key = format!("{:?}", font_id);
             if let Some(cmap_bytes) = get_tounicode_cmap(doc, font_id) {
                 let cmap_text = String::from_utf8_lossy(&cmap_bytes).to_string();
-                cmaps.insert(font_name, cmap_text);
+                cmaps.insert(font_key, cmap_text);
             }
         }
     }
@@ -322,12 +322,22 @@ fn get_tounicode_cmap(doc: &Document, font_id: ObjectId) -> Option<Vec<u8>> {
 }
 
 fn set_tounicode_cmap(doc: &mut Document, font_id: ObjectId, data: &[u8]) {
+    // Try updating existing ToUnicode stream first
     if let Ok(font_dict) = doc.get_dictionary(font_id) {
         if let Ok(Object::Reference(cmap_id)) = font_dict.get(b"ToUnicode") {
             if let Ok(Object::Stream(stream)) = doc.get_object_mut(*cmap_id) {
                 *stream = Stream::new(Dictionary::new(), data.to_vec());
+                return;
             }
         }
+    }
+    // ToUnicode was removed (CmapRemove) — create new stream and add to font dict
+    let new_stream_id = doc.add_object(Object::Stream(Stream::new(
+        Dictionary::new(),
+        data.to_vec(),
+    )));
+    if let Ok(font_dict) = doc.get_dictionary_mut(font_id) {
+        font_dict.set(b"ToUnicode", Object::Reference(new_stream_id));
     }
 }
 

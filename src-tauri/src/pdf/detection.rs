@@ -1110,12 +1110,12 @@ fn build_candidates(
                 let has_total = lines.iter().any(|l| l.text.contains('/'));
                 let representative = if has_total && !parsed_values.is_empty() {
                     format!(
-                        "页码 (1-{}/{})",
+                        "页码 1-{}/{}",
                         parsed_values.iter().max().copied().unwrap_or(count as u32),
                         page_end - page_start + 1
                     )
                 } else {
-                    format!("页码 ({}-{})", page_start, page_end)
+                    format!("页码 {}-{}", page_start, page_end)
                 };
                 (representative.clone(), representative)
             } else {
