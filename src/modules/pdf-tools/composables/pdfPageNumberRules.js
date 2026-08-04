@@ -97,6 +97,7 @@ function toOverlay(group, total, continuous) {
     text: group.rule.template || '{page}/{total}',
     region: group.rule.region || 'footer',
     artifactKind: 'PageNumber',
+    sequence: continuous ? 'continuous' : 'per-file',
     numberStyle: group.rule.style || 'arabic',
     numberOffset: offset,
     numberTotal: total,

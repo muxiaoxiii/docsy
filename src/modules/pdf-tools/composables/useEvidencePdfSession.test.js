@@ -9,6 +9,7 @@ import {
   canWriteFooter,
   canWriteHeader,
   candidateTargetRange,
+  createDefaultHeaderGroup,
   createEvidenceFile,
   expandPlaceholders,
   naturalCompare,
@@ -530,5 +531,57 @@ describe('Evidence PDF session helpers', () => {
     expect(toChineseNumber(10)).toBe('十')
     expect(toChineseNumber(11)).toBe('十一')
     expect(toChineseNumber(23)).toBe('二十三')
+  })
+
+  it('creates evidence files with default per-file groups', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    expect(file.headerGroups).toHaveLength(1)
+    expect(file.headerGroups[0].id).toBe('h1')
+    expect(file.footerTextGroups[0].id).toBe('ft1')
+    expect(file.pageNumberGroups[0].template).toBe('{page}/{total}')
+    expect(file.selectedHeaderGroupId).toBe('h1')
+    expect(file.selectedPageNumberGroupId).toBe('pn1')
+  })
+
+  it('renders the selected group as main slot and other groups as extra overlays only', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    file.pages = 2
+    file.headerGroups = [
+      createDefaultHeaderGroup(),
+      { ...createDefaultHeaderGroup(), id: 'h2', label: '页眉 2', mode: 'custom', text: '第二组' },
+    ]
+    file.headerGroups[0].mode = 'custom'
+    file.headerGroups[0].text = '第一组'
+    file.selectedHeaderGroupId = 'h2'
+
+    const items = buildHeaderFooterItems(
+      [file],
+      { ...baseRules, headerMode: 'custom', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false },
+      '/out',
+    )
+    expect(items[0].header.text).toBe('第二组')
+    const extraHeaders = items[0].extraOverlays.filter((o) => o.region === 'header')
+    expect(extraHeaders).toHaveLength(1)
+    expect(extraHeaders[0].text).toBe('第一组')
+  })
+
+  it('strips {total} from page number templates when showTotal is off', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    file.pages = 3
+    const items = buildHeaderFooterItems(
+      [file],
+      {
+        ...baseRules,
+        footerInsertEnabled: false,
+        footerEnabled: true,
+        pageNumberEnabled: true,
+        pageNumberShowTotal: false,
+      },
+      '/out',
+    )
+    const pn = items[0].extraOverlays.find((o) => o.artifactKind === 'PageNumber')
+    expect(pn).toBeTruthy()
+    expect(pn.text).not.toContain('{total}')
+    expect(pn.text).toBe('{page}')
   })
 })

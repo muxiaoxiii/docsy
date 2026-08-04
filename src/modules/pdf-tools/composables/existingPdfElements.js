@@ -20,6 +20,8 @@ export function detectedElementFromCandidate(candidate, kind, index = 0) {
     count: Number(candidate?.count || 0),
     confidence: Number(candidate?.confidence || 0),
     labels: [...(candidate?.labels || [])],
+    sequenceForm: candidate?.sequenceForm || null,
+    hasTotal: Boolean(candidate?.hasTotal),
     decision: 'keep',
     reasons: [...(candidate?.reasons || [])],
   }

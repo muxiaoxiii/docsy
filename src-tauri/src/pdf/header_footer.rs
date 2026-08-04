@@ -371,7 +371,17 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     let total_pages = args.total_pages.unwrap_or(pages);
     let end_page = page_start + pages.saturating_sub(1);
     if total_pages < end_page {
-        anyhow::bail!("全局总页数 {total_pages} 小于当前 PDF 的结束页码 {end_page}");
+        let uses_page_placeholders = [args.header.as_ref(), args.footer.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(overlay_uses_page_placeholders)
+            || args.extra_overlays.iter().any(overlay_uses_page_placeholders);
+        if uses_page_placeholders {
+            anyhow::bail!("全局总页数 {total_pages} 小于当前 PDF 的结束页码 {end_page}，页码占位符将越界");
+        }
+        warnings.push(format!(
+            "全局总页数 {total_pages} 小于当前 PDF 的结束页码 {end_page}，页码按 {total_pages} 截断显示"
+        ));
     }
     let cleaned = args.cleanup.header_enabled || args.cleanup.footer_enabled;
     if args.header.is_none()
@@ -791,37 +801,38 @@ fn build_overlay_pdf(
     for (index, size) in pages.iter().enumerate() {
         let current_page = page_start + index as u32;
         let local_page = index as u32 + 1;
+        let page_h_mm = size.height_pt * 25.4 / 72.0;
         let mut operations = Vec::new();
+        let mut placed: Vec<(OverlayRegion, f32, f32)> = Vec::new();
+        let mut page_warnings: Vec<String> = Vec::new();
 
+        // Draw order: main header, main footer, then extra overlays. Overlapping
+        // overlays are still rendered as-is (真实反映重叠), with a warning only.
+        let mut candidates: Vec<(OverlayRegion, &OverlayTextConfig)> = Vec::new();
         if let Some(config) = header.filter(|config| overlay_applies_to_page(config, local_page)) {
-            append_overlay_text_ops(
-                &mut operations,
-                config,
-                OverlayRegion::Header,
-                size,
-                current_page,
-                total_pages,
-                &embedded_fonts,
-            )?;
+            candidates.push((OverlayRegion::Header, config));
         }
-
         if let Some(config) = footer.filter(|config| overlay_applies_to_page(config, local_page)) {
-            append_overlay_text_ops(
-                &mut operations,
-                config,
-                OverlayRegion::Footer,
-                size,
-                current_page,
-                total_pages,
-                &embedded_fonts,
-            )?;
+            candidates.push((OverlayRegion::Footer, config));
+        }
+        for config in extra_overlays {
+            if overlay_applies_to_page(config, local_page) {
+                candidates.push((overlay_region(&config.region), config));
+            }
         }
 
-        for config in extra_overlays {
-            if !overlay_applies_to_page(config, local_page) {
-                continue;
+        for (region, config) in candidates {
+            let (y0, y1) = overlay_y_range_mm(config, region, page_h_mm);
+            let overlaps = placed
+                .iter()
+                .any(|(pr, py0, py1)| *pr == region && y0 < *py1 - 0.5 && *py0 < y1 - 0.5);
+            if overlaps {
+                page_warnings.push(format!(
+                    "第 {local_page} 页的“{}”与其他页眉页脚位置重叠，将按实际位置叠加渲染",
+                    config.text.trim()
+                ));
             }
-            let region = overlay_region(&config.region);
+            placed.push((region, y0, y1));
             append_overlay_text_ops(
                 &mut operations,
                 config,
@@ -831,6 +842,9 @@ fn build_overlay_pdf(
                 total_pages,
                 &embedded_fonts,
             )?;
+        }
+        if !page_warnings.is_empty() {
+            warnings.push(page_warnings.join("；"));
         }
 
         let content = Content { operations };
@@ -871,7 +885,20 @@ fn overlay_applies_to_page(config: &OverlayTextConfig, local_page: u32) -> bool 
     local_page >= start && local_page <= end
 }
 
-#[derive(Debug, Clone, Copy)]
+fn overlay_uses_page_placeholders(config: &OverlayTextConfig) -> bool {
+    config.text.contains("{page}") || config.text.contains("{total}") || config.text.contains("{range}")
+}
+
+/// Approximate vertical extent (mm from page top) of an overlay for collision checks.
+fn overlay_y_range_mm(config: &OverlayTextConfig, region: OverlayRegion, page_h_mm: f32) -> (f32, f32) {
+    let height = config.font_size * 0.4;
+    match region {
+        OverlayRegion::Header => (config.margin_mm, config.margin_mm + height),
+        OverlayRegion::Footer => (page_h_mm - config.margin_mm - height, page_h_mm - config.margin_mm),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum OverlayRegion {
     Header,
     Footer,

@@ -112,6 +112,8 @@ export function useEvidencePdfDetection({
     file.existingHeaderNormalizedText = header?.normalizedText || header?.text || ''
     file.existingFooterNormalizedText = footer?.normalizedText || footer?.text || ''
     file.existingPageNumberNormalizedText = pageNumber?.normalizedText || pageNumber?.text || ''
+    file.existingPageNumberSequenceForm = pageNumber?.sequenceForm || ''
+    file.existingPageNumberHasTotal = Boolean(pageNumber?.hasTotal)
     file.existingHeaderBBox = header?.bbox || null
     file.existingFooterBBox = footer?.bbox || null
     file.existingPageNumberBBox = pageNumber?.bbox || null

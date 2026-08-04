@@ -64,9 +64,9 @@
       </el-table-column>
       <el-table-column label="操作" width="170" fixed="right">
         <template #default="{ row }">
-          <el-button link size="small" type="primary" @click="previewRow(row)">预览</el-button>
-          <el-button link size="small" @click="selectBySequence(row)">同序列</el-button>
-          <el-button v-if="row.element.decision !== 'keep'" link size="small" @click="setDecision(row, 'keep')">
+          <el-button link size="small" type="primary" @click.stop="previewRow(row)">预览</el-button>
+          <el-button link size="small" @click.stop="selectBySequence(row)">同序列</el-button>
+          <el-button v-if="row.element.decision !== 'keep'" link size="small" @click.stop="setDecision(row, 'keep')">
             取消
           </el-button>
         </template>
@@ -134,8 +134,8 @@ function clearSelection() {
   selectedKeys.value = []
 }
 function selectBySequence(row) {
-  const { kind, pageStart, pageEnd, detectedText } = row.element
-  const fileName = row.fileName
+  const { kind, detectedText } = row.element
+  const fileName = row.fileName || row.file?.name
   if (kind === 'pageNumber') {
     // Select all page numbers from same file whose page ranges form a continuous sequence
     const filePageNumbers = filteredRows.value
@@ -173,6 +173,16 @@ function invertSelection() {
 function handleRowRightClick(_row, _column, event) {
   event.preventDefault()
   const key = _row.key
+  const idx = selectedKeys.value.indexOf(key)
+  if (idx >= 0) {
+    selectedKeys.value = selectedKeys.value.filter(k => k !== key)
+  } else {
+    selectedKeys.value = [...selectedKeys.value, key]
+  }
+}
+function handleRowClick(row) {
+  const key = row?.key
+  if (!key) return
   const idx = selectedKeys.value.indexOf(key)
   if (idx >= 0) {
     selectedKeys.value = selectedKeys.value.filter(k => k !== key)

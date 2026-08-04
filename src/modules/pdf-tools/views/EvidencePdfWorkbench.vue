@@ -187,7 +187,7 @@
         <HeaderFooterRuleFields
           v-if="insertHeaderFooterEnabled"
           class="rule-grid"
-          v-model:header-groups="headerGroups"
+          v-model:header-groups="headerGroupsModel"
           v-model:selected-header-group-id="selectedHeaderGroupId"
           v-model:header-mode="headerMode"
           v-model:header-insert-enabled="headerInsertEnabled"
@@ -200,7 +200,7 @@
           v-model:header-margin-mm="headerMarginMm"
           v-model:header-offset-x-mm="headerOffsetXMm"
           v-model:header-color="headerColor"
-          v-model:footer-text-groups="footerTextGroups"
+          v-model:footer-text-groups="footerTextGroupsModel"
           v-model:selected-footer-text-group-id="selectedFooterTextGroupId"
           v-model:footer-insert-enabled="footerInsertEnabled"
           v-model:footer-text-content="footerTextContent"
@@ -210,12 +210,12 @@
           v-model:footer-text-margin-mm="footerTextMarginMm"
           v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
           v-model:footer-text-color="footerTextColor"
-          v-model:page-number-groups="pageNumberGroups"
+          v-model:page-number-groups="pageNumberGroupsModel"
           v-model:selected-page-number-group-id="selectedPageNumberGroupId"
           v-model:page-number-enabled="footerEnabled"
           v-model:page-number-sequence="pageNumberSequence"
           v-model:page-number-style="pageNumberStyle"
-          v-model:page-number-template="footerText"
+          v-model:page-number-template="pageNumberTemplate"
           v-model:page-number-region="pageNumberRegion"
           v-model:page-number-align="footerAlign"
           v-model:page-number-font-size="footerFontSize"
@@ -227,6 +227,7 @@
           v-model:page-number-show-total="pageNumberShowTotal"
           :page-number-sample-page="previewSamplePage"
           :page-number-sample-total="totalOverlayPages"
+          :page-height-mm="previewHeightMm"
           @edit-page-number-rules="pageNumberRulesVisible = true"
           :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
         />
@@ -432,6 +433,75 @@
         @row-click="selectPreviewRow"
         @sort-change="sortOverlayFiles"
       >
+        <el-table-column type="expand" width="36">
+          <template #default="{ row }">
+            <div class="group-subrows">
+              <template v-for="group in row.headerGroups || []" :key="`h-${group.id}`">
+                <div
+                  class="group-subrow"
+                  :class="{ selected: row.path === selectedOverlayFile?.path && group.id === selectedHeaderGroupId }"
+                  @click.stop="focusGroup(row, 'header', group.id)"
+                >
+                  <span class="group-kind">页眉</span>
+                  <span class="group-label">{{ group.label || '页眉' }}</span>
+                  <span class="group-summary">{{ headerGroupSummary(group) }}</span>
+                  <el-switch
+                    :model-value="group.enabled"
+                    size="small"
+                    @click.stop
+                    @change="(v) => setGroupEnabled(row, 'header', group.id, v)"
+                  />
+                  <el-button link size="small" type="danger" @click.stop="removeGroupFromFile(row, 'header', group.id)"
+                    >删除</el-button
+                  >
+                </div>
+              </template>
+              <template v-for="group in row.footerTextGroups || []" :key="`ft-${group.id}`">
+                <div
+                  class="group-subrow"
+                  :class="{ selected: row.path === selectedOverlayFile?.path && group.id === selectedFooterTextGroupId }"
+                  @click.stop="focusGroup(row, 'footerText', group.id)"
+                >
+                  <span class="group-kind">页脚文字</span>
+                  <span class="group-label">{{ group.label || '页脚文字' }}</span>
+                  <span class="group-summary">{{ group.text || '（空）' }}</span>
+                  <el-switch
+                    :model-value="group.enabled"
+                    size="small"
+                    @click.stop
+                    @change="(v) => setGroupEnabled(row, 'footerText', group.id, v)"
+                  />
+                  <el-button link size="small" type="danger" @click.stop="removeGroupFromFile(row, 'footerText', group.id)"
+                    >删除</el-button
+                  >
+                </div>
+              </template>
+              <template v-for="group in row.pageNumberGroups || []" :key="`pn-${group.id}`">
+                <div
+                  class="group-subrow"
+                  :class="{ selected: row.path === selectedOverlayFile?.path && group.id === selectedPageNumberGroupId }"
+                  @click.stop="focusGroup(row, 'pageNumber', group.id)"
+                >
+                  <span class="group-kind">页码</span>
+                  <span class="group-label">{{ group.label || '页码' }}</span>
+                  <span class="group-summary">{{ group.template || '{page}/{total}' }}</span>
+                  <el-switch
+                    :model-value="group.enabled"
+                    size="small"
+                    @click.stop
+                    @change="(v) => setGroupEnabled(row, 'pageNumber', group.id, v)"
+                  />
+                  <el-button link size="small" type="danger" @click.stop="removeGroupFromFile(row, 'pageNumber', group.id)"
+                    >删除</el-button
+                  >
+                </div>
+              </template>
+              <div v-if="!(row.headerGroups?.length || row.footerTextGroups?.length || row.pageNumberGroups?.length)" class="group-subrow muted">
+                <span class="group-summary">该文件未配置页眉页脚页码组</span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column width="42" align="center">
           <template #default="{ $index }">
             <button
@@ -549,7 +619,7 @@
       <HeaderFooterRuleFields
         v-if="insertHeaderFooterEnabled"
         class="dialog-rule-grid"
-        v-model:header-groups="headerGroups"
+        v-model:header-groups="headerGroupsModel"
         v-model:selected-header-group-id="selectedHeaderGroupId"
         v-model:header-mode="headerMode"
         v-model:header-insert-enabled="headerInsertEnabled"
@@ -562,7 +632,7 @@
         v-model:header-margin-mm="headerMarginMm"
         v-model:header-offset-x-mm="headerOffsetXMm"
         v-model:header-color="headerColor"
-        v-model:footer-text-groups="footerTextGroups"
+        v-model:footer-text-groups="footerTextGroupsModel"
         v-model:selected-footer-text-group-id="selectedFooterTextGroupId"
         v-model:footer-insert-enabled="footerInsertEnabled"
         v-model:footer-text-content="footerTextContent"
@@ -572,12 +642,12 @@
         v-model:footer-text-margin-mm="footerTextMarginMm"
         v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
         v-model:footer-text-color="footerTextColor"
-        v-model:page-number-groups="pageNumberGroups"
+        v-model:page-number-groups="pageNumberGroupsModel"
         v-model:selected-page-number-group-id="selectedPageNumberGroupId"
         v-model:page-number-enabled="footerEnabled"
         v-model:page-number-sequence="pageNumberSequence"
         v-model:page-number-style="pageNumberStyle"
-        v-model:page-number-template="footerText"
+        v-model:page-number-template="pageNumberTemplate"
         v-model:page-number-region="pageNumberRegion"
         v-model:page-number-align="footerAlign"
         v-model:page-number-font-size="footerFontSize"
@@ -589,6 +659,7 @@
         v-model:page-number-show-total="pageNumberShowTotal"
         :page-number-sample-page="previewSamplePage"
         :page-number-sample-total="totalOverlayPages"
+        :page-height-mm="previewHeightMm"
         @edit-page-number-rules="pageNumberRulesVisible = true"
         :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
       />
@@ -751,10 +822,16 @@ import {
   buildEvidencePdfRulePayload,
   buildMergeOutputPath,
   buildOutputDir,
+  createDefaultFooterTextGroup,
+  createDefaultHeaderGroup,
+  createDefaultPageNumberGroup,
   createEvidenceFile,
   fileName,
+  groupsFor,
   pageRangeText,
   parentDir,
+  selectedGroupFor,
+  setSelectedGroup,
   sortByNatural,
   totalPages,
   updatePageRanges,
@@ -847,58 +924,47 @@ const insertHeaderFooterEnabled = ref(true)
 const headerInsertEnabled = ref(false)
 const footerInsertEnabled = ref(false)
 const pageNumberShowTotal = ref(true)
-const defaultHeaderGroup = () => ({
-  id: `h${Date.now()}`,
-  label: '',
-  enabled: true,
-  mode: 'filename',
-  text: '',
-  prefix: '',
-  suffix: '',
-  align: 'right',
-  fontSize: 10,
-  fontFamily: 'auto',
-  marginMm: 10,
-  offsetXMm: 0,
-  color: '#000000',
+const headerGroups = computed(() => groupsFor(selectedOverlayFile.value, 'header'))
+const footerTextGroups = computed(() => groupsFor(selectedOverlayFile.value, 'footerText'))
+const pageNumberGroups = computed(() => groupsFor(selectedOverlayFile.value, 'pageNumber'))
+// Writable models so HeaderFooterRuleFields can add/remove groups per file
+const headerGroupsModel = computed({
+  get: () => selectedOverlayFile.value?.headerGroups || [],
+  set: (v) => { if (selectedOverlayFile.value) selectedOverlayFile.value.headerGroups = v },
 })
-const defaultFooterTextGroup = () => ({
-  id: `ft${Date.now()}`,
-  label: '',
-  enabled: true,
-  text: '',
-  align: 'left',
-  fontSize: 9,
-  fontFamily: 'auto',
-  marginMm: 10,
-  offsetXMm: 0,
-  color: '#000000',
+const footerTextGroupsModel = computed({
+  get: () => selectedOverlayFile.value?.footerTextGroups || [],
+  set: (v) => { if (selectedOverlayFile.value) selectedOverlayFile.value.footerTextGroups = v },
 })
-const defaultPageNumberGroup = () => ({
-  id: `pn${Date.now()}`,
-  label: '',
-  enabled: true,
-  sequence: 'continuous',
-  style: 'arabic',
-  template: '{page}/{total}',
-  region: 'footer',
-  align: 'center',
-  fontSize: 9,
-  fontFamily: 'auto',
-  marginMm: 10,
-  offsetXMm: 0,
-  color: '#000000',
+const pageNumberGroupsModel = computed({
+  get: () => selectedOverlayFile.value?.pageNumberGroups || [],
+  set: (v) => { if (selectedOverlayFile.value) selectedOverlayFile.value.pageNumberGroups = v },
 })
-const headerGroups = ref([{ ...defaultHeaderGroup(), id: 'h1', label: '页眉 1' }])
-const footerTextGroups = ref([{ ...defaultFooterTextGroup(), id: 'ft1', label: '页脚文字 1' }])
-const selectedFooterTextGroupId = ref('ft1')
-const pageNumberGroups = ref([{ ...defaultPageNumberGroup(), id: 'pn1', label: '页码 1' }])
-const selectedPageNumberGroupId = ref('pn1')
-const selectedHeaderGroupId = ref('h1')
-const selectedHeaderGroup = computed(
-  () => headerGroups.value.find((g) => g.id === selectedHeaderGroupId.value) || headerGroups.value[0],
+const pageNumberTemplate = computed({
+  get: () => selectedPageNumberGroup.value.template || '{page}/{total}',
+  set: (v) => { selectedPageNumberGroup.value.template = v },
+})
+const selectedHeaderGroup = computed(() => selectedGroupFor(selectedOverlayFile.value, 'header') || createDefaultHeaderGroup())
+const selectedFooterTextGroup = computed(() =>
+  selectedGroupFor(selectedOverlayFile.value, 'footerText') || createDefaultFooterTextGroup(),
 )
-// Backward-compatible computed refs from first group (for existing code)
+const selectedPageNumberGroup = computed(() =>
+  selectedGroupFor(selectedOverlayFile.value, 'pageNumber') || createDefaultPageNumberGroup(),
+)
+// Per-file selected group ids (bind to HeaderFooterRuleFields v-model)
+const selectedHeaderGroupId = computed({
+  get: () => selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
+  set: (v) => setSelectedGroup(selectedOverlayFile.value, 'header', v),
+})
+const selectedFooterTextGroupId = computed({
+  get: () => selectedOverlayFile.value?.selectedFooterTextGroupId || 'ft1',
+  set: (v) => setSelectedGroup(selectedOverlayFile.value, 'footerText', v),
+})
+const selectedPageNumberGroupId = computed({
+  get: () => selectedOverlayFile.value?.selectedPageNumberGroupId || 'pn1',
+  set: (v) => setSelectedGroup(selectedOverlayFile.value, 'pageNumber', v),
+})
+// Legacy compat refs pointing at selected file/group. Setters update the file's group.
 const headerMode = computed({
   get: () => selectedHeaderGroup.value.mode,
   set: (v) => { selectedHeaderGroup.value.mode = v },
@@ -939,9 +1005,6 @@ const headerColor = computed({
   get: () => selectedHeaderGroup.value.color,
   set: (v) => { selectedHeaderGroup.value.color = v },
 })
-const selectedFooterTextGroup = computed(
-  () => footerTextGroups.value.find((g) => g.id === selectedFooterTextGroupId.value) || footerTextGroups.value[0],
-)
 const footerTextContent = computed({
   get: () => selectedFooterTextGroup.value.text,
   set: (v) => { selectedFooterTextGroup.value.text = v },
@@ -970,9 +1033,6 @@ const footerTextColor = computed({
   get: () => selectedFooterTextGroup.value.color,
   set: (v) => { selectedFooterTextGroup.value.color = v },
 })
-const selectedPageNumberGroup = computed(
-  () => pageNumberGroups.value.find((g) => g.id === selectedPageNumberGroupId.value) || pageNumberGroups.value[0],
-)
 const pageNumberSequence = computed({
   get: () => selectedPageNumberGroup.value.sequence,
   set: (v) => { selectedPageNumberGroup.value.sequence = v },
@@ -1022,6 +1082,10 @@ const mergeFileName = ref('merged_evidence.pdf')
 const previewPage = ref(1)
 const previewReloadKey = ref(0)
 const previewData = ref({})
+const previewHeightMm = computed(() => {
+  const heightPt = Number(previewData.value?.heightPt || 0)
+  return heightPt > 0 ? +((heightPt * 25.4) / 72).toFixed(1) : 297
+})
 const truePreview = ref(null)
 const truePreviewLoading = ref(false)
 const detectingAllHeaderFooter = ref(false)
@@ -1109,21 +1173,23 @@ const plannedMergeOutputPath = computed(() =>
   buildMergeOutputPath(overlayRows.value, overlayOutputDir.value, mergeFileName.value),
 )
 const firstHeaderPreview = computed(() => {
-  if (!insertHeaderFooterEnabled.value) return ''
+  if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value) return ''
   const first = overlayRows.value[0]
   return first ? rowHeaderPreview(first, 0) : ''
 })
 const firstFooterPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
-  if (!first || !footerEnabled.value || !footerText.value || !totalOverlayPages.value) return ''
-  let tpl = footerText.value
+  const pnGroup = selectedGroupFor(first, 'pageNumber')
+  if (!first || !footerEnabled.value || !pnGroup || !totalOverlayPages.value) return ''
+  const continuous = (pnGroup.sequence || 'continuous') !== 'per-file'
+  let tpl = pnGroup.template || '{page}/{total}'
   if (!pageNumberShowTotal.value) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
   return renderPageNumberTemplate(
     tpl,
-    footerContinuous.value ? first.pageStart || 1 : 1,
-    footerContinuous.value ? totalOverlayPages.value : first.pages || 1,
-    pageNumberStyle.value,
+    continuous ? first.pageStart || 1 : 1,
+    continuous ? totalOverlayPages.value : first.pages || 1,
+    pnGroup.style || 'arabic',
   )
 })
 const processingNotes = computed(() => {
@@ -1305,7 +1371,7 @@ const currentRules = computed(() => ({
   pageNumberEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   pageNumberSequence: pageNumberSequence.value,
   pageNumberStyle: pageNumberStyle.value,
-  pageNumberTemplate: footerText.value,
+  pageNumberTemplate: pageNumberTemplate.value,
   pageNumberRegion: pageNumberRegion.value,
   pageNumberAlign: footerAlign.value,
   pageNumberFontSize: footerFontSize.value,
@@ -1314,6 +1380,7 @@ const currentRules = computed(() => ({
   pageNumberOffsetXMm: footerOffsetXMm.value,
   pageNumberColor: footerColor.value,
   pageNumberOverrides: pageNumberOverrides.value,
+  pageNumberShowTotal: pageNumberShowTotal.value,
   selectedHeaderGroupId: selectedHeaderGroupId.value,
   selectedFooterTextGroupId: selectedFooterTextGroupId.value,
   selectedPageNumberGroupId: selectedPageNumberGroupId.value,
@@ -1612,15 +1679,18 @@ function applyReplacementPreset() {
   removeAnnotations.value = false
   cleanupHeaderHeightMm.value = 18
   cleanupFooterHeightMm.value = 18
-  // Reset header groups to single default
-  headerGroups.value = [{ ...defaultHeaderGroup(), id: 'h1', label: '页眉 1', mode: workflowMode.value === 'split' ? 'per_file' : 'filename' }]
-  selectedHeaderGroupId.value = 'h1'
-  // Reset footer text groups to single default
-  footerTextGroups.value = [{ ...defaultFooterTextGroup(), id: 'ft1', label: '页脚文字 1' }]
-  selectedFooterTextGroupId.value = 'ft1'
-  // Reset page number groups to single default
-  pageNumberGroups.value = [{ ...defaultPageNumberGroup(), id: 'pn1', label: '页码 1' }]
-  selectedPageNumberGroupId.value = 'pn1'
+  // Reset the selected file's groups to a single default each
+  const file = selectedOverlayFile.value
+  if (file) {
+    const headerGroup = createDefaultHeaderGroup()
+    headerGroup.mode = workflowMode.value === 'split' ? 'per_file' : 'filename'
+    file.headerGroups = [headerGroup]
+    file.footerTextGroups = [createDefaultFooterTextGroup()]
+    file.pageNumberGroups = [createDefaultPageNumberGroup()]
+    file.selectedHeaderGroupId = headerGroup.id
+    file.selectedFooterTextGroupId = 'ft1'
+    file.selectedPageNumberGroupId = 'pn1'
+  }
   footerEnabled.value = true
   footerContinuous.value = true
   footerText.value = '{page}/{total}'
@@ -2001,6 +2071,8 @@ function syncLegacyExistingElementState(file) {
 }
 
 function previewExistingElement(row) {
+  // Previewing closes the dialog; do not let that trigger the quick-cleanup pipeline
+  quickCleanupPipeline = false
   const index = overlayFiles.value.findIndex((file) => file.path === row.file.path)
   if (index >= 0) selectedOverlayIndex.value = index
   previewPage.value = Math.max(1, Number(row.element.pageStart || 1))
@@ -2147,6 +2219,41 @@ function removeOverlayFile(index) {
   selectedOverlayIndex.value = Math.min(selectedOverlayIndex.value, Math.max(0, overlayFiles.value.length - 1))
   refreshPreview()
 }
+
+function headerGroupSummary(group) {
+  if (group.mode === 'none') return '不插入'
+  if (group.mode === 'per_file') return '按列表名称'
+  if (group.mode === 'filename') return '文件名'
+  if (group.mode === 'custom' || group.mode === 'template') return group.text || '固定文本'
+  return group.mode || '文件名'
+}
+
+function focusGroup(row, kind, groupId) {
+  const index = overlayRows.value.findIndex((item) => item.path === row.path)
+  if (index >= 0) selectedOverlayIndex.value = index
+  setSelectedGroup(row, kind, groupId)
+  refreshPreview()
+}
+
+function setGroupEnabled(row, kind, groupId, enabled) {
+  const groups = groupsFor(row, kind)
+  const group = groups.find((g) => g.id === groupId)
+  if (group) group.enabled = Boolean(enabled)
+  refreshPreview()
+}
+
+function removeGroupFromFile(row, kind, groupId) {
+  const groups = groupsFor(row, kind)
+  if (groups.length <= 1) return
+  const updated = groups.filter((g) => g.id !== groupId)
+  if (kind === 'header') row.headerGroups = updated
+  else if (kind === 'footerText') row.footerTextGroups = updated
+  else row.pageNumberGroups = updated
+  if (row.selectedHeaderGroupId === groupId) row.selectedHeaderGroupId = updated[0]?.id || ''
+  if (row.selectedFooterTextGroupId === groupId) row.selectedFooterTextGroupId = updated[0]?.id || ''
+  if (row.selectedPageNumberGroupId === groupId) row.selectedPageNumberGroupId = updated[0]?.id || ''
+  refreshPreview()
+}
 </script>
 
 <style scoped>
@@ -2159,6 +2266,66 @@ function removeOverlayFile(index) {
   padding: 18px 20px;
   overflow: hidden;
   background: var(--docsy-canvas);
+}
+
+.group-subrows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
+}
+
+.group-subrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--docsy-text-muted);
+}
+
+.group-subrow:hover {
+  background: var(--docsy-surface-hover);
+}
+
+.group-subrow.selected {
+  background: var(--docsy-surface-active);
+  color: var(--docsy-text-strong);
+  font-weight: 500;
+}
+
+.group-subrow.muted {
+  cursor: default;
+}
+
+.group-kind {
+  display: inline-block;
+  min-width: 52px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  text-align: center;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+}
+
+.group-subrow.selected .group-kind {
+  background: var(--docsy-accent-subtle, rgba(64, 158, 255, 0.15));
+  color: var(--docsy-accent, #409eff);
+}
+
+.group-label {
+  min-width: 80px;
+  font-weight: 500;
+}
+
+.group-summary {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hf-panel {
@@ -2315,6 +2482,13 @@ h3 {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.empty-detect-hint {
+  margin: 0;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--docsy-text-muted, #999);
 }
 
 .existing-summary-grid {

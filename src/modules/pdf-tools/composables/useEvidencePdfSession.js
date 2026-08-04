@@ -6,6 +6,110 @@ import { pageNumberOverlaysForFile } from './pdfPageNumberRules.js'
 
 export { fileName, parentDir, stripPdf, toChineseNumber }
 
+export function createDefaultHeaderGroup() {
+  return {
+    id: 'h1',
+    label: '',
+    enabled: true,
+    mode: 'filename',
+    text: '',
+    prefix: '',
+    suffix: '',
+    align: 'right',
+    fontSize: 10,
+    fontFamily: 'auto',
+    marginMm: 10,
+    offsetXMm: 0,
+    color: '#000000',
+  }
+}
+
+export function createDefaultFooterTextGroup() {
+  return {
+    id: 'ft1',
+    label: '',
+    enabled: true,
+    text: '',
+    align: 'left',
+    fontSize: 9,
+    fontFamily: 'auto',
+    marginMm: 10,
+    offsetXMm: 0,
+    color: '#000000',
+  }
+}
+
+export function createDefaultPageNumberGroup() {
+  return {
+    id: 'pn1',
+    label: '',
+    enabled: true,
+    sequence: 'continuous',
+    style: 'arabic',
+    template: '{page}/{total}',
+    region: 'footer',
+    align: 'center',
+    fontSize: 9,
+    fontFamily: 'auto',
+    marginMm: 10,
+    offsetXMm: 0,
+    color: '#000000',
+  }
+}
+
+const GROUP_ID_KEYS = {
+  header: 'selectedHeaderGroupId',
+  footerText: 'selectedFooterTextGroupId',
+  pageNumber: 'selectedPageNumberGroupId',
+}
+
+export function groupsFor(file, kind) {
+  if (!file) return []
+  if (kind === 'header') return file.headerGroups || []
+  if (kind === 'footerText') return file.footerTextGroups || []
+  return file.pageNumberGroups || []
+}
+
+/** Resolve the group the main slot edits/renders for a file.
+ * Falls back to the first enabled group when the selected one is disabled. */
+export function selectedGroupFor(file, kind) {
+  const groups = groupsFor(file, kind)
+  if (!groups.length) return null
+  const idKey = GROUP_ID_KEYS[kind]
+  const selId = file?.[idKey]
+  const byId = groups.find((g) => g.id === selId)
+  if (byId && byId.enabled !== false) return byId
+  return groups.find((g) => g.enabled !== false) || groups[0] || null
+}
+
+export function setSelectedGroup(file, kind, id) {
+  const idKey = GROUP_ID_KEYS[kind]
+  if (file && idKey) file[idKey] = id
+}
+
+/** Strip {total}/{range} from a page-number template when the total is hidden. */
+export function pageNumberTemplateWithShowTotal(template, showTotal) {
+  if (showTotal === false) {
+    return String(template || '{page}')
+      .replaceAll('{range}', '{page}')
+      .replaceAll('{total}', '')
+      .replaceAll('//', '/')
+      .replace(/\/+$/, '')
+  }
+  return template
+}
+
+export function nextGroupId(file, kind, prefix) {
+  const groups = groupsFor(file, kind)
+  let n = groups.length + 1
+  let id = `${prefix}${n}`
+  while (groups.some((g) => g.id === id)) {
+    n += 1
+    id = `${prefix}${n}`
+  }
+  return id
+}
+
 export function createEvidenceFile(path) {
   const name = fileName(path)
   return {
@@ -30,6 +134,8 @@ export function createEvidenceFile(path) {
     existingHeaderNormalizedText: '',
     existingFooterNormalizedText: '',
     existingPageNumberNormalizedText: '',
+    existingPageNumberSequenceForm: '',
+    existingPageNumberHasTotal: false,
     existingFooterCandidateKey: '',
     existingPageNumberCandidateKey: '',
     footerCandidateChoices: [],
@@ -48,6 +154,7 @@ export function createEvidenceFile(path) {
     existingPageNumberPageEnd: 0,
     existingHeaderArtifact: false,
     existingFooterArtifact: false,
+    existingPageNumberArtifact: false,
     existingHeaderEdited: false,
     existingFooterEdited: false,
     existingPageNumberEdited: false,
@@ -59,6 +166,12 @@ export function createEvidenceFile(path) {
     removeExistingPageNumber: false,
     statusText: '等待',
     statusType: 'info',
+    headerGroups: [createDefaultHeaderGroup()],
+    footerTextGroups: [createDefaultFooterTextGroup()],
+    pageNumberGroups: [createDefaultPageNumberGroup()],
+    selectedHeaderGroupId: 'h1',
+    selectedFooterTextGroupId: 'ft1',
+    selectedPageNumberGroupId: 'pn1',
   }
 }
 
@@ -113,7 +226,7 @@ export function buildHeaderTextForGroup(file, index, group, rules) {
   return decorateHeaderTextForGroup(base, file, index, group, rules)
 }
 
-function headerBaseTextForGroup(file, index, group, rules) {
+function headerBaseTextForGroup(file, index, group, _rules) {
   if (group.mode === 'per_file') return file.header ?? stripPdf(file.name)
   if (group.mode === 'custom' || group.mode === 'template') return group.text || ''
   if (group.mode === 'seq') return `证据${index + 1}`
@@ -135,8 +248,8 @@ function decorateHeaderTextForGroup(base, file, index, group, rules) {
 
 export function overlayConfigForGroup(file, region, text, group) {
   return {
-    region: 'header',
-    artifactKind: 'HeaderText',
+    region: region || 'header',
+    artifactKind: region === 'footer' ? 'FooterText' : 'HeaderText',
     text,
     fontFamily: group.fontFamily || 'auto',
     fontSize: group.fontSize,
@@ -224,86 +337,95 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
     const headerInsertEnabled = rules.headerInsertEnabled !== false
     const footerInsertEnabled = rules.footerInsertEnabled !== false
-    const header = headerInsertEnabled ? buildHeaderText(file, index, rules) : ''
+    const headerGroup = selectedGroupFor(file, 'header')
+    const footerTextGroup = selectedGroupFor(file, 'footerText')
+    const pageNumberGroup = selectedGroupFor(file, 'pageNumber')
+    // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
+    const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
+    const header =
+      headerInsertEnabled && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none'
+        ? buildHeaderTextForGroup(file, index, { ...headerGroup, mode: headerModeValue }, rules)
+        : ''
     const outputPath = buildOverlayOutputPath(file.path, outputDir)
-    const pageNumberEnabled = rules.pageNumberEnabled ?? rules.footerEnabled
+    const pageNumberEnabled = legacyFooterMode ? false : (rules.pageNumberEnabled ?? rules.footerEnabled ?? true)
     const pageNumberSequence =
-      rules.pageNumberSequence || (rules.footerContinuous === false ? 'per-file' : 'continuous')
+      rules.pageNumberSequence ??
+      (rules.footerContinuous === false ? 'per-file' : undefined) ??
+      pageNumberGroup?.sequence ??
+      'continuous'
     const continuousPageNumber = pageNumberSequence !== 'per-file'
     const pageStart = continuousPageNumber ? file.pageStart : 1
     const jobTotalPages = continuousPageNumber ? total : file.pages || 1
     const existingHeaderReplacement = standardArtifactReplacementConfig(file, 'header', rules)
     const existingFooterReplacement = standardArtifactReplacementConfig(file, 'footer', rules)
-    const pageNumberOverlays = legacyFooterMode
-      ? []
-      : pageNumberOverlaysForFile(file, {
-          enabled: pageNumberEnabled,
-          totalPages: total,
-          sequence: pageNumberSequence,
-          template: rules.pageNumberTemplate || rules.footerText || '{page}/{total}',
-          style: rules.pageNumberStyle || 'arabic',
-          region: rules.pageNumberRegion || 'footer',
-          align: rules.pageNumberAlign || rules.footerAlign,
-          fontSize: rules.pageNumberFontSize || rules.footerFontSize,
-          fontFamily: rules.pageNumberFontFamily || rules.footerFontFamily,
-          marginMm: rules.pageNumberMarginMm || rules.footerMarginMm,
-          offsetXMm: rules.pageNumberOffsetXMm ?? rules.footerOffsetXMm,
-          color: rules.pageNumberColor || rules.footerColor,
-          overrides: rules.pageNumberOverrides || [],
-        })
-    const extraOverlays = [...convertedExistingOverlays(file, rules), ...pageNumberOverlays]
-    // Add header group overlays (skip the selected group since it's the main header)
-    const headerGroups = rules.headerGroups || []
-    const selectedHeaderId = rules.selectedHeaderGroupId || (headerGroups[0] && headerGroups[0].id)
-    if (headerInsertEnabled && headerGroups.length > 1) {
-      for (const g of headerGroups) {
-        if (g.id === selectedHeaderId) continue
-        if (!g.enabled) continue
+    const mainPageNumberOverlays =
+      pageNumberEnabled && pageNumberGroup && pageNumberGroup.enabled !== false
+        ? pageNumberOverlaysForFile(file, {
+            enabled: true,
+            totalPages: jobTotalPages,
+            sequence: pageNumberSequence,
+            template: pageNumberTemplateWithShowTotal(
+              pageNumberGroup.template || '{page}/{total}',
+              rules.pageNumberShowTotal,
+            ),
+            style: pageNumberGroup.style || 'arabic',
+            region: pageNumberGroup.region || 'footer',
+            align: pageNumberGroup.align || 'center',
+            fontSize: pageNumberGroup.fontSize || 9,
+            fontFamily: pageNumberGroup.fontFamily || 'auto',
+            marginMm: pageNumberGroup.marginMm ?? 10,
+            offsetXMm: pageNumberGroup.offsetXMm ?? 0,
+            color: pageNumberGroup.color || '#000000',
+            overrides: pageNumberGroup.overrides || rules.pageNumberOverrides || [],
+          })
+        : []
+    const extraOverlays = [...convertedExistingOverlays(file, rules), ...mainPageNumberOverlays]
+    // Header groups: every enabled group except the main (selected) one
+    if (headerInsertEnabled) {
+      for (const g of groupsFor(file, 'header')) {
+        if (g.id === headerGroup?.id || g.enabled === false || g.mode === 'none') continue
         const groupText = buildHeaderTextForGroup(file, index, g, rules)
         if (groupText) {
           extraOverlays.push(overlayConfigForGroup(file, 'header', groupText, g))
         }
       }
     }
-    // Add footer text group overlays (skip the selected group since it's the main footer)
-    const footerTextGroups = rules.footerTextGroups || []
-    const selectedFooterId = rules.selectedFooterTextGroupId || (footerTextGroups[0] && footerTextGroups[0].id)
-    if (footerInsertEnabled && footerTextGroups.length > 1) {
-      for (const g of footerTextGroups) {
-        if (g.id === selectedFooterId) continue
-        if (!g.enabled) continue
+    // Footer text groups: every enabled group except the main (selected) one
+    if (footerInsertEnabled) {
+      for (const g of groupsFor(file, 'footerText')) {
+        if (g.id === footerTextGroup?.id || g.enabled === false) continue
         if (g.text) {
           extraOverlays.push(footerTextOverlayConfigForGroup(g.text, g))
         }
       }
     }
-    // Add page number group overlays (skip the selected group since it's the main page number)
-    const pageNumberGroups = rules.pageNumberGroups || []
-    const selectedPnId = rules.selectedPageNumberGroupId || (pageNumberGroups[0] && pageNumberGroups[0].id)
-    if (pageNumberEnabled && pageNumberGroups.length > 1) {
-      for (const g of pageNumberGroups) {
-        if (g.id === selectedPnId) continue
-        if (!g.enabled) continue
+    // Page number groups: every enabled group except the main (selected) one
+    if (pageNumberEnabled) {
+      for (const g of groupsFor(file, 'pageNumber')) {
+        if (g.id === pageNumberGroup?.id || g.enabled === false) continue
         const pnSequence = g.sequence || pageNumberSequence
         const pnContinuous = pnSequence !== 'per-file'
-        const pnStart = pnContinuous ? file.pageStart : 1
         const pnTotal = pnContinuous ? total : file.pages || 1
-        const pnOverlays = pageNumberOverlaysForFile(file, {
-          enabled: true,
-          totalPages: pnTotal,
-          sequence: pnSequence,
-          template: g.template || '{page}/{total}',
-          style: g.style || 'arabic',
-          region: g.region || 'footer',
-          align: g.align || 'center',
-          fontSize: g.fontSize || 9,
-          fontFamily: g.fontFamily || 'auto',
-          marginMm: g.marginMm || 10,
-          offsetXMm: g.offsetXMm || 0,
-          color: g.color || '#000000',
-          overrides: rules.pageNumberOverrides || [],
-        })
-        extraOverlays.push(...pnOverlays)
+        extraOverlays.push(
+          ...pageNumberOverlaysForFile(file, {
+            enabled: true,
+            totalPages: pnTotal,
+            sequence: pnSequence,
+            template: pageNumberTemplateWithShowTotal(
+              g.template || '{page}/{total}',
+              rules.pageNumberShowTotal,
+            ),
+            style: g.style || 'arabic',
+            region: g.region || 'footer',
+            align: g.align || 'center',
+            fontSize: g.fontSize || 9,
+            fontFamily: g.fontFamily || 'auto',
+            marginMm: g.marginMm ?? 10,
+            offsetXMm: g.offsetXMm ?? 0,
+            color: g.color || '#000000',
+            overrides: g.overrides || rules.pageNumberOverrides || [],
+          }),
+        )
       }
     }
     file.outputPath = outputPath
@@ -329,30 +451,16 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         headerReplacement: existingHeaderReplacement,
         footerReplacement: existingFooterReplacement,
       },
-      header: header ? overlayConfigForFile(file, 'header', header, rules) : null,
+      header: header ? overlayConfigForFile(file, 'header', header, rules, headerGroup) : null,
       footer:
         legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
           ? (footerInsertEnabled ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules) : null)
-          : footerInsertEnabled && rules.footerTextContent
-            ? footerTextOverlayConfig(rules.footerTextContent, rules)
+          : footerInsertEnabled && footerTextGroup && footerTextGroup.enabled !== false && footerTextGroup.text
+            ? footerTextOverlayConfigForGroup(footerTextGroup.text, footerTextGroup)
             : null,
       extraOverlays,
     }
   })
-}
-
-function footerTextOverlayConfig(text, rules) {
-  return {
-    text,
-    region: 'footer',
-    artifactKind: 'FooterText',
-    fontSize: rules.footerTextFontSize || 9,
-    fontFamily: rules.footerTextFontFamily || 'auto',
-    marginMm: rules.footerTextMarginMm || 10,
-    align: rules.footerTextAlign || 'left',
-    offsetXMm: rules.footerTextOffsetXMm || 0,
-    color: rules.footerTextColor || '#000000',
-  }
 }
 
 function footerTextOverlayConfigForGroup(text, group) {
@@ -414,7 +522,7 @@ function plainTextTarget(file, region) {
   }
 }
 
-function overlayConfigForFile(file, region, text, rules) {
+function overlayConfigForFile(file, region, text, rules, group = null) {
   const isHeader = region === 'header'
   const bbox = existingBBox(file, region)
   const useDetectedPlacement =
@@ -423,28 +531,29 @@ function overlayConfigForFile(file, region, text, rules) {
       : region === 'footer'
         ? file.convertPlainFooter
         : file.convertPlainPageNumber
+  const g = group || {}
   const base = isHeader
     ? {
         region: 'header',
         artifactKind: 'HeaderText',
         text,
-        fontFamily: rules.headerFontFamily || 'auto',
-        fontSize: rules.headerFontSize,
-        marginMm: rules.headerMarginMm,
-        align: rules.headerAlign,
-        offsetXMm: rules.headerOffsetXMm || 0,
-        color: rules.headerColor || '#000000',
+        fontFamily: g.fontFamily || rules.headerFontFamily || 'auto',
+        fontSize: g.fontSize ?? rules.headerFontSize,
+        marginMm: g.marginMm ?? rules.headerMarginMm,
+        align: g.align || rules.headerAlign,
+        offsetXMm: g.offsetXMm ?? rules.headerOffsetXMm ?? 0,
+        color: g.color || rules.headerColor || '#000000',
       }
     : {
         region: 'footer',
         artifactKind: region === 'pageNumber' ? 'PageNumber' : 'FooterText',
         text,
-        fontFamily: rules.footerFontFamily || 'auto',
-        fontSize: rules.footerFontSize,
-        marginMm: rules.footerMarginMm,
-        align: rules.footerAlign,
-        offsetXMm: rules.footerOffsetXMm || 0,
-        color: rules.footerColor || '#000000',
+        fontFamily: g.fontFamily || rules.footerFontFamily || 'auto',
+        fontSize: g.fontSize ?? rules.footerFontSize,
+        marginMm: g.marginMm ?? rules.footerMarginMm,
+        align: g.align || rules.footerAlign,
+        offsetXMm: g.offsetXMm ?? rules.footerOffsetXMm ?? 0,
+        color: g.color || rules.footerColor || '#000000',
       }
   const scopedBase = useDetectedPlacement
     ? {
@@ -548,8 +657,8 @@ function overlayConfigForDetectedElement(element, rules) {
     offsetXMm: bbox ? ptToMm(anchorX - baseX) : 0,
     marginMm: bbox
       ? isHeader
-        ? ptToMm(pageHeight - Number(bbox.y1 || 0))
-        : ptToMm(Number(bbox.y0 || 0))
+        ? ptToMm(Number(bbox.y1 || 0))
+        : ptToMm(pageHeight - Number(bbox.y1 || 0))
       : isHeader
         ? rules.headerMarginMm
         : rules.footerMarginMm,

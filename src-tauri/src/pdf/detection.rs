@@ -129,6 +129,12 @@ pub struct HeaderFooterCandidate {
     artifact_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     docsy_kind: Option<String>,
+    /// Page-number style of the sequence ("arabic"/"roman"/"chinese"/"circled"/"dingbat"/"fraction"/"page-of"/"page-n").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sequence_form: Option<String>,
+    /// Whether the page number carries a total (N/M, 共M页, Page N of M).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    has_total: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -381,8 +387,9 @@ fn build_artifact_candidates(
                 .map(|item| item.page)
                 .collect::<BTreeSet<_>>()
                 .len();
+            let is_page_number = labels.iter().any(|label| label == "page-number");
             Some(HeaderFooterCandidate {
-                text,
+                text: text.clone(),
                 normalized_text,
                 region: first.region.to_string(),
                 page_range: PageRange {
@@ -401,6 +408,8 @@ fn build_artifact_candidates(
                 source: "artifact".to_string(),
                 artifact_id: first.docsy_id.clone().or_else(|| Some(first.id.clone())),
                 docsy_kind: first.docsy_kind.clone(),
+                sequence_form: is_page_number.then(|| sequence_form_of(&text).to_string()),
+                has_total: is_page_number.then(|| text_has_total(&text)),
             })
         })
         .collect()
@@ -943,6 +952,23 @@ static RE_PAGE_WORD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)page\s+\d+\s+of\s+\d+").unwrap());
 static RE_STANDALONE_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}$").unwrap());
 
+/// Map circled/dingbat digits to their arabic text. Returns None for non-digit chars.
+fn circled_digit_text(ch: char) -> Option<&'static str> {
+    const CIRCLED: [&str; 20] = [
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17",
+        "18", "19", "20",
+    ];
+    const DINGBAT: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+    const CIRCLED_11_20: [&str; 10] = ["11", "12", "13", "14", "15", "16", "17", "18", "19", "20"];
+    let code = ch as u32;
+    match code {
+        0x2460..=0x2473 => Some(CIRCLED[(code - 0x2460) as usize]),
+        0x2776..=0x277F => Some(DINGBAT[(code - 0x2776) as usize]),
+        0x24EB..=0x24F4 => Some(CIRCLED_11_20[(code - 0x24EB) as usize]),
+        _ => None,
+    }
+}
+
 fn is_roman_page_marker(value: &str) -> bool {
     let upper = value.trim().to_ascii_uppercase();
     if upper.is_empty()
@@ -1050,8 +1076,11 @@ fn build_candidates(
         }
     }
 
-    // For __page_number_seq__ groups, split by total value before building candidates.
-    // E.g., "1/3 页" on pages 1-4 and "1/13 页" on pages 5-17 are separate sequences.
+    // For __page_number_seq__ groups, split by total value, then by value
+    // continuity, before building candidates. E.g. "1/3 页" on pages 1-4 and
+    // "1/13 页" on pages 5-17 are separate sequences; a document whose page
+    // numbering restarts per section (1..13 then 1..2) must yield one
+    // candidate per section instead of one merged "2-19" range.
     let mut split_groups: BTreeMap<(String, i32, i32), Vec<&TextLineDetection>> = BTreeMap::new();
     for ((normalized_text, x_bucket, y_bucket), lines) in grouped {
         if normalized_text == "__page_number_seq__" {
@@ -1060,18 +1089,24 @@ fn build_candidates(
                 let total = parsed_page_number_total(&line.text);
                 by_total.entry(total).or_default().push(line);
             }
-            if by_total.len() > 1 {
-                for (total, group_lines) in by_total {
-                    let suffix = total.map(|t| format!(":total:{t}")).unwrap_or_default();
+            for (total, group_lines) in by_total {
+                for (seg_index, segment) in split_page_number_sequence(&group_lines)
+                    .into_iter()
+                    .enumerate()
+                {
+                    let suffix = match total {
+                        Some(t) => format!(":total:{t}:seg:{seg_index}"),
+                        None => format!(":seg:{seg_index}"),
+                    };
                     let key = (
                         format!("__page_number_seq__{suffix}"),
                         x_bucket,
                         y_bucket,
                     );
-                    split_groups.entry(key).or_default().extend(group_lines);
+                    split_groups.entry(key).or_default().extend(segment);
                 }
-                continue;
             }
+            continue;
         }
         split_groups
             .entry((normalized_text, x_bucket, y_bucket))
@@ -1162,6 +1197,8 @@ fn build_candidates(
                 source: "content-text".to_string(),
                 artifact_id: None,
                 docsy_kind: None,
+                sequence_form: is_page_number.then(|| sequence_form_of(&first.text).to_string()),
+                has_total: is_page_number.then(|| text_has_total(&first.text)),
             })
         })
         .collect();
@@ -1169,8 +1206,16 @@ fn build_candidates(
     // Merge candidates with same normalized_text and very close positions (±2 buckets).
     // Different pages may place the same header at slightly different y positions,
     // causing them to land in adjacent buckets. These should be one group.
+    // Page-number candidates are excluded: sectioning was already resolved by
+    // total-value and value-reset splits, and merging would collapse distinct
+    // sections (1/3, 1/13, 1/2 页) into one fake 2-19 range.
     let mut merged: Vec<HeaderFooterCandidate> = Vec::new();
     for cand in candidates {
+        let is_page_number = cand.labels.iter().any(|label| label == "page-number");
+        if is_page_number {
+            merged.push(cand);
+            continue;
+        }
         if let Some(existing) = merged.iter_mut().find(|m| {
             m.normalized_text == cand.normalized_text
                 && m.region == cand.region
@@ -1180,7 +1225,7 @@ fn build_candidates(
             // Merge: extend page range, increase count, keep higher confidence
             existing.page_range.start = existing.page_range.start.min(cand.page_range.start);
             existing.page_range.end = existing.page_range.end.max(cand.page_range.end);
-            existing.count = existing.count.max(cand.count);
+            existing.count = existing.count + cand.count;
             existing.confidence = existing.confidence.max(cand.confidence);
             existing.repeating = existing.repeating || cand.repeating;
         } else {
@@ -1249,13 +1294,113 @@ fn page_number_sequence_stable(lines: &[&TextLineDetection]) -> bool {
 }
 
 fn parsed_page_number_value(text: &str) -> Option<u32> {
-    static RE_FIRST_NUMBER: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\d{1,6}").expect("valid page number regex"));
-    if let Some(value) = RE_FIRST_NUMBER.find(text) {
-        return value.as_str().parse().ok();
+    let trimmed = text.trim();
+    // Match the page-number pattern itself (N/M, Page N of M, 第N页, trailing
+    // bare number) instead of the first number anywhere, so case numbers like
+    // "（2026）X刑初123号" don't pollute sequence analysis.
+    static RE_SLASH: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d{1,6})\s*/\s*\d+").expect("valid page number regex"));
+    static RE_PAGE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bpage\s*(\d{1,6})\b").expect("valid page number regex"));
+    static RE_CN: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"第\s*(\d{1,6})\s*页").expect("valid page number regex"));
+    static RE_TRAILING: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d{1,6})\s*页?$").expect("valid page number regex"));
+    for re in [&RE_SLASH, &RE_PAGE, &RE_CN, &RE_TRAILING] {
+        if let Some(caps) = re.captures(trimmed) {
+            if let Some(value) = caps.get(1) {
+                if let Ok(number) = value.as_str().parse() {
+                    return Some(number);
+                }
+            }
+        }
     }
-    parse_roman_page_number(&text.trim().to_ascii_uppercase())
-        .or_else(|| parse_chinese_page_number(text))
+    parse_roman_page_number(&trimmed.to_ascii_uppercase())
+        .or_else(|| parse_chinese_page_number(trimmed))
+}
+
+/// Classify a page-number's normalized form so format switches (roman → arabic,
+/// plain → fraction) can also signal a section boundary.
+fn page_number_kind(normalized_text: &str) -> &'static str {
+    if normalized_text.contains("{roman-page}") {
+        "roman"
+    } else if normalized_text.contains("{page}/{total}")
+        || normalized_text.contains("第{page}页")
+        || normalized_text.contains("Page {page}")
+    {
+        "fraction"
+    } else if normalized_text.contains("{page}") {
+        "plain"
+    } else {
+        "other"
+    }
+}
+
+/// Best-effort style label of a page-number line, for downstream editing UIs.
+fn sequence_form_of(text: &str) -> &'static str {
+    let has_circled = |ch: char| {
+        let code = ch as u32;
+        (0x2460..=0x2473).contains(&code) || (0x24EB..=0x24F4).contains(&code)
+    };
+    let has_dingbat = |ch: char| {
+        let code = ch as u32;
+        (0x2776..=0x277F).contains(&code)
+    };
+    if text.chars().any(has_circled) {
+        "circled"
+    } else if text.chars().any(has_dingbat) {
+        "dingbat"
+    } else if is_roman_page_marker(text) {
+        "roman"
+    } else if text.contains('/') || text.contains('共') {
+        "fraction"
+    } else if text.to_lowercase().contains("page") {
+        "page-of"
+    } else if text.contains('第') && text.contains('页') {
+        "page-n"
+    } else if text
+        .chars()
+        .any(|ch| "零一二三四五六七八九十百千〇两".contains(ch))
+    {
+        "chinese"
+    } else {
+        "arabic"
+    }
+}
+
+fn text_has_total(text: &str) -> bool {
+    text.contains('/') || text.contains('共') || text.to_lowercase().contains(" of ")
+}
+
+/// Split a page-number run (lines in page order) into segments whenever the
+/// sequence is not strictly continuous (+1), the format switches (roman front
+/// matter → arabic body), or a value cannot be parsed. Missing or garbled
+/// pages must surface as separate segments instead of being hidden in one
+/// merged range; position is the grouping criterion, but continuity decides
+/// whether they stay together.
+fn split_page_number_sequence<'a>(lines: &[&'a TextLineDetection]) -> Vec<Vec<&'a TextLineDetection>> {
+    let mut segments: Vec<Vec<&'a TextLineDetection>> = Vec::new();
+    let mut prev_value: Option<u32> = None;
+    let mut prev_kind: Option<&str> = None;
+    for line in lines {
+        let value = parsed_page_number_value(&line.text);
+        let kind = page_number_kind(&line.normalized_text);
+        let discontinuity = match (prev_value, value) {
+            (Some(prev), Some(value)) => value != prev + 1,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        let kind_changed = prev_kind.is_some_and(|prev| prev != kind);
+        if segments.is_empty() || discontinuity || kind_changed {
+            segments.push(Vec::new());
+        }
+        segments.last_mut().expect("segment exists").push(line);
+        if let Some(value) = value {
+            prev_value = Some(value);
+        }
+        prev_kind = Some(kind);
+    }
+    segments
 }
 
 /// Extract the denominator (total) from a page number string like "1/3 页" or "2/13".
@@ -1332,7 +1477,13 @@ fn parse_chinese_page_number(text: &str) -> Option<u32> {
 }
 
 fn normalize_header_footer_text(text: &str) -> String {
-    let normalized_digits: String = text
+    // Expand circled/dingbat digits (①-⑳, ❶-❿, ⓫-⓴) to arabic so the
+    // page-number pipeline recognizes them like any other numbering style.
+    let circled_expanded: String = text
+        .chars()
+        .map(|ch| circled_digit_text(ch).map(str::to_string).unwrap_or_else(|| ch.to_string()))
+        .collect();
+    let normalized_digits: String = circled_expanded
         .chars()
         .map(|ch| match ch {
             '０'..='９' => char::from_u32(ch as u32 - '０' as u32 + '0' as u32).unwrap_or(ch),
@@ -1695,9 +1846,10 @@ mod tests {
         };
         let candidates =
             build_candidates(&[page(1, "10"), page(2, "50"), page(3, "3")], "footer", 3);
-        assert_eq!(candidates.len(), 1);
-        assert!(candidates[0].repeating);
-        assert!(!candidates[0].sequence_stable);
+        // Unordered values are surfaced as separate single-page candidates so
+        // the garbled sequence is visible instead of hidden in one merged range.
+        assert_eq!(candidates.len(), 3);
+        assert!(candidates.iter().all(|c| !c.sequence_stable));
     }
 
     #[test]
@@ -2112,5 +2264,229 @@ mod tests {
         assert!(!labels_for("2").contains(&"page-number".to_string()));
         // Regular header text
         assert!(!labels_for("说 明 书").contains(&"page-number".to_string()));
+    }
+
+    #[test]
+    fn page_number_sequence_splits_on_section_resets() {
+        let line = |page: u32, text: &str| TextLineDetection {
+            text: text.to_string(),
+            normalized_text: "{page}".to_string(),
+            bbox: BBox {
+                x0: 260.0,
+                y0: 800.0,
+                x1: 290.0,
+                y1: 812.0,
+                page,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+        };
+        let lines = vec![
+            line(2, "1"),
+            line(3, "2"),
+            line(4, "3"),
+            line(5, "1"),
+            line(6, "2"),
+        ];
+        let refs: Vec<&TextLineDetection> = lines.iter().collect();
+        let segments = split_page_number_sequence(&refs);
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].len(), 3);
+        assert_eq!(segments[1].len(), 2);
+    }
+
+    #[test]
+    fn page_number_sequence_splits_on_format_switch() {
+        // Roman front matter → arabic body, values stay continuous (V/VI then 7/8)
+        let line = |page: u32, text: &str, norm: &str| TextLineDetection {
+            text: text.to_string(),
+            normalized_text: norm.to_string(),
+            bbox: BBox {
+                x0: 260.0,
+                y0: 800.0,
+                x1: 290.0,
+                y1: 812.0,
+                page,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+        };
+        let lines = vec![
+            line(1, "I", "{roman-page}"),
+            line(2, "II", "{roman-page}"),
+            line(3, "III", "{roman-page}"),
+            line(4, "IV", "{roman-page}"),
+            line(5, "V", "{roman-page}"),
+            line(6, "VI", "{roman-page}"),
+            line(7, "7", "{page}"),
+            line(8, "8", "{page}"),
+        ];
+        let refs: Vec<&TextLineDetection> = lines.iter().collect();
+        let segments = split_page_number_sequence(&refs);
+        assert_eq!(segments.len(), 2, "roman→arabic must split even without a value reset");
+        assert_eq!(segments[0].len(), 6);
+        assert_eq!(segments[1].len(), 2);
+    }
+
+    #[test]
+    fn page_number_sequence_splits_unordered_values() {
+        let line = |page: u32, text: &str| TextLineDetection {
+            text: text.to_string(),
+            normalized_text: "{page}".to_string(),
+            bbox: BBox {
+                x0: 540.0,
+                y0: 800.0,
+                x1: 550.0,
+                y1: 820.0,
+                page,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+        };
+        let lines = vec![line(1, "10"), line(2, "50"), line(3, "3")];
+        let refs: Vec<&TextLineDetection> = lines.iter().collect();
+        // 10 → 50 → 3: neither step is +1, so each value becomes its own segment
+        let segments = split_page_number_sequence(&refs);
+        assert_eq!(segments.len(), 3, "unordered values must be surfaced separately");
+    }
+
+    #[test]
+    fn page_number_sequence_splits_on_gaps() {
+        let line = |page: u32, text: &str| TextLineDetection {
+            text: text.to_string(),
+            normalized_text: "{page}".to_string(),
+            bbox: BBox {
+                x0: 540.0,
+                y0: 800.0,
+                x1: 550.0,
+                y1: 820.0,
+                page,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+        };
+        let lines = vec![line(1, "1"), line(2, "2"), line(3, "4"), line(4, "5")];
+        let refs: Vec<&TextLineDetection> = lines.iter().collect();
+        // 2 → 4 skips 3: the missing page must surface as a separate segment
+        let segments = split_page_number_sequence(&refs);
+        assert_eq!(segments.len(), 2, "gap in the sequence must split segments");
+        assert_eq!(segments[0].len(), 2);
+        assert_eq!(segments[1].len(), 2);
+    }
+
+    #[test]
+    fn circled_page_numbers_normalize_and_classify() {
+        // Circled digits expand to arabic, then standalone numbers normalize to {page}
+        assert_eq!(normalize_header_footer_text("①"), "{page}");
+        assert_eq!(normalize_header_footer_text("⑫"), "{page}");
+        assert_eq!(normalize_header_footer_text("❶"), "{page}");
+        assert_eq!(normalize_header_footer_text("⓫"), "{page}");
+        assert!(labels_for("{page}").contains(&"page-number".to_string()));
+        assert_eq!(sequence_form_of("①"), "circled");
+        assert_eq!(sequence_form_of("❶"), "dingbat");
+        assert_eq!(sequence_form_of("1/3 页"), "fraction");
+        assert_eq!(sequence_form_of("I"), "roman");
+        assert!(text_has_total("1/3 页"));
+        assert!(!text_has_total("2"));
+    }
+
+    #[test]
+    fn sectioned_page_numbers_produce_separate_candidates() {
+        let line = |page: u32, text: &str| TextLineDetection {
+            text: text.to_string(),
+            normalized_text: "{page}".to_string(),
+            bbox: BBox {
+                x0: 260.0,
+                y0: 800.0,
+                x1: 290.0,
+                y1: 812.0,
+                page,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+        };
+        let mk = |page: u32, text: &str| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![],
+            footers: vec![line(page, text)],
+        };
+        let pages = vec![
+            mk(2, "1"),
+            mk(3, "2"),
+            mk(4, "3"),
+            mk(5, "1"),
+            mk(6, "2"),
+        ];
+        let candidates = build_candidates(&pages, "footer", 5);
+        // Pure numbers normalize to the {page} template; page-number candidates
+        // are exempt from the merge step, so both sections stay separate.
+        let pn: Vec<_> = candidates
+            .iter()
+            .filter(|c| c.normalized_text.contains("{page}"))
+            .collect();
+        assert_eq!(pn.len(), 2);
+        let starts: Vec<u32> = pn.iter().map(|c| c.page_range.start).collect();
+        assert!(starts.contains(&2));
+        assert!(starts.contains(&5));
+        // No candidate spans across the section boundary
+        assert!(pn.iter().all(|c| !(c.page_range.start <= 3 && c.page_range.end >= 5)));
+    }
+
+    #[test]
+    #[ignore = "requires the real patent PDF and pdftotext"]
+    fn detect_real_patent_pdf_sections() {
+        let path = "/Users/only/Desktop/Test/侵权比对-附件一-专利授权公告文本-CN117457788B.pdf";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("skipping: file not found");
+            return;
+        }
+        let result = detect(&serde_json::json!({
+            "inputPath": path,
+            "maxPages": 30,
+            "headerZoneMm": 25.0,
+            "footerZoneMm": 25.0,
+        }))
+        .unwrap();
+        for c in result
+            .header_candidates
+            .iter()
+            .chain(result.footer_candidates.iter())
+        {
+            if c.normalized_text.contains("page") || c.normalized_text.contains('{') {
+                println!(
+                    "{} text={} norm={} pages={}-{} bbox=({:.1},{:.1})",
+                    c.region,
+                    c.text,
+                    c.normalized_text,
+                    c.page_range.start,
+                    c.page_range.end,
+                    c.bbox.x0,
+                    c.bbox.y0
+                );
+            }
+        }
+        // Page-number candidates must keep their per-section ranges instead of
+        // being merged into one 2-19 range: claims 1/3, spec 1/13, drawings 1/2.
+        let header_pn: Vec<_> = result
+            .header_candidates
+            .iter()
+            .filter(|c| c.labels.iter().any(|l| l == "page-number"))
+            .collect();
+        assert!(header_pn.len() >= 3, "expected 3 sectioned header page numbers, got {}", header_pn.len());
+        let starts: Vec<u32> = header_pn.iter().map(|c| c.page_range.start).collect();
+        assert!(starts.contains(&2) && starts.contains(&5), "missing section start: {starts:?}");
+        let footer_pn: Vec<_> = result
+            .footer_candidates
+            .iter()
+            .filter(|c| c.labels.iter().any(|l| l == "page-number"))
+            .collect();
+        assert_eq!(footer_pn.len(), 1, "footer should be one continuous total range");
     }
 }

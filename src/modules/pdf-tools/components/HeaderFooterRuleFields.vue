@@ -85,6 +85,30 @@
         </el-button>
       </div>
     </div>
+    <!-- Footer text group list (only when >1 group) -->
+    <div v-if="footerTextGroups.length > 1" class="header-group-list">
+      <div
+        v-for="group in footerTextGroups"
+        :key="group.id"
+        class="header-group-item"
+        :class="{ active: group.id === selectedFooterTextGroupId }"
+        @click="$emit('update:selectedFooterTextGroupId', group.id)"
+      >
+        <span class="group-label">
+          <el-icon v-if="group.id === selectedFooterTextGroupId"><i-ep-arrow-right /></el-icon>
+          {{ group.label || '页脚文字' }} · {{ group.text || '（空）' }}
+        </span>
+        <el-button
+          size="small"
+          link
+          type="danger"
+          :disabled="footerTextGroups.length <= 1"
+          @click.stop="removeFooterTextGroup(group.id)"
+        >
+          删除
+        </el-button>
+      </div>
+    </div>
     <div class="rule-item">
       <label>页脚文本</label>
       <el-input v-model="footerTextContentModel" :disabled="!footerInsertEnabled" placeholder="固定文字，不用于页码" />
@@ -108,6 +132,30 @@
         <el-switch v-model="pageNumberEnabledModel" size="small" />
         <el-button size="small" circle :disabled="!pageNumberEnabled" @click="addPageNumberGroup">
           <el-icon><i-ep-plus /></el-icon>
+        </el-button>
+      </div>
+    </div>
+    <!-- Page number group list (only when >1 group) -->
+    <div v-if="pageNumberGroups.length > 1" class="header-group-list">
+      <div
+        v-for="group in pageNumberGroups"
+        :key="group.id"
+        class="header-group-item"
+        :class="{ active: group.id === selectedPageNumberGroupId }"
+        @click="$emit('update:selectedPageNumberGroupId', group.id)"
+      >
+        <span class="group-label">
+          <el-icon v-if="group.id === selectedPageNumberGroupId"><i-ep-arrow-right /></el-icon>
+          {{ group.label || '页码' }} · {{ group.template || '{page}/{total}' }}
+        </span>
+        <el-button
+          size="small"
+          link
+          type="danger"
+          :disabled="pageNumberGroups.length <= 1"
+          @click.stop="removePageNumberGroup(group.id)"
+        >
+          删除
         </el-button>
       </div>
     </div>
@@ -254,6 +302,7 @@ const props = defineProps({
   pageNumberShowTotal: { type: Boolean, default: true },
   pageNumberSamplePage: { type: Number, default: 1 },
   pageNumberSampleTotal: { type: Number, default: 35 },
+  pageHeightMm: { type: Number, default: 297 },
   offsetLimitMm: { type: Number, default: 120 },
 })
 
@@ -314,8 +363,7 @@ const headerAlignModel = model('headerAlign'),
   headerMarginMmModel = model('headerMarginMm'),
   headerOffsetXMmModel = model('headerOffsetXMm'),
   headerColorModel = model('headerColor')
-const footerTextEnabledModel = model('footerTextEnabled'),
-  footerInsertEnabledModel = model('footerInsertEnabled'),
+const footerInsertEnabledModel = model('footerInsertEnabled'),
   footerTextContentModel = model('footerTextContent'),
   footerTextAlignModel = model('footerTextAlign'),
   footerTextFontSizeModel = model('footerTextFontSize'),
@@ -358,29 +406,47 @@ const pageNumberPreviewText = computed(() => {
 // Overlap detection
 const overlapWarnings = computed(() => {
   const warnings = []
-  const groups = props.headerGroups || []
-  // Check header-to-header overlap (±2mm tolerance)
-  for (let i = 0; i < groups.length; i++) {
-    for (let j = i + 1; j < groups.length; j++) {
-      if (groups[i].enabled && groups[j].enabled && Math.abs(groups[i].marginMm - groups[j].marginMm) <= 2) {
-        warnings.push(`"${groups[i].label || '页眉 ' + (i + 1)}" 与 "${groups[j].label || '页眉 ' + (j + 1)}" 距顶距离接近，可能重叠`)
+  const headerGroups = props.headerGroups || []
+  const footerTextGroups = props.footerTextGroups || []
+  const pageNumberGroups = props.pageNumberGroups || []
+  const pageHeight = Number(props.pageHeightMm || 297)
+  const enabledHeader = headerGroups.filter((g) => g.enabled)
+  const enabledFooterText = footerTextGroups.filter((g) => g.enabled)
+  const enabledPnFooter = pageNumberGroups.filter((g) => g.enabled && g.region !== 'header')
+  const enabledPnHeader = pageNumberGroups.filter((g) => g.enabled && g.region === 'header')
+  const label = (g, fallback) => g.label || fallback
+  // Header-to-header overlap (±2mm tolerance)
+  for (let i = 0; i < enabledHeader.length; i++) {
+    for (let j = i + 1; j < enabledHeader.length; j++) {
+      if (Math.abs(enabledHeader[i].marginMm - enabledHeader[j].marginMm) <= 2) {
+        warnings.push(`"${label(enabledHeader[i], '页眉 ' + (i + 1))}" 与 "${label(enabledHeader[j], '页眉 ' + (j + 1))}" 距顶距离接近，可能重叠`)
       }
     }
   }
-  // Check header vs footer collision (page height ~297mm for A4)
-  const pageHeight = 297
-  const headerBottom = groups.filter(g => g.enabled).map(g => g.marginMm + (g.fontSize || 10) * 0.4)
-  const footerTop = pageHeight - (props.pageNumberMarginMm || 10) - (props.pageNumberFontSize || 9) * 0.4
-  for (const hb of headerBottom) {
-    if (hb > footerTop - 5) {
-      warnings.push(`页眉底部（${hb.toFixed(1)}mm）与页码区域可能碰撞`)
+  // Header bottom vs page number area (footer-region page numbers) and header-region page numbers
+  for (const h of enabledHeader) {
+    const headerBottom = (h.marginMm || 10) + (h.fontSize || 10) * 0.4
+    for (const pn of enabledPnFooter) {
+      const pnTop = pageHeight - (pn.marginMm || 10) - (pn.fontSize || 9) * 0.4
+      if (headerBottom > pnTop - 5) {
+        warnings.push(`"${label(h, '页眉')}" 底部与页码区域可能碰撞`)
+        break
+      }
+    }
+    for (const pn of enabledPnHeader) {
+      const pnBottom = (pn.marginMm || 10) + (pn.fontSize || 9) * 0.4
+      if (Math.abs(headerBottom - pnBottom) <= 5) {
+        warnings.push(`"${label(h, '页眉')}" 与页眉区页码"${label(pn, '页码')}"可能重叠`)
+      }
     }
   }
-  // Check footer text vs page number overlap
-  const ftMargin = props.footerTextMarginMm || 10
-  const pnMargin = props.pageNumberMarginMm || 10
-  if (props.footerInsertEnabled && props.pageNumberEnabled && Math.abs(ftMargin - pnMargin) <= 3) {
-    warnings.push('页脚文字与页码的距底距离接近，可能重叠')
+  // Footer text vs page number (±3mm), all group combinations
+  for (const ft of enabledFooterText) {
+    for (const pn of enabledPnFooter) {
+      if (Math.abs((ft.marginMm || 10) - (pn.marginMm || 10)) <= 3) {
+        warnings.push(`"${label(ft, '页脚文字')}" 与 "${label(pn, '页码')}" 距底距离接近，可能重叠`)
+      }
+    }
   }
   return warnings
 })
@@ -389,9 +455,7 @@ function groupModeLabel(group) {
   return MODE_LABELS[group.mode] || group.mode
 }
 
-let groupCounter = 1
 function addGroup() {
-  groupCounter++
   const newGroup = {
     id: `h${Date.now()}`,
     label: `页眉 ${props.headerGroups.length + 1}`,
