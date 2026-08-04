@@ -1050,7 +1050,36 @@ fn build_candidates(
         }
     }
 
-    let mut candidates: Vec<HeaderFooterCandidate> = grouped
+    // For __page_number_seq__ groups, split by total value before building candidates.
+    // E.g., "1/3 页" on pages 1-4 and "1/13 页" on pages 5-17 are separate sequences.
+    let mut split_groups: BTreeMap<(String, i32, i32), Vec<&TextLineDetection>> = BTreeMap::new();
+    for ((normalized_text, x_bucket, y_bucket), lines) in grouped {
+        if normalized_text == "__page_number_seq__" {
+            let mut by_total: BTreeMap<Option<u32>, Vec<&TextLineDetection>> = BTreeMap::new();
+            for line in lines {
+                let total = parsed_page_number_total(&line.text);
+                by_total.entry(total).or_default().push(line);
+            }
+            if by_total.len() > 1 {
+                for (total, group_lines) in by_total {
+                    let suffix = total.map(|t| format!(":total:{t}")).unwrap_or_default();
+                    let key = (
+                        format!("__page_number_seq__{suffix}"),
+                        x_bucket,
+                        y_bucket,
+                    );
+                    split_groups.entry(key).or_default().extend(group_lines);
+                }
+                continue;
+            }
+        }
+        split_groups
+            .entry((normalized_text, x_bucket, y_bucket))
+            .or_default()
+            .extend(lines);
+    }
+
+    let mut candidates: Vec<HeaderFooterCandidate> = split_groups
         .into_iter()
         .filter_map(|((normalized_text, _, _), lines)| {
             let first = *lines.first()?;
@@ -1071,7 +1100,7 @@ fn build_candidates(
                 .unwrap_or(first.bbox.page);
             // For page number sequences with VARYING text across pages,
             // derive representative text. Template markers (like "{page}") keep original text.
-            let is_seq = normalized_text == "__page_number_seq__";
+            let is_seq = normalized_text.starts_with("__page_number_seq__");
             let is_template = first.normalized_text.contains('{');
             let (display_text, effective_normalized) = if is_seq && !is_template {
                 let parsed_values: Vec<u32> = lines
@@ -1227,6 +1256,16 @@ fn parsed_page_number_value(text: &str) -> Option<u32> {
     }
     parse_roman_page_number(&text.trim().to_ascii_uppercase())
         .or_else(|| parse_chinese_page_number(text))
+}
+
+/// Extract the denominator (total) from a page number string like "1/3 页" or "2/13".
+/// Returns None if the text doesn't contain a "/" total separator.
+fn parsed_page_number_total(text: &str) -> Option<u32> {
+    static RE_SLASH_TOTAL: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\d+\s*/\s*(\d+)").expect("valid slash-total regex"));
+    RE_SLASH_TOTAL
+        .captures(text)
+        .and_then(|caps| caps.get(1)?.as_str().parse().ok())
 }
 
 fn parse_chinese_page_number(text: &str) -> Option<u32> {
