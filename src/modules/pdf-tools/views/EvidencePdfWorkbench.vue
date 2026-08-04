@@ -92,6 +92,14 @@
             <el-button size="small" :loading="detectingAllHeaderFooter" @click="detectAllHeaderFooter"
               >重新检测</el-button
             >
+            <el-button
+              size="small"
+              type="warning"
+              :loading="quickCleanupRunning"
+              @click="quickCleanupExistingHeaderFooter"
+            >
+              一键清除页眉页脚
+            </el-button>
             <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter"
               >删除现有</el-button
             >
@@ -778,6 +786,8 @@ const overlayFiles = ref([])
 const overlayOutputDir = ref('')
 const checkingOverlayPages = ref(false)
 const overlaying = ref(false)
+const quickCleanupRunning = ref(false)
+let quickCleanupPipeline = false
 const importingMergedPdf = ref(false)
 const splittingMergedImport = ref(false)
 const selectedOverlayIndex = ref(0)
@@ -891,6 +901,14 @@ watch(
 
 watch(pageNumberSequence, (value) => {
   footerContinuous.value = value !== 'per-file'
+})
+
+// Pipeline: when dialog closes during quick cleanup, proceed with processing
+watch(existingElementsVisible, (visible) => {
+  if (!visible && quickCleanupPipeline) {
+    quickCleanupPipeline = false
+    finishQuickCleanupPipeline()
+  }
 })
 
 applyWorkflowDefaults()
@@ -1623,6 +1641,125 @@ function hasExistingHeaderFooter(row) {
 function openExistingElements(filter = 'all') {
   existingElementsFilter.value = filter
   existingElementsVisible.value = true
+}
+
+async function quickCleanupExistingHeaderFooter() {
+  if (!overlayFiles.value.length) {
+    ElMessage.info('请先导入 PDF 文件')
+    return
+  }
+  quickCleanupRunning.value = true
+  try {
+    // Step 1: Ensure detection is done
+    if (!hasDetectedExistingHeaderFooter.value) {
+      await detectAllHeaderFooter({ silent: true })
+    }
+    if (!hasDetectedExistingHeaderFooter.value) {
+      ElMessage.info('未检测到现有页眉页脚或页码')
+      return
+    }
+    // Step 2: Open dialog for user to select what to delete
+    quickCleanupPipeline = true
+    existingElementsFilter.value = 'all'
+    existingElementsVisible.value = true
+    // The watcher will call finishQuickCleanupPipeline when dialog closes
+  } catch (err) {
+    quickCleanupPipeline = false
+    ElMessage.error(userFacingError(err?.message || err, '检测失败'))
+  } finally {
+    quickCleanupRunning.value = false
+  }
+}
+
+async function finishQuickCleanupPipeline() {
+  // Check if anything was marked for deletion
+  const deleteCount = overlayFiles.value.reduce(
+    (sum, file) => sum + (file.existingElements || []).filter((e) => e.decision === 'delete').length,
+    0,
+  )
+  if (!deleteCount) {
+    ElMessage.info('未选择删除任何内容')
+    return
+  }
+
+  // Step 3: Confirm
+  try {
+    await ElMessageBox.confirm(
+      `将删除 ${deleteCount} 项已检测到的页眉页脚内容。标准结构直接删除，普通文本删除区域内匹配内容。处理后的文件将放在源文件旁边的 _cleaned 文件夹中。`,
+      '确认删除页眉页脚',
+      { confirmButtonText: '执行删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  // Step 4: Auto-set output to _cleaned subfolder next to source files
+  const firstFile = overlayFiles.value[0]
+  if (!firstFile?.path) return
+  const sourceDir = parentDir(firstFile.path)
+  const outputDir = `${sourceDir}_cleaned`
+
+  // Step 5: Process with minimal settings (only delete, no new headers/footers)
+  quickCleanupRunning.value = true
+  overlaying.value = true
+  try {
+    const cleanupRules = {
+      headerMode: 'none',
+      footerTextEnabled: false,
+      pageNumberEnabled: false,
+      normalizeA4: false,
+      removeAnnotations: false,
+      outputMode: 'files_only',
+      cleanupHeaderHeightMm: 18,
+      cleanupFooterHeightMm: 18,
+    }
+    const payload = buildEvidencePdfRulePayload(overlayRows.value, cleanupRules, outputDir)
+    overlayRows.value.forEach((file) => {
+      file.statusText = '处理中'
+      file.statusType = 'warning'
+      file.statusDetail = ''
+    })
+
+    const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    if (!result.ok) {
+      ElMessage.error(userFacingError(result.error, '页眉页脚删除失败'))
+      overlayFiles.value.forEach((file) => {
+        file.statusText = '失败'
+        file.statusType = 'danger'
+      })
+      return
+    }
+
+    const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
+    const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
+    overlayFiles.value.forEach((file) => {
+      const success = successByInput.get(file.path)
+      const failed = failedByInput.get(file.path)
+      if (success) {
+        file.outputPath = success.outputPath
+        file.statusText = '已完成'
+        file.statusType = 'success'
+        file.statusDetail = (success.warnings || []).join('；')
+      } else if (failed) {
+        file.statusText = '失败'
+        file.statusType = 'danger'
+        file.statusDetail = userFacingError(failed.message, '处理失败', 300)
+      }
+    })
+
+    const successCount = result.data.results?.length || 0
+    const failedCount = result.data.failed?.length || 0
+    if (failedCount) {
+      ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个。输出目录：${outputDir}`)
+    } else {
+      ElMessage.success(`已完成 ${successCount} 个 PDF，输出目录：${outputDir}`)
+    }
+  } catch (err) {
+    ElMessage.error(userFacingError(err?.message || err, '页眉页脚删除失败'))
+  } finally {
+    quickCleanupRunning.value = false
+    overlaying.value = false
+  }
 }
 
 function handleExistingElementChange(row) {
