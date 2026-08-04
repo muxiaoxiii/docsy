@@ -1,5 +1,8 @@
 <template>
-  <div class="hf-workbench">
+  <div class="hf-workbench" :class="{ 'is-evidence-dragging': evidenceDragging }">
+    <div v-if="evidenceDragging" class="evidence-drop-overlay">
+      <div class="evidence-drop-message">松开以导入 PDF 文件</div>
+    </div>
     <section class="hf-panel">
       <div class="section-head">
         <div>
@@ -195,7 +198,6 @@
           v-model:header-margin-mm="headerMarginMm"
           v-model:header-offset-x-mm="headerOffsetXMm"
           v-model:header-color="headerColor"
-          v-model:footer-text-enabled="footerTextEnabled"
           v-model:footer-insert-enabled="footerInsertEnabled"
           v-model:footer-text-content="footerTextContent"
           v-model:footer-text-align="footerTextAlign"
@@ -463,7 +465,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column v-if="footerTextEnabled" label="新页脚文字" min-width="110" show-overflow-tooltip>
+        <el-table-column v-if="footerInsertEnabled" label="新页脚文字" min-width="110" show-overflow-tooltip>
           <template #default>{{ footerTextContent || '-' }}</template>
         </el-table-column>
         <el-table-column label="新页码" prop="footer" sortable="custom" min-width="110" show-overflow-tooltip>
@@ -754,6 +756,7 @@ import { renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
 import { elementIdentity } from '../composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
 const props = defineProps({
   workflow: {
@@ -787,6 +790,7 @@ const overlayOutputDir = ref('')
 const checkingOverlayPages = ref(false)
 const overlaying = ref(false)
 const quickCleanupRunning = ref(false)
+const evidenceDragging = ref(false)
 let quickCleanupPipeline = false
 const importingMergedPdf = ref(false)
 const splittingMergedImport = ref(false)
@@ -855,7 +859,7 @@ const footerFontFamily = ref('auto')
 const footerMarginMm = ref(10)
 const footerOffsetXMm = ref(0)
 const footerColor = ref('#000000')
-const footerTextEnabled = ref(false)
+// footerTextEnabled merged into footerInsertEnabled
 const footerTextContent = ref('')
 const footerTextAlign = ref('left')
 const footerTextFontSize = ref(9)
@@ -1102,7 +1106,7 @@ const hasApplicableProcessingRule = computed(
     hasExistingConvertRule.value ||
     hasExistingRemovalRule.value ||
     (insertHeaderFooterEnabled.value &&
-      (headerMode.value !== 'none' || footerTextEnabled.value || footerEnabled.value)),
+      (headerMode.value !== 'none' || footerInsertEnabled.value || footerEnabled.value)),
 )
 
 const currentRules = computed(() => ({
@@ -1136,7 +1140,6 @@ const currentRules = computed(() => ({
   footerMarginMm: footerMarginMm.value,
   footerOffsetXMm: footerOffsetXMm.value,
   footerColor: footerColor.value,
-  footerTextEnabled: insertHeaderFooterEnabled.value && footerTextEnabled.value,
   footerInsertEnabled: insertHeaderFooterEnabled.value && footerInsertEnabled.value,
   footerTextContent: footerTextContent.value,
   footerTextAlign: footerTextAlign.value,
@@ -1353,12 +1356,29 @@ async function selectOverlayFiles() {
   })
   if (!selected) return
   const paths = Array.isArray(selected) ? selected : [selected]
+  await loadEvidenceFiles(paths)
+}
+
+async function handleEvidenceDrop(paths) {
+  const pdfPaths = paths.filter((p) => p.toLowerCase().endsWith('.pdf'))
+  if (!pdfPaths.length) return
+  await loadEvidenceFiles(pdfPaths)
+}
+
+async function loadEvidenceFiles(paths) {
   mergedImportPlan.value = null
   overlayFiles.value = paths.map(createEvidenceFile)
   selectedOverlayIndex.value = 0
   await refreshOverlayPageCounts()
   await detectAllHeaderFooter({ silent: true })
 }
+
+useWindowFileDrop({
+  onEnter: () => { evidenceDragging.value = true },
+  onLeave: () => { evidenceDragging.value = false },
+  onDrop: handleEvidenceDrop,
+})
+
 async function selectOverlayOutputDir() {
   const selected = await open({ directory: true })
   if (selected) overlayOutputDir.value = selected
@@ -2595,5 +2615,28 @@ h3 {
   .dialog-rule-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.evidence-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(37, 99, 235, 0.08);
+  border: 2px dashed var(--docsy-primary, #2563eb);
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+.evidence-drop-message {
+  padding: 16px 32px;
+  background: var(--docsy-surface-elevated, #fff);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--docsy-primary, #2563eb);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
 </style>

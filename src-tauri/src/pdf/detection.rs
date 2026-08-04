@@ -568,10 +568,12 @@ fn build_page_detections(
                 height,
                 headers: group_words_into_lines(&header_words)
                     .into_iter()
+                    .flat_map(|line| split_mixed_page_number_line(line, width))
                     .map(line_to_detection)
                     .collect(),
                 footers: group_words_into_lines(&footer_words)
                     .into_iter()
+                    .flat_map(|line| split_mixed_page_number_line(line, width))
                     .map(line_to_detection)
                     .collect(),
             }
@@ -634,6 +636,67 @@ fn group_words_into_lines(words: &[&WordBox]) -> Vec<LineBox> {
             })
         })
         .collect()
+}
+
+/// Split a line that contains both header text and a trailing page number pattern.
+/// Also split if the line spans more than 30% of page width (likely two separate groups).
+fn split_mixed_page_number_line(line: LineBox, page_width: f32) -> Vec<LineBox> {
+    static PAGE_NUM_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?ix)\s\d+\s*/\s*\d+\s*页?$|\s第\s*\d+\s*页\s*/\s*共\s*\d+\s*页$|\spage\s*\d+\s*(?:of|/)\s*\d+$").unwrap()
+    });
+    let text = line.text.trim();
+    // Position-based split: line spans > 30% of page width
+    let line_width = line.bbox.x1 - line.bbox.x0;
+    if line_width > page_width * 0.30 {
+        // Try to find a page number pattern at the end
+        if let Some(m) = PAGE_NUM_RE.find(text) {
+            let prefix = text[..m.start()].trim();
+            let suffix = text[m.start()..].trim();
+            if !prefix.is_empty() && !suffix.is_empty() {
+                // Estimate split x-position from character count ratio
+                let total_chars = text.chars().count() as f32;
+                let prefix_chars = prefix.chars().count() as f32;
+                let ratio = prefix_chars / total_chars;
+                let split_x = line.bbox.x0 + line_width * ratio;
+                return vec![
+                    LineBox {
+                        text: prefix.to_string(),
+                        bbox: BBox { x0: line.bbox.x0, x1: split_x, ..line.bbox },
+                        font_size: line.font_size,
+                    },
+                    LineBox {
+                        text: suffix.to_string(),
+                        bbox: BBox { x0: split_x, x1: line.bbox.x1, ..line.bbox },
+                        font_size: line.font_size,
+                    },
+                ];
+            }
+        }
+    }
+    // Content-based split even without position trigger: trailing page number
+    if let Some(m) = PAGE_NUM_RE.find(text) {
+        let prefix = text[..m.start()].trim();
+        let suffix = text[m.start()..].trim();
+        if !prefix.is_empty() && !suffix.is_empty() {
+            let total_chars = text.chars().count() as f32;
+            let prefix_chars = prefix.chars().count() as f32;
+            let ratio = prefix_chars / total_chars;
+            let split_x = line.bbox.x0 + line_width * ratio;
+            return vec![
+                LineBox {
+                    text: prefix.to_string(),
+                    bbox: BBox { x0: line.bbox.x0, x1: split_x, ..line.bbox },
+                    font_size: line.font_size,
+                },
+                LineBox {
+                    text: suffix.to_string(),
+                    bbox: BBox { x0: split_x, x1: line.bbox.x1, ..line.bbox },
+                    font_size: line.font_size,
+                },
+            ];
+        }
+    }
+    vec![line]
 }
 
 fn line_to_detection(line: LineBox) -> TextLineDetection {
@@ -974,10 +1037,16 @@ fn build_candidates(
             let center_y = (line.bbox.y0 + line.bbox.y1) / 2.0 / line.bbox.height.max(1.0);
             let x_bucket = (center_x * 20.0).round() as i32;
             let y_bucket = (center_y * 40.0).round() as i32;
-            grouped
-                .entry((line.normalized_text.clone(), x_bucket, y_bucket))
-                .or_default()
-                .push(line);
+            // Page numbers at the same position form a sequence (different text per page),
+            // so use a position-only key. Headers/footers use (text, position) key.
+            let labels = labels_for(&line.normalized_text);
+            let is_page_num = labels.iter().any(|l| l == "page-number");
+            let key = if is_page_num {
+                ("__page_number_seq__".to_string(), x_bucket, y_bucket)
+            } else {
+                (line.normalized_text.clone(), x_bucket, y_bucket)
+            };
+            grouped.entry(key).or_default().push(line);
         }
     }
 
@@ -1000,7 +1069,30 @@ fn build_candidates(
                 .map(|line| line.bbox.page)
                 .max()
                 .unwrap_or(first.bbox.page);
-            let labels = labels_for(&normalized_text);
+            // For page number sequences with VARYING text across pages,
+            // derive representative text. Template markers (like "{page}") keep original text.
+            let is_seq = normalized_text == "__page_number_seq__";
+            let is_template = first.normalized_text.contains('{');
+            let (display_text, effective_normalized) = if is_seq && !is_template {
+                let parsed_values: Vec<u32> = lines
+                    .iter()
+                    .filter_map(|l| parsed_page_number_value(&l.text))
+                    .collect();
+                let has_total = lines.iter().any(|l| l.text.contains('/'));
+                let representative = if has_total && !parsed_values.is_empty() {
+                    format!(
+                        "页码 (1-{}/{})",
+                        parsed_values.iter().max().copied().unwrap_or(count as u32),
+                        page_end - page_start + 1
+                    )
+                } else {
+                    format!("页码 ({}-{})", page_start, page_end)
+                };
+                (representative.clone(), representative)
+            } else {
+                (first.text.clone(), first.normalized_text.clone())
+            };
+            let labels = labels_for(&effective_normalized);
             let is_page_number = labels.iter().any(|label| label == "page-number");
             let position_spread = normalized_position_spread(&lines);
             let position_stable = position_spread <= 0.025;
@@ -1022,8 +1114,8 @@ fn build_candidates(
             }
             confidence = confidence.min(1.0);
             Some(HeaderFooterCandidate {
-                text: first.text.clone(),
-                normalized_text,
+                text: display_text,
+                normalized_text: effective_normalized,
                 region: region.to_string(),
                 page_range: PageRange {
                     start: page_start,

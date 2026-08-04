@@ -181,7 +181,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
   const rangedFiles = assignPageRanges(files)
   const total = totalPages(rangedFiles)
   return rangedFiles.map((file, index) => {
-    const legacyFooterMode = rules.footerTextEnabled === undefined && rules.pageNumberEnabled === undefined
+    const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
     const headerInsertEnabled = rules.headerInsertEnabled !== false
     const footerInsertEnabled = rules.footerInsertEnabled !== false
     const header = headerInsertEnabled ? buildHeaderText(file, index, rules) : ''
@@ -239,7 +239,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       footer:
         legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
           ? (footerInsertEnabled ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules) : null)
-          : rules.footerTextEnabled && rules.footerTextContent && footerInsertEnabled
+          : footerInsertEnabled && rules.footerTextContent
             ? footerTextOverlayConfig(rules.footerTextContent, rules)
             : null,
       extraOverlays,
@@ -554,7 +554,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         color: rules.headerColor || '#000000',
       },
       footerRule: {
-        enabled: Boolean(rules.footerTextEnabled),
+        enabled: Boolean(rules.footerInsertEnabled),
         text: rules.footerTextContent || '',
         align: rules.footerTextAlign || 'left',
         fontSize: rules.footerTextFontSize || 9,

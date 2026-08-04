@@ -1,9 +1,8 @@
 <template>
   <div>
-    <div class="rule-item section-label"><strong>页眉文字</strong></div>
-    <div class="rule-item">
-      <label>插入页眉</label>
-      <el-switch v-model="headerInsertEnabledModel" active-text="启用" inactive-text="关闭" />
+    <div class="rule-item section-label">
+      <strong>页眉文字</strong>
+      <el-switch v-model="headerInsertEnabledModel" size="small" />
     </div>
     <div class="rule-item">
       <label>页眉来源</label>
@@ -37,22 +36,17 @@
       margin-label="距顶"
     />
 
-    <div class="rule-item section-label"><strong>页脚文字</strong></div>
-    <div class="rule-item">
-      <label>插入页脚文字</label>
-      <el-switch v-model="footerInsertEnabledModel" active-text="启用" inactive-text="关闭" />
-    </div>
-    <div class="rule-item">
-      <label>页脚文本内容</label>
-      <el-switch v-model="footerTextEnabledModel" active-text="启用" inactive-text="关闭" />
+    <div class="rule-item section-label">
+      <strong>页脚文字</strong>
+      <el-switch v-model="footerInsertEnabledModel" size="small" />
     </div>
     <div class="rule-item">
       <label>页脚文本</label>
-      <el-input v-model="footerTextContentModel" :disabled="!footerInsertEnabled || !footerTextEnabled" placeholder="固定文字，不用于页码" />
+      <el-input v-model="footerTextContentModel" :disabled="!footerInsertEnabled" placeholder="固定文字，不用于页码" />
     </div>
     <TextPlacementFields
       prefix="页脚"
-      :disabled="!footerInsertEnabled || !footerTextEnabled"
+      :disabled="!footerInsertEnabled"
       v-model:align="footerTextAlignModel"
       v-model:font-size="footerTextFontSizeModel"
       v-model:font-family="footerTextFontFamilyModel"
@@ -63,10 +57,9 @@
       margin-label="距底"
     />
 
-    <div class="rule-item section-label"><strong>页码</strong></div>
-    <div class="rule-item">
-      <label>插入页码</label>
-      <el-switch v-model="pageNumberEnabledModel" active-text="启用" inactive-text="关闭" />
+    <div class="rule-item section-label">
+      <strong>页码</strong>
+      <el-switch v-model="pageNumberEnabledModel" size="small" />
     </div>
     <div class="rule-item">
       <label>连续方式</label>
@@ -152,9 +145,7 @@ import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../composables/pdf
 const PRESETS_WITH_TOTAL = [
   { value: '{page}/{total}', label: '1/35' },
   { value: '第{page}页，共{total}页', label: '第1页，共35页' },
-  { value: '-{page}-', label: '-1-' },
-  { value: '— {page} —', label: '— 1 —' },
-  { value: '{page}', label: '1' },
+  { value: '{page} of {total}', label: '1 of 35' },
 ]
 const PRESETS_NO_TOTAL = [
   { value: '{page}', label: '1' },
@@ -176,7 +167,6 @@ const props = defineProps({
   headerMarginMm: { type: Number, required: true },
   headerOffsetXMm: { type: Number, required: true },
   headerColor: { type: String, required: true },
-  footerTextEnabled: { type: Boolean, required: true },
   footerInsertEnabled: { type: Boolean, default: true },
   footerTextContent: { type: String, required: true },
   footerTextAlign: { type: String, required: true },
@@ -218,7 +208,6 @@ const emit = defineEmits([
     'headerMarginMm',
     'headerOffsetXMm',
     'headerColor',
-    'footerTextEnabled',
     'footerInsertEnabled',
     'footerTextContent',
     'footerTextAlign',
@@ -300,6 +289,9 @@ const pageNumberPreviewText = computed(() => {
 <style scoped>
 .section-label {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-top: 4px;
   padding-top: 8px;
   border-top: 1px solid var(--docsy-border-subtle);

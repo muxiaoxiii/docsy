@@ -332,20 +332,30 @@ async function inspectUnlockFiles(items) {
     while (nextIndex < items.length) {
       const item = items[nextIndex]
       nextIndex += 1
-      const result = await tauriCallSafe('inspect_pdf', { input: item.path })
-      item.inspecting = false
-      if (!result.ok) {
+      try {
+        const result = await Promise.race([
+          tauriCallSafe('inspect_pdf', { input: item.path }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
+        ])
+        item.inspecting = false
+        if (!result.ok) {
+          item.encrypted = null
+          item.statusText = result.error || '检测失败'
+          item.statusType = 'danger'
+        } else if (result.data.encrypted) {
+          item.encrypted = true
+          item.statusText = '已加密，待解锁'
+          item.statusType = 'warning'
+        } else {
+          item.encrypted = false
+          item.statusText = '未加密，无需处理'
+          item.statusType = 'info'
+        }
+      } catch (err) {
+        item.inspecting = false
         item.encrypted = null
-        item.statusText = result.error || '检测失败'
+        item.statusText = userFacingError(err?.message || err, '检测异常')
         item.statusType = 'danger'
-      } else if (result.data.encrypted) {
-        item.encrypted = true
-        item.statusText = '已加密，待解锁'
-        item.statusType = 'warning'
-      } else {
-        item.encrypted = false
-        item.statusText = '未加密，无需处理'
-        item.statusType = 'info'
       }
     }
   })
