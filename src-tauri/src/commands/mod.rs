@@ -51,7 +51,6 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         // settings
         settings::get_app_settings,
         settings::set_app_settings,
-        settings::get_module_registry,
         settings::check_external_tool,
         settings::install_external_tool,
         settings::install_external_tool_from_package,

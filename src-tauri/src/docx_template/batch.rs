@@ -333,17 +333,13 @@ fn is_valid_date_text(text: &str) -> bool {
     if t.is_empty() {
         return true;
     }
-    // Common date patterns
-    if regex::Regex::new(r"^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?$")
-        .unwrap()
-        .is_match(t)
-    {
-        return true;
-    }
-    if regex::Regex::new(r"^\d{4}年\d{1,2}月\d{1,2}日$")
-        .unwrap()
-        .is_match(t)
-    {
+    static DATE_RE1: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?$").unwrap()
+    });
+    static DATE_RE2: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^\d{4}年\d{1,2}月\d{1,2}日$").unwrap()
+    });
+    if DATE_RE1.is_match(t) || DATE_RE2.is_match(t) {
         return true;
     }
     // Chinese date with blanks

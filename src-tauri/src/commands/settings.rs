@@ -9,11 +9,6 @@ pub fn set_app_settings(settings: crate::services::history::AppSettings) -> Resu
 }
 
 #[tauri::command]
-pub fn get_module_registry() -> Result<Vec<serde_json::Value>, String> {
-    Ok(crate::services::module_registry::all_descriptors())
-}
-
-#[tauri::command]
 pub async fn check_external_tool(tool_name: String) -> Result<crate::external::ToolStatus, String> {
     tauri::async_runtime::spawn_blocking(move || crate::external::check_by_name(&tool_name))
         .await
