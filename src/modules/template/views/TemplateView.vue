@@ -1611,6 +1611,17 @@ async function selectSourceDocx() {
     filters: [{ name: 'Word 文档', extensions: ['docx', 'docm', 'doc'] }],
   })
   if (!selected) return
+  // .doc (old binary format) cannot preserve yellow highlights during conversion
+  if (selected.toLowerCase().endsWith('.doc') && !selected.toLowerCase().endsWith('.docx')) {
+    await ElMessageBox.confirm(
+      '旧版 .doc 格式暂不支持自动导入（标黄信息会丢失）。
+
+请先用 Word 或 WPS 打开文件，另存为 .docx 格式后再导入。',
+      '需要另存为 .docx',
+      { confirmButtonText: '我知道了', showCancelButton: false, type: 'warning' },
+    )
+    return
+  }
   sourceDocx.value = selected
   templateName.value = cleanTemplateName(stripExtension(fileName(selected), /\.(docx|docm|doc)$/i))
   await inspectSourceDocx()
