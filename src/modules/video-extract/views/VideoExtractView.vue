@@ -344,7 +344,7 @@ async function loadVideo(path) {
   if (res.ok) {
     videoInfo.value = res.data
   } else {
-    ElMessage.error('无法读取视频信息: ' + res.error)
+    ElMessage.error('无法读取视频信息: ' + (res.error || '请确认文件是有效的视频格式'))
   }
 }
 
@@ -397,7 +397,7 @@ async function extractFrames() {
       await loadResultImages(res.data.output_dir)
     }
   } else {
-    ElMessage.error('抽帧失败: ' + res.error)
+    ElMessage.error('视频抽帧失败: ' + (res.error || '请确认 FFmpeg 可用且磁盘空间充足'))
   }
 }
 

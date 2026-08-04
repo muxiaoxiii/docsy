@@ -1429,7 +1429,7 @@ async function applySplitHeaderFooterReplacement() {
 
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
     if (!result.ok) {
-      ElMessage.error(userFacingError(result.error, '页眉页码替换失败'))
+      ElMessage.error(userFacingError(result.error, '证据 PDF 处理失败'))
       overlayFiles.value.forEach((file) => {
         file.statusText = '失败'
         file.statusType = 'danger'

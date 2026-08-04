@@ -1622,7 +1622,7 @@ async function inspectSourceDocx() {
   const result = await tauriCallSafe('inspect_docx_template', { path: sourceDocx.value })
   scanning.value = false
   if (!result.ok) {
-    ElMessage.error(result.error || '扫描失败')
+    ElMessage.error(result.error || 'Word 文档读取失败，请确认文件未损坏且不是加密文件')
     return
   }
   marks.value = result.data.marks || []
@@ -3100,7 +3100,7 @@ async function saveTemplate() {
   })
   saving.value = false
   if (!result.ok) {
-    ElMessage.error(result.error || '保存模板失败')
+    ElMessage.error(result.error || '保存模板失败，请检查文件是否被其他程序占用')
     return
   }
   const actualOutputPath = result.data?.outputPath || ''
@@ -3508,7 +3508,7 @@ async function openTemplatePackage(path, knownManifest = null) {
   const result = knownManifest ? { ok: true, data: knownManifest } : await tauriCallSafe('inspect_docsytpl', { path })
   if (requestSeq !== templateOpenRequestSeq) return false
   if (!result.ok) {
-    ElMessage.error(result.error || '读取模板失败')
+    ElMessage.error(result.error || '读取模板失败，文件可能已被移动或删除')
     return false
   }
   templatePath.value = path
@@ -3714,7 +3714,7 @@ async function renderTemplate() {
   })
   rendering.value = false
   if (!result.ok) {
-    ElMessage.error(result.error || '生成失败')
+    ElMessage.error(result.error || 'Word 文书生成失败，请检查模板字段是否完整')
     return
   }
   ElMessage.success('Word 文书已生成')

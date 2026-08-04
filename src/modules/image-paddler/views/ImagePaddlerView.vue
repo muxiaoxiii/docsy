@@ -395,7 +395,7 @@ async function analyze() {
     analysis.value = result.data
     await preloadVisibleImages()
   } else {
-    ElMessage.error(result.error || '图片分析失败')
+    ElMessage.error(result.error || '图片文件夹分析失败，请确认文件夹路径正确')
   }
   analyzing.value = false
 }
@@ -421,7 +421,7 @@ async function run() {
         : `已生成 ${result.data.images} 张图片，${result.data.pages} 页`,
     )
   } else {
-    ElMessage.error(result.error || '生成失败')
+    ElMessage.error(result.error || '图片排版文档生成失败，请确认图片文件未被占用')
   }
   generating.value = false
 }
