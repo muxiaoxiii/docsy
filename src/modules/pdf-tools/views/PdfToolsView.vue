@@ -279,24 +279,24 @@
             </template>
           </FileQueuePanel>
           <template #actions>
+            <el-select v-model="antiCopyMethod" size="small" style="width:120px">
+              <el-option label="CMap 篡改" value="cmap_scramble" />
+              <el-option label="CMap 移除" value="cmap_remove" />
+            </el-select>
             <el-button
               type="success"
               @click="batchAntiOcrApply"
               :loading="antiOcrProcessing"
-              <el-select v-model="antiCopyMethod" size="small" style="width:120px">
-                            <el-option label="CMap 篡改" value="cmap_scramble" />
-                            <el-option label="CMap 移除" value="cmap_remove" />
-                          </el-select>
-                          <el-button :disabled="antiOcrReadyCount === 0"
+              :disabled="antiOcrReadyCount === 0"
             >
-              添加防OCR {{ antiOcrReadyCount }} 个文件
+              添加防复制 {{ antiOcrReadyCount }} 个文件
             </el-button>
             <el-button
               @click="batchAntiOcrRemove"
               :loading="antiOcrProcessing"
               :disabled="antiOcrProtectedCount === 0"
             >
-              移除防OCR {{ antiOcrProtectedCount }} 个文件
+              移除防复制 {{ antiOcrProtectedCount }} 个文件
             </el-button>
           </template>
         </ToolWorkspaceShell>
