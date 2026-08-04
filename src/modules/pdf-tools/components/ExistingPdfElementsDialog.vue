@@ -6,14 +6,22 @@
       </el-select>
       <el-button size="small" @click="selectAll">全选</el-button>
       <el-button size="small" @click="invertSelection">反选</el-button>
+      <el-button size="small" :disabled="!selectedKeys.length" @click="clearSelection">取消选择</el-button>
       <el-button size="small" @click="selectByKind('pageNumber')">选中全部页码</el-button>
       <el-button size="small" @click="selectByKind('header')">选中全部页眉</el-button>
-      <el-button size="small" @click="applyDecision('keep')">保留</el-button>
-      <el-button size="small" @click="applyDecision('ignore')">忽略识别</el-button>
-      <el-button size="small" type="danger" @click="applyDecision('delete')">标记删除</el-button>
-      <el-button size="small" type="primary" @click="applyDecision('edit')">标记编辑</el-button>
+      <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('keep')">保留</el-button>
+      <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
+      <el-button size="small" :disabled="!selectedKeys.length" type="danger" @click="applyDecision('delete')">标记删除</el-button>
+      <el-button size="small" :disabled="!selectedKeys.length" type="primary" @click="applyDecision('edit')">标记编辑</el-button>
     </div>
-    <el-table :data="filteredRows" border size="small" max-height="58vh" row-key="key">
+    <el-table
+      :data="filteredRows"
+      border
+      size="small"
+      max-height="58vh"
+      row-key="key"
+      @row-contextmenu="handleRowRightClick"
+    >
       <el-table-column width="44">
         <template #header>
           <el-checkbox :model-value="allSelected" @change="toggleAll" />
@@ -55,14 +63,15 @@
       </el-table-column>
       <el-table-column label="操作" width="170" fixed="right">
         <template #default="{ row }">
-          <el-button link size="small" type="primary" @click="$emit('preview', row)">预览</el-button>
-          <el-button link size="small" @click="selectByFile(row.fileName)">同文件</el-button>
+          <el-button link size="small" type="primary" @click="previewRow(row)">预览</el-button>
+          <el-button link size="small" @click="selectBySequence(row)">同序列</el-button>
           <el-button v-if="row.element.decision !== 'keep'" link size="small" @click="setDecision(row, 'keep')">
             取消
           </el-button>
         </template>
       </el-table-column>
     </el-table>
+    <p class="hint-text">右键点击行可切换勾选状态</p>
     <template #footer>
       <el-button @click="visibleModel = false">完成</el-button>
     </template>
@@ -70,7 +79,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { elementDecisionText, elementKindText } from '../composables/existingPdfElements.js'
 
 const props = defineProps({
@@ -112,8 +121,37 @@ function toggleAll(value) {
 function selectAll() {
   toggleAll(true)
 }
-function selectByFile(fileName) {
-  selectedKeys.value = filteredRows.value.filter(row => row.fileName === fileName).map(row => row.key)
+function clearSelection() {
+  selectedKeys.value = []
+}
+function selectBySequence(row) {
+  const { kind, pageStart, pageEnd, detectedText, fileName } = row.element
+  if (kind === 'pageNumber') {
+    // Select all page numbers from same file whose page ranges form a continuous sequence
+    const filePageNumbers = filteredRows.value
+      .filter(r => r.element.kind === 'pageNumber' && r.element.fileName === fileName)
+      .sort((a, b) => a.element.pageStart - b.element.pageStart)
+    // Build connected groups: pages are "connected" if ranges touch or overlap
+    const groups = []
+    let current = []
+    for (const r of filePageNumbers) {
+      if (current.length === 0 || r.element.pageStart <= current[current.length - 1].element.pageEnd + 1) {
+        current.push(r)
+      } else {
+        groups.push(current)
+        current = [r]
+      }
+    }
+    if (current.length) groups.push(current)
+    // Find the group containing the clicked row
+    const group = groups.find(g => g.some(r => r.key === row.key))
+    if (group) selectedKeys.value = group.map(r => r.key)
+  } else {
+    // For headers/footers: select all with same text from same file
+    selectedKeys.value = filteredRows.value
+      .filter(r => r.element.kind === kind && r.element.fileName === fileName && r.element.detectedText === detectedText)
+      .map(r => r.key)
+  }
 }
 function selectByKind(kind) {
   selectedKeys.value = filteredRows.value.filter(row => row.element.kind === kind).map(row => row.key)
@@ -122,14 +160,29 @@ function invertSelection() {
   const selected = new Set(selectedKeys.value)
   selectedKeys.value = filteredRows.value.filter((row) => !selected.has(row.key)).map((row) => row.key)
 }
+function handleRowRightClick(_row, _column, event) {
+  event.preventDefault()
+  const key = _row.key
+  const idx = selectedKeys.value.indexOf(key)
+  if (idx >= 0) {
+    selectedKeys.value = selectedKeys.value.filter(k => k !== key)
+  } else {
+    selectedKeys.value = [...selectedKeys.value, key]
+  }
+}
 function applyDecision(decision) {
   const selected = new Set(selectedKeys.value)
   filteredRows.value.filter((row) => selected.has(row.key)).forEach((row) => setDecision(row, decision))
+  selectedKeys.value = []
 }
 function setDecision(row, decision) {
   row.element.decision = decision
   if (decision !== 'edit') row.element.editedText = row.element.detectedText
   emit('change', row)
+}
+function previewRow(row) {
+  visibleModel.value = false
+  nextTick(() => emit('preview', row))
 }
 function emitChange(row) {
   emit('change', row)
@@ -145,5 +198,10 @@ function decisionTagType(decision) {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+}
+.hint-text {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--docsy-text-muted, #999);
 }
 </style>
