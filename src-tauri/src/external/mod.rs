@@ -293,3 +293,4 @@ mod tests {
         assert_eq!(command_failure_detail(&output), "退出码 2：stderr detail");
     }
 }
+

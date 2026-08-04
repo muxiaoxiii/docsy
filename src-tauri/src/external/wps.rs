@@ -65,6 +65,38 @@ fn wps_installation() -> Result<PathBuf> {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        // Check known macOS locations
+        let candidates = [
+            std::path::PathBuf::from("/Applications/wpsoffice.app"),
+            std::path::PathBuf::from("/Applications/WPS Office.app"),
+        ];
+        for path in &candidates {
+            if path.join("Contents/MacOS/wpsoffice").is_file()
+                || path.join("Contents/MacOS/wpscli").is_file()
+            {
+                return Ok(path.clone());
+            }
+        }
+        // Try mdfind
+        let mut cmd = super::hidden_command("mdfind");
+        cmd.arg("kMDItemCFBundleIdentifier == 'cn.wps.macos.wpsoffice'");
+        if let Ok(output) = super::command_output_with_timeout(
+            &mut cmd,
+            std::time::Duration::from_secs(2),
+        ) {
+            if output.status.success() {
+                for line in String::from_utf8_lossy(&output.stdout).lines() {
+                    let path = std::path::PathBuf::from(line.trim());
+                    if path.exists() {
+                        return Ok(path);
+                    }
+                }
+            }
+        }
+    }
+
     anyhow::bail!("WPS Writer 未找到")
 }
 
