@@ -1407,6 +1407,9 @@ function applyHeaderFooterSettings() {
 
 function applyReplacementPreset() {
   insertHeaderFooterEnabled.value = true
+  headerInsertEnabled.value = true
+  footerInsertEnabled.value = true
+  pageNumberShowTotal.value = true
   normalizeA4.value = false
   removeAnnotations.value = false
   cleanupHeaderHeightMm.value = 18
