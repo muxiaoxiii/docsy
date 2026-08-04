@@ -3773,7 +3773,7 @@ async function importAndBatchRender() {
   })
   if (!selected) return
 
-  const xlsxPath = typeof selected === 'string' ? selected : selected
+  const xlsxPath = selected
 
   // Step 1: Validate
   batchProcessing.value = true
