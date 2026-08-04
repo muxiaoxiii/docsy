@@ -2,6 +2,24 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.1] - 2026-08-04
+
+### 打磨
+- **错误提示改进**：qpdf 解锁/合并失败时现在显示具体原因（退出码和 stderr 文本）
+- **错误来源标识**：前端错误弹窗自动检测出错工具并标注名称（如"qpdf（PDF 处理引擎）报错：…"）
+- **设置页工具管理**：Docsy 托管的工具（qpdf/Poppler/FFmpeg）新增"清除此工具"按钮
+- **设置页说明**：补充工具问题排查指引
+- **操作计时显示**：Doclet 宠物动画显示已用时（如"已用时 2分15秒"）
+- **操作取消支持**：处理超过30秒后显示"取消"按钮，通过 SIGTERM/taskkill 终止子进程
+- **证据处理状态列**：新增"状态"列，悬停显示详细错误（tooltip）
+- **模板静默失败修复**：renderTemplate/exportBatch/batchRender 的 openPath 增加错误反馈
+- **错误提示全面改进**：所有模块的错误提示增加具体原因和操作指引
+- **Lint 修复**：window.clearInterval/setInterval 避免 no-undef，移除未使用变量
+
+### 测试
+- Rust: 141 个测试通过
+- Frontend: 70 个测试通过（13 个测试文件）
+
 ## [0.9.0] - 2026-08-03
 
 ### 概述
