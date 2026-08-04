@@ -29,7 +29,7 @@
 
       <div class="about-legal">
         <p class="about-license">License: MIT</p>
-        <p class="about-copyright">© 2026 Jade Zhang. All rights reserved.</p>
+        <p class="about-copyright">© 2026 木小樨 (muxiaoxi). All rights reserved.</p>
         <p class="about-note">本软件为开源项目，欢迎贡献，但请勿移除版权声明</p>
       </div>
     </div>
