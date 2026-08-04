@@ -107,6 +107,46 @@ export function buildHeaderText(file, index, rules) {
   return decorateHeaderText(base, file, index, rules)
 }
 
+export function buildHeaderTextForGroup(file, index, group, rules) {
+  if (group.mode === 'none') return ''
+  const base = headerBaseTextForGroup(file, index, group, rules)
+  return decorateHeaderTextForGroup(base, file, index, group, rules)
+}
+
+function headerBaseTextForGroup(file, index, group, rules) {
+  if (group.mode === 'per_file') return file.header ?? stripPdf(file.name)
+  if (group.mode === 'custom' || group.mode === 'template') return group.text || ''
+  if (group.mode === 'seq') return `证据${index + 1}`
+  if (group.mode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`
+  if (group.mode === 'prefix_seq') return `${group.text || ''}证据${index + 1}`
+  return stripPdf(file.name)
+}
+
+function decorateHeaderTextForGroup(base, file, index, group, rules) {
+  const name = stripPdf(file?.name || '')
+  const contextText = String(base || '')
+    .replaceAll('[name]', name)
+    .replaceAll('[文件名]', name)
+  const prefix = expandSplitNameTokens(group.prefix || '', index, rules.headerDateValue || '')
+  const suffix = expandSplitNameTokens(group.suffix || '', index, rules.headerDateValue || '')
+  const body = expandSplitNameTokens(contextText, index, rules.headerDateValue || '')
+  return `${prefix}${body}${suffix}`.trim()
+}
+
+export function overlayConfigForGroup(file, region, text, group) {
+  return {
+    region: 'header',
+    artifactKind: 'HeaderText',
+    text,
+    fontFamily: group.fontFamily || 'auto',
+    fontSize: group.fontSize,
+    marginMm: group.marginMm,
+    align: group.align,
+    offsetXMm: group.offsetXMm || 0,
+    color: group.color || '#000000',
+  }
+}
+
 function headerBaseText(file, index, rules) {
   if (rules.headerMode === 'per_file') return file.header ?? stripPdf(file.name)
   if (rules.headerMode === 'custom' || rules.headerMode === 'template') return rules.headerText || ''
@@ -212,6 +252,18 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
           overrides: rules.pageNumberOverrides || [],
         })
     const extraOverlays = [...convertedExistingOverlays(file, rules), ...pageNumberOverlays]
+    // Add header groups overlays (skip first group since it's already the main header)
+    const headerGroups = rules.headerGroups || []
+    if (headerInsertEnabled && headerGroups.length > 1) {
+      for (let gi = 1; gi < headerGroups.length; gi++) {
+        const g = headerGroups[gi]
+        if (!g.enabled) continue
+        const groupText = buildHeaderTextForGroup(file, index, g, rules)
+        if (groupText) {
+          extraOverlays.push(overlayConfigForGroup(file, 'header', groupText, g))
+        }
+      }
+    }
     file.outputPath = outputPath
     return {
       inputPath: file.path,
@@ -552,6 +604,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         marginMm: rules.headerMarginMm,
         offsetXmm: rules.headerOffsetXMm || 0,
         color: rules.headerColor || '#000000',
+        groups: rules.headerGroups || [],
       },
       footerRule: {
         enabled: Boolean(rules.footerInsertEnabled),

@@ -261,6 +261,45 @@
           </div>
         </ToolWorkspaceShell>
       </el-tab-pane>
+
+      <el-tab-pane label="防OCR" name="anti-ocr" lazy>
+        <ToolWorkspaceShell title="防OCR处理" description="检测或添加 PDF 文字防提取保护。保留视觉效果，干扰自动化文字提取。">
+          <template #toolbar>
+            <el-button type="primary" @click="selectAntiOcrFile">选择 PDF</el-button>
+            <el-button :disabled="!antiOcrFile" @click="runAntiOcrDetect">检测</el-button>
+            <el-button :disabled="!antiOcrFile" type="warning" @click="runAntiOcrApply">添加防OCR</el-button>
+            <el-button :disabled="!antiOcrFile" @click="runAntiOcrRemove">移除防OCR</el-button>
+          </template>
+          <template #main>
+            <div v-if="!antiOcrFile" class="empty-hint">选择 PDF 文件开始</div>
+            <div v-else class="anti-ocr-content">
+              <p class="file-path">{{ antiOcrFile }}</p>
+              <div v-if="antiOcrResult" class="anti-ocr-result">
+                <el-alert
+                  :type="antiOcrResult.has_anti_ocr ? 'warning' : 'success'"
+                  :title="antiOcrResult.has_anti_ocr ? '检测到防OCR保护' : '未检测到防OCR保护'"
+                  :closable="false"
+                  show-icon
+                />
+                <div class="anti-ocr-stats">
+                  <span>总页数: {{ antiOcrResult.total_pages }}</span>
+                  <span>正常: {{ antiOcrResult.pages_with_valid_cmap }}</span>
+                  <span>已篡改: {{ antiOcrResult.pages_with_scrambled_cmap }}</span>
+                  <span>无CMap: {{ antiOcrResult.pages_without_cmap }}</span>
+                </div>
+                <el-table :data="antiOcrResult.details" size="small" border max-height="40vh">
+                  <el-table-column prop="page" label="页码" width="70" />
+                  <el-table-column prop="status" label="状态" min-width="120" />
+                  <el-table-column prop="extracted_text_preview" label="提取文本预览" min-width="200" show-overflow-tooltip />
+                </el-table>
+              </div>
+              <div v-if="antiOcrMessage" class="anti-ocr-message" :class="antiOcrMessageType">
+                {{ antiOcrMessage }}
+              </div>
+            </div>
+          </template>
+        </ToolWorkspaceShell>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -431,6 +470,74 @@ const splitWarnings = computed(() => [
 ])
 const splitPreviewMaxPage = computed(() => Math.max(1, splitTotalPages.value || 1))
 const selectedSplitRange = computed(() => splitRanges.value[selectedSplitRangeIndex.value] || null)
+
+// Anti-OCR
+const antiOcrFile = ref('')
+const antiOcrResult = ref(null)
+const antiOcrMessage = ref('')
+const antiOcrMessageType = ref('info')
+
+async function selectAntiOcrFile() {
+  const selected = await open({ multiple: false, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+  if (!selected) return
+  antiOcrFile.value = normalizeSelectedPath(selected)
+  antiOcrResult.value = null
+  antiOcrMessage.value = ''
+  await runAntiOcrDetect()
+}
+
+async function runAntiOcrDetect() {
+  if (!antiOcrFile.value) return
+  antiOcrMessage.value = '检测中...'
+  antiOcrMessageType.value = 'info'
+  const result = await tauriCallSafe('detect_anti_ocr', { input: antiOcrFile.value })
+  if (!result.ok) {
+    antiOcrMessage.value = userFacingError(result.error, '检测失败')
+    antiOcrMessageType.value = 'danger'
+    antiOcrResult.value = null
+    return
+  }
+  antiOcrResult.value = result.data
+  antiOcrMessage.value = ''
+}
+
+async function runAntiOcrApply() {
+  if (!antiOcrFile.value) return
+  const dir = parentDir(antiOcrFile.value)
+  const stem = stripPdf(fileName(antiOcrFile.value))
+  const output = `${dir}/${stem}_anti_ocr.pdf`
+  antiOcrMessage.value = '处理中...'
+  antiOcrMessageType.value = 'info'
+  const result = await tauriCallSafe('apply_anti_ocr', { input: antiOcrFile.value, output })
+  if (!result.ok) {
+    antiOcrMessage.value = userFacingError(result.error, '防OCR处理失败')
+    antiOcrMessageType.value = 'danger'
+    return
+  }
+  antiOcrMessage.value = `已完成，修改了 ${result.data} 个字体。输出：${output}`
+  antiOcrMessageType.value = 'success'
+  antiOcrFile.value = output
+  await runAntiOcrDetect()
+}
+
+async function runAntiOcrRemove() {
+  if (!antiOcrFile.value) return
+  const dir = parentDir(antiOcrFile.value)
+  const stem = stripPdf(fileName(antiOcrFile.value))
+  const output = `${dir}/${stem}_restored.pdf`
+  antiOcrMessage.value = '处理中...'
+  antiOcrMessageType.value = 'info'
+  const result = await tauriCallSafe('remove_anti_ocr', { input: antiOcrFile.value, output })
+  if (!result.ok) {
+    antiOcrMessage.value = userFacingError(result.error, '移除防OCR失败')
+    antiOcrMessageType.value = 'danger'
+    return
+  }
+  antiOcrMessage.value = `已恢复，处理了 ${result.data} 个字体。输出：${output}`
+  antiOcrMessageType.value = 'success'
+  antiOcrFile.value = output
+  await runAntiOcrDetect()
+}
 
 async function selectMergeFiles() {
   const selected = await open({
@@ -952,5 +1059,40 @@ h3 {
   .split-options {
     grid-template-columns: 1fr 120px;
   }
+}
+
+.anti-ocr-content {
+  padding: 12px 0;
+}
+.file-path {
+  font-size: 13px;
+  color: var(--docsy-text-muted);
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+.anti-ocr-stats {
+  display: flex;
+  gap: 16px;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--docsy-text);
+}
+.anti-ocr-message {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.anti-ocr-message.info {
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text);
+}
+.anti-ocr-message.success {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+.anti-ocr-message.danger {
+  background: #fef2f2;
+  color: #dc2626;
 }
 </style>

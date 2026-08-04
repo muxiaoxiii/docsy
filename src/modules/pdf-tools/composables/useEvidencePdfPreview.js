@@ -4,7 +4,7 @@ import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { logWarn } from '../../../services/appLogger.js'
 import { bboxOverlayStyle, textOverlayStyle } from './pdfPreviewCoordinates.js'
 import { candidateKey } from './useEvidencePdfDetection.js'
-import { buildHeaderFooterItems, expandPlaceholders, buildHeaderText } from './useEvidencePdfSession.js'
+import { buildHeaderFooterItems, expandPlaceholders, buildHeaderText, buildHeaderTextForGroup } from './useEvidencePdfSession.js'
 import { renderPageNumberTemplate } from './pdfPageNumberRules.js'
 
 const TRUE_PREVIEW_DPI = 120
@@ -84,6 +84,32 @@ export function useEvidencePdfPreview({
       color: headerColor.value,
     }),
   )
+
+  // Multiple header group overlays for preview
+  const previewHeaderGroupOverlays = computed(() => {
+    if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value) return []
+    const groups = currentRules.value.headerGroups || []
+    if (!groups.length) return []
+    return groups
+      .filter((g) => g.enabled && g.mode !== 'none')
+      .map((g) => {
+        const text = buildHeaderTextForGroup(selectedOverlayFile.value, selectedOverlayIndex.value, g, currentRules.value)
+        if (!text) return null
+        return {
+          key: g.id,
+          text,
+          style: textOverlayStyle('header', previewData.value, {
+            align: g.align,
+            marginMm: g.marginMm,
+            fontSize: g.fontSize,
+            fontFamily: g.fontFamily,
+            offsetXMm: g.offsetXMm,
+            color: g.color,
+          }),
+        }
+      })
+      .filter(Boolean)
+  })
 
   const previewFooterStyle = computed(() =>
     textOverlayStyle('footer', previewData.value, {
@@ -374,6 +400,7 @@ export function useEvidencePdfPreview({
     previewHeaderText,
     previewFooterText,
     previewHeaderStyle,
+    previewHeaderGroupOverlays,
     previewFooterStyle,
     truePreviewFrameStyle,
     selectedFooterCandidates,

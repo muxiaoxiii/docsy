@@ -190,3 +190,30 @@ pub async fn render_pdf_preview(
 pub async fn get_pdf_page_count(input: String) -> Result<u32, String> {
     run_blocking(move || crate::pdf::qpdf::page_count(&input)).await
 }
+
+#[tauri::command]
+pub async fn detect_anti_ocr(input: String) -> Result<crate::pdf::anti_ocr::AntiOcrDetectionResult, String> {
+    run_blocking(move || crate::pdf::anti_ocr::detect_anti_ocr(std::path::Path::new(&input))).await
+}
+
+#[tauri::command]
+pub async fn apply_anti_ocr(input: String, output: String) -> Result<usize, String> {
+    run_blocking(move || {
+        crate::pdf::anti_ocr::apply_anti_ocr(
+            std::path::Path::new(&input),
+            std::path::Path::new(&output),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn remove_anti_ocr(input: String, output: String) -> Result<usize, String> {
+    run_blocking(move || {
+        crate::pdf::anti_ocr::remove_anti_ocr(
+            std::path::Path::new(&input),
+            std::path::Path::new(&output),
+        )
+    })
+    .await
+}

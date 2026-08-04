@@ -40,6 +40,9 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         pdf::delete_pdf_header_footer_artifacts,
         pdf::render_pdf_preview,
         pdf::get_pdf_page_count,
+        pdf::detect_anti_ocr,
+        pdf::apply_anti_ocr,
+        pdf::remove_anti_ocr,
         // image_paddler
         image_paddler::analyze_image_paddler_folder,
         image_paddler::run_image_paddler,

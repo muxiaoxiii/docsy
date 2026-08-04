@@ -187,6 +187,8 @@
         <HeaderFooterRuleFields
           v-if="insertHeaderFooterEnabled"
           class="rule-grid"
+          v-model:header-groups="headerGroups"
+          v-model:selected-header-group-id="selectedHeaderGroupId"
           v-model:header-mode="headerMode"
           v-model:header-insert-enabled="headerInsertEnabled"
           v-model:header-text="headerText"
@@ -543,6 +545,8 @@
       <HeaderFooterRuleFields
         v-if="insertHeaderFooterEnabled"
         class="dialog-rule-grid"
+        v-model:header-groups="headerGroups"
+        v-model:selected-header-group-id="selectedHeaderGroupId"
         v-model:header-mode="headerMode"
         v-model:header-insert-enabled="headerInsertEnabled"
         v-model:header-text="headerText"
@@ -835,16 +839,67 @@ const insertHeaderFooterEnabled = ref(true)
 const headerInsertEnabled = ref(true)
 const footerInsertEnabled = ref(true)
 const pageNumberShowTotal = ref(true)
-const headerMode = ref('filename')
-const headerText = ref('')
-const headerPrefix = ref('')
-const headerSuffix = ref('')
-const headerAlign = ref('right')
-const headerFontSize = ref(10)
-const headerFontFamily = ref('auto')
-const headerMarginMm = ref(10)
-const headerOffsetXMm = ref(0)
-const headerColor = ref('#000000')
+const defaultHeaderGroup = () => ({
+  id: `h${Date.now()}`,
+  label: '',
+  enabled: true,
+  mode: 'filename',
+  text: '',
+  prefix: '',
+  suffix: '',
+  align: 'right',
+  fontSize: 10,
+  fontFamily: 'auto',
+  marginMm: 10,
+  offsetXMm: 0,
+  color: '#000000',
+})
+const headerGroups = ref([{ ...defaultHeaderGroup(), id: 'h1', label: '页眉 1' }])
+const selectedHeaderGroupId = ref('h1')
+const selectedHeaderGroup = computed(
+  () => headerGroups.value.find((g) => g.id === selectedHeaderGroupId.value) || headerGroups.value[0],
+)
+// Backward-compatible computed refs from first group (for existing code)
+const headerMode = computed({
+  get: () => selectedHeaderGroup.value.mode,
+  set: (v) => { selectedHeaderGroup.value.mode = v },
+})
+const headerText = computed({
+  get: () => selectedHeaderGroup.value.text,
+  set: (v) => { selectedHeaderGroup.value.text = v },
+})
+const headerPrefix = computed({
+  get: () => selectedHeaderGroup.value.prefix,
+  set: (v) => { selectedHeaderGroup.value.prefix = v },
+})
+const headerSuffix = computed({
+  get: () => selectedHeaderGroup.value.suffix,
+  set: (v) => { selectedHeaderGroup.value.suffix = v },
+})
+const headerAlign = computed({
+  get: () => selectedHeaderGroup.value.align,
+  set: (v) => { selectedHeaderGroup.value.align = v },
+})
+const headerFontSize = computed({
+  get: () => selectedHeaderGroup.value.fontSize,
+  set: (v) => { selectedHeaderGroup.value.fontSize = v },
+})
+const headerFontFamily = computed({
+  get: () => selectedHeaderGroup.value.fontFamily,
+  set: (v) => { selectedHeaderGroup.value.fontFamily = v },
+})
+const headerMarginMm = computed({
+  get: () => selectedHeaderGroup.value.marginMm,
+  set: (v) => { selectedHeaderGroup.value.marginMm = v },
+})
+const headerOffsetXMm = computed({
+  get: () => selectedHeaderGroup.value.offsetXMm,
+  set: (v) => { selectedHeaderGroup.value.offsetXMm = v },
+})
+const headerColor = computed({
+  get: () => selectedHeaderGroup.value.color,
+  set: (v) => { selectedHeaderGroup.value.color = v },
+})
 const footerEnabled = ref(true)
 const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)
@@ -885,19 +940,20 @@ const existingElementsVisible = ref(false)
 const existingElementsFilter = ref('all')
 
 watch(
-  headerMode,
+  () => selectedHeaderGroup.value.mode,
   (mode) => {
+    const group = selectedHeaderGroup.value
     if (mode === 'template') {
-      headerMode.value = 'custom'
+      group.mode = 'custom'
     } else if (mode === 'seq') {
-      headerText.value = '证据[序号]'
-      headerMode.value = 'custom'
+      group.text = '证据[序号]'
+      group.mode = 'custom'
     } else if (mode === 'seq_cn') {
-      headerText.value = '证据[中文序号]'
-      headerMode.value = 'custom'
+      group.text = '证据[中文序号]'
+      group.mode = 'custom'
     } else if (mode === 'prefix_seq') {
-      headerText.value = `${headerText.value || ''}证据[序号]`
-      headerMode.value = 'custom'
+      group.text = `${group.text || ''}证据[序号]`
+      group.mode = 'custom'
     }
   },
   { immediate: true },
@@ -1131,6 +1187,7 @@ const currentRules = computed(() => ({
   headerMarginMm: headerMarginMm.value,
   headerOffsetXMm: headerOffsetXMm.value,
   headerColor: headerColor.value,
+  headerGroups: insertHeaderFooterEnabled.value ? headerGroups.value : [],
   footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,
@@ -1453,11 +1510,9 @@ function applyReplacementPreset() {
   removeAnnotations.value = false
   cleanupHeaderHeightMm.value = 18
   cleanupFooterHeightMm.value = 18
-  headerMode.value = workflowMode.value === 'split' ? 'per_file' : 'filename'
-  headerAlign.value = 'right'
-  headerFontSize.value = 10
-  headerFontFamily.value = 'auto'
-  headerMarginMm.value = 10
+  // Reset header groups to single default
+  headerGroups.value = [{ ...defaultHeaderGroup(), id: 'h1', label: '页眉 1', mode: workflowMode.value === 'split' ? 'per_file' : 'filename' }]
+  selectedHeaderGroupId.value = 'h1'
   footerEnabled.value = true
   footerContinuous.value = true
   footerText.value = '{page}/{total}'

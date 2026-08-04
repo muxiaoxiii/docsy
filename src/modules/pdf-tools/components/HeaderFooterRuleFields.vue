@@ -2,8 +2,48 @@
   <div>
     <div class="rule-item section-label">
       <strong>页眉文字</strong>
-      <el-switch v-model="headerInsertEnabledModel" size="small" />
+      <div class="section-actions">
+        <el-switch v-model="headerInsertEnabledModel" size="small" />
+        <el-button size="small" circle :disabled="!headerInsertEnabled" @click="addGroup">
+          <el-icon><i-ep-plus /></el-icon>
+        </el-button>
+      </div>
     </div>
+    <!-- Overlap warnings -->
+    <el-alert
+      v-if="overlapWarnings.length"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="overlap-warnings"
+    >
+      <template #title>{{ overlapWarnings.join('；') }}</template>
+    </el-alert>
+    <!-- Group list (only when >1 group) -->
+    <div v-if="headerGroups.length > 1" class="header-group-list">
+      <div
+        v-for="group in headerGroups"
+        :key="group.id"
+        class="header-group-item"
+        :class="{ active: group.id === selectedHeaderGroupId }"
+        @click="$emit('update:selectedHeaderGroupId', group.id)"
+      >
+        <span class="group-label">
+          <el-icon v-if="group.id === selectedHeaderGroupId"><i-ep-arrow-right /></el-icon>
+          {{ group.label || '页眉' }} · {{ groupModeLabel(group) }}
+        </span>
+        <el-button
+          size="small"
+          link
+          type="danger"
+          :disabled="headerGroups.length <= 1"
+          @click.stop="removeGroup(group.id)"
+        >
+          删除
+        </el-button>
+      </div>
+    </div>
+    <!-- Settings for selected group -->
     <div class="rule-item">
       <label>页眉来源</label>
       <el-select v-model="headerModeModel" :disabled="!headerInsertEnabled">
@@ -155,9 +195,19 @@ const PRESETS_NO_TOTAL = [
   { value: '（{page}）', label: '（1）' },
 ]
 
+const MODE_LABELS = {
+  none: '不插入',
+  filename: '文件名',
+  per_file: '按列表名称',
+  custom: '固定文本',
+}
+
 const props = defineProps({
-  headerMode: { type: String, required: true },
+  headerGroups: { type: Array, required: true },
+  selectedHeaderGroupId: { type: String, required: true },
   headerInsertEnabled: { type: Boolean, default: true },
+  // Legacy single-group props (still used for selected group via parent computed)
+  headerMode: { type: String, required: true },
   headerText: { type: String, required: true },
   headerPrefix: { type: String, required: true },
   headerSuffix: { type: String, required: true },
@@ -196,6 +246,8 @@ const props = defineProps({
 const emit = defineEmits([
   'editPageNumberRules',
   'update:pageNumberShowTotal',
+  'update:headerGroups',
+  'update:selectedHeaderGroupId',
   ...[
     'headerMode',
     'headerInsertEnabled',
@@ -284,6 +336,57 @@ const pageNumberPreviewText = computed(() => {
   if (!props.pageNumberShowTotal) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
   return renderPageNumberTemplate(tpl, props.pageNumberSamplePage, props.pageNumberSampleTotal, props.pageNumberStyle)
 })
+
+// Overlap detection
+const overlapWarnings = computed(() => {
+  const warnings = []
+  const groups = props.headerGroups || []
+  // Check header-to-header overlap (±2mm tolerance)
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      if (groups[i].enabled && groups[j].enabled && Math.abs(groups[i].marginMm - groups[j].marginMm) <= 2) {
+        warnings.push(`"${groups[i].label || '页眉 ' + (i + 1)}" 与 "${groups[j].label || '页眉 ' + (j + 1)}" 距顶距离接近，可能重叠`)
+      }
+    }
+  }
+  return warnings
+})
+
+function groupModeLabel(group) {
+  return MODE_LABELS[group.mode] || group.mode
+}
+
+let groupCounter = 1
+function addGroup() {
+  groupCounter++
+  const newGroup = {
+    id: `h${Date.now()}`,
+    label: `页眉 ${props.headerGroups.length + 1}`,
+    enabled: true,
+    mode: 'filename',
+    text: '',
+    prefix: '',
+    suffix: '',
+    align: 'right',
+    fontSize: 10,
+    fontFamily: 'auto',
+    marginMm: 10,
+    offsetXMm: 0,
+    color: '#000000',
+  }
+  const updated = [...props.headerGroups, newGroup]
+  emit('update:headerGroups', updated)
+  emit('update:selectedHeaderGroupId', newGroup.id)
+}
+
+function removeGroup(id) {
+  if (props.headerGroups.length <= 1) return
+  const updated = props.headerGroups.filter((g) => g.id !== id)
+  emit('update:headerGroups', updated)
+  if (props.selectedHeaderGroupId === id) {
+    emit('update:selectedHeaderGroupId', updated[0].id)
+  }
+}
 </script>
 
 <style scoped>
@@ -295,6 +398,48 @@ const pageNumberPreviewText = computed(() => {
   margin-top: 4px;
   padding-top: 8px;
   border-top: 1px solid var(--docsy-border-subtle);
+}
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.overlap-warnings {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+}
+.header-group-list {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+}
+.header-group-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--docsy-text-muted);
+  transition: background 0.15s;
+}
+.header-group-item:hover {
+  background: var(--docsy-surface-hover);
+}
+.header-group-item.active {
+  background: var(--docsy-surface-active);
+  color: var(--docsy-text-strong);
+  font-weight: 500;
+}
+.group-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .page-number-preview {
   display: inline-block;

@@ -1,4 +1,5 @@
 pub mod annotations;
+pub mod anti_ocr;
 pub mod artifacts;
 pub mod content_text;
 pub mod detection;
