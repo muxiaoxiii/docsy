@@ -79,10 +79,48 @@ impl SubprocessRegistry {
             false
         }
     }
+
+    /// Spawn a command, register its PID, wait for completion, unregister.
+    /// This is the primary entry point for cancellable subprocesses.
+    pub fn spawn_and_wait(
+        &self,
+        operation_id: &str,
+        mut cmd: std::process::Command,
+    ) -> std::io::Result<std::process::Output> {
+        let mut child = cmd.spawn()?;
+        let pid = child.id();
+        self.register(operation_id, pid);
+        let result = child.wait_with_output();
+        self.unregister(operation_id);
+        result
+    }
+
+    /// Kill all registered subprocesses (for app shutdown cleanup).
+    pub fn cancel_all(&self) {
+        let pids: Vec<u32> = if let Ok(mut map) = self.pids.lock() {
+            map.drain().map(|(_, pid)| pid).collect()
+        } else {
+            return;
+        };
+        for pid in pids {
+            #[cfg(unix)]
+            { let _ = std::process::Command::new("kill").args(["-TERM", &pid.to_string()]).output(); }
+            #[cfg(windows)]
+            { let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output(); }
+        }
+    }
 }
 
 /// Global app handle for emitting events from non-command contexts.
 static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Global subprocess registry for cancellation support.
+/// Set once during app initialization; qpdf/ffmpeg can access it without Tauri state.
+static SUBPROCESS_REGISTRY: std::sync::OnceLock<Arc<SubprocessRegistry>> = std::sync::OnceLock::new();
+
+pub fn get_subprocess_registry() -> Option<&'static Arc<SubprocessRegistry>> {
+    SUBPROCESS_REGISTRY.get()
+}
 
 pub fn get_app_handle() -> Option<&'static tauri::AppHandle> {
     APP_HANDLE.get()
@@ -154,6 +192,7 @@ pub fn run() {
 
     let conversion_state = Arc::new(ConversionState::new());
     let subprocess_registry = Arc::new(SubprocessRegistry::new());
+    let _ = SUBPROCESS_REGISTRY.set(subprocess_registry.clone());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

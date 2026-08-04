@@ -3,6 +3,20 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
+/// Run a command through the SubprocessRegistry if available, otherwise fall back to .output().
+/// `label` is used as a human-readable operation ID prefix for cancellation tracking.
+fn run_cancellable(label: &str, mut cmd: std::process::Command) -> Result<std::process::Output> {
+    if let Some(registry) = crate::get_subprocess_registry() {
+        let op_id = format!("qpdf:{label}:{}", std::process::id());
+        registry
+            .spawn_and_wait(&op_id, cmd)
+            .with_context(|| format!("执行 qpdf {label} 失败"))
+    } else {
+        cmd.output()
+            .with_context(|| format!("执行 qpdf {label} 失败"))
+    }
+}
+
 pub(crate) fn status_is_success(status: &ExitStatus) -> bool {
     status.success() || status.code() == Some(3)
 }
@@ -31,11 +45,9 @@ pub fn inspect(path: &str) -> Result<InspectResult> {
 fn is_encrypted(path: &str) -> Result<bool> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let output = crate::external::hidden_command(&bin)
-        .arg("--is-encrypted")
-        .arg(path)
-        .output()
-        .context("执行 qpdf 加密检测失败")?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    cmd.arg("--is-encrypted").arg(path);
+    let output = run_cancellable("加密检测", cmd)?;
     parse_is_encrypted_status(output.status, &output.stderr)
 }
 
@@ -71,12 +83,9 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
     let bin = qpdf.binary_path()?;
 
     let output_path = unique_output_path(input, "_unlocked");
-    let output = crate::external::hidden_command(&bin)
-        .arg("--decrypt")
-        .arg("--password=")
-        .arg(input)
-        .arg(&output_path)
-        .output()?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    cmd.arg("--decrypt").arg("--password=").arg(input).arg(&output_path);
+    let output = run_cancellable("解锁", cmd)?;
 
     if !status_is_success(&output.status) {
         anyhow::bail!(
@@ -105,7 +114,7 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     }
     cmd.arg("--").arg(&output_path);
 
-    let output = cmd.output()?;
+    let output = run_cancellable("合并", cmd)?;
     if !status_is_success(&output.status) {
         anyhow::bail!(
             "qpdf 合并失败（{}）：{}",
@@ -122,11 +131,8 @@ pub fn optimize_to(input: &Path, output: &Path) -> Result<()> {
     let bin = qpdf.binary_path()?;
     let mut command = crate::external::hidden_command(&bin);
     add_optimization_args(&mut command);
-    let command_output = command
-        .arg(input)
-        .arg(output)
-        .output()
-        .context("执行 qpdf 压缩整理失败")?;
+    command.arg(input).arg(output);
+    let command_output = run_cancellable("压缩整理", command)?;
 
     if !status_is_success(&command_output.status) {
         anyhow::bail!(
@@ -181,7 +187,7 @@ pub fn extract_pages(
     }
     command.arg("--").arg(&output_path);
 
-    let command_output = command.output().context("执行 qpdf 页面提取失败")?;
+    let command_output = run_cancellable("页面提取", command)?;
     if !status_is_success(&command_output.status) {
         anyhow::bail!(
             "qpdf 页面提取失败（{}）：{}",
@@ -248,11 +254,9 @@ pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {
     let pages = page_count(input)?;
     let token = unique_suffix();
     let output_pattern = Path::new(output_dir).join(format!("{stem}-split-{token}-%d.pdf"));
-    let command_output = crate::external::hidden_command(&bin)
-        .arg("--split-pages")
-        .arg(input)
-        .arg(&output_pattern)
-        .output()?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    cmd.arg("--split-pages").arg(input).arg(&output_pattern);
+    let command_output = run_cancellable("拆分", cmd)?;
     if !status_is_success(&command_output.status) {
         anyhow::bail!(
             "qpdf 拆分失败（{}）：{}",
@@ -288,10 +292,9 @@ pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {
 pub fn page_count(input: &str) -> Result<u32> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let output = crate::external::hidden_command(&bin)
-        .arg("--show-npages")
-        .arg(input)
-        .output()?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    cmd.arg("--show-npages").arg(input);
+    let output = run_cancellable("读取页数", cmd)?;
     if status_is_success(&output.status) {
         let stdout = String::from_utf8_lossy(&output.stdout);
         if let Ok(count) = stdout.trim().parse::<u32>() {

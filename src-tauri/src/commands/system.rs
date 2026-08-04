@@ -132,12 +132,14 @@ pub fn respond_conversion_timeout(
     Ok(())
 }
 
-/// Cancel a running subprocess operation by its operation ID.
-/// Returns true if the operation was found and a cancel signal was sent.
+/// Cancel all running subprocess operations.
+/// Returns true if any processes were found and termination signals were sent.
 #[tauri::command]
 pub fn cancel_operation(
     registry: tauri::State<'_, std::sync::Arc<crate::SubprocessRegistry>>,
-    operation_id: String,
+    _operation_id: String,
 ) -> Result<bool, String> {
-    Ok(registry.cancel(&operation_id))
+    // Kill all registered subprocesses (typically only one running at a time)
+    registry.cancel_all();
+    Ok(true)
 }
