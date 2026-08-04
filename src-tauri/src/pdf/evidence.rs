@@ -223,6 +223,25 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
         groups.insert(dir_name, files);
     }
 
+    // Fallback: if no subdirectory groups found, treat root as a single group
+    if groups.is_empty() {
+        let mut root_files = Vec::new();
+        collect_supported_files(root_path, &mut root_files)?;
+        // Filter out files in subdirectories (only keep root-level files)
+        root_files.retain(|(_, path, _, _)| {
+            path.parent().map_or(false, |p| p == root_path)
+        });
+        root_files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+        if !root_files.is_empty() {
+            let group_name = root_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("证据")
+                .to_string();
+            groups.insert(group_name, root_files);
+        }
+    }
+
     let mut groups_json = Vec::new();
     for (group_name, files) in &groups {
         let group_id = format!("{:016x}", fnv1a_hash(group_name));
