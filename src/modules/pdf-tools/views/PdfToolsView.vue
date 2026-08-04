@@ -358,21 +358,24 @@ function addUnlockFiles(paths, replace = false) {
     statusText: '检测中',
   }))
   unlockFiles.value = replace ? items : [...unlockFiles.value, ...items]
-  if (items.length) void inspectUnlockFiles(items)
+  if (items.length) void inspectUnlockFiles(candidates)
 }
 
-async function inspectUnlockFiles(items) {
+async function inspectUnlockFiles(paths) {
+  const reactive = unlockFiles.value
   let nextIndex = 0
-  const workerCount = Math.min(4, items.length)
+  const workerCount = Math.min(4, paths.length)
   const workers = Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
-      const item = items[nextIndex]
+    while (nextIndex < paths.length) {
+      const path = paths[nextIndex]
       nextIndex += 1
       try {
         const result = await Promise.race([
-          tauriCallSafe('inspect_pdf', { input: item.path }),
+          tauriCallSafe('inspect_pdf', { input: path }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
         ])
+        const item = reactive.find((f) => f.path === path)
+        if (!item) continue
         item.inspecting = false
         if (!result.ok) {
           item.encrypted = null
@@ -388,10 +391,13 @@ async function inspectUnlockFiles(items) {
           item.statusType = 'info'
         }
       } catch (err) {
-        item.inspecting = false
-        item.encrypted = null
-        item.statusText = userFacingError(err?.message || err, '检测异常')
-        item.statusType = 'danger'
+        const item = reactive.find((f) => f.path === path)
+        if (item) {
+          item.inspecting = false
+          item.encrypted = null
+          item.statusText = userFacingError(err?.message || err, '检测异常')
+          item.statusType = 'danger'
+        }
       }
     }
   })
@@ -484,16 +490,20 @@ function addAntiOcrFiles(paths) {
     hasAntiOcr: null,
   }))
   antiOcrFiles.value = [...antiOcrFiles.value, ...newItems]
-  if (newItems.length) void inspectAntiOcrFiles(newItems)
+  const newPaths = newItems.map((i) => i.path)
+  if (newPaths.length) void inspectAntiOcrFiles(newPaths)
 }
 
-async function inspectAntiOcrFiles(items) {
-  for (const item of items) {
+async function inspectAntiOcrFiles(paths) {
+  const reactive = antiOcrFiles.value
+  for (const path of paths) {
     try {
       const result = await Promise.race([
-        tauriCallSafe('detect_anti_ocr', { input: item.path }),
+        tauriCallSafe('detect_anti_ocr', { input: path }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
       ])
+      const item = reactive.find((f) => f.path === path)
+      if (!item) continue
       if (!result.ok) {
         item.statusText = result.error || '检测失败'
         item.statusType = 'danger'
@@ -509,8 +519,11 @@ async function inspectAntiOcrFiles(items) {
         }
       }
     } catch (err) {
-      item.statusText = userFacingError(err?.message || err, '检测异常')
-      item.statusType = 'danger'
+      const item = reactive.find((f) => f.path === path)
+      if (item) {
+        item.statusText = userFacingError(err?.message || err, '检测异常')
+        item.statusType = 'danger'
+      }
     }
   }
 }

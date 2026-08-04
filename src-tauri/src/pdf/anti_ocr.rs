@@ -352,3 +352,4 @@ fn try_restore_cmap(_doc: &Document, _font_id: ObjectId, scrambled: &str) -> Opt
     }
     None
 }
+
