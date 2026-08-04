@@ -131,7 +131,6 @@ export function userFacingError(error, fallback = '操作失败', maxLength = 22
   }
 
   // Clean up "context" chains from anyhow — keep the most relevant message
-  const parts = message.split(/[:：]/).map(s => s.trim()).filter(Boolean)
   const compact = message.replace(/\s+/g, ' ')
 
   if (compact.length <= maxLength) return `${prefix}${compact}`

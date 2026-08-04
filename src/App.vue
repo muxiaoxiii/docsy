@@ -128,8 +128,8 @@ function startOperation(event) {
   operationMessage.value = entry?.label || 'Doclet 正在处理…'
   operationTimer = window.setTimeout(() => {
     operationVisible.value = true
-    clearInterval(elapsedTimer)
-    elapsedTimer = setInterval(updateElapsedTime, 1000)
+    window.clearInterval(elapsedTimer)
+    elapsedTimer = window.setInterval(updateElapsedTime, 1000)
     // Show cancel button after 30 seconds
     clearTimeout(cancelTimer)
     cancelTimer = window.setTimeout(() => {
@@ -147,7 +147,7 @@ function finishOperation(event) {
     return
   }
   clearTimeout(operationTimer)
-  clearInterval(elapsedTimer)
+  window.clearInterval(elapsedTimer)
   clearTimeout(cancelTimer)
   operationVisible.value = false
   operationElapsed.value = ''
@@ -167,7 +167,7 @@ async function cancelCurrentOperation() {
   // Clear all pending operations since we can't know which ones were killed
   pendingOperations.clear()
   clearTimeout(operationTimer)
-  clearInterval(elapsedTimer)
+  window.clearInterval(elapsedTimer)
   clearTimeout(cancelTimer)
   operationVisible.value = false
   operationElapsed.value = ''
@@ -203,7 +203,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearTimeout(operationTimer)
-  clearInterval(elapsedTimer)
+  window.clearInterval(elapsedTimer)
   clearTimeout(cancelTimer)
   window.removeEventListener('docsy-settings-updated', applySettingsEvent)
   window.removeEventListener('docsy-operation-start', startOperation)
