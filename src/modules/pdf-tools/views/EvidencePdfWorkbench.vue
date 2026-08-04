@@ -2737,26 +2737,6 @@ h3 {
 }
 
 
-
-  .preview-panel {
-    flex: 0 0 auto;
-    resize: none;
-  }
-
-  .hf-panel,
-  .preview-panel {
-    overflow: visible;
-  }
-
-  .session-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .existing-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 .evidence-drop-overlay {
   position: fixed;
   inset: 0;
