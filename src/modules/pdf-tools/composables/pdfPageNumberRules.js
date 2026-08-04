@@ -67,7 +67,7 @@ export function pageNumberOverlaysForFile(file, baseRule) {
       active.numberEnd = number
       continue
     }
-    if (active && !active.excluded) overlays.push(toOverlay(active, total))
+    if (active && !active.excluded) overlays.push(toOverlay(active, total, continuous))
     active = {
       signature,
       excluded,
@@ -79,17 +79,24 @@ export function pageNumberOverlaysForFile(file, baseRule) {
       numberEnd: number,
     }
   }
-  if (active && !active.excluded) overlays.push(toOverlay(active, total))
+  if (active && !active.excluded) overlays.push(toOverlay(active, total, continuous))
   return overlays
 }
 
-function toOverlay(group, total) {
+function toOverlay(group, total, continuous) {
+  // continuous mode: backend current_page = page_start(file.pageStart) + index = globalPage
+  //   numberOffset = numberStart - globalStart → page = globalPage + offset = numberStart ✓
+  // per-file mode: backend current_page = page_start(1) + index = localPage
+  //   numberOffset = numberStart - localPageStart = numberStart - pageStart
+  const offset = continuous
+    ? group.numberStart - group.globalStart
+    : group.numberStart - group.pageStart
   return {
     text: group.rule.template || '{page}/{total}',
     region: group.rule.region || 'footer',
     artifactKind: 'PageNumber',
     numberStyle: group.rule.style || 'arabic',
-    numberOffset: group.numberStart - group.globalStart,
+    numberOffset: offset,
     numberTotal: total,
     pageStart: group.pageStart,
     pageEnd: group.pageEnd,
