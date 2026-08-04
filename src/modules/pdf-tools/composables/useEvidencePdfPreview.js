@@ -29,7 +29,9 @@ export function useEvidencePdfPreview({
   currentRules,
   overlayOutputDir,
   insertHeaderFooterEnabled,
+  headerInsertEnabled,
   headerMode,
+  footerInsertEnabled,
   footerEnabled,
   footerContinuous,
   totalOverlayPages,
@@ -57,7 +59,7 @@ export function useEvidencePdfPreview({
   const showRulePreviewOverlays = computed(() => !mergedImportPlan.value)
 
   const previewHeaderText = computed(() => {
-    if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
+    if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
     if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
     return buildHeaderText(selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value)
   })
@@ -87,7 +89,7 @@ export function useEvidencePdfPreview({
 
   // Multiple header group overlays for preview
   const previewHeaderGroupOverlays = computed(() => {
-    if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value) return []
+    if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value || !selectedOverlayFile.value) return []
     const groups = currentRules.value.headerGroups || []
     if (!groups.length) return []
     return groups
@@ -215,7 +217,7 @@ export function useEvidencePdfPreview({
     const file = selectedOverlayFile.value
     const markers = []
     if (
-      (file.removeExistingHeader || file.convertPlainHeader) &&
+      headerInsertEnabled.value && (file.removeExistingHeader || file.convertPlainHeader) &&
       isPageInDetectedRange(previewPage.value, file.existingHeaderPageStart, file.existingHeaderPageEnd)
     ) {
       markers.push(
@@ -227,7 +229,7 @@ export function useEvidencePdfPreview({
       )
     }
     if (
-      (file.removeExistingFooter || file.convertPlainFooter) &&
+      footerInsertEnabled.value && (file.removeExistingFooter || file.convertPlainFooter) &&
       isPageInDetectedRange(previewPage.value, file.existingFooterPageStart, file.existingFooterPageEnd)
     ) {
       markers.push(
@@ -239,7 +241,7 @@ export function useEvidencePdfPreview({
       )
     }
     if (
-      (file.removeExistingPageNumber || file.convertPlainPageNumber) &&
+      footerEnabled.value && (file.removeExistingPageNumber || file.convertPlainPageNumber) &&
       isPageInDetectedRange(previewPage.value, file.existingPageNumberPageStart, file.existingPageNumberPageEnd)
     ) {
       markers.push(
@@ -257,7 +259,13 @@ export function useEvidencePdfPreview({
     if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value || !insertHeaderFooterEnabled.value) return []
     const items = buildHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value)
     const item = items.find((candidate) => candidate.inputPath === selectedOverlayFile.value.path)
-    return (item?.extraOverlays || []).map((overlay, index) => {
+    return (item?.extraOverlays || [])
+      .filter((overlay) => {
+        if (overlay.region === 'header' && !headerInsertEnabled.value) return false
+        if (overlay.region === 'footer' && !footerInsertEnabled.value) return false
+        return true
+      })
+      .map((overlay, index) => {
       const region = overlay.region === 'header' ? 'header' : 'footer'
       return {
         key: `${selectedOverlayFile.value.path}-converted-${index}`,
