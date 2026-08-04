@@ -35,7 +35,7 @@
       </el-main>
       <Transition name="doclet-operation">
         <div v-if="operationVisible" class="doclet-operation-panel">
-          <DocletWorkingPet :message="operationMessage" />
+          <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed" />
         </div>
       </Transition>
     </el-container>
@@ -64,8 +64,10 @@ const menuItems = computed(() => getMenuItems(settings.value))
 const activeMenu = computed(() => route.name || 'home')
 const operationVisible = ref(false)
 const operationMessage = ref('Doclet 正在处理…')
+const operationElapsed = ref('')
 let operationTimer
-const pendingOperations = new Map()
+let elapsedTimer
+const pendingOperations = new Map() // id -> { label, startTime }
 
 const currentPageTitle = computed(() => {
   const item = menuItems.value.find((m) => m.route === route.name)
@@ -87,13 +89,37 @@ function applySettingsEvent(event) {
   settings.value = { ...settings.value, ...(event.detail || {}) }
 }
 
+function formatElapsed(ms) {
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}秒`
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${minutes}分${secs}秒`
+}
+
+function updateElapsedTime() {
+  const oldest = Array.from(pendingOperations.values()).at(0)
+  if (!oldest) {
+    operationElapsed.value = ''
+    return
+  }
+  const ms = Date.now() - oldest.startTime
+  operationElapsed.value = ms > 3000 ? formatElapsed(ms) : ''
+}
+
 function startOperation(event) {
   const operationId = event.detail?.id || `unknown:${Date.now()}`
-  pendingOperations.set(operationId, event.detail?.label || 'Doclet 正在处理…')
+  pendingOperations.set(operationId, {
+    label: event.detail?.label || 'Doclet 正在处理…',
+    startTime: Date.now(),
+  })
   clearTimeout(operationTimer)
-  operationMessage.value = pendingOperations.get(operationId) || 'Doclet 正在处理…'
+  const entry = pendingOperations.get(operationId)
+  operationMessage.value = entry?.label || 'Doclet 正在处理…'
   operationTimer = window.setTimeout(() => {
     operationVisible.value = true
+    clearInterval(elapsedTimer)
+    elapsedTimer = setInterval(updateElapsedTime, 1000)
   }, 350)
 }
 
@@ -101,11 +127,14 @@ function finishOperation(event) {
   const operationId = event.detail?.id
   if (operationId) pendingOperations.delete(operationId)
   if (pendingOperations.size) {
-    operationMessage.value = Array.from(pendingOperations.values()).at(-1) || 'Doclet 正在处理…'
+    const entry = Array.from(pendingOperations.values()).at(-1)
+    operationMessage.value = entry?.label || 'Doclet 正在处理…'
     return
   }
   clearTimeout(operationTimer)
+  clearInterval(elapsedTimer)
   operationVisible.value = false
+  operationElapsed.value = ''
 }
 
 let unlistenConversionTimeout = null
@@ -137,6 +166,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearTimeout(operationTimer)
+  clearInterval(elapsedTimer)
   window.removeEventListener('docsy-settings-updated', applySettingsEvent)
   window.removeEventListener('docsy-operation-start', startOperation)
   window.removeEventListener('docsy-operation-finish', finishOperation)

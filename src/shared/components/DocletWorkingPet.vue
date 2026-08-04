@@ -1,7 +1,10 @@
 <template>
   <div class="doclet-working" role="status" aria-live="polite">
     <div class="doclet-working__sprite" :style="{ backgroundImage: `url(${spritesheet})` }" aria-hidden="true" />
-    <div v-if="message" class="doclet-working__message">{{ message }}</div>
+    <div class="doclet-working__info">
+      <div v-if="message" class="doclet-working__message">{{ message }}</div>
+      <div v-if="elapsed" class="doclet-working__elapsed">已用时 {{ elapsed }}</div>
+    </div>
   </div>
 </template>
 
@@ -12,6 +15,10 @@ defineProps({
   message: {
     type: String,
     default: 'Doclet 正在处理…',
+  },
+  elapsed: {
+    type: String,
+    default: '',
   },
 })
 </script>
@@ -40,10 +47,22 @@ defineProps({
   animation: doclet-look-around 5.6s steps(1, end) infinite;
 }
 
-.doclet-working__message {
+.doclet-working__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   max-width: 180px;
+}
+
+.doclet-working__message {
   font-size: 13px;
   line-height: 1.5;
+}
+
+.doclet-working__elapsed {
+  font-size: 11px;
+  color: #7a8a9a;
+  line-height: 1.4;
 }
 
 @keyframes doclet-look-around {
