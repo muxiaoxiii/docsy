@@ -3,6 +3,8 @@
     <div class="decision-toolbar">
       <el-button size="small" @click="selectAll">全选</el-button>
       <el-button size="small" @click="invertSelection">反选</el-button>
+      <el-button size="small" @click="selectByKind('pageNumber')">选中全部页码</el-button>
+      <el-button size="small" @click="selectByKind('header')">选中全部页眉</el-button>
       <el-button size="small" @click="applyDecision('keep')">保留</el-button>
       <el-button size="small" @click="applyDecision('ignore')">忽略识别</el-button>
       <el-button size="small" type="danger" @click="applyDecision('delete')">标记删除</el-button>
@@ -98,6 +100,9 @@ function toggleAll(value) {
 }
 function selectAll() {
   toggleAll(true)
+}
+function selectByKind(kind) {
+  selectedKeys.value = filteredRows.value.filter(row => row.element.kind === kind).map(row => row.key)
 }
 function invertSelection() {
   const selected = new Set(selectedKeys.value)

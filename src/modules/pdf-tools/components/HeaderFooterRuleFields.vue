@@ -2,8 +2,12 @@
   <div>
     <div class="rule-item section-label"><strong>页眉文字</strong></div>
     <div class="rule-item">
+      <label>插入页眉</label>
+      <el-switch v-model="headerInsertEnabledModel" active-text="启用" inactive-text="关闭" />
+    </div>
+    <div class="rule-item">
       <label>页眉来源</label>
-      <el-select v-model="headerModeModel">
+      <el-select v-model="headerModeModel" :disabled="!headerInsertEnabled">
         <el-option label="不插入页眉" value="none" />
         <el-option label="文件名" value="filename" />
         <el-option label="按证据列表名称" value="per_file" />
@@ -12,17 +16,17 @@
     </div>
     <div v-if="headerMode === 'custom'" class="rule-item">
       <label>页眉文本</label>
-      <el-input v-model="headerTextModel" placeholder="可用 [##]、[序号]、[文件名]、[YYYYMMDD]" />
+      <el-input v-model="headerTextModel" :disabled="!headerInsertEnabled" placeholder="可用 [##]、[序号]、[文件名]、[YYYYMMDD]" />
     </div>
     <div class="rule-item">
-      <label>页眉前缀</label><el-input v-model="headerPrefixModel" :disabled="headerMode === 'none'" />
+      <label>页眉前缀</label><el-input v-model="headerPrefixModel" :disabled="!headerInsertEnabled || headerMode === 'none'" />
     </div>
     <div class="rule-item">
-      <label>页眉后缀</label><el-input v-model="headerSuffixModel" :disabled="headerMode === 'none'" />
+      <label>页眉后缀</label><el-input v-model="headerSuffixModel" :disabled="!headerInsertEnabled || headerMode === 'none'" />
     </div>
     <TextPlacementFields
       prefix="页眉"
-      :disabled="headerMode === 'none'"
+      :disabled="!headerInsertEnabled || headerMode === 'none'"
       v-model:align="headerAlignModel"
       v-model:font-size="headerFontSizeModel"
       v-model:font-family="headerFontFamilyModel"
@@ -36,15 +40,19 @@
     <div class="rule-item section-label"><strong>页脚文字</strong></div>
     <div class="rule-item">
       <label>插入页脚文字</label>
+      <el-switch v-model="footerInsertEnabledModel" active-text="启用" inactive-text="关闭" />
+    </div>
+    <div class="rule-item">
+      <label>页脚文本内容</label>
       <el-switch v-model="footerTextEnabledModel" active-text="启用" inactive-text="关闭" />
     </div>
     <div class="rule-item">
       <label>页脚文本</label>
-      <el-input v-model="footerTextContentModel" :disabled="!footerTextEnabled" placeholder="固定文字，不用于页码" />
+      <el-input v-model="footerTextContentModel" :disabled="!footerInsertEnabled || !footerTextEnabled" placeholder="固定文字，不用于页码" />
     </div>
     <TextPlacementFields
       prefix="页脚"
-      :disabled="!footerTextEnabled"
+      :disabled="!footerInsertEnabled || !footerTextEnabled"
       v-model:align="footerTextAlignModel"
       v-model:font-size="footerTextFontSizeModel"
       v-model:font-family="footerTextFontFamilyModel"
@@ -68,7 +76,7 @@
       </el-select>
     </div>
     <div class="rule-item">
-      <label>数字样式</label>
+      <label>页码样式</label>
       <el-select v-model="pageNumberStyleModel" :disabled="!pageNumberEnabled">
         <el-option
           v-for="style in PAGE_NUMBER_STYLES"
@@ -79,12 +87,34 @@
       </el-select>
     </div>
     <div class="rule-item">
+      <label>显示总页数</label>
+      <el-switch v-model="pageNumberShowTotalModel" active-text="开" inactive-text="关" :disabled="!pageNumberEnabled" />
+    </div>
+    <div class="rule-item">
       <label>页码格式</label>
+      <div class="template-presets">
+        <el-radio-group
+          v-model="pageNumberPresetModel"
+          size="small"
+          :disabled="!pageNumberEnabled"
+          @change="applyPresetTemplate"
+        >
+          <el-radio-button v-for="p in filteredPageNumberPresets" :key="p.value" :value="p.value">
+            {{ p.label }}
+          </el-radio-button>
+        </el-radio-group>
+      </div>
       <el-input
         v-model="pageNumberTemplateModel"
         :disabled="!pageNumberEnabled"
         placeholder="例如 {page}/{total}、-{page}-"
+        size="small"
+        class="template-custom-input"
       />
+    </div>
+    <div class="rule-item" v-if="pageNumberEnabled">
+      <label>预览</label>
+      <span class="page-number-preview">{{ pageNumberPreviewText }}</span>
     </div>
     <div class="rule-item">
       <label>页码区域</label>
@@ -110,7 +140,6 @@
       <el-button :disabled="!pageNumberEnabled" @click="$emit('editPageNumberRules')">
         设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
       </el-button>
-      <span class="field-hint">可排除首页，或让指定页段使用不同样式、位置和起始编号</span>
     </div>
   </div>
 </template>
@@ -118,10 +147,26 @@
 <script setup>
 import { computed } from 'vue'
 import TextPlacementFields from './TextPlacementFields.vue'
-import { PAGE_NUMBER_STYLES } from '../composables/pdfPageNumberRules.js'
+import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
+
+const PRESETS_WITH_TOTAL = [
+  { value: '{page}/{total}', label: '1/35' },
+  { value: '第{page}页，共{total}页', label: '第1页，共35页' },
+  { value: '-{page}-', label: '-1-' },
+  { value: '— {page} —', label: '— 1 —' },
+  { value: '{page}', label: '1' },
+]
+const PRESETS_NO_TOTAL = [
+  { value: '{page}', label: '1' },
+  { value: '-{page}-', label: '-1-' },
+  { value: '— {page} —', label: '— 1 —' },
+  { value: '第{page}页', label: '第1页' },
+  { value: '（{page}）', label: '（1）' },
+]
 
 const props = defineProps({
   headerMode: { type: String, required: true },
+  headerInsertEnabled: { type: Boolean, default: true },
   headerText: { type: String, required: true },
   headerPrefix: { type: String, required: true },
   headerSuffix: { type: String, required: true },
@@ -132,6 +177,7 @@ const props = defineProps({
   headerOffsetXMm: { type: Number, required: true },
   headerColor: { type: String, required: true },
   footerTextEnabled: { type: Boolean, required: true },
+  footerInsertEnabled: { type: Boolean, default: true },
   footerTextContent: { type: String, required: true },
   footerTextAlign: { type: String, required: true },
   footerTextFontSize: { type: Number, required: true },
@@ -151,13 +197,18 @@ const props = defineProps({
   pageNumberOffsetXMm: { type: Number, required: true },
   pageNumberColor: { type: String, required: true },
   pageNumberOverrideCount: { type: Number, default: 0 },
+  pageNumberShowTotal: { type: Boolean, default: true },
+  pageNumberSamplePage: { type: Number, default: 1 },
+  pageNumberSampleTotal: { type: Number, default: 35 },
   offsetLimitMm: { type: Number, default: 120 },
 })
 
 const emit = defineEmits([
   'editPageNumberRules',
+  'update:pageNumberShowTotal',
   ...[
     'headerMode',
+    'headerInsertEnabled',
     'headerText',
     'headerPrefix',
     'headerSuffix',
@@ -168,6 +219,7 @@ const emit = defineEmits([
     'headerOffsetXMm',
     'headerColor',
     'footerTextEnabled',
+    'footerInsertEnabled',
     'footerTextContent',
     'footerTextAlign',
     'footerTextFontSize',
@@ -193,6 +245,7 @@ function model(key) {
   return computed({ get: () => props[key], set: (value) => emit(`update:${key}`, value) })
 }
 const headerModeModel = model('headerMode'),
+  headerInsertEnabledModel = model('headerInsertEnabled'),
   headerTextModel = model('headerText'),
   headerPrefixModel = model('headerPrefix'),
   headerSuffixModel = model('headerSuffix')
@@ -203,6 +256,7 @@ const headerAlignModel = model('headerAlign'),
   headerOffsetXMmModel = model('headerOffsetXMm'),
   headerColorModel = model('headerColor')
 const footerTextEnabledModel = model('footerTextEnabled'),
+  footerInsertEnabledModel = model('footerInsertEnabled'),
   footerTextContentModel = model('footerTextContent'),
   footerTextAlignModel = model('footerTextAlign'),
   footerTextFontSizeModel = model('footerTextFontSize'),
@@ -221,6 +275,26 @@ const pageNumberEnabledModel = model('pageNumberEnabled'),
   pageNumberMarginMmModel = model('pageNumberMarginMm'),
   pageNumberOffsetXMmModel = model('pageNumberOffsetXMm'),
   pageNumberColorModel = model('pageNumberColor')
+const pageNumberShowTotalModel = model('pageNumberShowTotal')
+const pageNumberPresetModel = computed({
+  get() {
+    const tpl = props.pageNumberTemplate
+    const presets = props.pageNumberShowTotal ? PRESETS_WITH_TOTAL : PRESETS_NO_TOTAL
+    return presets.some(p => p.value === tpl) ? tpl : 'custom'
+  },
+  set() {},
+})
+const filteredPageNumberPresets = computed(() =>
+  props.pageNumberShowTotal ? PRESETS_WITH_TOTAL : PRESETS_NO_TOTAL
+)
+function applyPresetTemplate(val) {
+  if (val && val !== 'custom') pageNumberTemplateModel.value = val
+}
+const pageNumberPreviewText = computed(() => {
+  let tpl = props.pageNumberTemplate || '{page}'
+  if (!props.pageNumberShowTotal) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
+  return renderPageNumberTemplate(tpl, props.pageNumberSamplePage, props.pageNumberSampleTotal, props.pageNumberStyle)
+})
 </script>
 
 <style scoped>
@@ -230,4 +304,14 @@ const pageNumberEnabledModel = model('pageNumberEnabled'),
   padding-top: 8px;
   border-top: 1px solid var(--docsy-border-subtle);
 }
+.page-number-preview {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 13px;
+  color: var(--docsy-text-strong);
+  background: var(--docsy-surface-muted);
+  border-radius: 4px;
+}
+.template-presets { margin-bottom: 4px; }
+.template-custom-input { margin-top: 4px; }
 </style>

@@ -177,6 +177,7 @@
           v-if="insertHeaderFooterEnabled"
           class="rule-grid"
           v-model:header-mode="headerMode"
+          v-model:header-insert-enabled="headerInsertEnabled"
           v-model:header-text="headerText"
           v-model:header-prefix="headerPrefix"
           v-model:header-suffix="headerSuffix"
@@ -187,6 +188,7 @@
           v-model:header-offset-x-mm="headerOffsetXMm"
           v-model:header-color="headerColor"
           v-model:footer-text-enabled="footerTextEnabled"
+          v-model:footer-insert-enabled="footerInsertEnabled"
           v-model:footer-text-content="footerTextContent"
           v-model:footer-text-align="footerTextAlign"
           v-model:footer-text-font-size="footerTextFontSize"
@@ -206,6 +208,9 @@
           v-model:page-number-offset-x-mm="footerOffsetXMm"
           v-model:page-number-color="footerColor"
           :page-number-override-count="pageNumberOverrides.length"
+          v-model:page-number-show-total="pageNumberShowTotal"
+          :page-number-sample-page="previewSamplePage"
+          :page-number-sample-total="totalOverlayPages"
           @edit-page-number-rules="pageNumberRulesVisible = true"
           :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
         />
@@ -808,6 +813,9 @@ const annotationKinds = ref([
 const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
 const insertHeaderFooterEnabled = ref(true)
+const headerInsertEnabled = ref(true)
+const footerInsertEnabled = ref(true)
+const pageNumberShowTotal = ref(true)
 const headerMode = ref('filename')
 const headerText = ref('')
 const headerPrefix = ref('')
@@ -917,6 +925,7 @@ const previewMaxPage = computed(() => {
 })
 const previewHint = computed(() => (mergedImportPlan.value ? '合并 PDF 原文预览' : '实时位置；真实预览需手动生成'))
 const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
+const previewSamplePage = computed(() => previewPage.value)
 const plannedOutputDir = computed(() => buildOutputDir(overlayRows.value, overlayOutputDir.value))
 const plannedMergeOutputPath = computed(() =>
   buildMergeOutputPath(overlayRows.value, overlayOutputDir.value, mergeFileName.value),
