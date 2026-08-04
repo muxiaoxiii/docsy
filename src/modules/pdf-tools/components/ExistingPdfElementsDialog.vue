@@ -134,11 +134,12 @@ function clearSelection() {
   selectedKeys.value = []
 }
 function selectBySequence(row) {
-  const { kind, pageStart, pageEnd, detectedText, fileName } = row.element
+  const { kind, pageStart, pageEnd, detectedText } = row.element
+  const fileName = row.fileName
   if (kind === 'pageNumber') {
     // Select all page numbers from same file whose page ranges form a continuous sequence
     const filePageNumbers = filteredRows.value
-      .filter(r => r.element.kind === 'pageNumber' && r.element.fileName === fileName)
+      .filter(r => r.element.kind === 'pageNumber' && r.fileName === fileName)
       .sort((a, b) => a.element.pageStart - b.element.pageStart)
     // Build connected groups: pages are "connected" if ranges touch or overlap
     const groups = []
@@ -158,7 +159,7 @@ function selectBySequence(row) {
   } else {
     // For headers/footers: select all with same text from same file
     selectedKeys.value = filteredRows.value
-      .filter(r => r.element.kind === kind && r.element.fileName === fileName && r.element.detectedText === detectedText)
+      .filter(r => r.element.kind === kind && r.fileName === fileName && r.element.detectedText === detectedText)
       .map(r => r.key)
   }
 }

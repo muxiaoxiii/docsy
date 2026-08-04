@@ -252,11 +252,12 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
           overrides: rules.pageNumberOverrides || [],
         })
     const extraOverlays = [...convertedExistingOverlays(file, rules), ...pageNumberOverlays]
-    // Add header groups overlays (skip first group since it's already the main header)
+    // Add header group overlays (skip the selected group since it's the main header)
     const headerGroups = rules.headerGroups || []
+    const selectedHeaderId = rules.selectedHeaderGroupId || (headerGroups[0] && headerGroups[0].id)
     if (headerInsertEnabled && headerGroups.length > 1) {
-      for (let gi = 1; gi < headerGroups.length; gi++) {
-        const g = headerGroups[gi]
+      for (const g of headerGroups) {
+        if (g.id === selectedHeaderId) continue
         if (!g.enabled) continue
         const groupText = buildHeaderTextForGroup(file, index, g, rules)
         if (groupText) {
@@ -264,22 +265,24 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         }
       }
     }
-    // Add footer text group overlays (skip first group since it's already the main footer text)
+    // Add footer text group overlays (skip the selected group since it's the main footer)
     const footerTextGroups = rules.footerTextGroups || []
+    const selectedFooterId = rules.selectedFooterTextGroupId || (footerTextGroups[0] && footerTextGroups[0].id)
     if (footerInsertEnabled && footerTextGroups.length > 1) {
-      for (let gi = 1; gi < footerTextGroups.length; gi++) {
-        const g = footerTextGroups[gi]
+      for (const g of footerTextGroups) {
+        if (g.id === selectedFooterId) continue
         if (!g.enabled) continue
         if (g.text) {
           extraOverlays.push(footerTextOverlayConfigForGroup(g.text, g))
         }
       }
     }
-    // Add page number group overlays (skip first group since it's already the main page number)
+    // Add page number group overlays (skip the selected group since it's the main page number)
     const pageNumberGroups = rules.pageNumberGroups || []
+    const selectedPnId = rules.selectedPageNumberGroupId || (pageNumberGroups[0] && pageNumberGroups[0].id)
     if (pageNumberEnabled && pageNumberGroups.length > 1) {
-      for (let gi = 1; gi < pageNumberGroups.length; gi++) {
-        const g = pageNumberGroups[gi]
+      for (const g of pageNumberGroups) {
+        if (g.id === selectedPnId) continue
         if (!g.enabled) continue
         const pnSequence = g.sequence || pageNumberSequence
         const pnContinuous = pnSequence !== 'per-file'
