@@ -855,7 +855,38 @@ const defaultHeaderGroup = () => ({
   offsetXMm: 0,
   color: '#000000',
 })
+const defaultFooterTextGroup = () => ({
+  id: `ft${Date.now()}`,
+  label: '',
+  enabled: true,
+  text: '',
+  align: 'left',
+  fontSize: 9,
+  fontFamily: 'auto',
+  marginMm: 10,
+  offsetXMm: 0,
+  color: '#000000',
+})
+const defaultPageNumberGroup = () => ({
+  id: `pn${Date.now()}`,
+  label: '',
+  enabled: true,
+  sequence: 'continuous',
+  style: 'arabic',
+  template: '{page}/{total}',
+  region: 'footer',
+  align: 'center',
+  fontSize: 9,
+  fontFamily: 'auto',
+  marginMm: 10,
+  offsetXMm: 0,
+  color: '#000000',
+})
 const headerGroups = ref([{ ...defaultHeaderGroup(), id: 'h1', label: '页眉 1' }])
+const footerTextGroups = ref([{ ...defaultFooterTextGroup(), id: 'ft1', label: '页脚文字 1' }])
+const selectedFooterTextGroupId = ref('ft1')
+const pageNumberGroups = ref([{ ...defaultPageNumberGroup(), id: 'pn1', label: '页码 1' }])
+const selectedPageNumberGroupId = ref('pn1')
 const selectedHeaderGroupId = ref('h1')
 const selectedHeaderGroup = computed(
   () => headerGroups.value.find((g) => g.id === selectedHeaderGroupId.value) || headerGroups.value[0],
@@ -900,6 +931,52 @@ const headerOffsetXMm = computed({
 const headerColor = computed({
   get: () => selectedHeaderGroup.value.color,
   set: (v) => { selectedHeaderGroup.value.color = v },
+})
+const selectedFooterTextGroup = computed(
+  () => footerTextGroups.value.find((g) => g.id === selectedFooterTextGroupId.value) || footerTextGroups.value[0],
+)
+const footerTextContent = computed({
+  get: () => selectedFooterTextGroup.value.text,
+  set: (v) => { selectedFooterTextGroup.value.text = v },
+})
+const footerTextAlign = computed({
+  get: () => selectedFooterTextGroup.value.align,
+  set: (v) => { selectedFooterTextGroup.value.align = v },
+})
+const footerTextFontSize = computed({
+  get: () => selectedFooterTextGroup.value.fontSize,
+  set: (v) => { selectedFooterTextGroup.value.fontSize = v },
+})
+const footerTextFontFamily = computed({
+  get: () => selectedFooterTextGroup.value.fontFamily,
+  set: (v) => { selectedFooterTextGroup.value.fontFamily = v },
+})
+const footerTextMarginMm = computed({
+  get: () => selectedFooterTextGroup.value.marginMm,
+  set: (v) => { selectedFooterTextGroup.value.marginMm = v },
+})
+const footerTextOffsetXMm = computed({
+  get: () => selectedFooterTextGroup.value.offsetXMm,
+  set: (v) => { selectedFooterTextGroup.value.offsetXMm = v },
+})
+const footerTextColor = computed({
+  get: () => selectedFooterTextGroup.value.color,
+  set: (v) => { selectedFooterTextGroup.value.color = v },
+})
+const selectedPageNumberGroup = computed(
+  () => pageNumberGroups.value.find((g) => g.id === selectedPageNumberGroupId.value) || pageNumberGroups.value[0],
+)
+const pageNumberSequence = computed({
+  get: () => selectedPageNumberGroup.value.sequence,
+  set: (v) => { selectedPageNumberGroup.value.sequence = v },
+})
+const pageNumberStyle = computed({
+  get: () => selectedPageNumberGroup.value.style,
+  set: (v) => { selectedPageNumberGroup.value.style = v },
+})
+const pageNumberRegion = computed({
+  get: () => selectedPageNumberGroup.value.region,
+  set: (v) => { selectedPageNumberGroup.value.region = v },
 })
 const footerEnabled = ref(false)
 const footerText = ref('{page}/{total}')
@@ -1401,7 +1478,7 @@ function applyWorkflowDefaults() {
   }
   insertHeaderFooterEnabled.value = true
   headerMode.value = 'filename'
-  footerEnabled.value = true
+  footerEnabled.value = false
   footerContinuous.value = true
   outputMode.value = 'files_and_merge'
   mergeFileName.value = 'merged_evidence.pdf'
@@ -2047,6 +2124,7 @@ function removeOverlayFile(index) {
 <style scoped>
 .hf-workbench {
   display: flex;
+  flex-direction: column;
   gap: 0;
   height: 100%;
   min-height: 0;
@@ -2057,7 +2135,6 @@ function removeOverlayFile(index) {
 
 .hf-panel {
   flex: 1 1 0;
-  min-width: 480px;
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
@@ -2065,15 +2142,13 @@ function removeOverlayFile(index) {
 }
 
 .preview-panel {
-  flex: 0 0 400px;
-  min-width: 320px;
-  max-width: 50vw;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: 50vh;
   overflow: auto;
   scrollbar-gutter: stable;
-  padding-left: 14px;
-  border-left: 1px solid var(--docsy-border-subtle);
-  resize: horizontal;
+  padding-top: 14px;
+  border-top: 1px solid var(--docsy-border-subtle);
+  resize: vertical;
 }
 
 .section-head,
@@ -2641,7 +2716,6 @@ h3 {
 
 @media (max-width: 1280px) {
   .hf-workbench {
-    flex-direction: column;
     height: auto;
     overflow: visible;
   }
@@ -2652,11 +2726,6 @@ h3 {
 
   .preview-panel {
     flex: 0 0 auto;
-    max-width: none;
-    min-width: 0;
-    margin-top: 14px;
-    padding-left: 0;
-    border-left: 0;
     resize: none;
   }
 

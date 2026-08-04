@@ -1056,7 +1056,7 @@ fn build_candidates(
     for ((normalized_text, x_bucket, y_bucket), lines) in grouped {
         if normalized_text == "__page_number_seq__" {
             let mut by_total: BTreeMap<Option<u32>, Vec<&TextLineDetection>> = BTreeMap::new();
-            for line in lines {
+            for line in &lines {
                 let total = parsed_page_number_total(&line.text);
                 by_total.entry(total).or_default().push(line);
             }

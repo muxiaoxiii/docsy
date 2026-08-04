@@ -201,7 +201,7 @@ export function useEvidencePdfPreview({
   })
 
   const convertedExistingPreviewOverlays = computed(() => {
-    if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value) return []
+    if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value || !insertHeaderFooterEnabled.value) return []
     const items = buildHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value)
     const item = items.find((candidate) => candidate.inputPath === selectedOverlayFile.value.path)
     return (item?.extraOverlays || []).map((overlay, index) => {
