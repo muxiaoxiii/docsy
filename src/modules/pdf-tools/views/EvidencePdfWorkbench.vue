@@ -597,6 +597,7 @@
       :filter="existingElementsFilter"
       @change="handleExistingElementChange"
       @preview="previewExistingElement"
+      @jump-to-settings="handleJumpToSettings"
     />
 
     <section class="preview-panel">
@@ -731,7 +732,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -836,8 +837,8 @@ const annotationKinds = ref([
 const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
 const insertHeaderFooterEnabled = ref(true)
-const headerInsertEnabled = ref(true)
-const footerInsertEnabled = ref(true)
+const headerInsertEnabled = ref(false)
+const footerInsertEnabled = ref(false)
 const pageNumberShowTotal = ref(true)
 const defaultHeaderGroup = () => ({
   id: `h${Date.now()}`,
@@ -900,7 +901,7 @@ const headerColor = computed({
   get: () => selectedHeaderGroup.value.color,
   set: (v) => { selectedHeaderGroup.value.color = v },
 })
-const footerEnabled = ref(true)
+const footerEnabled = ref(false)
 const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)
 const pageNumberSequence = ref('continuous')
@@ -1846,6 +1847,19 @@ async function finishQuickCleanupPipeline() {
     quickCleanupRunning.value = false
     overlaying.value = false
   }
+}
+
+function handleJumpToSettings(kind) {
+  existingElementsVisible.value = false
+  // Ensure the target section toggle is on
+  if (kind === 'header') headerInsertEnabled.value = true
+  else if (kind === 'footerText') footerInsertEnabled.value = true
+  else if (kind === 'pageNumber') footerEnabled.value = true
+  // Scroll to the header/footer rule fields section
+  nextTick(() => {
+    const el = document.querySelector('.rule-grid')
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 function handleExistingElementChange(row) {

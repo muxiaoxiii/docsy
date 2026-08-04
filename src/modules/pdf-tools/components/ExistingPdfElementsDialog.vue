@@ -21,6 +21,7 @@
       max-height="58vh"
       row-key="key"
       @row-contextmenu="handleRowRightClick"
+      @row-click="handleRowClick"
     >
       <el-table-column width="44">
         <template #header>
@@ -87,7 +88,7 @@ const props = defineProps({
   rows: { type: Array, default: () => [] },
   filter: { type: String, default: 'all' },
 })
-const emit = defineEmits(['update:visible', 'change', 'preview'])
+const emit = defineEmits(['update:visible', 'change', 'preview', 'jump-to-settings'])
 const selectedKeys = ref([])
 const visibleModel = computed({ get: () => props.visible, set: (value) => emit('update:visible', value) })
 const fileFilter = ref('')
