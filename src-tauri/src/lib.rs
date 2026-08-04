@@ -9,9 +9,77 @@ mod services;
 mod sort_utils;
 mod template_history;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::Emitter;
+
+/// Registry of active subprocess PIDs for cancellation support.
+/// Frontend can call `cancel_operation` to kill a subprocess by its operation ID.
+#[derive(Default)]
+pub struct SubprocessRegistry {
+    /// Map from operation ID (e.g. "merge_pdfs:42") to subprocess PID.
+    pids: Mutex<HashMap<String, u32>>,
+}
+
+impl SubprocessRegistry {
+    pub fn new() -> Self {
+        Self {
+            pids: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Register a subprocess PID under the given operation ID.
+    pub fn register(&self, operation_id: &str, pid: u32) {
+        if let Ok(mut map) = self.pids.lock() {
+            map.insert(operation_id.to_string(), pid);
+        }
+    }
+
+    /// Unregister a subprocess (call when operation completes normally).
+    pub fn unregister(&self, operation_id: &str) {
+        if let Ok(mut map) = self.pids.lock() {
+            map.remove(operation_id);
+        }
+    }
+
+    /// Kill a subprocess by operation ID. Returns true if the process was found and killed.
+    pub fn cancel(&self, operation_id: &str) -> bool {
+        let pid = {
+            if let Ok(mut map) = self.pids.lock() {
+                map.remove(operation_id)
+            } else {
+                return false;
+            }
+        };
+        if let Some(pid) = pid {
+            #[cfg(unix)]
+            {
+                // Try SIGTERM first (graceful), then SIGKILL if needed
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .output();
+            }
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .output();
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Check if an operation has been cancelled.
+    pub fn is_cancelled(&self, operation_id: &str) -> bool {
+        if let Ok(map) = self.pids.lock() {
+            !map.contains_key(operation_id)
+        } else {
+            false
+        }
+    }
+}
 
 /// Global app handle for emitting events from non-command contexts.
 static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
@@ -85,11 +153,13 @@ pub fn run() {
     std::thread::spawn(cleanup_webkit_cache);
 
     let conversion_state = Arc::new(ConversionState::new());
+    let subprocess_registry = Arc::new(SubprocessRegistry::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(conversion_state)
+        .manage(subprocess_registry)
         .setup(|app| {
             let _ = APP_HANDLE.set(app.handle().clone());
             Ok(())

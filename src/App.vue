@@ -36,6 +36,14 @@
       <Transition name="doclet-operation">
         <div v-if="operationVisible" class="doclet-operation-panel">
           <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed" />
+          <button
+            v-if="showCancel"
+            class="doclet-cancel-btn"
+            @click="cancelCurrentOperation"
+            title="取消当前操作"
+          >
+            取消
+          </button>
         </div>
       </Transition>
     </el-container>
@@ -65,6 +73,8 @@ const activeMenu = computed(() => route.name || 'home')
 const operationVisible = ref(false)
 const operationMessage = ref('Doclet 正在处理…')
 const operationElapsed = ref('')
+const showCancel = ref(false)
+let cancelTimer
 let operationTimer
 let elapsedTimer
 const pendingOperations = new Map() // id -> { label, startTime }
@@ -120,6 +130,11 @@ function startOperation(event) {
     operationVisible.value = true
     clearInterval(elapsedTimer)
     elapsedTimer = setInterval(updateElapsedTime, 1000)
+    // Show cancel button after 30 seconds
+    clearTimeout(cancelTimer)
+    cancelTimer = window.setTimeout(() => {
+      showCancel.value = true
+    }, 30000)
   }, 350)
 }
 
@@ -133,8 +148,30 @@ function finishOperation(event) {
   }
   clearTimeout(operationTimer)
   clearInterval(elapsedTimer)
+  clearTimeout(cancelTimer)
   operationVisible.value = false
   operationElapsed.value = ''
+  showCancel.value = false
+}
+
+async function cancelCurrentOperation() {
+  // Find the oldest (first) pending operation — that's the one running longest
+  const firstId = Array.from(pendingOperations.keys()).at(0)
+  if (firstId) {
+    try {
+      await tauriCallSafe('cancel_operation', { operationId: firstId })
+    } catch {
+      // Ignore errors — the operation may have already finished
+    }
+  }
+  // Clear all pending operations since we can't know which ones were killed
+  pendingOperations.clear()
+  clearTimeout(operationTimer)
+  clearInterval(elapsedTimer)
+  clearTimeout(cancelTimer)
+  operationVisible.value = false
+  operationElapsed.value = ''
+  showCancel.value = false
 }
 
 let unlistenConversionTimeout = null
@@ -167,6 +204,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearTimeout(operationTimer)
   clearInterval(elapsedTimer)
+  clearTimeout(cancelTimer)
   window.removeEventListener('docsy-settings-updated', applySettingsEvent)
   window.removeEventListener('docsy-operation-start', startOperation)
   window.removeEventListener('docsy-operation-finish', finishOperation)
@@ -289,7 +327,26 @@ onBeforeUnmount(() => {
   right: 24px;
   bottom: 24px;
   z-index: 999;
-  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.doclet-cancel-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+  background: var(--docsy-surface-elevated);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.doclet-cancel-btn:hover {
+  color: var(--docsy-danger);
+  border-color: var(--docsy-danger);
 }
 
 .doclet-operation-enter-active,
