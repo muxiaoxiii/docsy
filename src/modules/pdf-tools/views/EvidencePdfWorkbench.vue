@@ -924,6 +924,13 @@ const insertHeaderFooterEnabled = ref(true)
 const headerInsertEnabled = ref(false)
 const footerInsertEnabled = ref(false)
 const pageNumberShowTotal = ref(true)
+
+// Per-file overlay rows (must be declared before group computeds that reference selectedOverlayFile)
+const overlayRows = computed(() => {
+  return updatePageRanges(overlayFiles.value)
+})
+const selectedOverlayFile = computed(() => overlayRows.value[selectedOverlayIndex.value] || null)
+
 const headerGroups = computed(() => groupsFor(selectedOverlayFile.value, 'header'))
 const footerTextGroups = computed(() => groupsFor(selectedOverlayFile.value, 'footerText'))
 const pageNumberGroups = computed(() => groupsFor(selectedOverlayFile.value, 'pageNumber'))
@@ -1131,10 +1138,6 @@ watch(existingElementsVisible, (visible) => {
 })
 
 applyWorkflowDefaults()
-
-const overlayRows = computed(() => {
-  return updatePageRanges(overlayFiles.value)
-})
 const {
   start: startOverlayReorder,
   move: moveOverlayReorder,
@@ -1159,7 +1162,6 @@ const hasMergedBatchImports = computed(
   () => workflowMode.value === 'split' && overlayFiles.value.length > 0 && !hasSourceSplitRanges.value,
 )
 
-const selectedOverlayFile = computed(() => overlayRows.value[selectedOverlayIndex.value] || null)
 const activePreviewFilePath = computed(() => mergedImportPlan.value?.inputPath || selectedOverlayFile.value?.path || '')
 const previewMaxPage = computed(() => {
   if (mergedImportPlan.value) return Math.max(1, Number(mergedImportPlan.value.totalPages || 1))
