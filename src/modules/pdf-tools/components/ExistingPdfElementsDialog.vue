@@ -1,6 +1,9 @@
 <template>
   <el-dialog v-model="visibleModel" title="确认原有页眉、页脚和页码" width="min(1080px, 94vw)" append-to-body>
     <div class="decision-toolbar">
+      <el-select v-model="fileFilter" size="small" placeholder="全部文件" clearable style="width: 200px">
+        <el-option v-for="f in fileNames" :key="f" :label="f" :value="f" />
+      </el-select>
       <el-button size="small" @click="selectAll">全选</el-button>
       <el-button size="small" @click="invertSelection">反选</el-button>
       <el-button size="small" @click="selectByKind('pageNumber')">选中全部页码</el-button>
@@ -50,11 +53,12 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="115" fixed="right">
+      <el-table-column label="操作" width="170" fixed="right">
         <template #default="{ row }">
           <el-button link size="small" type="primary" @click="$emit('preview', row)">预览</el-button>
+          <el-button link size="small" @click="selectByFile(row.fileName)">同文件</el-button>
           <el-button v-if="row.element.decision !== 'keep'" link size="small" @click="setDecision(row, 'keep')">
-            取消处理
+            取消
           </el-button>
         </template>
       </el-table-column>
@@ -77,12 +81,19 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'change', 'preview'])
 const selectedKeys = ref([])
 const visibleModel = computed({ get: () => props.visible, set: (value) => emit('update:visible', value) })
+const fileFilter = ref('')
+const fileNames = computed(() => [...new Set(props.rows.map(r => r.fileName))].sort())
 const filteredRows = computed(() => {
-  if (props.filter === 'all') return props.rows
-  if (props.filter === 'delete' || props.filter === 'edit') {
-    return props.rows.filter((row) => row.element.decision === props.filter)
+  let rows = props.rows
+  if (props.filter !== 'all') {
+    if (props.filter === 'delete' || props.filter === 'edit') {
+      rows = rows.filter((row) => row.element.decision === props.filter)
+    } else {
+      rows = rows.filter((row) => row.element.kind === props.filter)
+    }
   }
-  return props.rows.filter((row) => row.element.kind === props.filter)
+  if (fileFilter.value) rows = rows.filter(row => row.fileName === fileFilter.value)
+  return rows
 })
 const allSelected = computed(
   () => filteredRows.value.length > 0 && filteredRows.value.every((row) => selectedKeys.value.includes(row.key)),
@@ -100,6 +111,9 @@ function toggleAll(value) {
 }
 function selectAll() {
   toggleAll(true)
+}
+function selectByFile(fileName) {
+  selectedKeys.value = filteredRows.value.filter(row => row.fileName === fileName).map(row => row.key)
 }
 function selectByKind(kind) {
   selectedKeys.value = filteredRows.value.filter(row => row.element.kind === kind).map(row => row.key)
