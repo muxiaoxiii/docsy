@@ -92,6 +92,7 @@ const selectedKeys = ref([])
 const visibleModel = computed({ get: () => props.visible, set: (value) => emit('update:visible', value) })
 const fileFilter = ref('')
 const fileNames = computed(() => [...new Set(props.rows.map(r => r.fileName))].sort())
+const KIND_ORDER = { header: 0, footerText: 1, pageNumber: 2 }
 const filteredRows = computed(() => {
   let rows = props.rows
   if (props.filter !== 'all') {
@@ -102,7 +103,14 @@ const filteredRows = computed(() => {
     }
   }
   if (fileFilter.value) rows = rows.filter(row => row.fileName === fileFilter.value)
-  return rows
+  // Sort: by fileName → by kind (header < footer < pageNumber) → by pageStart
+  return [...rows].sort((a, b) => {
+    const fa = a.fileName || '', fb = b.fileName || ''
+    if (fa !== fb) return fa.localeCompare(fb)
+    const ka = KIND_ORDER[a.element.kind] ?? 9, kb = KIND_ORDER[b.element.kind] ?? 9
+    if (ka !== kb) return ka - kb
+    return (a.element.pageStart || 0) - (b.element.pageStart || 0)
+  })
 })
 const allSelected = computed(
   () => filteredRows.value.length > 0 && filteredRows.value.every((row) => selectedKeys.value.includes(row.key)),
