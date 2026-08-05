@@ -182,12 +182,13 @@
       <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title-row">
           <div class="block-title">插入新页眉、页脚文字和页码</div>
+          <el-checkbox v-model="globalApplyEnabled" size="small">全局应用</el-checkbox>
           <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
-        </div>
-        <HeaderFooterRuleFields
-          v-if="insertHeaderFooterEnabled"
-          ref="inlineHfFieldsRef"
-          class="rule-grid"
+          </div>
+          <HeaderFooterRuleFields
+            v-if="insertHeaderFooterEnabled"
+            ref="inlineHfFieldsRef"
+            class="rule-grid" 
           v-model:header-groups="headerGroupsModel"
           v-model:selected-header-group-id="selectedHeaderGroupId"
           v-model:header-mode="headerMode"
@@ -664,6 +665,7 @@
       <template #header>
         <div class="dialog-title-row">
           <span>页眉页脚格式</span>
+          <el-checkbox v-model="globalApplyEnabled" size="small">全局应用</el-checkbox>
           <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
         </div>
       </template>
@@ -942,6 +944,7 @@ const annotationKinds = ref([
 const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
 const insertHeaderFooterEnabled = ref(true)
+const globalApplyEnabled = ref(true)
 const headerInsertEnabled = ref(false)
 const footerInsertEnabled = ref(false)
 const pageNumberShowTotal = ref(true)
@@ -1467,9 +1470,10 @@ const currentRules = computed(() => ({
   footerTextGroups: insertHeaderFooterEnabled.value && footerInsertEnabled.value ? footerTextGroups.value : [],
   pageNumberGroups: insertHeaderFooterEnabled.value && footerEnabled.value ? pageNumberGroups.value : [],
   // Global group: the selected file's group is the single source of truth for ALL files
-  _globalHeaderGroup: selectedGroupFor(selectedOverlayFile.value, 'header'),
-  _globalFooterTextGroup: selectedGroupFor(selectedOverlayFile.value, 'footerText'),
-  _globalPageNumberGroup: selectedGroupFor(selectedOverlayFile.value, 'pageNumber'),
+  _globalApply: globalApplyEnabled.value,
+  _globalHeaderGroup: globalApplyEnabled.value ? selectedGroupFor(selectedOverlayFile.value, 'header') : null,
+  _globalFooterTextGroup: globalApplyEnabled.value ? selectedGroupFor(selectedOverlayFile.value, 'footerText') : null,
+  _globalPageNumberGroup: globalApplyEnabled.value ? selectedGroupFor(selectedOverlayFile.value, 'pageNumber') : null,
   footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,
