@@ -562,19 +562,10 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       footer:
         legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
           ? (footerInsertEnabled ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules) : null)
-          : footerInsertEnabled && footerTextGroup && footerTextGroup.enabled !== false && footerTextGroup.text
-            ? footerTextOverlayConfigForGroup(footerTextGroup.text, footerTextGroup)
+          : footerInsertEnabled && footerTextGroup && footerTextGroup.enabled !== false && (footerTextGroup.text || rules.footerTextContent)
+            ? footerTextOverlayConfigForGroup(footerTextGroup.text || rules.footerTextContent, footerTextGroup)
             : null,
       extraOverlays,
-      bookmark: rules.bookmarkEnabled
-        ? {
-            enabled: true,
-            label: rules.headerInsertEnabled && rules.headerMode !== 'none'
-              ? buildHeaderText(file, index, rules)
-              : stripPdf(file.name),
-            pageIndex: 0,
-          }
-        : null,
       bookmarks: rules.bookmarkEnabled
         ? [{
             enabled: true,

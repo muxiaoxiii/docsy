@@ -471,6 +471,7 @@
       <el-table
         v-if="overlayFiles.length"
         :data="overlayRows"
+        :row-key="row => row.path"
         size="small"
         border
         class="overlay-table"

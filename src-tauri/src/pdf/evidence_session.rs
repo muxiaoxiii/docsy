@@ -302,16 +302,7 @@ fn collect_merge_bookmarks(items: &[Value], results: &[Value]) -> Vec<header_foo
             .and_then(Value::as_u64)
             .unwrap_or(0) as u32;
 
-        // Collect bookmarks from both the legacy single bookmark and the bookmarks array
-        if let Some(bm) = item.get("bookmark").and_then(|v| {
-            serde_json::from_value::<header_footer::BookmarkConfig>(v.clone()).ok()
-        }) {
-            if bm.enabled && !bm.label.is_empty() {
-                let mut adjusted = bm;
-                adjusted.page_index += page_offset;
-                bookmarks.push(adjusted);
-            }
-        }
+        // Collect bookmarks from the bookmarks array
         if let Some(bms) = item.get("bookmarks").and_then(Value::as_array) {
             for bm_value in bms {
                 if let Ok(bm) = serde_json::from_value::<header_footer::BookmarkConfig>(bm_value.clone()) {
