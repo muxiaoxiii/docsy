@@ -945,6 +945,9 @@ const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
 const insertHeaderFooterEnabled = ref(true)
 const globalApplyEnabled = ref(true)
+const globalHeaderGroup = ref(createDefaultHeaderGroup())
+const globalFooterTextGroup = ref(createDefaultFooterTextGroup())
+const globalPageNumberGroup = ref(createDefaultPageNumberGroup())
 const headerInsertEnabled = ref(false)
 const footerInsertEnabled = ref(false)
 const pageNumberShowTotal = ref(true)
@@ -955,45 +958,95 @@ const overlayRows = computed(() => {
 })
 const selectedOverlayFile = computed(() => overlayRows.value[selectedOverlayIndex.value] || null)
 
-const headerGroups = computed(() => groupsFor(selectedOverlayFile.value, 'header'))
-const footerTextGroups = computed(() => groupsFor(selectedOverlayFile.value, 'footerText'))
-const pageNumberGroups = computed(() => groupsFor(selectedOverlayFile.value, 'pageNumber'))
+const headerGroups = computed(() =>
+  globalApplyEnabled.value ? [globalHeaderGroup.value] : groupsFor(selectedOverlayFile.value, 'header'),
+)
+const footerTextGroups = computed(() =>
+  globalApplyEnabled.value ? [globalFooterTextGroup.value] : groupsFor(selectedOverlayFile.value, 'footerText'),
+)
+const pageNumberGroups = computed(() =>
+  globalApplyEnabled.value ? [globalPageNumberGroup.value] : groupsFor(selectedOverlayFile.value, 'pageNumber'),
+)
 // Writable models so HeaderFooterRuleFields can add/remove groups per file
 const headerGroupsModel = computed({
-  get: () => selectedOverlayFile.value?.headerGroups || [],
-  set: (v) => { if (selectedOverlayFile.value) selectedOverlayFile.value.headerGroups = v },
+  get: () => globalApplyEnabled.value
+    ? [globalHeaderGroup.value]
+    : selectedOverlayFile.value?.headerGroups || [],
+  set: (v) => {
+    if (globalApplyEnabled.value) {
+      globalHeaderGroup.value = v[0] || createDefaultHeaderGroup()
+    } else if (selectedOverlayFile.value) {
+      selectedOverlayFile.value.headerGroups = v
+    }
+  },
 })
 const footerTextGroupsModel = computed({
-  get: () => selectedOverlayFile.value?.footerTextGroups || [],
-  set: (v) => { if (selectedOverlayFile.value) selectedOverlayFile.value.footerTextGroups = v },
+  get: () => globalApplyEnabled.value
+    ? [globalFooterTextGroup.value]
+    : selectedOverlayFile.value?.footerTextGroups || [],
+  set: (v) => {
+    if (globalApplyEnabled.value) {
+      globalFooterTextGroup.value = v[0] || createDefaultFooterTextGroup()
+    } else if (selectedOverlayFile.value) {
+      selectedOverlayFile.value.footerTextGroups = v
+    }
+  },
 })
 const pageNumberGroupsModel = computed({
-  get: () => selectedOverlayFile.value?.pageNumberGroups || [],
-  set: (v) => { if (selectedOverlayFile.value) selectedOverlayFile.value.pageNumberGroups = v },
+  get: () => globalApplyEnabled.value
+    ? [globalPageNumberGroup.value]
+    : selectedOverlayFile.value?.pageNumberGroups || [],
+  set: (v) => {
+    if (globalApplyEnabled.value) {
+      globalPageNumberGroup.value = v[0] || createDefaultPageNumberGroup()
+    } else if (selectedOverlayFile.value) {
+      selectedOverlayFile.value.pageNumberGroups = v
+    }
+  },
 })
 const pageNumberTemplate = computed({
   get: () => selectedPageNumberGroup.value.template || '{page}/{total}',
   set: (v) => { selectedPageNumberGroup.value.template = v },
 })
-const selectedHeaderGroup = computed(() => selectedGroupFor(selectedOverlayFile.value, 'header') || createDefaultHeaderGroup())
+const selectedHeaderGroup = computed(() =>
+  globalApplyEnabled.value
+    ? globalHeaderGroup.value
+    : selectedGroupFor(selectedOverlayFile.value, 'header') || createDefaultHeaderGroup(),
+)
 const selectedFooterTextGroup = computed(() =>
-  selectedGroupFor(selectedOverlayFile.value, 'footerText') || createDefaultFooterTextGroup(),
+  globalApplyEnabled.value
+    ? globalFooterTextGroup.value
+    : selectedGroupFor(selectedOverlayFile.value, 'footerText') || createDefaultFooterTextGroup(),
 )
 const selectedPageNumberGroup = computed(() =>
-  selectedGroupFor(selectedOverlayFile.value, 'pageNumber') || createDefaultPageNumberGroup(),
+  globalApplyEnabled.value
+    ? globalPageNumberGroup.value
+    : selectedGroupFor(selectedOverlayFile.value, 'pageNumber') || createDefaultPageNumberGroup(),
 )
 // Per-file selected group ids (bind to HeaderFooterRuleFields v-model)
 const selectedHeaderGroupId = computed({
-  get: () => selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
-  set: (v) => setSelectedGroup(selectedOverlayFile.value, 'header', v),
+  get: () => globalApplyEnabled.value
+    ? globalHeaderGroup.value.id
+    : selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
+  set: (v) => {
+    if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'header', v)
+  },
 })
 const selectedFooterTextGroupId = computed({
-  get: () => selectedOverlayFile.value?.selectedFooterTextGroupId || 'ft1',
-  set: (v) => setSelectedGroup(selectedOverlayFile.value, 'footerText', v),
+  get: () => globalApplyEnabled.value
+    ? globalFooterTextGroup.value.id
+    : selectedOverlayFile.value?.selectedFooterTextGroupId || 'ft1',
+  set: (v) => {
+    if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'footerText', v)
+  },
 })
 const selectedPageNumberGroupId = computed({
-  get: () => selectedOverlayFile.value?.selectedPageNumberGroupId || 'pn1',
-  set: (v) => setSelectedGroup(selectedOverlayFile.value, 'pageNumber', v),
+  get: () => globalApplyEnabled.value
+    ? globalPageNumberGroup.value.id
+    : selectedOverlayFile.value?.selectedPageNumberGroupId || 'pn1',
+  set: (v) => {
+    if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'pageNumber', v)
+  },
 })
 // Legacy compat refs pointing at selected file/group. Setters update the file's group.
 const headerMode = computed({
@@ -1286,7 +1339,9 @@ const firstHeaderPreview = computed(() => {
 const firstFooterPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
-  const pnGroup = selectedGroupFor(first, 'pageNumber')
+  const pnGroup = globalApplyEnabled.value
+    ? globalPageNumberGroup.value
+    : selectedGroupFor(first, 'pageNumber')
   if (!first || !footerEnabled.value || !pnGroup || !totalOverlayPages.value) return ''
   const continuous = (pnGroup.sequence || 'continuous') !== 'per-file'
   let tpl = pnGroup.template || '{page}/{total}'
@@ -1469,11 +1524,11 @@ const currentRules = computed(() => ({
   headerGroups: insertHeaderFooterEnabled.value ? headerGroups.value : [],
   footerTextGroups: insertHeaderFooterEnabled.value && footerInsertEnabled.value ? footerTextGroups.value : [],
   pageNumberGroups: insertHeaderFooterEnabled.value && footerEnabled.value ? pageNumberGroups.value : [],
-  // Global group: the selected file's group is the single source of truth for ALL files
+  // Global group: shared group instances used by ALL files when enabled
   _globalApply: globalApplyEnabled.value,
-  _globalHeaderGroup: globalApplyEnabled.value ? selectedGroupFor(selectedOverlayFile.value, 'header') : null,
-  _globalFooterTextGroup: globalApplyEnabled.value ? selectedGroupFor(selectedOverlayFile.value, 'footerText') : null,
-  _globalPageNumberGroup: globalApplyEnabled.value ? selectedGroupFor(selectedOverlayFile.value, 'pageNumber') : null,
+  _globalHeaderGroup: globalApplyEnabled.value ? globalHeaderGroup.value : null,
+  _globalFooterTextGroup: globalApplyEnabled.value ? globalFooterTextGroup.value : null,
+  _globalPageNumberGroup: globalApplyEnabled.value ? globalPageNumberGroup.value : null,
   footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,

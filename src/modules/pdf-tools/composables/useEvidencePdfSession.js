@@ -441,45 +441,10 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
     const headerInsertEnabled = rules.headerInsertEnabled !== false
     const footerInsertEnabled = rules.footerInsertEnabled !== false
-    // Global mode: all files share the same params from rules (not per-file groups).
-    const headerGroup = rules._globalApply
-      ? {
-          ...(selectedGroupFor(file, 'header') || {}),
-          mode: rules.headerMode || 'filename',
-          align: rules.headerAlign,
-          fontSize: rules.headerFontSize,
-          fontFamily: rules.headerFontFamily,
-          marginMm: rules.headerMarginMm,
-          offsetXMm: rules.headerOffsetXMm,
-          color: rules.headerColor,
-        }
-      : selectedGroupFor(file, 'header')
-    const footerTextGroup = rules._globalApply
-      ? {
-          ...(selectedGroupFor(file, 'footerText') || {}),
-          text: rules.footerTextContent || selectedGroupFor(file, 'footerText')?.text || '',
-          align: rules.footerTextAlign || rules.footerAlign,
-          fontSize: rules.footerTextFontSize || rules.footerFontSize,
-          fontFamily: rules.footerTextFontFamily || rules.footerFontFamily,
-          marginMm: rules.footerTextMarginMm || rules.footerMarginMm,
-          offsetXMm: rules.footerTextOffsetXMm || rules.footerOffsetXMm,
-          color: rules.footerTextColor || rules.footerColor,
-        }
-      : selectedGroupFor(file, 'footerText')
-    const pageNumberGroup = rules._globalApply
-      ? {
-          ...(selectedGroupFor(file, 'pageNumber') || {}),
-          template: rules.pageNumberTemplate || selectedGroupFor(file, 'pageNumber')?.template || '{page}/{total}',
-          style: rules.pageNumberStyle || selectedGroupFor(file, 'pageNumber')?.style || 'arabic',
-          region: rules.pageNumberRegion || selectedGroupFor(file, 'pageNumber')?.region || 'footer',
-          align: rules.footerAlign,
-          fontSize: rules.footerFontSize,
-          fontFamily: rules.footerFontFamily,
-          marginMm: rules.footerMarginMm,
-          offsetXMm: rules.footerOffsetXMm,
-          color: rules.footerColor,
-        }
-      : selectedGroupFor(file, 'pageNumber')
+    // Global mode: all files share the same group instance.
+    const headerGroup = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
+    const footerTextGroup = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
+    const pageNumberGroup = rules._globalPageNumberGroup || selectedGroupFor(file, 'pageNumber')
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
     const header =
