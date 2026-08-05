@@ -46,8 +46,6 @@
             class="field-search-input"
             @update:model-value="$emit('update:fieldSearch', $event)"
           />
-          <el-button size="small" text @click="$emit('collapse-all-fields')">折叠全部</el-button>
-          <el-button size="small" text @click="$emit('expand-all-fields')">展开全部</el-button>
         </div>
         <el-button type="success" :loading="rendering" @click="$emit('render-template')">生成 Word</el-button>
         <el-button :disabled="!templateManifest" @click="$emit('toggle-fill-preview')">
@@ -67,44 +65,53 @@
       </div>
 
       <div class="template-form-grid">
-        <section v-for="field in filteredRenderableFields" :key="field.id" class="fill-field-card" :class="{ 'duplicate-field': field._isDuplicate }">
-          <div class="fill-field-header" @click="$emit('toggle-field-collapse', field)">
+        <section
+          v-for="field in fillPositionEntries"
+          :key="`${field.id}#${field.posIndex ?? 0}`"
+          class="fill-field-card"
+          :class="{ 'duplicate-field': field._isDuplicate, 'follow-field': field.posIndex > 0 || (!field.editable && !field.isReference) }"
+        >
+          <div class="fill-field-header">
             <strong>{{ fillFieldLabel(field) }}</strong>
+            <span v-if="field.posIndex > 0" class="position-label">位置 {{ field.posIndex + 1 }}</span>
             <span v-if="field.semanticKey && field.semanticKey !== field.name">{{ field.semanticKey }}</span>
             <em v-if="field.required">必填</em>
-            <el-tag v-if="field._isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
+            <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
               同名字段，自动同步
+            </el-tag>
+            <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0" size="small" effect="plain" class="fill-all-tag">
+              引用首个位置
             </el-tag>
             <el-tag v-else-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
               填一次将自动填充到所有位置
             </el-tag>
-            <span class="field-collapse-toggle">{{ collapsedFields.has(field.id) ? '▸' : '▾' }}</span>
           </div>
-          <div v-show="!collapsedFields.has(field.id)" class="fill-field-body">
+          <div class="fill-field-body">
             <div v-if="fieldStructureHints(field).length" class="fill-structure-hints">
               <span v-for="hint in fieldStructureHints(field)" :key="hint.key" class="fill-structure-hint">
                 {{ hint.label }}：<code :class="{ empty: hint.empty }">{{ hint.text }}</code>
                 <em>空值时删除</em>
               </span>
             </div>
+            <template v-if="field.editable || field.isReference">
             <el-date-picker
               v-if="effectiveFieldType(field) === 'date'"
-              :model-value="getFormValue(field)"
+              :model-value="getEntryValue(field)"
               type="date"
               value-format="YYYY-MM-DD"
-              @update:model-value="setFormValue(field, $event)"
+              @update:model-value="setEntryValue(field, $event)"
             />
             <el-checkbox
               v-else-if="effectiveFieldType(field) === 'checkbox'"
-              :model-value="getFormValue(field)"
-              @update:model-value="setFormValue(field, $event)"
+              :model-value="getEntryValue(field)"
+              @update:model-value="setEntryValue(field, $event)"
             >
               {{ firstOptionLabel(field) || '选中' }}
             </el-checkbox>
             <el-radio-group
               v-else-if="effectiveFieldType(field) === 'radio_group'"
-              :model-value="getFormValue(field)"
-              @update:model-value="setFormValue(field, $event)"
+              :model-value="getEntryValue(field)"
+              @update:model-value="setEntryValue(field, $event)"
             >
               <el-radio v-for="option in field.options" :key="option.id" :label="option.id">
                 {{ option.label }}
@@ -112,8 +119,8 @@
             </el-radio-group>
             <el-checkbox-group
               v-else-if="effectiveFieldType(field) === 'checkbox_group'"
-              :model-value="getFormValue(field)"
-              @update:model-value="setFormValue(field, $event)"
+              :model-value="getEntryValue(field)"
+              @update:model-value="setEntryValue(field, $event)"
             >
               <el-checkbox v-for="option in field.options" :key="option.id" :label="option.id">
                 {{ option.label }}
@@ -195,25 +202,17 @@
                   :value="item.key"
                 />
               </el-select>
-              <el-input
-                :model-value="getFormValue(field)"
-                type="textarea"
-                :autosize="{ minRows: 1, maxRows: 6 }"
-                resize="none"
-                clearable
-                placeholder="引用文本，可单独修改"
-                @input="setFormValue(field, $event)"
-              />
+              <p class="setting-caption">引用字段从已填字段取值，不能手动输入；前后缀在"…"菜单里设置。</p>
             </div>
             <el-select
               v-else-if="effectiveFieldType(field) === 'select'"
-              :model-value="getFormValue(field)"
+              :model-value="getEntryValue(field)"
               filterable
               allow-create
               default-first-option
               clearable
               placeholder="选择或输入"
-              @update:model-value="setFormValue(field, $event)"
+              @update:model-value="setEntryValue(field, $event)"
             >
               <el-option
                 v-for="opt in selectFieldOptions(field)"
@@ -224,13 +223,12 @@
             </el-select>
             <el-input
               v-else
-              :model-value="field._isDuplicate ? getFormValueByPrimary(field) : getFormValue(field)"
+              :model-value="getEntryValue(field)"
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 6 }"
               resize="none"
               clearable
-              :disabled="field._isDuplicate"
-              @input="setFormValue(field, $event)"
+              @input="setEntryValue(field, $event)"
             />
             <div v-if="templateStoredSuggestionItems(field).length" class="suggestion-row">
               <el-tag
@@ -245,6 +243,13 @@
                 <span v-if="item.count">×{{ item.count }}</span>
               </el-tag>
             </div>
+            </template>
+            <template v-else>
+              <div class="follow-value">{{ getEntryValue(field) || '（空）' }}</div>
+              <p class="setting-caption">
+                此位置引用第一个位置的值；如需单独填写，可在"…"菜单里修改类型。
+              </p>
+            </template>
             <el-popover placement="bottom-end" trigger="click" width="280">
               <template #reference>
                 <button class="field-more-button" type="button">…</button>
@@ -284,6 +289,35 @@
                   <template #prepend>后缀</template>
                 </el-input>
                 <p v-else class="setting-caption">这是列表项后缀，每一项单独设置；字段整体后缀不在这里修改。</p>
+                <div v-if="isReferenceablePosition(field)" class="setting-row">
+                  <span class="setting-label">引用来源</span>
+                  <el-select
+                    :model-value="getSavedReferenceKey(field)"
+                    filterable
+                    clearable
+                    placeholder="同字段首个位置"
+                    size="small"
+                    @update:model-value="(key) => $emit('save-field-reference', field, key || '')"
+                  >
+                    <el-option
+                      v-for="item in referenceFillOptions(field)"
+                      :key="item.key"
+                      :label="item.label"
+                      :value="item.key"
+                    />
+                  </el-select>
+                  <p class="setting-caption">选择后此位置引用所选字段的值，并保存到模板。</p>
+                </div>
+                <div v-if="effectiveFieldType(field) === 'date'" class="setting-row">
+                  <span class="setting-label">日期格式</span>
+                  <el-select
+                    :model-value="field.dateFormat || 'iso'"
+                    size="small"
+                    @update:model-value="(fmt) => $emit('save-field-date-format', field, fmt)"
+                  >
+                    <el-option v-for="item in dateFormatOptions" :key="item.value" :label="item.label" :value="item.value" />
+                  </el-select>
+                </div>
               </div>
             </el-popover>
           </div>
@@ -334,12 +368,14 @@ const props = defineProps({
   rendering: { type: Boolean, default: false },
   batchProcessing: { type: Boolean, default: false },
   fieldSearch: { type: String, default: '' },
-  collapsedFields: { type: Object, default: () => new Set() },
   // Fill preview
   fillPreviewVisible: { type: Boolean, default: false },
   fillPreviewText: { type: String, default: '' },
   // Computed from parent
   renderableTemplateFields: { type: Array, default: () => [] },
+  // Position entries (one card per document position; followers are read-only
+  // copies of the primary field). Ordering handled by the parent.
+  fillPositionEntries: { type: Array, default: () => [] },
   filteredRenderableFields: { type: Array, default: () => [] },
 })
 
@@ -350,11 +386,8 @@ const emit = defineEmits([
   'edit-template',
   'delete-template',
   'update:fieldSearch',
-  'collapse-all-fields',
-  'expand-all-fields',
   'render-template',
   'batch-command',
-  'toggle-field-collapse',
   'schedule-history-refresh',
   'complete-field',
   'move-party-item',
@@ -365,6 +398,8 @@ const emit = defineEmits([
   'set-field-type-override',
   'update-form-value',
   'update-structure-override',
+  'save-field-reference',
+  'save-field-date-format',
   'toggle-fill-preview',
 ])
 
@@ -376,11 +411,54 @@ function fieldFormKey(field) {
 }
 
 function effectiveFieldType(field) {
-  return props.typeOverrides[field.id] || field.type
+  const slotKey = slotKeyFor(field)
+  return props.typeOverrides[slotKey] || props.typeOverrides[field.id] || field.type
+}
+
+function slotKeyFor(field) {
+  const base = field?.id || field?.name || ''
+  const pos = field?.posIndex ?? 0
+  return pos > 0 ? `${base}#${pos}` : base
+}
+
+function getEntryValue(field) {
+  if (field.isDuplicate) return getFormValueByPrimary(field)
+  const slotKey = slotKeyFor(field)
+  // A follower made independent by a type change stores its own slot value.
+  if (props.typeOverrides[slotKey]) return props.formValues[slotKey]
+  return props.formValues[fieldFormKey(field)]
+}
+
+function setEntryValue(field, value) {
+  if (field.isDuplicate) return
+  const slotKey = slotKeyFor(field)
+  emit('update-form-value', props.typeOverrides[slotKey] ? slotKey : fieldFormKey(field), value)
 }
 
 function firstOptionLabel(field) {
   return field.options?.[0]?.label || ''
+}
+
+const dateFormatOptions = [
+  { value: 'iso', label: '数字 2026-08-05' },
+  { value: 'cn', label: '中文 2026年8月5日' },
+  { value: 'cn_full', label: '中文大写 二零二六年八月五日' },
+  { value: 'en_long', label: '英文 August 5, 2026' },
+  { value: 'en_short', label: '英文缩写 Aug. 5, 2026' },
+  { value: 'en_dmy', label: '英文日优先 5 August 2026' },
+  { value: 'en_ordinal', label: '英文序数 2026 August 5th' },
+  { value: 'blank', label: '留空 年月日手写' },
+]
+
+// Follower positions (fillAllPositions slot > 0) and reference fields can
+// repoint their data source from the "…" menu.
+function isReferenceablePosition(field) {
+  return field.isReference || (field.fillAllPositions && (field.posIndex ?? 0) > 0)
+}
+
+function getSavedReferenceKey(field) {
+  const ref = props.referenceSelections[`${field.id}#${field.posIndex ?? 0}`]
+  return ref || ''
 }
 
 function selectFieldOptions(field) {

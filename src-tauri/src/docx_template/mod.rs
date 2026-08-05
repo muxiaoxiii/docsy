@@ -123,6 +123,11 @@ pub struct TemplateField {
     /// split across multiple runs with different formatting).
     #[serde(default)]
     pub fill_all_positions: bool,
+    /// Date rendering format for date fields: iso (2026-08-05), cn (2026年8月5日),
+    /// cn_full (二零二六年八月五日), en_long (August 5, 2026), en_short (Aug. 5, 2026),
+    /// en_dmy (5 August 2026), en_ordinal (2026 August 5th), blank (留空: 年 月 日).
+    #[serde(default)]
+    pub date_format: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -456,6 +461,32 @@ pub fn permanently_delete_template(args: TemplatePermanentDeleteArgs) -> Result<
 
 pub fn inspect_template_package(path: &str) -> Result<TemplateManifest> {
     read_template_manifest(Path::new(path))
+}
+
+/// Update a field's reference (data source) and/or date format in the template
+/// manifest and rewrite the docsytpl package (word content untouched). Used to
+/// persist reference-source / date-format changes made on the fill page.
+pub fn update_template_field_settings(
+    template_path: &str,
+    field_id: &str,
+    reference: Option<TemplateFieldReference>,
+    date_format: Option<String>,
+) -> Result<()> {
+    let path = Path::new(template_path);
+    let (mut manifest, pkg) = package::read_docsytpl_package(path)?;
+    let field = manifest
+        .fields
+        .iter_mut()
+        .find(|f| f.id == field_id)
+        .ok_or_else(|| anyhow::anyhow!("模板中不存在字段: {}", field_id))?;
+    if let Some(reference) = reference {
+        field.reference = Some(reference);
+    }
+    if let Some(date_format) = date_format {
+        field.date_format = date_format;
+    }
+    package::write_docsytpl_package(path, &manifest, &pkg)?;
+    Ok(())
 }
 
 fn read_template_manifest(path: &Path) -> Result<TemplateManifest> {

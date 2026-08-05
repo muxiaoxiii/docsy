@@ -110,7 +110,6 @@ struct PlainTextCleanupBBoxConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[serde(rename_all = "camelCase")]
 pub struct BookmarkConfig {
     #[serde(default)]
     enabled: bool,
@@ -234,6 +233,16 @@ pub fn batch_overlay(args: &serde_json::Value) -> Result<serde_json::Value> {
         .or_else(|| args.get("inputs"))
         .and_then(|v| v.as_array())
         .context("缺少 items 数组")?;
+
+    // Debug: log bookmark data for the first item
+    if let Some(first) = items.first() {
+        let bm = first.get("bookmarks");
+        let bm_rm = first.get("bookmarkRemoveExisting");
+        eprintln!(
+            "[batch_overlay] first item bookmarks={:?}, bookmarkRemoveExisting={:?}",
+            bm, bm_rm
+        );
+    }
 
     let mut results = Vec::new();
     let mut failed = Vec::new();
@@ -616,12 +625,16 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     let qpdf_tool = crate::external::QpdfTool;
     let bin = qpdf_tool.binary_path()?;
     let overlay_output = TempPathGuard::new(temp_named_path("docsy_overlay_result", "pdf"));
+    // Redirect stderr to null to avoid "Broken pipe (os error 32)" when qpdf
+    // writes progress information to stderr and the pipe is already closed.
+    // On failure, re-run briefly to capture the error detail.
     let command_output = crate::external::hidden_command(&bin)
         .arg(work_input)
         .arg("--overlay")
         .arg(overlay_path.path())
         .arg("--")
         .arg(overlay_output.path())
+        .stderr(std::process::Stdio::null())
         .output()
         .context("执行 qpdf overlay 失败")?;
 
@@ -630,8 +643,10 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     cleanup_semantic_temp(semantic_deleted_path);
 
     if !super::qpdf::status_is_success(&command_output.status) {
-        let stderr = String::from_utf8_lossy(&command_output.stderr);
-        anyhow::bail!("qpdf overlay 失败: {}", stderr.trim());
+        anyhow::bail!(
+            "qpdf overlay 失败，退出码: {}",
+            command_output.status.code().unwrap_or(-1)
+        );
     }
     write_optimized_or_copy(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
     if !args.bookmarks.is_empty() || args.bookmark_remove_existing {
@@ -2285,6 +2300,48 @@ mod tests {
         let _ = fs::remove_file(result.output_path);
         let _ = fs::remove_file(output);
         let _ = fs::remove_file(deleted);
+    }
+
+    #[test]
+    fn bookmark_roundtrip() {
+        let path = temp_named_path("docsy_bookmark_rt", "pdf");
+        create_simple_test_pdf(&path);
+
+        let config = BookmarkConfig {
+            enabled: true,
+            label: "测试书签".to_string(),
+            page_index: 0,
+            remove_existing: false,
+        };
+        apply_bookmark(&path, &config).unwrap();
+
+        // Reload and verify
+        let doc = Document::load(&path).unwrap();
+        let catalog_id = doc
+            .trailer
+            .get(b"Root")
+            .and_then(|obj| obj.as_reference())
+            .unwrap();
+        let catalog = doc.objects.get(&catalog_id).unwrap().as_dict().unwrap();
+
+        // Catalog must reference Outlines
+        let outlines_ref = catalog.get(b"Outlines").unwrap().as_reference().unwrap();
+        let outlines = doc.objects.get(&outlines_ref).unwrap().as_dict().unwrap();
+        assert_eq!(outlines.get(b"Type").unwrap().as_name().unwrap(), b"Outlines");
+        assert_eq!(outlines.get(b"Count").unwrap().as_i64().unwrap(), 1);
+
+        // First outline item
+        let first_ref = outlines.get(b"First").unwrap().as_reference().unwrap();
+        let last_ref = outlines.get(b"Last").unwrap().as_reference().unwrap();
+        assert_eq!(first_ref, last_ref);
+
+        let item = doc.objects.get(&first_ref).unwrap().as_dict().unwrap();
+        let title = super::artifacts::decode_pdf_string(item.get(b"Title").unwrap()).unwrap();
+        assert_eq!(title, "测试书签");
+        assert!(item.get(b"Dest").is_ok());
+        assert_eq!(item.get(b"Parent").unwrap().as_reference().unwrap(), outlines_ref);
+
+        let _ = fs::remove_file(&path);
     }
 
     fn create_simple_test_pdf(path: &Path) {

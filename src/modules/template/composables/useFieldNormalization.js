@@ -525,6 +525,7 @@ export function buildFields(fieldRows) {
         optionalRule: null,
         options: [],
         fillAllPositions: false,
+        dateFormat: type === 'date' ? (row.dateFormat || 'iso') : '',
         reference:
           row.type === 'reference'
             ? {
@@ -639,7 +640,9 @@ function structuralOptionalRuleForRow(fieldRow, rows) {
 
 function manifestLabelForRow(row, currentName) {
   const name = String(currentName || '').trim()
-  if (isGeneratedFieldName(name)) return name
+  // Auto-generated names ("字段N") keep the highlighted source text as the
+  // display label so the fill page shows what was marked, not a placeholder.
+  if (isGeneratedFieldName(name)) return String(row?.text || '').trim() || name
   if (rowUsage(row) === 'delete_text') return safeExplicitLabel(row, name)
   if (row.type === 'party_list') return name || row.label?.trim() || row.text
   return safeExplicitLabel(row, name)

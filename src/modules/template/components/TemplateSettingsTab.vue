@@ -93,8 +93,11 @@
           <el-table-column prop="updatedAt" label="更新时间" min-width="140">
             <template #default="{ row }">{{ shortDateTime(row.updatedAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
+          <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
+              <el-button size="small" link type="primary" :disabled="templateDatabase.length < 2" @click="openMergeDialog(row)"
+                >合并到…</el-button
+              >
               <el-button size="small" link type="danger" @click="$emit('delete-template-database-entry', row)"
                 >删除</el-button
               >
@@ -104,6 +107,33 @@
         <el-empty v-else description="暂无模板数据" />
       </div>
     </div>
+
+    <!-- 模板数据合并对话框 -->
+    <el-dialog v-model="mergeDialog.visible" title="合并模板字段数据" width="480px">
+      <p class="dialog-tip">
+        把源模板中与目标模板字段名相同的历史数据复制到目标模板（目标已存在的相同值会跳过）。
+        源模板独有的字段数据保留在源模板；填表时字段名相同的历史本来就可以跨模板检索到。
+      </p>
+      <el-form label-width="80px" size="small">
+        <el-form-item label="源模板">
+          <el-input :model-value="mergeDialog.source?.name || ''" disabled />
+        </el-form-item>
+        <el-form-item label="目标模板">
+          <el-select v-model="mergeDialog.targetId" filterable placeholder="选择目标模板" style="width: 100%">
+            <el-option
+              v-for="item in mergeTargets"
+              :key="item.templateId"
+              :label="`${item.name}（${item.fieldCount} 个字段）`"
+              :value="item.templateId"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mergeDialog.visible = false">取消</el-button>
+        <el-button type="primary" :disabled="!mergeDialog.targetId" @click="executeMerge">合并</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 导出模板对话框 -->
     <el-dialog
@@ -142,7 +172,10 @@
 
 <script setup>
 import { InfoFilled } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { tauriCallSafe } from '../../../core/tauriBridge.js'
 import { shortDateTime } from '../composables/fieldRowUtils.js'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
   itemSeparatorSetting: { type: String, default: '、' },
@@ -178,6 +211,42 @@ const emit = defineEmits([
 
 function handleExportSelectionChange(selection) {
   emit('update:exportSelectedPaths', selection.map((item) => item.path))
+}
+
+// ── Field-history merge ──────────────────────────────────────────────────────
+
+const mergeDialog = ref({ visible: false, source: null, targetId: '' })
+const mergeTargets = computed(() =>
+  props.templateDatabase.filter((item) => item.templateId !== mergeDialog.value.source?.templateId),
+)
+
+function openMergeDialog(row) {
+  mergeDialog.value = { visible: true, source: row, targetId: '' }
+}
+
+async function executeMerge() {
+  const { source, targetId } = mergeDialog.value
+  if (!source || !targetId) return
+  try {
+    await ElMessageBox.confirm(
+      `把"${source.name}"的同名字段历史数据合并到目标模板？源模板数据不会被删除。`,
+      '确认合并',
+      { confirmButtonText: '合并', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  const result = await tauriCallSafe('merge_template_field_history', {
+    sourceTemplateId: source.templateId,
+    targetTemplateId: targetId,
+  })
+  if (!result.ok) {
+    ElMessage.error(result.error || '合并失败')
+    return
+  }
+  ElMessage.success(`已合并 ${result.data ?? 0} 条同名字段数据`)
+  mergeDialog.value.visible = false
+  emit('refresh-template-database')
 }
 </script>
 

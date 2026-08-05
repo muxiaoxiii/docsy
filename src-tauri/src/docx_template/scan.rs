@@ -13,7 +13,8 @@ pub fn scan_document_index(part_name: &str, tree: &XmlTree) -> Result<TextIndex>
         // Handle both document fragments (root = w:p) and full documents (root = w:document > w:body)
         if name == "w:p" {
             index.add_paragraph();
-            scan_paragraph_runs(children, &mut index, 0);
+            let mut run_idx = 0;
+            scan_paragraph_runs(children, &mut index, 0, &mut run_idx);
         } else {
             scan_element_children_recursive(children, &mut index, &mut Vec::new());
         }
@@ -45,7 +46,8 @@ fn scan_element_children_recursive(
             if name == "w:p" {
                 index.add_paragraph();
                 let p_idx = index.paragraph_count - 1;
-                scan_paragraph_runs(children, index, p_idx);
+                let mut run_idx = 0;
+                scan_paragraph_runs(children, index, p_idx, &mut run_idx);
             }
             // Always recurse into all children — w:p inside txbxContent are descendants
             scan_element_children_recursive(children, index, _path);
@@ -53,8 +55,12 @@ fn scan_element_children_recursive(
     }
 }
 
-fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_idx: usize) {
-    let mut run_idx = 0;
+fn scan_paragraph_runs(
+    children: &[XmlNode],
+    index: &mut TextIndex,
+    paragraph_idx: usize,
+    run_idx: &mut usize,
+) {
 
     for child in children {
         if let XmlNode::Element {
@@ -69,7 +75,7 @@ fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_id
                 // w:hyperlink > w:r). Skipping w:sdtContent shifts every
                 // run index after the sdt, breaking markId matching on reload.
                 if name == "w:sdt" || name == "w:sdtContent" || name == "w:hyperlink" {
-                    scan_paragraph_runs(children, index, paragraph_idx);
+                    scan_paragraph_runs(children, index, paragraph_idx, run_idx);
                 }
                 continue;
             }
@@ -105,7 +111,7 @@ fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_id
                 };
                 index.add_text_node(TextNodeRef {
                     paragraph_index: paragraph_idx,
-                    run_index: run_idx,
+                    run_index: *run_idx,
                     text_index: 0,
                     text,
                     highlighted,
@@ -115,7 +121,7 @@ fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_id
                     checkbox_like,
                     option_label,
                 });
-                run_idx += 1;
+                *run_idx += 1;
             }
         }
     }

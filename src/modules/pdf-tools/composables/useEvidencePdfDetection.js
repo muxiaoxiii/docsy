@@ -397,6 +397,22 @@ export function useEvidencePdfDetection({
     if (file.existingHeaderEdited || file.existingFooterEdited || file.existingPageNumberEdited) {
       return { text: '旧内容已编辑', type: 'warning' }
     }
+    // Check if all existing elements have been confirmed (decision: keep/ignore)
+    const elements = file.existingElements || []
+    if (elements.length > 0) {
+      const allConfirmed = elements.every(
+        (el) => el.decision === 'keep' || el.decision === 'ignore',
+      )
+      if (allConfirmed) {
+        return { text: '已确认', type: 'success' }
+      }
+      const anyPending = elements.some(
+        (el) => el.decision == null || el.decision === undefined,
+      )
+      if (anyPending) {
+        return { text: '待确认', type: 'warning' }
+      }
+    }
     if (footerCandidatesNeedReview(file)) {
       return { text: '页脚需确认', type: 'warning' }
     }

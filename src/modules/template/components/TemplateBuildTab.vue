@@ -187,7 +187,7 @@
                 v-model="row.name"
                 size="small"
                 :placeholder="rowUsage(row) === 'field' ? '法院' : '归属字段名'"
-                @input="$emit('field-name-input', row)"
+                @input="onNameInput(row)"
               />
               <span class="field-label">{{ fieldCellSecondaryLabel(row) }}</span>
             </div>
@@ -279,13 +279,23 @@
 
                   <el-form label-width="84px" size="small">
                     <el-form-item label="显示名" v-if="rowUsage(row) === 'field'">
-                      <el-input v-model="row.label" />
+                      <el-input v-model="row.label" @input="onLabelInput(row)" />
                     </el-form-item>
                     <el-form-item label="通用字段名" v-if="rowUsage(row) === 'field'">
                       <el-input
                         v-model="row.semanticKey"
                         :placeholder="`默认跟随字段名：${row.name || '未命名'}`"
                       />
+                    </el-form-item>
+                    <el-form-item label="日期格式" v-if="rowUsage(row) === 'field' && row.type === 'date'">
+                      <el-select v-model="row.dateFormat" size="small">
+                        <el-option
+                          v-for="item in dateFormatOptions"
+                          :key="item.value"
+                          :label="item.label"
+                          :value="item.value"
+                        />
+                      </el-select>
                     </el-form-item>
 
                     <template v-if="rowUsage(row) === 'field' && row.type === 'reference'">
@@ -635,8 +645,8 @@ import {
 } from '../composables/fieldRowUtils.js'
 
 const props = defineProps({
-  // Source document state
   sourceDocx: { type: String, default: '' },
+  // Source document state
   scanning: { type: Boolean, default: false },
   marks: { type: Array, default: () => [] },
   documentText: { type: String, default: '' },
@@ -661,7 +671,7 @@ const props = defineProps({
   editingLibraryTemplatePath: { type: String, default: '' },
 })
 
-defineEmits([
+const emit = defineEmits([
   'select-source-docx',
   'update:templateName',
   'update:groupName',
@@ -693,6 +703,17 @@ defineEmits([
 ])
 
 // Computed properties that depend on fieldRows
+const dateFormatOptions = [
+  { value: 'iso', label: '数字 2026-08-05' },
+  { value: 'cn', label: '中文 2026年8月5日' },
+  { value: 'cn_full', label: '中文大写 二零二六年八月五日' },
+  { value: 'en_long', label: '英文 August 5, 2026' },
+  { value: 'en_short', label: '英文缩写 Aug. 5, 2026' },
+  { value: 'en_dmy', label: '英文日优先 5 August 2026' },
+  { value: 'en_ordinal', label: '英文序数 2026 August 5th' },
+  { value: 'blank', label: '留空 年月日手写' },
+]
+
 const checkboxLikeCount = computed(() => props.marks.filter((mark) => mark.checkboxLike).length)
 const fieldTableRows = computed(() => buildFieldTableRows(props.fieldRows))
 const optionalRuleSummaries = computed(() => buildOptionalRuleSummaries(props.fieldRows))
@@ -709,6 +730,18 @@ const documentPreviewRef = ref(null)
 // Functions that need fieldRows
 function relationSummary(row) {
   return relationSummaryFn(row, props.fieldRows)
+}
+
+// Field name edits mark the name as manually set so label edits stop
+// overwriting it (label is the display name, name is the internal key).
+function onNameInput(row) {
+  if (row) row._nameManuallySet = true
+  emit('field-name-input', row)
+}
+
+// Display-name edits keep the field name in sync unless it was manually set.
+function onLabelInput(row) {
+  if (row && !row._nameManuallySet) row.name = row.label
 }
 
 function isGroupedField(row) {

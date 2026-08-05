@@ -388,7 +388,12 @@ export function isGroupedField(row, rows) {
 
 export function groupedFieldSummary(row) {
   if (isMarkerType(row.type)) return '同一勾选组'
-  return '同一字段'
+  // Same-name multi-position fields are fillAllPositions: later positions
+  // reference the first one, so label them accordingly.
+  const sourceName =
+    row?.referenceSourceField || row?.referenceSourceSemanticKey || ''
+  if (sourceName) return `引用：${sourceName}`
+  return '同一字段，已改成引用'
 }
 
 export function markerGroupMembers(row, rows) {
@@ -566,7 +571,9 @@ export function previewSourceLabel(row) {
     return `【${isConnectorRow(row) ? '连接符' : '前缀'}：${row.name || '未指定'}】`
   if (rowUsage(row) === 'suffix') return `【后缀：${row.name || '未指定'}】`
   if (row.type === 'reference') return `【引用：${row.name || '引用'}】`
-  return `【${row.name || row.label || row.text}】`
+  // Display name (label) wins so renaming the display name updates the
+  // preview; scan rows without a label fall back to the field name.
+  return `【${row.label || row.name || row.text}】`
 }
 
 export function previewReplacementText(row, sampleValues = {}) {
@@ -615,6 +622,85 @@ function normalizePreviewDate(value) {
   const dashed = compact.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/)
   if (dashed) return `${Number(dashed[1])}年${Number(dashed[2])}月${Number(dashed[3])}日`
   return raw
+}
+
+// ── Date formatting (fill values → rendered date forms) ──────────────────────
+
+const CN_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+const EN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const EN_MONTHS_SHORT = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.']
+
+// Parse an entered date value into {y, m, d}; a zero part means "leave blank".
+// Accepts 20260805, 2026-08-05, 2026年8月5日, "留空", etc.
+export function parseDateParts(value) {
+  const s = String(value ?? '').trim()
+  if (!s) return null
+  if (s === '留空') return { y: 0, m: 0, d: 0 }
+  let y = 0
+  let m = 0
+  let d = 0
+  const compact = s.replace(/\s+/g, '')
+  if (/^\d{8}$/.test(compact)) {
+    y = Number(compact.slice(0, 4))
+    m = Number(compact.slice(4, 6))
+    d = Number(compact.slice(6, 8))
+  } else {
+    const parts = compact.split(/[-/年月日.]+/).filter(Boolean)
+    if (parts.length >= 3) {
+      y = Number(parts[0])
+      m = Number(parts[1])
+      d = Number(parts[2])
+    } else if (parts.length === 1 && /^\d+$/.test(compact)) {
+      // bare digits without separators are ambiguous; treat as y-m-d only when 8 wide
+      return null
+    }
+  }
+  return { y: y || 0, m: m || 0, d: d || 0 }
+}
+
+function cnNumber(n) {
+  if (!n) return ''
+  return String(n).split('').map((c) => CN_DIGITS[Number(c)] ?? c).join('')
+}
+
+function ordinal(n) {
+  const rem10 = n % 10
+  const rem100 = n % 100
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`
+  if (rem10 === 1) return `${n}st`
+  if (rem10 === 2) return `${n}nd`
+  if (rem10 === 3) return `${n}rd`
+  return `${n}th`
+}
+
+// Render a date value in the requested format. Zero parts become blanks
+// (no limit: 0000 year / 00 month / 00 day are all "leave blank").
+export function formatDateValue(value, format) {
+  const parts = parseDateParts(value)
+  if (!parts) return String(value ?? '')
+  const { y, m, d } = parts
+  const fmt = format || 'iso'
+  const yStr = y ? String(y) : '    '
+  const mStr = m ? String(m) : '  '
+  const dStr = d ? String(d) : '  '
+  if (fmt === 'cn' || fmt === 'blank') {
+    // blank is the same form with all parts empty (供打印后手写)
+    return `${yStr}年${mStr}月${dStr}日`
+  }
+  if (fmt === 'cn_full') {
+    return `${cnNumber(y)}年${m ? cnNumber(m) : '  '}月${d ? cnNumber(d) : '  '}日`
+  }
+  const monthLong = m >= 1 && m <= 12 ? EN_MONTHS[m - 1] : ' '
+  const monthShort = m >= 1 && m <= 12 ? EN_MONTHS_SHORT[m - 1] : ' '
+  if (fmt === 'en_long') return `${monthLong} ${dStr}, ${yStr}`.replace(/\s+/g, ' ').trim()
+  if (fmt === 'en_short') return `${monthShort} ${dStr}, ${yStr}`.replace(/\s+/g, ' ').trim()
+  if (fmt === 'en_dmy') return `${dStr} ${monthLong} ${yStr}`.replace(/\s+/g, ' ').trim()
+  if (fmt === 'en_ordinal') {
+    const dOrd = d ? ordinal(d) : ''
+    return `${yStr} ${monthLong} ${dOrd}`.replace(/\s+/g, ' ').trim()
+  }
+  // iso default: 2026-08-05 (zero parts stay blank segments)
+  return `${yStr}-${mStr}-${dStr}`.trim()
 }
 
 export function previewTokenClass(row, segment = {}) {
@@ -769,7 +855,9 @@ export function isRenderableField(field) {
 
 export function fillFieldLabel(field) {
   if (!field) return ''
-  if (isGeneratedFieldName(field.name)) return field.name || field.label || ''
+  // Auto-generated names ("字段N") prefer the saved label (highlighted source
+  // text) so the fill page shows what was marked instead of a placeholder.
+  if (isGeneratedFieldName(field.name)) return field.label || field.name || ''
   if (field.type === 'party_list') return field.name || field.label || ''
   if (['前缀', '后缀', '连接符', '列表项'].includes(field.label)) return field.name || field.label || ''
   return field.label || field.name || ''

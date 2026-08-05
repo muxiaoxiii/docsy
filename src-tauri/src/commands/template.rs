@@ -151,6 +151,38 @@ pub async fn clear_template_history() -> Result<usize, String> {
     run_blocking(crate::template_history::clear_history).await
 }
 
+/// Merge same-name field history from one template into another.
+#[tauri::command]
+pub async fn merge_template_field_history(
+    source_template_id: String,
+    target_template_id: String,
+) -> Result<usize, String> {
+    run_blocking(move || {
+        crate::template_history::merge_template_field_history(&source_template_id, &target_template_id)
+    })
+    .await
+}
+
+/// Persist a field's reference (data source) / date format into the template
+/// manifest (word content untouched). Used by the fill page's "…" menu.
+#[tauri::command]
+pub async fn save_template_field_settings(
+    template_path: String,
+    field_id: String,
+    reference: Option<crate::docx_template::TemplateFieldReference>,
+    date_format: Option<String>,
+) -> Result<(), String> {
+    run_blocking(move || {
+        crate::docx_template::update_template_field_settings(
+            &template_path,
+            &field_id,
+            reference,
+            date_format,
+        )
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn seed_template_history(
     template_path: String,

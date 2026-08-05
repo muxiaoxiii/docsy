@@ -62,8 +62,8 @@
           :rendering="rendering"
           :batch-processing="batchProcessing"
           v-model:field-search="fieldSearch"
-          :collapsed-fields="collapsedFields"
           :renderable-template-fields="renderableTemplateFields"
+          :fill-position-entries="filteredFillPositionEntries"
           :filtered-renderable-fields="filteredRenderableFields"
           :fill-preview-visible="fillPreviewVisible"
           :fill-preview-text="fillPreviewText"
@@ -72,11 +72,8 @@
           @open-template-from-library="openTemplateFromLibrary"
           @edit-template="editTemplateFromLibrary"
           @delete-template="deleteTemplate"
-          @collapse-all-fields="collapseAllFields"
-          @expand-all-fields="expandAllFields"
           @render-template="renderTemplate"
           @batch-command="handleBatchCommand"
-          @toggle-field-collapse="toggleFieldCollapse"
           @schedule-history-refresh="scheduleHistoryRefresh"
           @complete-field="completeField"
           @move-party-item="movePartyItem"
@@ -87,6 +84,8 @@
           @set-field-type-override="setFieldTypeOverride"
           @update-form-value="handleUpdateFormValue"
           @update-structure-override="handleUpdateStructureOverride"
+          @save-field-reference="onSaveFieldReference"
+          @save-field-date-format="onSaveFieldDateFormat"
           @toggle-fill-preview="fillPreviewVisible = !fillPreviewVisible"
         />
       </el-tab-pane>
@@ -192,6 +191,7 @@ import { usePreviewSelection } from '../composables/usePreviewSelection.js'
 import {
   sliceChars,
   referenceSourceKey,
+  formatDateValue,
   parseReferenceSourceKey,
   syncReferenceSourceFromKey,
   normalizedReferenceSource,
@@ -322,7 +322,6 @@ const renderableTemplateFields = computed(() => {
   return fields
 })
 const fieldSearch = ref('')
-const collapsedFields = reactive(new Set())
 const filteredRenderableFields = computed(() => {
   const query = fieldSearch.value.trim().toLowerCase()
   if (!query) return renderableTemplateFields.value
@@ -333,27 +332,74 @@ const filteredRenderableFields = computed(() => {
       (field.semanticKey || '').toLowerCase().includes(query),
   )
 })
-function toggleFieldCollapse(field) {
-  if (collapsedFields.has(field.id)) {
-    collapsedFields.delete(field.id)
-  } else {
-    collapsedFields.add(field.id)
-  }
+
+// Fill-page position entries: same-name multi-position (fillAllPositions)
+// fields are expanded into one card per document position. The first position
+// is editable (its value fills every slot on render); later positions follow
+// the primary value and only allow type changes. Editable cards come first,
+// follower/reference cards last; each group is ordered by document position.
+const markIdPosition = (markId) => {
+  const m = /-p(\d+)-r(\d+)$/.exec(markId || '')
+  return m ? [Number(m[1]), Number(m[2])] : [Number.MAX_SAFE_INTEGER, 0]
 }
-function collapseAllFields() {
-  collapsedFields.clear()
+const fillPositionEntries = computed(() => {
+  const entries = []
+  const manifestIndex = new Map()
+  renderableTemplateFields.value.forEach((f, i) => manifestIndex.set(f.id, i))
   for (const field of renderableTemplateFields.value) {
-    collapsedFields.add(field.id)
+    const refs = (field.markRefs || []).slice().sort((a, b) => {
+      const [ap, ar] = markIdPosition(a.markId)
+      const [bp, br] = markIdPosition(b.markId)
+      return ap - bp || ar - br
+    })
+    const isReference = field.type === 'reference'
+    if (field.fillAllPositions && refs.length > 1 && !isReference && !field._isDuplicate) {
+      refs.forEach((ref, i) => {
+        const [p, r] = markIdPosition(ref.markId)
+        entries.push({
+          ...field,
+          posIndex: i,
+          editable: i === 0,
+          isReference: false,
+          isDuplicate: false,
+          _entryMarkId: ref.markId,
+          _entryP: p,
+          _entryR: r,
+        })
+      })
+    } else {
+      const [p, r] = markIdPosition(refs[0]?.markId)
+      entries.push({
+        ...field,
+        posIndex: 0,
+        editable: !isReference && !field._isDuplicate,
+        isReference,
+        isDuplicate: !!field._isDuplicate,
+        _entryMarkId: refs[0]?.markId,
+        _entryP: p,
+        _entryR: r,
+      })
+    }
   }
-}
-function expandAllFields() {
-  collapsedFields.clear()
-}
-// Searching should surface matches even if they were collapsed.
-watch(fieldSearch, (value) => {
-  if (String(value || '').trim()) {
-    collapsedFields.clear()
-  }
+  entries.sort((a, b) => {
+    const ka = [a.editable && !a.isReference ? 0 : 1, a._entryP, a._entryR, manifestIndex.get(a.id) ?? 0]
+    const kb = [b.editable && !b.isReference ? 0 : 1, b._entryP, b._entryR, manifestIndex.get(b.id) ?? 0]
+    for (let i = 0; i < ka.length; i += 1) {
+      if (ka[i] !== kb[i]) return ka[i] - kb[i]
+    }
+    return 0
+  })
+  return entries
+})
+const filteredFillPositionEntries = computed(() => {
+  const query = fieldSearch.value.trim().toLowerCase()
+  if (!query) return fillPositionEntries.value
+  return fillPositionEntries.value.filter(
+    (field) =>
+      field.label?.toLowerCase().includes(query) ||
+      field.name?.toLowerCase().includes(query) ||
+      (field.semanticKey || '').toLowerCase().includes(query),
+  )
 })
 const formValues = reactive({})
 const referenceSelections = reactive({})
@@ -366,10 +412,12 @@ function effectiveFieldType(field) {
 }
 
 function setFieldTypeOverride(field, type) {
+  // Per-position override for follower cards (fillAllPositions slots).
+  const slotKey = (field?.posIndex ?? 0) > 0 ? `${field.id}#${field.posIndex}` : field.id
   if (!type || type === field.type) {
-    delete typeOverrides[field.id]
+    delete typeOverrides[slotKey]
   } else {
-    typeOverrides[field.id] = type
+    typeOverrides[slotKey] = type
   }
 }
 const rendering = ref(false)
@@ -661,6 +709,68 @@ function onReferenceSelectionChange(field, key) {
   const source = parseReferenceFillKey(key)
   const values = normalizeValuesForReferenceSources()
   formValues[fieldFormKey(field)] = resolveReferenceValueFromSource(source, values)
+  scheduleHistoryRefresh()
+}
+
+// Persist a follower position's reference source into the template manifest.
+async function onSaveFieldReference(field, key) {
+  const slotKey = `${field.id}#${field.posIndex ?? 0}`
+  const slotBase = `${field.id}#${field.posIndex ?? 0}`
+  if (key) {
+    const source = parseReferenceFillKey(key)
+    referenceSelections[slotKey] = key
+    // Follower value follows the chosen source field.
+    formValues[slotBase] = resolveReferenceValueFromSource(source, normalizeValuesForReferenceSources())
+    const result = await tauriCallSafe('save_template_field_settings', {
+      templatePath: templatePath.value,
+      fieldId: field.id,
+      reference: {
+        sourceMode: 'field',
+        sourceField: source.field || '',
+        sourceSemanticKey: '',
+        sourceIndex: source.index ?? null,
+      },
+      dateFormat: null,
+    })
+    if (!result.ok) {
+      ElMessage.error(result.error || '保存引用来源失败')
+      return
+    }
+    ElMessage.success('引用来源已保存到模板')
+  } else {
+    delete referenceSelections[slotKey]
+    // Back to following the primary position's value.
+    formValues[slotBase] = formValues[fieldFormKey(field)] ?? ''
+    const result = await tauriCallSafe('save_template_field_settings', {
+      templatePath: templatePath.value,
+      fieldId: field.id,
+      reference: null,
+      dateFormat: null,
+    })
+    if (!result.ok) {
+      ElMessage.error(result.error || '保存引用来源失败')
+    }
+  }
+  scheduleHistoryRefresh()
+}
+
+// Persist a date field's format into the template manifest.
+async function onSaveFieldDateFormat(field, fmt) {
+  const result = await tauriCallSafe('save_template_field_settings', {
+    templatePath: templatePath.value,
+    fieldId: field.id,
+    reference: null,
+    dateFormat: fmt || 'iso',
+  })
+  if (!result.ok) {
+    ElMessage.error(result.error || '保存日期格式失败')
+    return
+  }
+  if (templateManifest.value) {
+    const target = templateManifest.value.fields.find((f) => f.id === field.id)
+    if (target) target.dateFormat = fmt || 'iso'
+  }
+  ElMessage.success('日期格式已保存到模板')
   scheduleHistoryRefresh()
 }
 
@@ -1173,12 +1283,12 @@ function defaultUncheckedText(text) {
 }
 
 async function saveTemplate(overwrite = false) {
-  const validationError = validateFieldRowsBeforeSave()
+  const validationError = validateFieldRowsBeforeSave(fieldRows.value, marks.value)
   if (validationError) {
     ElMessage.warning(validationError)
     return
   }
-  const fields = buildFields()
+  const fields = buildFields(fieldRows.value)
   if (!fields.length) {
     ElMessage.warning('请至少确认一个字段')
     return
@@ -1200,10 +1310,30 @@ async function saveTemplate(overwrite = false) {
     }
   }
 
+  // 保存前检查模板库是否已有同名模板（排除正在编辑的自身），避免静默创建同名副本
+  const nameConflict = templateLibrary.value.find(
+    (item) => item.name === confirmedName && item.path !== editingLibraryTemplatePath.value,
+  )
+  if (nameConflict) {
+    try {
+      await ElMessageBox.confirm(
+        `模板库中已存在同名模板"${confirmedName}"，继续保存将创建一个同名的重复模板。是否继续？`,
+        '重名提示',
+        { confirmButtonText: '继续保存', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch {
+      return // User cancelled
+    }
+  }
+
   saving.value = true
   const result = await tauriCallSafe('save_docx_template_to_library', {
     args: {
-      sourceDocx: sourceDocx.value,
+      // Editing a library template has no source Word file: pass the docsytpl
+      // package itself so the backend rebuilds from its embedded document.
+      sourceDocx: isEditingExisting
+        ? editingLibraryTemplatePath.value || templatePath.value
+        : sourceDocx.value,
       outputPath: isEditingExisting ? editingLibraryTemplatePath.value : '',
       templateName: confirmedName,
       fields,
@@ -1376,7 +1506,6 @@ async function openTemplateFromLibrary(item) {
 function manifestToFieldRows(manifest) {
   const rows = []
   const fields = manifest.fields || []
-  const byNameKey = new Map()
 
   for (const field of fields) {
     if (field.type === 'checkbox' || field.type === 'radio_group' || field.type === 'checkbox_group') {
@@ -1468,22 +1597,29 @@ function manifestToFieldRows(manifest) {
         }
       }
     } else {
-      // Regular field (text, date, party_list): merge same-name rows into one
-      // row holding every markRef, aligning with buildFields on the scan side
-      // (one field, fill all positions) instead of a row per document position.
+      // Regular field (text, date, party_list): one row per document position.
+      // markRefs living in the same paragraph are one position split across
+      // runs (Word splits highlighted text), so they merge into a single row;
+      // refs in different paragraphs are separate positions and get their own
+      // rows. Rows are flagged so the relation column stays neutral.
       const refs = field.markRefs || []
-      const key = `${field.type}:${(field.name || '').trim()}`
-      let merged = byNameKey.get(key)
-      if (!merged) {
-        merged = createSimpleFieldRow(field, [], refs[0] || null)
-        merged.markRefs = []
-        merged.fillAllPositions = true
-        byNameKey.set(key, merged)
-        rows.push(merged)
-      }
+      const byParagraph = new Map()
       for (const ref of refs) {
-        if (!merged.markRefs.some((r) => r.markId === ref.markId)) {
-          merged.markRefs.push(ref)
+        const m = /-p(\d+)-r(\d+)$/.exec(ref?.markId || '')
+        const pid = m ? Number(m[1]) : -1
+        if (!byParagraph.has(pid)) byParagraph.set(pid, [])
+        byParagraph.get(pid).push(ref)
+      }
+      if (byParagraph.size === 0) {
+        const row = createSimpleFieldRow(field, [], refs[0] || null)
+        row._fromManifestRef = true
+        rows.push(row)
+      } else {
+        for (const paraRefs of byParagraph.values()) {
+          const row = createSimpleFieldRow(field, [], paraRefs[0] || null)
+          row.markRefs = paraRefs
+          row._fromManifestRef = true
+          rows.push(row)
         }
       }
     }
@@ -1510,6 +1646,10 @@ function createSimpleFieldRow(field, options, markRef, refIndex) {
     name: field.name,
     label: field.label,
     semanticKey: field.semanticKey,
+    dateFormat: field.type === 'date' ? (field.dateFormat || 'iso') : '',
+    // A stored name that differs from the display label was manually set;
+    // keep it independent (label edits no longer overwrite it).
+    _nameManuallySet: Boolean(field.name && field.label && field.name !== field.label),
     required: field.required,
     optionalWhenEmpty: false,
     optionalScope: 'position',
@@ -1701,30 +1841,35 @@ function buildFillPreview() {
 
   // Build markId → field mapping (first occurrence wins for duplicate fields)
   const markToField = new Map()
-  const fieldLabelByName = new Map()
   for (const field of manifest.fields) {
     if (!isRenderableField(field)) continue
-    const label = field.label || field.name
-    fieldLabelByName.set(field.name, label)
     for (const ref of field.markRefs || []) {
       if (ref.markId && !markToField.has(ref.markId)) {
-        markToField.set(ref.markId, field.name)
+        markToField.set(ref.markId, field)
       }
     }
   }
 
   const parts = []
   let lastParagraph = null
+  // A field can occupy several consecutive runs in one paragraph (Word splits
+  // highlighted text); only render its value once per paragraph position.
+  const renderedFieldAtParagraph = new Set()
   for (const run of runs) {
     if (lastParagraph !== null && run.paragraphIndex !== lastParagraph) {
       parts.push('\n')
     }
     lastParagraph = run.paragraphIndex
 
-    const fieldName = markToField.get(run.id)
-    if (fieldName) {
-      const key = fieldFormKey({ id: `fill:${fieldName}`, name: fieldName })
-      const value = formValues[key]
+    const field = markToField.get(run.id)
+    if (field) {
+      const paraKey = `${field.id}:${run.paragraphIndex}`
+      if (renderedFieldAtParagraph.has(paraKey)) continue
+      renderedFieldAtParagraph.add(paraKey)
+      // formValues stores plain fields under field.id (fieldFormKey); also
+      // accept name-keyed and legacy fill:-prefixed lookups.
+      const value =
+        formValues[field.id] ?? formValues[field.name] ?? formValues[`fill:${field.name}`]
       if (value != null && value !== '' && value !== false) {
         if (Array.isArray(value)) {
           parts.push(value.map((v) => (typeof v === 'object' ? v.text : v)).filter(Boolean).join('、'))
@@ -1732,7 +1877,7 @@ function buildFillPreview() {
           parts.push(String(value))
         }
       } else {
-        parts.push(`[${fieldLabelByName.get(fieldName) || fieldName}]`)
+        parts.push(`[${field.label || field.name}]`)
       }
     } else {
       parts.push(run.text || '')
@@ -1959,6 +2104,9 @@ function normalizeValues() {
     let normalizedValue
     if (effectiveFieldType(field) === 'party_list') {
       normalizedValue = partyItemsToValues(value)
+    } else if (effectiveFieldType(field) === 'date') {
+      // Render in the template's configured date format (zero parts stay blank).
+      normalizedValue = formatDateValue(value, field.dateFormat)
     } else {
       normalizedValue = value
     }
@@ -1968,6 +2116,12 @@ function normalizeValues() {
     }
     if (effectiveFieldType(field) !== 'reference') {
       addSemanticAliasValue(values, field, normalizedValue)
+    }
+  }
+  // Per-position values for follower cards made independent by a type change.
+  for (const [slotKey, slotValue] of Object.entries(typeOverrides)) {
+    if (slotKey.includes('#')) {
+      values[slotKey] = formValues[slotKey]
     }
   }
   return values

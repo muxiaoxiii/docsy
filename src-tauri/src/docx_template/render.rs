@@ -121,7 +121,7 @@ fn render_tree(
                         }
 
                         if let Some((field, slot)) = tag_map.get(&tag) {
-                            let value = value_for_field(values, field)
+                            let value = value_for_field(values, field, *slot)
                                 .cloned()
                                 .unwrap_or(Value::Null);
                             let rendered = rendered_base_text(field, *slot, &value, item_separator);
@@ -210,7 +210,7 @@ fn try_expand_table_row(
             continue;
         };
         if field.field_type == "party_list" {
-            let value = value_for_field(values, field)
+            let value = value_for_field(values, field, None)
                 .cloned()
                 .unwrap_or(Value::Null);
             let items = party_items(&value);
@@ -882,8 +882,13 @@ fn trim_chars_from_start(node: &mut XmlNode, count: usize) {
 fn value_for_field<'a>(
     values: &'a HashMap<String, Value>,
     field: &TemplateField,
+    slot: Option<usize>,
 ) -> Option<&'a Value> {
-    values.get(&field.id).or_else(|| values.get(&field.name))
+    // A per-position value (fill page "follower made independent by type
+    // change") takes precedence; otherwise fall back to the shared field key.
+    slot.and_then(|s| values.get(&format!("{}#{}", field.id, s)))
+        .or_else(|| values.get(&field.id))
+        .or_else(|| values.get(&field.name))
 }
 
 #[derive(Debug, Clone)]

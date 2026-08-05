@@ -257,6 +257,15 @@
             <label>合并文件名</label>
             <el-input v-model="mergeFileName" :disabled="outputMode === 'files_only'" />
           </div>
+          <div v-if="outputMode === 'files_only'" class="rule-item">
+            <el-checkbox v-model="fileSuffixEnabled">添加后缀</el-checkbox>
+            <el-input
+              v-model="fileSuffixText"
+              :disabled="!fileSuffixEnabled"
+              placeholder="后缀文字"
+              style="width: 140px"
+            />
+          </div>
         </div>
       </div>
 
@@ -834,7 +843,8 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Rank } from '@element-plus/icons-vue'
+import { Plus, Rank } from '@element-plus/icons-vue'
+import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
 import HeaderFooterRuleFields from '../components/HeaderFooterRuleFields.vue'
@@ -1114,6 +1124,8 @@ const footerColor = computed({
 // footerTextContent..footerTextColor are computed from selectedFooterTextGroup above
 const outputMode = ref('files_and_merge')
 const mergeFileName = ref('merged_evidence.pdf')
+const fileSuffixEnabled = ref(true)
+const fileSuffixText = ref('processed')
 const previewPage = ref(1)
 const previewReloadKey = ref(0)
 const previewData = ref({})
@@ -1436,6 +1448,8 @@ const currentRules = computed(() => ({
   outputMode: outputMode.value,
   mergeAfterProcessing: outputMode.value !== 'files_only',
   mergeFileName: mergeFileName.value,
+  fileSuffixEnabled: fileSuffixEnabled.value,
+  fileSuffixText: fileSuffixText.value,
 }))
 
 const {
@@ -1800,6 +1814,62 @@ function ensureReplacementPreset() {
   }
 }
 
+/** When suffix is disabled, check if output files already exist and prompt user. */
+async function resolveSuffixConflicts(payload) {
+  if (fileSuffixEnabled.value) return payload
+  const items = payload.items || []
+  const conflicts = []
+  for (const item of items) {
+    try {
+      if (await exists(item.outputPath)) conflicts.push(item)
+    } catch {
+      /* ignore check errors */
+    }
+  }
+  if (!conflicts.length) return payload
+
+  let action
+  try {
+    await ElMessageBox.confirm(
+      `${conflicts.length} 个输出文件已存在同名文件。`,
+      '文件名冲突',
+      {
+        confirmButtonText: '覆盖已有文件',
+        cancelButtonText: '共存（自动加序号）',
+        distinguishCancelAndClose: true,
+        type: 'warning',
+      },
+    )
+    action = 'overwrite'
+  } catch (e) {
+    action = e === 'cancel' ? 'coexist' : null
+  }
+  if (!action) return null // user closed dialog → abort
+
+  if (action === 'coexist') {
+    for (const item of items) {
+      if (!conflicts.includes(item)) continue
+      const dot = item.outputPath.lastIndexOf('.')
+      const base = dot > 0 ? item.outputPath.slice(0, dot) : item.outputPath
+      const ext = dot > 0 ? item.outputPath.slice(dot) : '.pdf'
+      let seq = 1
+      let candidate
+      do {
+        candidate = `${base}_${seq}${ext}`
+        seq++
+        // eslint-disable-next-line no-await-in-loop
+      } while (await exists(candidate).catch(() => false))
+      item.outputPath = candidate
+    }
+    // Also update session items
+    for (const sessionItem of payload.session?.items || []) {
+      const matched = items.find((it) => it.inputPath === sessionItem.sourcePath)
+      if (matched) sessionItem.outputPath = matched.outputPath
+    }
+  }
+  return payload
+}
+
 async function applySplitHeaderFooterReplacement() {
   if (!canApplySplitReplacement.value) return
   ensureReplacementPreset()
@@ -1812,7 +1882,9 @@ async function applySplitHeaderFooterReplacement() {
       outputMode: 'files_only',
       mergeAfterProcessing: false,
     }
-    const payload = buildEvidencePdfRulePayload(overlayRows.value, rules, outputDir)
+    let payload = buildEvidencePdfRulePayload(overlayRows.value, rules, outputDir)
+    payload = await resolveSuffixConflicts(payload)
+    if (!payload) { overlaying.value = false; return }
     overlayRows.value.forEach((file) => {
       file.statusText = '替换中'
       file.statusType = 'warning'
@@ -1875,7 +1947,9 @@ async function applyHeaderFooter() {
   if (!canApplyOverlay.value) return
   overlaying.value = true
   try {
-    const payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
+    let payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
+    payload = await resolveSuffixConflicts(payload)
+    if (!payload) { overlaying.value = false; return }
     overlayRows.value.forEach((file) => {
       file.statusText = '处理中'
       file.statusType = 'warning'
@@ -2419,21 +2493,25 @@ function finishContentRowEdit(row, cr) {
 }
 
 function finishNewContentRowEdit(row, cr, value) {
+  // Fallback: if group reference is stale (e.g. groups array was rebuilt),
+  // resolve it from the file's current groups.
+  const group = cr.group || selectedGroupFor(row, cr.kind) || groupsFor(row, cr.kind)[0]
+  if (!group) return
   if (cr.kind === 'header') {
-    cr.group.text = value
+    group.text = value
     // Sync per_file mode to row.header
-    if (cr.group.mode === 'per_file') {
+    if (group.mode === 'per_file') {
       row.header = value
     }
   } else if (cr.kind === 'footerText') {
-    cr.group.text = value
+    group.text = value
   } else if (cr.kind === 'pageNumber') {
     // Validate {page} placeholder
     if (!value.includes('{page}')) {
       ElMessage.warning('页码模板必须包含 {page} 占位符')
       return
     }
-    cr.group.template = value
+    group.template = value
   }
 }
 

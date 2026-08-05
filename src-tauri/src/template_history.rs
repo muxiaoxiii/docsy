@@ -94,6 +94,36 @@ pub fn clear_history() -> Result<usize> {
     Ok(deleted)
 }
 
+/// Copy field-history rows of `source_template_id` whose field name also
+/// exists in `target_template_id` into the target (skipping rows the target
+/// already has for the same field+value). Rows only present in the source
+/// stay there — the cross-template field-name lookup surfaces them anyway.
+/// Returns the number of copied rows.
+pub fn merge_template_field_history(
+    source_template_id: &str,
+    target_template_id: &str,
+) -> Result<usize> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    let mut stmt = conn.prepare(
+        "INSERT INTO field_history
+            (run_id, template_id, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at)
+         SELECT run_id, ?2, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at
+         FROM field_history AS src
+         WHERE src.template_id = ?1
+           AND src.field_name IN (SELECT DISTINCT field_name FROM field_history WHERE template_id = ?2)
+           AND NOT EXISTS (
+             SELECT 1 FROM field_history AS tgt
+             WHERE tgt.template_id = ?2
+               AND tgt.field_name = src.field_name
+               AND tgt.value_json = src.value_json
+               AND tgt.display_value = src.display_value
+           )",
+    )?;
+    let copied = stmt.execute(params![source_template_id, target_template_id])?;
+    Ok(copied)
+}
+
 pub fn list_database_entries() -> Result<Vec<Value>> {
     let conn = open_db()?;
     init_db(&conn)?;
@@ -629,15 +659,28 @@ fn query_field_suggestions(
     template_id: &str,
     field: &TemplateField,
 ) -> Result<Vec<ValueSuggestion>> {
+    // Field-name-keyed suggestions span templates: the current template first,
+    // then the shared common bucket, then any non-trashed template with the
+    // same field name. This lets two templates with similar terms share fill
+    // history without any manual merge step.
     let mut stmt = conn.prepare(
         "SELECT value_json, display_value, COUNT(*) AS freq, MAX(generated_at) AS last_used
          FROM field_history
-         WHERE template_id = ?1 AND field_id = ?2
+         WHERE field_name = ?2
+           AND (
+             template_id = ?1
+             OR template_id = ?3
+             OR NOT EXISTS (
+               SELECT 1 FROM template_meta
+               WHERE template_meta.template_id = field_history.template_id
+                 AND template_meta.trashed = 1
+             )
+           )
          GROUP BY value_json, display_value
          ORDER BY freq DESC, last_used DESC
          LIMIT 8",
     )?;
-    let rows = stmt.query_map(params![template_id, field.id], |row| {
+    let rows = stmt.query_map(params![template_id, field.name, TEMPLATE_COMMON_ID], |row| {
         suggestion_from_row(row, "field")
     })?;
     collect_rows(rows)

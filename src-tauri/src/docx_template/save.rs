@@ -321,7 +321,6 @@ fn wrap_paragraph_runs(
     cursor: &mut (usize, usize),
     coord_map: &HashMap<(String, usize, usize), Vec<FieldTarget>>,
 ) -> Result<()> {
-    let mut run_idx = 0;
     let p_idx = cursor.0;
     let mut i = 0;
 
@@ -339,7 +338,7 @@ fn wrap_paragraph_runs(
             continue;
         }
 
-        let key = (part.to_string(), p_idx, run_idx);
+        let key = (part.to_string(), p_idx, cursor.1);
         // Pre-check: record whether this run has text BEFORE modification
         let had_text = run_has_text(&children[i]);
         let mut inserted = 0u32;
@@ -404,8 +403,7 @@ fn wrap_paragraph_runs(
         }
         // Use pre-modification check so deletion/wrapping doesn't shift coordinates
         if had_text {
-            run_idx += 1;
-            cursor.1 = run_idx;
+            cursor.1 += 1;
         }
     }
 

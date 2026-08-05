@@ -450,7 +450,10 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       headerInsertEnabled && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none'
         ? buildHeaderTextForGroup(file, index, { ...headerGroup, mode: headerModeValue }, rules)
         : ''
-    const outputPath = buildOverlayOutputPath(file.path, outputDir)
+    const outputPath = buildOverlayOutputPath(file.path, outputDir, {
+      suffixEnabled: rules.fileSuffixEnabled !== false,
+      suffixText: rules.fileSuffixText || 'processed',
+    })
     const pageNumberEnabled = legacyFooterMode ? false : (rules.pageNumberEnabled ?? rules.footerEnabled ?? true)
     const pageNumberSequence =
       rules.pageNumberSequence ??
@@ -951,11 +954,14 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
   }
 }
 
-export function buildOverlayOutputPath(inputPath, outputDir = '') {
+export function buildOverlayOutputPath(inputPath, outputDir = '', { suffixEnabled = true, suffixText = 'processed' } = {}) {
   const name = fileName(inputPath)
   const stem = stripPdf(name)
   const dir = outputDir || `${parentDir(inputPath)}/_docsy_pdf_processed`
-  return `${dir}/${stem}_processed.pdf`
+  if (suffixEnabled && suffixText) {
+    return `${dir}/${stem}_${suffixText}.pdf`
+  }
+  return `${dir}/${stem}.pdf`
 }
 
 export function buildMergeOutputPath(files, outputDir = '', fileName = '') {

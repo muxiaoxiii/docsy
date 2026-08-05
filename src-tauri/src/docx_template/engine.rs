@@ -55,6 +55,15 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
     };
     let output = unique_docx_output_path(std::path::Path::new(&args.output_path))?;
 
+    // Editing a library template re-saves from the docsytpl package itself
+    // (its embedded word/document.xml) instead of an external Word file.
+    let pkg = if args.source_docx.to_lowercase().ends_with(".docsytpl") {
+        let (_manifest, pkg) = package::read_docsytpl_package(std::path::Path::new(&args.source_docx))?;
+        pkg
+    } else {
+        package::read_docx_package(&source)?
+    };
+
     let mut manifest = TemplateManifest {
         // The application version is 0.8.x; the package schema remains v2.
         // It is still the same manifest shape, with stable per-mark tags.
@@ -68,7 +77,6 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
         fields: args.fields,
     };
 
-    let pkg = package::read_docx_package(&source)?;
     ensure_template_package_safe(&pkg)?;
     let (runs, marks, _) = scan_package_to_runs_and_marks(&pkg)?;
     prune_stray_punctuation_refs(&mut manifest.fields, &runs);
