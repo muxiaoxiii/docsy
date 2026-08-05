@@ -7,7 +7,7 @@
         :disabled="!canUndo"
         @click.stop="$emit('undo')"
       >
-        <el-icon :size="iconSize"><Back /></el-icon>
+        <el-icon :size="iconSize"><RefreshLeft /></el-icon>
       </el-button>
     </el-tooltip>
     <el-tooltip content="重做 (Ctrl+Shift+Z)" :show-after="500" placement="top">
@@ -17,14 +17,14 @@
         :disabled="!canRedo"
         @click.stop="$emit('redo')"
       >
-        <el-icon :size="iconSize"><Right /></el-icon>
+        <el-icon :size="iconSize"><RefreshRight /></el-icon>
       </el-button>
     </el-tooltip>
   </span>
 </template>
 
 <script setup>
-import { Back, Right } from '@element-plus/icons-vue'
+import { RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 
 const props = defineProps({

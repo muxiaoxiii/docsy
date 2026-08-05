@@ -83,6 +83,28 @@
         :offset-limit-mm="offsetLimitMm"
         margin-label="距顶"
       />
+      <div class="rule-item page-range-row">
+        <label>分段</label>
+        <div class="page-range-inputs">
+          <el-input-number
+            v-model="headerPageStartModel"
+            :min="1"
+            :max="9999"
+            size="small"
+            controls-position="right"
+            placeholder="起始页"
+          />
+          <span class="range-sep">–</span>
+          <el-input-number
+            v-model="headerPageEndModel"
+            :min="0"
+            :max="9999"
+            size="small"
+            controls-position="right"
+            placeholder="0=全部"
+          />
+        </div>
+      </div>
     </template>
 
     <div class="rule-item section-label">
@@ -128,7 +150,7 @@
       </div>
       <div class="rule-item">
         <label>页脚文本</label>
-        <el-input v-model="footerTextContentModel" placeholder="固定文字，不用于页码" />
+        <el-input v-model="footerTextContentModel" placeholder="可用 [##]、[序号]、[文件名]、[YYYYMMDD]" />
       </div>
       <TextPlacementFields
         prefix="页脚"
@@ -141,6 +163,28 @@
         :offset-limit-mm="offsetLimitMm"
         margin-label="距底"
       />
+      <div class="rule-item page-range-row">
+        <label>分段</label>
+        <div class="page-range-inputs">
+          <el-input-number
+            v-model="footerTextPageStartModel"
+            :min="1"
+            :max="9999"
+            size="small"
+            controls-position="right"
+            placeholder="起始页"
+          />
+          <span class="range-sep">–</span>
+          <el-input-number
+            v-model="footerTextPageEndModel"
+            :min="0"
+            :max="9999"
+            size="small"
+            controls-position="right"
+            placeholder="0=全部"
+          />
+        </div>
+      </div>
     </template>
 
     <div class="rule-item section-label">
@@ -309,6 +353,8 @@ const props = defineProps({
   headerMarginMm: { type: Number, required: true },
   headerOffsetXMm: { type: Number, required: true },
   headerColor: { type: String, required: true },
+  headerPageStart: { type: Number, default: 1 },
+  headerPageEnd: { type: Number, default: 0 },
   footerTextGroups: { type: Array, default: () => [] },
   selectedFooterTextGroupId: { type: String, default: '' },
   footerInsertEnabled: { type: Boolean, default: true },
@@ -319,6 +365,8 @@ const props = defineProps({
   footerTextMarginMm: { type: Number, required: true },
   footerTextOffsetXMm: { type: Number, required: true },
   footerTextColor: { type: String, required: true },
+  footerTextPageStart: { type: Number, default: 1 },
+  footerTextPageEnd: { type: Number, default: 0 },
   pageNumberGroups: { type: Array, default: () => [] },
   selectedPageNumberGroupId: { type: String, default: '' },
   pageNumberEnabled: { type: Boolean, required: true },
@@ -361,6 +409,8 @@ const emit = defineEmits([
     'headerMarginMm',
     'headerOffsetXMm',
     'headerColor',
+    'headerPageStart',
+    'headerPageEnd',
     'footerInsertEnabled',
     'footerTextContent',
     'footerTextAlign',
@@ -369,6 +419,8 @@ const emit = defineEmits([
     'footerTextMarginMm',
     'footerTextOffsetXMm',
     'footerTextColor',
+    'footerTextPageStart',
+    'footerTextPageEnd',
     'pageNumberEnabled',
     'pageNumberSequence',
     'pageNumberStyle',
@@ -490,6 +542,8 @@ const headerAlignModel = model('headerAlign'),
   headerMarginMmModel = model('headerMarginMm'),
   headerOffsetXMmModel = model('headerOffsetXMm'),
   headerColorModel = model('headerColor')
+const headerPageStartModel = model('headerPageStart')
+const headerPageEndModel = model('headerPageEnd')
 const footerInsertEnabledModel = model('footerInsertEnabled'),
   footerTextContentModel = model('footerTextContent'),
   footerTextAlignModel = model('footerTextAlign'),
@@ -498,6 +552,8 @@ const footerInsertEnabledModel = model('footerInsertEnabled'),
   footerTextMarginMmModel = model('footerTextMarginMm'),
   footerTextOffsetXMmModel = model('footerTextOffsetXMm'),
   footerTextColorModel = model('footerTextColor')
+const footerTextPageStartModel = model('footerTextPageStart')
+const footerTextPageEndModel = model('footerTextPageEnd')
 const pageNumberEnabledModel = model('pageNumberEnabled'),
   pageNumberSequenceModel = model('pageNumberSequence'),
   pageNumberStyleModel = model('pageNumberStyle'),
@@ -597,6 +653,8 @@ function addGroup() {
     marginMm: 10,
     offsetXMm: 0,
     color: '#000000',
+    pageStart: 1,
+    pageEnd: 0,
   }
   const updated = [...props.headerGroups, newGroup]
   emit('update:headerGroups', updated)
@@ -624,6 +682,8 @@ function addFooterTextGroup() {
     marginMm: 10,
     offsetXMm: 0,
     color: '#000000',
+    pageStart: 1,
+    pageEnd: 0,
   }
   const updated = [...props.footerTextGroups, newGroup]
   emit('update:footerTextGroups', updated)
@@ -732,4 +792,19 @@ function removePageNumberGroup(id) {
 }
 .template-presets { margin-bottom: 4px; }
 .template-custom-input { margin-top: 4px; }
+.page-range-row {
+  grid-column: 1 / -1;
+}
+.page-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.page-range-inputs .el-input-number {
+  width: 100px;
+}
+.range-sep {
+  color: var(--docsy-text-muted);
+  font-size: 13px;
+}
 </style>

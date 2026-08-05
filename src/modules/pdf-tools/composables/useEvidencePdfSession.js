@@ -21,6 +21,8 @@ export function createDefaultHeaderGroup() {
     marginMm: 10,
     offsetXMm: 0,
     color: '#000000',
+    pageStart: 1,
+    pageEnd: 0,
   }
 }
 
@@ -36,6 +38,8 @@ export function createDefaultFooterTextGroup() {
     marginMm: 10,
     offsetXMm: 0,
     color: '#000000',
+    pageStart: 1,
+    pageEnd: 0,
   }
 }
 
@@ -264,6 +268,8 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
           id: `${kind}-${selectedGroup.id}`,
           text,
           group: selectedGroup,
+          pageStart: selectedGroup.pageStart || 1,
+          pageEnd: selectedGroup.pageEnd || 0,
         })
       }
     }
@@ -281,6 +287,8 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
         id: `${kind}-${g.id}`,
         text,
         group: g,
+        pageStart: g.pageStart || 1,
+        pageEnd: g.pageEnd || 0,
       })
     }
 
@@ -310,7 +318,7 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
 
 function contentRowText(file, index, kind, group, rules) {
   if (kind === 'header') return buildHeaderTextForGroup(file, index, group, rules)
-  if (kind === 'footerText') return group.text || ''
+  if (kind === 'footerText') return resolveTextTemplate(group.text, file, index, rules)
   // pageNumber
   return pageNumberTemplateWithShowTotal(group.template || '{page}/{total}', rules.pageNumberShowTotal)
 }
@@ -328,6 +336,20 @@ export function buildHeaderTextForGroup(file, index, group, rules) {
   if (group.mode === 'none') return ''
   const base = headerBaseTextForGroup(file, index, group, rules)
   return decorateHeaderTextForGroup(base, file, index, group, rules)
+}
+
+/**
+ * Resolve a text template with placeholder tokens.
+ * Supports [文件名], [name], [序号], [中文序号], [##], [日期], and date patterns.
+ * Used by both header and footer text to ensure consistent placeholder support.
+ */
+export function resolveTextTemplate(text, file, index, rules = {}) {
+  if (!text) return ''
+  const name = stripPdf(file?.name || '')
+  const contextText = String(text || '')
+    .replaceAll('[name]', name)
+    .replaceAll('[文件名]', name)
+  return expandSplitNameTokens(contextText, index, rules.headerDateValue || '')
 }
 
 function headerBaseTextForGroup(file, index, group, _rules) {
@@ -351,7 +373,7 @@ function decorateHeaderTextForGroup(base, file, index, group, rules) {
 }
 
 export function overlayConfigForGroup(file, region, text, group) {
-  return {
+  const config = {
     region: region || 'header',
     artifactKind: region === 'footer' ? 'FooterText' : 'HeaderText',
     text,
@@ -362,6 +384,12 @@ export function overlayConfigForGroup(file, region, text, group) {
     offsetXMm: group.offsetXMm || 0,
     color: group.color || '#000000',
   }
+  // Apply group-level page range scoping
+  if (group.pageStart > 1 || (group.pageEnd && group.pageEnd > 0)) {
+    config.pageStart = group.pageStart || 1
+    config.pageEnd = group.pageEnd || file.pages || 1
+  }
+  return config
 }
 
 function headerBaseText(file, index, rules) {
@@ -528,7 +556,10 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       for (const g of groupsFor(file, 'footerText')) {
         if (g.id === footerTextGroup?.id || g.enabled === false) continue
         if (g.text) {
-          extraOverlays.push(footerTextOverlayConfigForGroup(g.text, g, rules))
+          const resolvedText = resolveTextTemplate(g.text, file, index, rules)
+          if (resolvedText) {
+            extraOverlays.push(footerTextOverlayConfigForGroup(resolvedText, g, rules))
+          }
         }
       }
     }
@@ -589,7 +620,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
           ? (footerInsertEnabled ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules) : null)
           : footerInsertEnabled && footerTextGroup && footerTextGroup.enabled !== false && (footerTextGroup.text || rules.footerTextContent)
-            ? footerTextOverlayConfigForGroup(footerTextGroup.text || rules.footerTextContent, footerTextGroup, rules)
+            ? footerTextOverlayConfigForGroup(resolveTextTemplate(footerTextGroup.text || rules.footerTextContent, file, index, rules), footerTextGroup, rules)
             : null,
       extraOverlays,
       bookmarks: rules.bookmarkEnabled
@@ -607,7 +638,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
 }
 
 function footerTextOverlayConfigForGroup(text, group, rules = {}) {
-  return {
+  const config = {
     text,
     region: 'footer',
     artifactKind: 'FooterText',
@@ -618,6 +649,12 @@ function footerTextOverlayConfigForGroup(text, group, rules = {}) {
     offsetXMm: group.offsetXMm || rules.footerTextOffsetXMm || rules.footerOffsetXMm || 0,
     color: group.color || rules.footerTextColor || rules.footerColor || '#000000',
   }
+  // Apply group-level page range scoping
+  if (group.pageStart > 1 || (group.pageEnd && group.pageEnd > 0)) {
+    config.pageStart = group.pageStart || 1
+    config.pageEnd = group.pageEnd || 0
+  }
+  return config
 }
 
 function buildPlainTextTargets(file, region) {
@@ -704,7 +741,9 @@ function overlayConfigForFile(file, region, text, rules, group = null) {
         pageStart: existingPageStart(file, region) || 1,
         pageEnd: existingPageEnd(file, region) || file.pages || 1,
       }
-    : base
+    : (g.pageStart > 1 || (g.pageEnd && g.pageEnd > 0))
+      ? { ...base, pageStart: g.pageStart || 1, pageEnd: g.pageEnd || file.pages || 1 }
+      : base
   if (!useDetectedPlacement || !bbox || !bbox.width || !bbox.height) return scopedBase
   const centerX = (Number(bbox.x0) + Number(bbox.x1)) / 2
   const pageWidth = Number(bbox.width)

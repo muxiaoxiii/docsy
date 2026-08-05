@@ -11,10 +11,12 @@ import {
   canWriteHeader,
   candidateTargetRange,
   createDefaultHeaderGroup,
+  createDefaultFooterTextGroup,
   createEvidenceFile,
   expandPlaceholders,
   naturalCompare,
   pageRangeText,
+  resolveTextTemplate,
   sortByNatural,
   toChineseNumber,
   totalPages,
@@ -629,5 +631,79 @@ describe('Evidence PDF session helpers', () => {
     expect(existingHeader.status).toBe('pending-edit')
     expect(existingHeader.text).toBe('新页眉文字')
     expect(existingPn.status).toBe('pending-delete')
+  })
+
+  it('resolveTextTemplate expands [文件名] and [序号] tokens in footer text', () => {
+    const file = { ...createEvidenceFile('/case/鉴定意见.pdf'), pages: 2 }
+
+    expect(resolveTextTemplate('[文件名]', file, 0)).toBe('鉴定意见')
+    expect(resolveTextTemplate('证据[序号]-[文件名]', file, 2)).toBe('证据3-鉴定意见')
+    expect(resolveTextTemplate('[##]号文件', file, 0)).toBe('01号文件')
+    expect(resolveTextTemplate('[中文序号]', file, 9)).toBe('十')
+    expect(resolveTextTemplate('', file, 0)).toBe('')
+    expect(resolveTextTemplate(null, file, 0)).toBe('')
+  })
+
+  it('footer text in content rows uses resolved template', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    file.footerTextGroups[0].text = '证据[序号]-[文件名]'
+    const rules = {
+      insertHeaderFooterEnabled: true,
+      headerInsertEnabled: false,
+      footerInsertEnabled: true,
+      pageNumberEnabled: false,
+    }
+    const rows = buildFileContentRows(file, 2, rules)
+    const footerRow = rows.find((r) => r.kind === 'footerText')
+    expect(footerRow).toBeTruthy()
+    expect(footerRow.text).toBe('证据3-合同')
+  })
+
+  it('createDefaultHeaderGroup and createDefaultFooterTextGroup include pageStart/pageEnd', () => {
+    const hg = createDefaultHeaderGroup()
+    const ftg = createDefaultFooterTextGroup()
+    expect(hg.pageStart).toBe(1)
+    expect(hg.pageEnd).toBe(0)
+    expect(ftg.pageStart).toBe(1)
+    expect(ftg.pageEnd).toBe(0)
+  })
+
+  it('content rows include pageStart/pageEnd from groups', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    file.headerGroups[0].pageStart = 3
+    file.headerGroups[0].pageEnd = 5
+    const rules = {
+      insertHeaderFooterEnabled: true,
+      headerInsertEnabled: true,
+      footerInsertEnabled: false,
+      pageNumberEnabled: false,
+    }
+    const rows = buildFileContentRows(file, 0, rules)
+    expect(rows[0].pageStart).toBe(3)
+    expect(rows[0].pageEnd).toBe(5)
+  })
+
+  it('header overlay respects group page range', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    file.pages = 10
+    file.headerGroups = [
+      { ...createDefaultHeaderGroup(), mode: 'custom', text: '前5页', pageStart: 1, pageEnd: 5 },
+      { ...createDefaultHeaderGroup(), id: 'h2', mode: 'custom', text: '后5页', pageStart: 6, pageEnd: 10 },
+    ]
+    file.selectedHeaderGroupId = 'h1'
+
+    const items = buildHeaderFooterItems(
+      [file],
+      { ...baseRules, headerMode: 'custom', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false },
+      '/out',
+    )
+
+    expect(items[0].header.text).toBe('前5页')
+    expect(items[0].header.pageStart).toBe(1)
+    expect(items[0].header.pageEnd).toBe(5)
+    const extra = items[0].extraOverlays.find((o) => o.text === '后5页')
+    expect(extra).toBeTruthy()
+    expect(extra.pageStart).toBe(6)
+    expect(extra.pageEnd).toBe(10)
   })
 })

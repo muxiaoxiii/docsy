@@ -624,7 +624,41 @@ fn build_row_values(
                     .collect();
                 serde_json::Value::Array(items)
             }
-            "date" => serde_json::Value::String(text.trim().to_string()),
+            "checkbox" => {
+                let trimmed = text.trim().to_lowercase();
+                serde_json::Value::Bool(
+                    matches!(trimmed.as_str(), "true" | "1" | "是" | "yes" | "☑" | "✓" | "✔"),
+                )
+            }
+            "radio_group" | "select" => {
+                // Match against field options by label or id
+                let trimmed = text.trim();
+                let matched_option = field.options.iter().find(|opt| {
+                    opt.label == trimmed || opt.id == trimmed
+                });
+                match matched_option {
+                    Some(opt) => serde_json::Value::String(opt.id.clone()),
+                    None => serde_json::Value::String(trimmed.to_string()),
+                }
+            }
+            "checkbox_group" => {
+                // Parse multiple selections separated by 、 or ,
+                let items: Vec<serde_json::Value> = text
+                    .split(|c| c == '、' || c == ',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| {
+                        // Match against options by label
+                        let matched = field.options.iter().find(|opt| opt.label == s);
+                        match matched {
+                            Some(opt) => serde_json::Value::String(opt.id.clone()),
+                            None => serde_json::Value::String(s.to_string()),
+                        }
+                    })
+                    .collect();
+                serde_json::Value::Array(items)
+            }
+            // reference, marker, prefix, suffix, text, date, and others: store as string
             _ => serde_json::Value::String(text.trim().to_string()),
         };
 
