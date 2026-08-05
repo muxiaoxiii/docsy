@@ -2517,26 +2517,24 @@ function finishNewContentRowEdit(row, cr, value) {
   }
   if (cr.kind === 'header') {
     group.text = value
-    // For modes that compute text (filename/seq/seq_cn), editing inline means
-    // the user wants per-file custom text — switch mode so the edit persists
-    // across rebuilds of buildFileContentRows.
     if (group.mode === 'filename' || group.mode === 'seq' || group.mode === 'seq_cn') {
       group.mode = 'per_file'
     }
-    // Sync per_file mode to row.header
     if (group.mode === 'per_file') {
       row.header = value
     }
   } else if (cr.kind === 'footerText') {
     group.text = value
   } else if (cr.kind === 'pageNumber') {
-    // Validate {page} placeholder
     if (!value.includes('{page}')) {
       ElMessage.warning('页码模板必须包含 {page} 占位符')
       return
     }
     group.template = value
   }
+  // Force Vue reactivity: ref([]) doesn't track deep property mutations,
+  // so we trigger a shallow update to make the table re-render.
+  overlayFiles.value = [...overlayFiles.value]
 }
 
 function finishExistingContentRowEdit(row, cr, value) {
@@ -2570,6 +2568,8 @@ function finishExistingContentRowEdit(row, cr, value) {
   const status = fileExistingStatus(row)
   row.statusText = status.text
   row.statusType = status.type
+  // Force Vue reactivity for deep property mutations
+  overlayFiles.value = [...overlayFiles.value]
 }
 
 function cancelExistingDecision(row, cr) {
@@ -2582,6 +2582,7 @@ function cancelExistingDecision(row, cr) {
   row.statusText = status.text
   row.statusType = status.type
   refreshPreview()
+  overlayFiles.value = [...overlayFiles.value]
 }
 
 function removeContentRowNew(row, cr) {
