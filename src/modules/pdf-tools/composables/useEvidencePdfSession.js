@@ -441,16 +441,16 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
   return rangedFiles.map((file, index) => {
     const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
     // When global apply is ON, infer enabled state from group content
+    // Global mode: all files share the same group instance.
+    const headerGroup = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
+    const footerTextGroup = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
+    const pageNumberGroup = rules._globalPageNumberGroup || selectedGroupFor(file, 'pageNumber')
     const headerInsertEnabled = rules._globalApply
       ? (headerGroup && headerGroup.enabled !== false && headerGroup.mode !== 'none')
       : rules.headerInsertEnabled !== false
     const footerInsertEnabled = rules._globalApply
       ? (footerTextGroup && footerTextGroup.enabled !== false && Boolean(footerTextGroup.text || rules.footerTextContent))
       : rules.footerInsertEnabled !== false
-    // Global mode: all files share the same group instance.
-    const headerGroup = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
-    const footerTextGroup = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
-    const pageNumberGroup = rules._globalPageNumberGroup || selectedGroupFor(file, 'pageNumber')
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
     const header =
