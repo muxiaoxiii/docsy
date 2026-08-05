@@ -514,3 +514,299 @@ function structureEditorTitle(field) {
   return fillFieldLabel(field)
 }
 </script>
+
+<style scoped>
+.workspace {
+  display: grid;
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.panel {
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  padding: 14px;
+  background: var(--docsy-surface-elevated);
+  box-shadow: 0 3px 14px rgba(54, 45, 36, 0.035);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.panel-header.compact {
+  align-items: center;
+}
+
+h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--docsy-text-strong);
+}
+
+p {
+  margin: 0;
+  color: var(--docsy-text-muted);
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.actions.inline {
+  margin-top: 0;
+}
+
+.template-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.template-library-card {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--docsy-border-strong);
+  border-radius: 6px;
+  background: var(--docsy-surface-elevated);
+  color: var(--docsy-text-strong);
+  text-align: left;
+  cursor: pointer;
+}
+
+.template-library-card:hover,
+.template-library-card.active {
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
+}
+
+.template-library-card span,
+.template-library-card small {
+  color: var(--docsy-text-muted);
+}
+
+.form-panel {
+  min-height: 0;
+}
+
+.template-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.fill-field-card {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 34px 12px 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  background: var(--docsy-surface-elevated);
+}
+
+.fill-field-body {
+  display: contents;
+}
+
+.field-more-button {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--docsy-border-strong);
+  border-radius: 50%;
+  background: var(--docsy-surface);
+  color: var(--docsy-text);
+  cursor: pointer;
+  line-height: 18px;
+}
+
+.field-more-button:hover {
+  border-color: var(--docsy-primary);
+  color: var(--docsy-primary);
+}
+
+.fill-structure-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.fill-field-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.fill-field-header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fill-field-header span,
+.fill-field-header em {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.fill-field-header em {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
+.fill-structure-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fill-structure-hint {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+}
+
+.fill-structure-hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text);
+  font-family: inherit;
+}
+
+.fill-structure-hint code.empty {
+  color: #c0c4cc;
+}
+
+.fill-structure-hint em {
+  margin-left: 4px;
+  color: #c0c4cc;
+  font-style: normal;
+}
+
+.party-list-editor {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.reference-fill-editor {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.party-list-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(90px, 130px) minmax(106px, auto);
+  gap: 6px;
+  align-items: center;
+}
+
+.party-list-row.compact {
+  grid-template-columns: 24px minmax(0, 1fr) minmax(72px, 90px) minmax(96px, auto);
+}
+
+.party-list-row.compact.no-suffix {
+  grid-template-columns: 24px minmax(0, 1fr) minmax(96px, auto);
+}
+
+.party-list-row.compact .el-button {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.party-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.party-row-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.party-list-add-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.field-structure-hint {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.party-order {
+  color: var(--docsy-text-muted);
+  text-align: center;
+}
+
+.party-suffix {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text);
+  font-size: 12px;
+}
+
+.suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.suggestion-tag {
+  cursor: pointer;
+}
+
+@media (max-width: 1180px) {
+  .template-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-header,
+  .panel-header.compact {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 760px) {
+  .party-list-row,
+  .party-list-row.compact,
+  .party-list-row.compact.no-suffix {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .party-list-row > :not(.party-order):not(.el-autocomplete):not(.el-input) {
+    grid-column: 2;
+  }
+
+  .party-row-actions {
+    justify-content: flex-start;
+  }
+}
+</style>

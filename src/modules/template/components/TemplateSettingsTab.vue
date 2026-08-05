@@ -119,6 +119,40 @@ defineEmits([
 </script>
 
 <style scoped>
+.workspace {
+  display: grid;
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.panel {
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  padding: 14px;
+  background: var(--docsy-surface-elevated);
+  box-shadow: 0 3px 14px rgba(54, 45, 36, 0.035);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--docsy-text-strong);
+}
+
+p {
+  margin: 0;
+  color: var(--docsy-text-muted);
+  font-size: 13px;
+}
+
 .settings-form {
   display: grid;
   gap: 14px;

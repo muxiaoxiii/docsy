@@ -101,3 +101,118 @@ function visibleGroupRuns(group) {
   return group.runs.slice(0, HISTORY_PAGE_SIZE)
 }
 </script>
+
+<style scoped>
+.workspace {
+  display: grid;
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.panel {
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  padding: 14px;
+  background: var(--docsy-surface-elevated);
+  box-shadow: 0 3px 14px rgba(54, 45, 36, 0.035);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--docsy-text-strong);
+}
+
+p {
+  margin: 0;
+  color: var(--docsy-text-muted);
+  font-size: 13px;
+}
+
+.history-group-list {
+  display: grid;
+  gap: 12px;
+}
+
+.history-group {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  background: var(--docsy-surface-muted);
+}
+
+.history-group-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.history-group-header h4 {
+  margin: 0 0 2px;
+  color: var(--docsy-text-strong);
+}
+
+.history-group-header span {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+}
+
+.history-run-list {
+  display: grid;
+  gap: 12px;
+}
+
+.history-run-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  background: var(--docsy-surface-elevated);
+  cursor: pointer;
+}
+
+.history-run-card:hover {
+  border-color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
+}
+
+.history-run-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.history-run-main > span {
+  overflow: hidden;
+  color: var(--docsy-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-run-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.history-run-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+</style>
