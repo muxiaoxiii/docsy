@@ -91,7 +91,7 @@ export function useEvidencePdfDetection({
         .filter((candidate) => bestReliableHeaderCandidate([candidate], totalPages))
         .map((candidate, index) => detectedElementFromCandidate(candidate, 'header', index)),
       ...footerCandidates
-        .filter((candidate) => !isPageNumberCandidate(candidate) && isStrongNonPageFooterCandidate(candidate))
+        .filter((candidate) => !isPageNumberCandidate(candidate))
         .map((candidate, index) => detectedElementFromCandidate(candidate, 'footerText', index)),
       ...pageNumberCandidates.map((candidate, index) => detectedElementFromCandidate(candidate, 'pageNumber', index)),
     ]
