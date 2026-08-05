@@ -284,10 +284,11 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
       })
     }
 
-    // 3. Existing detected elements
+    // 3. Existing detected elements (skip ignored — user says "not a header/footer")
     const existingKind = kind === 'footerText' ? 'footerText' : kind
     for (const element of file.existingElements || []) {
       if (element.kind !== existingKind) continue
+      if (element.decision === 'ignore') continue
       const decision = element.decision
       let status = 'existing'
       if (decision === 'keep') status = 'confirmed'
