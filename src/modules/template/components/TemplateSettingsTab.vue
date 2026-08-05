@@ -30,6 +30,20 @@
       </div>
     </div>
 
+    <!-- 模板管理 -->
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>模板管理</h3>
+          <p>导入或导出 .docsytpl 模板文件。</p>
+        </div>
+      </div>
+      <div class="template-management-actions">
+        <el-button @click="$emit('import-template')">导入模板</el-button>
+        <el-button @click="$emit('open-export-dialog')">导出模板</el-button>
+      </div>
+    </div>
+
     <!-- 模板回收站 -->
     <div class="panel">
       <div class="panel-header">
@@ -90,6 +104,39 @@
         <el-empty v-else description="暂无模板数据" />
       </div>
     </div>
+
+    <!-- 导出模板对话框 -->
+    <el-dialog
+      :model-value="exportDialogVisible"
+      title="导出模板"
+      width="520px"
+      @update:model-value="$emit('update:exportDialogVisible', $event)"
+    >
+      <el-table
+        :data="exportTemplateList"
+        size="small"
+        border
+        @selection-change="handleExportSelectionChange"
+      >
+        <el-table-column type="selection" width="42" />
+        <el-table-column prop="name" label="模板名称" min-width="200" />
+        <el-table-column prop="fieldCount" label="字段数" width="80" />
+      </el-table>
+      <div v-if="exportResult" class="export-result">
+        <el-alert :title="exportResult" type="success" show-icon :closable="false" />
+        <el-button size="small" type="primary" @click="$emit('open-export-folder')">打开文件夹</el-button>
+      </div>
+      <template #footer>
+        <el-button @click="$emit('update:exportDialogVisible', false)">取消</el-button>
+        <el-button
+          type="primary"
+          :disabled="!exportSelectedPaths.length"
+          @click="$emit('execute-export')"
+        >
+          选择目录并导出
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -97,16 +144,21 @@
 import { InfoFilled } from '@element-plus/icons-vue'
 import { shortDateTime } from '../composables/fieldRowUtils.js'
 
-defineProps({
+const props = defineProps({
   itemSeparatorSetting: { type: String, default: '、' },
   templateTrash: { type: Array, default: () => [] },
   templateTrashLoading: { type: Boolean, default: false },
   templateDatabase: { type: Array, default: () => [] },
   templateDatabaseLoading: { type: Boolean, default: false },
   clearingHistory: { type: Boolean, default: false },
+  // Export dialog
+  exportDialogVisible: { type: Boolean, default: false },
+  exportTemplateList: { type: Array, default: () => [] },
+  exportSelectedPaths: { type: Array, default: () => [] },
+  exportResult: { type: String, default: '' },
 })
 
-defineEmits([
+const emit = defineEmits([
   'update:itemSeparatorSetting',
   'save-separator',
   'restore-template',
@@ -115,7 +167,18 @@ defineEmits([
   'refresh-trash',
   'refresh-template-database',
   'delete-template-database-entry',
+  // Import/Export
+  'import-template',
+  'open-export-dialog',
+  'execute-export',
+  'open-export-folder',
+  'update:exportDialogVisible',
+  'update:exportSelectedPaths',
 ])
+
+function handleExportSelectionChange(selection) {
+  emit('update:exportSelectedPaths', selection.map((item) => item.path))
+}
 </script>
 
 <style scoped>
@@ -196,5 +259,17 @@ p {
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
   overflow: hidden;
+}
+
+.template-management-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.export-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
 }
 </style>

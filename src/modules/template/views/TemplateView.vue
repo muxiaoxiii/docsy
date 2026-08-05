@@ -65,6 +65,8 @@
           :collapsed-fields="collapsedFields"
           :renderable-template-fields="renderableTemplateFields"
           :filtered-renderable-fields="filteredRenderableFields"
+          :fill-preview-visible="fillPreviewVisible"
+          :fill-preview-text="fillPreviewText"
           @load-template-library="loadTemplateLibrary"
           @select-template-package="selectTemplatePackage"
           @open-template-from-library="openTemplateFromLibrary"
@@ -85,6 +87,7 @@
           @set-field-type-override="setFieldTypeOverride"
           @update-form-value="handleUpdateFormValue"
           @update-structure-override="handleUpdateStructureOverride"
+          @toggle-fill-preview="fillPreviewVisible = !fillPreviewVisible"
         />
       </el-tab-pane>
 
@@ -109,6 +112,10 @@
           :clearing-history="clearingHistory"
           :template-database="templateDatabase"
           :template-database-loading="templateDatabaseLoading"
+          v-model:export-dialog-visible="exportDialogVisible"
+          :export-template-list="exportTemplateList"
+          v-model:export-selected-paths="exportSelectedPaths"
+          :export-result="exportResult"
           @save-separator="saveItemSeparatorSetting"
           @restore-template="restoreTemplate"
           @permanently-delete-template="permanentlyDeleteTemplate"
@@ -116,6 +123,10 @@
           @refresh-trash="loadTemplateTrash"
           @refresh-template-database="loadTemplateDatabase"
           @delete-template-database-entry="deleteTemplateDatabaseEntry"
+          @import-template="importTemplateToLibrary"
+          @open-export-dialog="openExportDialog"
+          @execute-export="executeExportTemplates"
+          @open-export-folder="openExportFolder"
         />
       </el-tab-pane>
     </el-tabs>
@@ -276,9 +287,40 @@ const templateManifest = ref(null)
 const templateLibrary = ref([])
 const templateLibraryLoading = ref(false)
 const editingLibraryTemplatePath = ref('')
+const fillDocumentRuns = ref([])
+const fillPreviewVisible = ref(false)
+const fillPreviewText = ref('')
+// Export dialog state
+const exportDialogVisible = ref(false)
+const exportTemplateList = ref([])
+const exportSelectedPaths = ref([])
+const exportResult = ref('')
+let exportResultDir = ''
 const historyRuns = ref([])
 const historyRunsLoading = ref(false)
-const renderableTemplateFields = computed(() => (templateManifest.value?.fields || []).filter(isRenderableField))
+const renderableTemplateFields = computed(() => {
+  const fields = (templateManifest.value?.fields || []).filter(isRenderableField)
+  // Mark duplicate fields (same name appearing more than once)
+  const nameCount = new Map()
+  for (const field of fields) {
+    nameCount.set(field.name, (nameCount.get(field.name) || 0) + 1)
+  }
+  const seenNames = new Set()
+  for (const field of fields) {
+    if ((nameCount.get(field.name) || 0) > 1) {
+      if (seenNames.has(field.name)) {
+        field._isDuplicate = true
+        field._primaryFieldName = field.name
+      } else {
+        field._isDuplicate = false
+        seenNames.add(field.name)
+      }
+    } else {
+      field._isDuplicate = false
+    }
+  }
+  return fields
+})
 const fieldSearch = ref('')
 const collapsedFields = reactive(new Set())
 const filteredRenderableFields = computed(() => {
@@ -1378,73 +1420,77 @@ function manifestToFieldRows(manifest) {
       }
     } else if (field.type === 'select') {
       // Select field: one row with options
-      rows.push(createSimpleFieldRow(field, field.options || []))
+      rows.push(createSimpleFieldRow(field, field.options || [], null))
     } else if (field.name?.startsWith('delete_')) {
-      // Delete text field
-      rows.push({
-        rowId: field.name.replace('delete_', ''),
-        displayId: field.marks?.[0] || '',
-        markId: field.marks?.[0] || '',
-        markRefs: field.markRefs || [],
-        markSegments: [],
-        charStart: null,
-        charEnd: null,
-        text: field.label || '',
-        context: '',
-        enabled: true,
-        type: 'delete_text',
-        name: field.name,
-        label: field.label,
-        semanticKey: '',
-        required: false,
-        optionalWhenEmpty: false,
-        optionalScope: 'position',
-        optionalPrefix: '',
-        optionalSuffix: '',
-        optionId: '',
-        optionLabel: '',
-        checkedText: '☑',
-        uncheckedText: '☐',
-        partyItems: [],
-        referenceHintSeen: true,
-        referenceIncludePrefix: true,
-        referenceIncludeSuffix: true,
-        referenceSourceMode: 'auto',
-        referenceSourceField: '',
-        referenceSourceSemanticKey: '',
-        referenceSourceIndex: null,
-        referenceSourceKey: referenceSourceKey('auto', '', null),
-        options: [],
-        selectOptions: [],
-      })
-    } else {
-      // Regular field (text, date, party_list, reference): one row
-      const row = createSimpleFieldRow(field, [])
-      // Set reference properties
-      if (field.type === 'reference' && field.reference) {
-        row.referenceSourceMode = field.reference.sourceMode || 'auto'
-        row.referenceSourceField = field.reference.sourceField || ''
-        row.referenceSourceSemanticKey = field.reference.sourceSemanticKey || ''
-        row.referenceSourceIndex = field.reference.sourceIndex ?? null
-        row.referenceSourceKey = referenceSourceKey(
-          row.referenceSourceMode,
-          row.referenceSourceField || row.referenceSourceSemanticKey,
-          row.referenceSourceIndex,
-        )
+      // Delete text field: one row per markRef
+      const refs = field.markRefs || []
+      if (refs.length === 0) {
+        rows.push(createDeleteFieldRow(field, null, 0))
+      } else {
+        for (let i = 0; i < refs.length; i++) {
+          rows.push(createDeleteFieldRow(field, refs[i], i))
+        }
       }
-      rows.push(row)
+    } else if (field.type === 'reference') {
+      // Reference field: one row per markRef (preserve positions)
+      const refs = field.markRefs || []
+      if (refs.length <= 1) {
+        const row = createSimpleFieldRow(field, [], refs[0] || null)
+        if (field.reference) {
+          row.referenceSourceMode = field.reference.sourceMode || 'auto'
+          row.referenceSourceField = field.reference.sourceField || ''
+          row.referenceSourceSemanticKey = field.reference.sourceSemanticKey || ''
+          row.referenceSourceIndex = field.reference.sourceIndex ?? null
+          row.referenceSourceKey = referenceSourceKey(
+            row.referenceSourceMode,
+            row.referenceSourceField || row.referenceSourceSemanticKey,
+            row.referenceSourceIndex,
+          )
+        }
+        rows.push(row)
+      } else {
+        for (let i = 0; i < refs.length; i++) {
+          const row = createSimpleFieldRow(field, [], refs[i])
+          row.rowId = `edit:${field.id}:ref${i}`
+          if (field.reference) {
+            row.referenceSourceMode = field.reference.sourceMode || 'auto'
+            row.referenceSourceField = field.reference.sourceField || ''
+            row.referenceSourceSemanticKey = field.reference.sourceSemanticKey || ''
+            row.referenceSourceIndex = field.reference.sourceIndex ?? null
+            row.referenceSourceKey = referenceSourceKey(
+              row.referenceSourceMode,
+              row.referenceSourceField || row.referenceSourceSemanticKey,
+              row.referenceSourceIndex,
+            )
+          }
+          rows.push(row)
+        }
+      }
+    } else {
+      // Regular field (text, date, party_list): one row per markRef
+      // This preserves all document positions, matching the build tab behavior.
+      const refs = field.markRefs || []
+      if (refs.length <= 1) {
+        rows.push(createSimpleFieldRow(field, [], refs[0] || null))
+      } else {
+        for (let i = 0; i < refs.length; i++) {
+          rows.push(createSimpleFieldRow(field, [], refs[i], i))
+        }
+      }
     }
   }
 
   return rows
 }
 
-function createSimpleFieldRow(field, options) {
+function createSimpleFieldRow(field, options, markRef, refIndex) {
+  const markId = markRef?.markId || field.marks?.[0] || ''
+  const suffix = refIndex != null && refIndex > 0 ? `:ref${refIndex}` : ''
   return {
-    rowId: `edit:${field.id}`,
-    displayId: field.marks?.[0] || '',
-    markId: field.marks?.[0] || '',
-    markRefs: field.markRefs || [],
+    rowId: `edit:${field.id}${suffix}`,
+    displayId: markId,
+    markId,
+    markRefs: markRef ? [markRef] : (field.markRefs || []),
     markSegments: [],
     charStart: null,
     charEnd: null,
@@ -1486,6 +1532,47 @@ function createSimpleFieldRow(field, options) {
   }
 }
 
+function createDeleteFieldRow(field, markRef, refIndex) {
+  const markId = markRef?.markId || field.marks?.[0] || ''
+  const suffix = refIndex > 0 ? `:ref${refIndex}` : ''
+  return {
+    rowId: `${field.name.replace('delete_', '')}${suffix}`,
+    displayId: markId,
+    markId,
+    markRefs: markRef ? [markRef] : (field.markRefs || []),
+    markSegments: [],
+    charStart: null,
+    charEnd: null,
+    text: field.label || '',
+    context: '',
+    enabled: true,
+    type: 'delete_text',
+    name: field.name,
+    label: field.label,
+    semanticKey: '',
+    required: false,
+    optionalWhenEmpty: false,
+    optionalScope: 'position',
+    optionalPrefix: '',
+    optionalSuffix: '',
+    optionId: '',
+    optionLabel: '',
+    checkedText: '☑',
+    uncheckedText: '☐',
+    partyItems: [],
+    referenceHintSeen: true,
+    referenceIncludePrefix: true,
+    referenceIncludeSuffix: true,
+    referenceSourceMode: 'auto',
+    referenceSourceField: '',
+    referenceSourceSemanticKey: '',
+    referenceSourceIndex: null,
+    referenceSourceKey: referenceSourceKey('auto', '', null),
+    options: [],
+    selectOptions: [],
+  }
+}
+
 async function editTemplateFromLibrary(item) {
   if (!item?.path) return
   const result = await tauriCallSafe('inspect_docsytpl', { path: item.path })
@@ -1498,8 +1585,25 @@ async function editTemplateFromLibrary(item) {
   templateManifest.value = manifest
   templateName.value = manifest.name || item.name || ''
 
+  // Load document content so full-text and preview buttons work
+  const contentResult = await tauriCallSafe('inspect_docsytpl_content', { path: item.path })
+  if (contentResult.ok) {
+    documentText.value = contentResult.data.documentText || ''
+    documentRuns.value = contentResult.data.documentRuns || []
+  } else {
+    documentText.value = ''
+    documentRuns.value = []
+  }
+  sourcePreviewSelection.value = null
+  sourcePreviewSelectionPayload.value = null
+  clearPreviewSampleValues()
+
   // Convert manifest fields back to editable fieldRows
   const rows = manifestToFieldRows(manifest)
+  // TEMP diagnostic: show real counts so we can locate the edit bug
+  ElMessage.warning(
+    `[诊断] manifest.fields=${manifest.fields?.length ?? '?'} → rows=${rows.length}; first field keys: ${Object.keys(manifest.fields?.[0] || {}).slice(0, 12).join(',')}`,
+  )
   fieldRows.value = rows
 
   editingLibraryTemplatePath.value = item.path
@@ -1520,6 +1624,19 @@ async function openTemplatePackage(path, knownManifest = null) {
   templateManifest.value = result.data
   clearStructureOverrides()
   resetFormValues((result.data.fields || []).filter(isRenderableField))
+
+  // Load document content for fill preview (non-blocking)
+  tauriCallSafe('inspect_docsytpl_content', { path }).then((contentResult) => {
+    if (requestSeq !== templateOpenRequestSeq) return
+    if (contentResult.ok) {
+      fillDocumentRuns.value = contentResult.data.documentRuns || []
+    } else {
+      fillDocumentRuns.value = []
+    }
+    // Rebuild preview if panel is open
+    if (fillPreviewVisible.value) buildFillPreview()
+  })
+
   await loadHistoryContext(false)
   return true
 }
@@ -1566,6 +1683,74 @@ function resetFormValues(fields) {
     }
   }
 }
+
+// ── Fill Preview ──────────────────────────────────────────────────────────────
+
+function buildFillPreview() {
+  const runs = fillDocumentRuns.value
+  const manifest = templateManifest.value
+  if (!runs?.length || !manifest?.fields?.length) {
+    fillPreviewText.value = ''
+    return
+  }
+
+  // Build markId → field mapping (first occurrence wins for duplicate fields)
+  const markToField = new Map()
+  const fieldLabelByName = new Map()
+  for (const field of manifest.fields) {
+    if (!isRenderableField(field)) continue
+    const label = field.label || field.name
+    fieldLabelByName.set(field.name, label)
+    for (const ref of field.markRefs || []) {
+      if (ref.markId && !markToField.has(ref.markId)) {
+        markToField.set(ref.markId, field.name)
+      }
+    }
+  }
+
+  const parts = []
+  let lastParagraph = null
+  for (const run of runs) {
+    if (lastParagraph !== null && run.paragraphIndex !== lastParagraph) {
+      parts.push('\n')
+    }
+    lastParagraph = run.paragraphIndex
+
+    const fieldName = markToField.get(run.id)
+    if (fieldName) {
+      const key = fieldFormKey({ id: `fill:${fieldName}`, name: fieldName })
+      const value = formValues[key]
+      if (value != null && value !== '' && value !== false) {
+        if (Array.isArray(value)) {
+          parts.push(value.map((v) => (typeof v === 'object' ? v.text : v)).filter(Boolean).join('、'))
+        } else {
+          parts.push(String(value))
+        }
+      } else {
+        parts.push(`[${fieldLabelByName.get(fieldName) || fieldName}]`)
+      }
+    } else {
+      parts.push(run.text || '')
+    }
+  }
+  fillPreviewText.value = parts.join('')
+}
+
+// Debounced watcher: update preview when formValues change and preview is visible
+let fillPreviewTimer = null
+watch(
+  () => JSON.stringify(formValues),
+  () => {
+    if (!fillPreviewVisible.value) return
+    if (fillPreviewTimer) window.clearTimeout(fillPreviewTimer)
+    fillPreviewTimer = window.setTimeout(() => buildFillPreview(), 200)
+  },
+)
+
+// Build preview immediately when panel opens
+watch(fillPreviewVisible, (visible) => {
+  if (visible) buildFillPreview()
+})
 
 async function loadHistoryContext(applyLastValues = false) {
   if (!templatePath.value || !templateManifest.value) return
@@ -1635,6 +1820,70 @@ function inputValueForField(field, value) {
     return value.map((item) => parsePartyItem(displayValue(item)))
   }
   return value
+}
+
+// ── Template Import/Export ────────────────────────────────────────────────────
+
+async function importTemplateToLibrary() {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'Docsy 模板', extensions: ['docsytpl'] }],
+  })
+  if (!selected) return
+  // Check for existing templates with the same name
+  const sourceName = fileName(selected)
+  const existing = templateLibrary.value.find((item) => fileName(item.path) === sourceName)
+  if (existing) {
+    try {
+      await ElMessageBox.confirm(
+        `模板库中已存在同名模板"${sourceName}"，是否覆盖？`,
+        '重名提示',
+        { confirmButtonText: '覆盖', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch {
+      return // User cancelled
+    }
+  }
+  const result = await tauriCallSafe('import_template_to_library', { sourcePath: selected })
+  if (!result.ok) {
+    ElMessage.error(result.error || '导入失败')
+    return
+  }
+  ElMessage.success(existing ? '模板已覆盖导入' : '模板已导入')
+  await loadTemplateLibrary()
+}
+
+async function openExportDialog() {
+  await loadTemplateLibrary()
+  exportTemplateList.value = [...templateLibrary.value]
+  exportSelectedPaths.value = []
+  exportResult.value = ''
+  exportResultDir = ''
+  exportDialogVisible.value = true
+}
+
+async function executeExportTemplates() {
+  if (!exportSelectedPaths.value.length) return
+  const dir = await open({ directory: true, multiple: false })
+  if (!dir) return
+  const result = await tauriCallSafe('export_templates', {
+    templatePaths: exportSelectedPaths.value,
+    outputDir: dir,
+  })
+  if (!result.ok) {
+    ElMessage.error(result.error || '导出失败')
+    return
+  }
+  exportResultDir = result.data
+  const count = exportSelectedPaths.value.length
+  exportResult.value = count > 1
+    ? `已导出 ${count} 个模板到 Docsy模板 文件夹`
+    : `已导出 1 个模板`
+  ElMessage.success('模板导出成功')
+}
+
+async function openExportFolder() {
+  if (exportResultDir) await openPath(exportResultDir)
 }
 
 function scheduleHistoryRefresh() {

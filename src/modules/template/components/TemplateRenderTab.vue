@@ -8,7 +8,6 @@
         </div>
         <div class="actions inline">
           <el-button :loading="templateLibraryLoading" @click="$emit('load-template-library')">刷新</el-button>
-          <el-button @click="$emit('select-template-package')">选择外部模板</el-button>
         </div>
       </div>
 
@@ -51,6 +50,9 @@
           <el-button size="small" text @click="$emit('expand-all-fields')">展开全部</el-button>
         </div>
         <el-button type="success" :loading="rendering" @click="$emit('render-template')">生成 Word</el-button>
+        <el-button :disabled="!templateManifest" @click="$emit('toggle-fill-preview')">
+          {{ fillPreviewVisible ? '收起预览' : '预览' }}
+        </el-button>
         <el-dropdown @command="$emit('batch-command', $event)" trigger="click">
           <el-button :loading="batchProcessing"
             >批量填写 <el-icon class="el-icon--right"><arrow-down /></el-icon
@@ -65,12 +67,15 @@
       </div>
 
       <div class="template-form-grid">
-        <section v-for="field in filteredRenderableFields" :key="field.id" class="fill-field-card">
+        <section v-for="field in filteredRenderableFields" :key="field.id" class="fill-field-card" :class="{ 'duplicate-field': field._isDuplicate }">
           <div class="fill-field-header" @click="$emit('toggle-field-collapse', field)">
             <strong>{{ fillFieldLabel(field) }}</strong>
             <span v-if="field.semanticKey && field.semanticKey !== field.name">{{ field.semanticKey }}</span>
             <em v-if="field.required">必填</em>
-            <el-tag v-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
+            <el-tag v-if="field._isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
+              同名字段，自动同步
+            </el-tag>
+            <el-tag v-else-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
               填一次将自动填充到所有位置
             </el-tag>
             <span class="field-collapse-toggle">{{ collapsedFields.has(field.id) ? '▸' : '▾' }}</span>
@@ -219,11 +224,12 @@
             </el-select>
             <el-input
               v-else
-              :model-value="getFormValue(field)"
+              :model-value="field._isDuplicate ? getFormValueByPrimary(field) : getFormValue(field)"
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 6 }"
               resize="none"
               clearable
+              :disabled="field._isDuplicate"
               @input="setFormValue(field, $event)"
             />
             <div v-if="templateStoredSuggestionItems(field).length" class="suggestion-row">
@@ -283,6 +289,14 @@
           </div>
         </section>
       </div>
+
+      <div v-if="fillPreviewVisible && fillPreviewText" class="fill-preview-panel">
+        <div class="fill-preview-header">
+          <h3>填写预览</h3>
+          <p>未填入的字段用方括号标注，以最终生成效果为准。</p>
+        </div>
+        <pre class="fill-preview-text">{{ fillPreviewText }}</pre>
+      </div>
     </div>
   </section>
 </template>
@@ -321,6 +335,9 @@ const props = defineProps({
   batchProcessing: { type: Boolean, default: false },
   fieldSearch: { type: String, default: '' },
   collapsedFields: { type: Object, default: () => new Set() },
+  // Fill preview
+  fillPreviewVisible: { type: Boolean, default: false },
+  fillPreviewText: { type: String, default: '' },
   // Computed from parent
   renderableTemplateFields: { type: Array, default: () => [] },
   filteredRenderableFields: { type: Array, default: () => [] },
@@ -348,6 +365,7 @@ const emit = defineEmits([
   'set-field-type-override',
   'update-form-value',
   'update-structure-override',
+  'toggle-fill-preview',
 ])
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -377,6 +395,15 @@ function selectFieldOptions(field) {
 // ── Form value accessors (emit events instead of mutating props) ────────────
 
 function getFormValue(field) {
+  return props.formValues[fieldFormKey(field)]
+}
+
+function getFormValueByPrimary(field) {
+  // For duplicate fields, get the value from the first field with the same name
+  const primary = props.renderableTemplateFields.find(
+    (f) => f.name === field.name && !f._isDuplicate
+  )
+  if (primary) return props.formValues[fieldFormKey(primary)]
   return props.formValues[fieldFormKey(field)]
 }
 
@@ -790,6 +817,57 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Duplicate field styling */
+.duplicate-field {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.duplicate-field .el-textarea.is-disabled .el-textarea__inner {
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+  cursor: not-allowed;
+}
+
+/* Fill preview */
+.fill-preview-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--docsy-border-subtle);
+}
+
+.fill-preview-header {
+  margin-bottom: 8px;
+}
+
+.fill-preview-header h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--docsy-text-strong);
+}
+
+.fill-preview-header p {
+  margin: 0;
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+}
+
+.fill-preview-text {
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-strong);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @media (max-width: 1180px) {

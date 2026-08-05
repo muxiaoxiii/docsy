@@ -82,6 +82,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         template::restore_template_from_trash,
         template::permanently_delete_template,
         template::inspect_docsytpl,
+        template::inspect_docsytpl_content,
         template::render_docx_template,
         template::get_template_history_context,
         template::list_template_generation_runs,
@@ -93,5 +94,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         template::export_template_fields_xlsx,
         template::validate_batch_import,
         template::batch_render_from_xlsx,
+        template::import_template_to_library,
+        template::export_templates,
     ]
 }

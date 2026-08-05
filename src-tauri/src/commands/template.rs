@@ -258,3 +258,43 @@ pub async fn save_batch_history_rows(
     })
     .await
 }
+
+#[tauri::command]
+pub async fn import_template_to_library(source_path: String) -> Result<String, String> {
+    run_blocking(move || {
+        let source = std::path::Path::new(&source_path);
+        let file_name = source
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("无效文件名"))?;
+        let dest = crate::docx_template::template_library_dir().join(file_name);
+        std::fs::copy(source, &dest)?;
+        Ok(dest.display().to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn export_templates(
+    template_paths: Vec<String>,
+    output_dir: String,
+) -> Result<String, String> {
+    run_blocking(move || {
+        let output = std::path::Path::new(&output_dir);
+        let target_dir = if template_paths.len() > 1 {
+            let dir = output.join("Docsy模板");
+            std::fs::create_dir_all(&dir)?;
+            dir
+        } else {
+            output.to_path_buf()
+        };
+        for path in &template_paths {
+            let source = std::path::Path::new(path);
+            let file_name = source
+                .file_name()
+                .ok_or_else(|| anyhow::anyhow!("无效文件名"))?;
+            std::fs::copy(source, target_dir.join(file_name))?;
+        }
+        Ok(target_dir.display().to_string())
+    })
+    .await
+}

@@ -257,6 +257,11 @@
             <label>合并文件名</label>
             <el-input v-model="mergeFileName" :disabled="outputMode === 'files_only'" />
           </div>
+          <div class="rule-item">
+            <label>PDF 书签</label>
+            <el-switch v-model="bookmarkEnabled" active-text="添加" inactive-text="不添加" />
+            <span class="field-hint">为每个文件添加书签，方便快速导航</span>
+          </div>
         </div>
       </div>
 
@@ -876,6 +881,7 @@ const normalizeA4 = ref(false)
 const a4Orientation = ref('preserve')
 const rasterDpi = ref(DEFAULT_RASTER_DPI)
 const removeAnnotations = ref(false)
+const bookmarkEnabled = ref(false)
 const annotationKinds = ref([
   'Text',
   'FreeText',
@@ -1304,6 +1310,7 @@ const hasApplicableProcessingRule = computed(
   () =>
     normalizeA4.value ||
     removeAnnotations.value ||
+    bookmarkEnabled.value ||
     hasExistingEditRule.value ||
     hasExistingConvertRule.value ||
     hasExistingRemovalRule.value ||
@@ -1316,6 +1323,7 @@ const currentRules = computed(() => ({
   a4Orientation: a4Orientation.value,
   rasterDpi: rasterDpi.value,
   removeAnnotations: removeAnnotations.value,
+  bookmarkEnabled: bookmarkEnabled.value,
   annotationKinds: annotationKinds.value,
   cleanupHeaderEnabled: autoCleanupHeaderEnabled.value,
   cleanupFooterEnabled: autoCleanupFooterEnabled.value,

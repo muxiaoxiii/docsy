@@ -562,6 +562,15 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             ? footerTextOverlayConfigForGroup(footerTextGroup.text, footerTextGroup)
             : null,
       extraOverlays,
+      bookmark: rules.bookmarkEnabled
+        ? {
+            enabled: true,
+            label: rules.headerInsertEnabled && rules.headerMode !== 'none'
+              ? buildHeaderText(file, index, rules)
+              : stripPdf(file.name),
+            pageIndex: 0,
+          }
+        : null,
     }
   })
 }
