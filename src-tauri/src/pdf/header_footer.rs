@@ -51,6 +51,10 @@ pub struct HeaderFooterJob {
     extra_overlays: Vec<OverlayTextConfig>,
     #[serde(default)]
     bookmark: Option<BookmarkConfig>,
+    #[serde(default)]
+    bookmarks: Vec<BookmarkConfig>,
+    #[serde(default)]
+    bookmark_remove_existing: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -106,6 +110,7 @@ struct PlainTextCleanupBBoxConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct BookmarkConfig {
     #[serde(default)]
     enabled: bool,
@@ -113,6 +118,8 @@ pub struct BookmarkConfig {
     label: String,
     #[serde(default)]
     page_index: u32,
+    #[serde(default)]
+    remove_existing: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -355,6 +362,90 @@ fn apply_bookmark(output: &Path, config: &BookmarkConfig) -> Result<()> {
     Ok(())
 }
 
+/// 写入多个书签，创建 /First /Last /Next /Prev 链
+fn apply_bookmarks(output: &Path, bookmarks: &[BookmarkConfig], remove_existing: bool) -> Result<()> {
+    if remove_existing {
+        remove_pdf_bookmarks(output)?;
+    }
+
+    let active: Vec<&BookmarkConfig> = bookmarks
+        .iter()
+        .filter(|b| b.enabled && !b.label.is_empty())
+        .collect();
+
+    if active.is_empty() {
+        return Ok(());
+    }
+
+    let temp = temp_named_path("docsy_bookmarks", "pdf");
+    let mut doc = Document::load(output).context("加载 PDF 以写入书签失败")?;
+    let pages = doc.get_pages();
+    let page_ids: Vec<ObjectId> = pages.into_iter().map(|(_, id)| id).collect();
+
+    // Create outline items
+    let mut item_ids = Vec::new();
+    for config in &active {
+        let page_id = page_ids
+            .get(config.page_index as usize)
+            .copied()
+            .context("书签页码超出文档范围")?;
+
+        let item_id = doc.add_object(dictionary! {
+            "Title" => Object::String(utf16be_pdf_text(&config.label), StringFormat::Hexadecimal),
+            "Dest" => vec![
+                Object::Reference(page_id),
+                Object::Name(b"XYZ".to_vec()),
+                Object::Null,
+                Object::Null,
+                Object::Null,
+            ],
+        });
+        item_ids.push(item_id);
+    }
+
+    // Link items with Next/Prev
+    for i in 0..item_ids.len() {
+        if let Some(Object::Dictionary(item)) = doc.objects.get_mut(&item_ids[i]) {
+            if i > 0 {
+                item.set("Prev", item_ids[i - 1]);
+            }
+            if i + 1 < item_ids.len() {
+                item.set("Next", item_ids[i + 1]);
+            }
+        }
+    }
+
+    // Create Outlines dictionary
+    let outlines_id = doc.add_object(dictionary! {
+        "Type" => "Outlines",
+        "Count" => item_ids.len() as i64,
+        "First" => item_ids[0],
+        "Last" => item_ids[item_ids.len() - 1],
+    });
+
+    // Set Parent on all items
+    for item_id in &item_ids {
+        if let Some(Object::Dictionary(item)) = doc.objects.get_mut(item_id) {
+            item.set("Parent", outlines_id);
+        }
+    }
+
+    // Set Outlines in Catalog
+    let catalog_id = doc
+        .trailer
+        .get(b"Root")
+        .and_then(|obj| obj.as_reference())
+        .context("找不到 PDF Catalog")?;
+    if let Some(Object::Dictionary(catalog)) = doc.objects.get_mut(&catalog_id) {
+        catalog.set("Outlines", outlines_id);
+    }
+
+    doc.save(&temp).context("保存书签 PDF 失败")?;
+    fs::copy(&temp, output).context("复制书签 PDF 失败")?;
+    let _ = fs::remove_file(&temp);
+    Ok(())
+}
+
 /// 检查 PDF 的 Catalog 是否包含 /Outlines（即已有书签）
 pub fn has_pdf_bookmarks(path: &Path) -> Result<bool> {
     let doc = Document::load(path)
@@ -490,7 +581,9 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         && semantic_rebuild_overlays.is_empty()
     {
         fs::copy(work_input, output).context("复制 PDF 失败")?;
-        if let Some(bookmark) = &args.bookmark {
+        if !args.bookmarks.is_empty() || args.bookmark_remove_existing {
+            apply_bookmarks(output, &args.bookmarks, args.bookmark_remove_existing)?;
+        } else if let Some(bookmark) = &args.bookmark {
             apply_bookmark(output, bookmark)?;
         }
         cleanup_temp(normalized_path);
@@ -541,7 +634,9 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         anyhow::bail!("qpdf overlay 失败: {}", stderr.trim());
     }
     write_optimized_or_copy(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
-    if let Some(bookmark) = &args.bookmark {
+    if !args.bookmarks.is_empty() || args.bookmark_remove_existing {
+        apply_bookmarks(output, &args.bookmarks, args.bookmark_remove_existing)?;
+    } else if let Some(bookmark) = &args.bookmark {
         apply_bookmark(output, bookmark)?;
     }
 
@@ -2125,6 +2220,8 @@ mod tests {
             footer: None,
             extra_overlays: Vec::new(),
             bookmark: None,
+            bookmarks: Vec::new(),
+            bookmark_remove_existing: false,
         })
         .unwrap();
 

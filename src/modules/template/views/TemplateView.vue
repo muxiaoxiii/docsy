@@ -1376,6 +1376,7 @@ async function openTemplateFromLibrary(item) {
 function manifestToFieldRows(manifest) {
   const rows = []
   const fields = manifest.fields || []
+  const byNameKey = new Map()
 
   for (const field of fields) {
     if (field.type === 'checkbox' || field.type === 'radio_group' || field.type === 'checkbox_group') {
@@ -1467,14 +1468,22 @@ function manifestToFieldRows(manifest) {
         }
       }
     } else {
-      // Regular field (text, date, party_list): one row per markRef
-      // This preserves all document positions, matching the build tab behavior.
+      // Regular field (text, date, party_list): merge same-name rows into one
+      // row holding every markRef, aligning with buildFields on the scan side
+      // (one field, fill all positions) instead of a row per document position.
       const refs = field.markRefs || []
-      if (refs.length <= 1) {
-        rows.push(createSimpleFieldRow(field, [], refs[0] || null))
-      } else {
-        for (let i = 0; i < refs.length; i++) {
-          rows.push(createSimpleFieldRow(field, [], refs[i], i))
+      const key = `${field.type}:${(field.name || '').trim()}`
+      let merged = byNameKey.get(key)
+      if (!merged) {
+        merged = createSimpleFieldRow(field, [], refs[0] || null)
+        merged.markRefs = []
+        merged.fillAllPositions = true
+        byNameKey.set(key, merged)
+        rows.push(merged)
+      }
+      for (const ref of refs) {
+        if (!merged.markRefs.some((r) => r.markId === ref.markId)) {
+          merged.markRefs.push(ref)
         }
       }
     }
@@ -1600,10 +1609,6 @@ async function editTemplateFromLibrary(item) {
 
   // Convert manifest fields back to editable fieldRows
   const rows = manifestToFieldRows(manifest)
-  // TEMP diagnostic: show real counts so we can locate the edit bug
-  ElMessage.warning(
-    `[诊断] manifest.fields=${manifest.fields?.length ?? '?'} → rows=${rows.length}; first field keys: ${Object.keys(manifest.fields?.[0] || {}).slice(0, 12).join(',')}`,
-  )
   fieldRows.value = rows
 
   editingLibraryTemplatePath.value = item.path

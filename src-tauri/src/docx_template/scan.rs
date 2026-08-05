@@ -64,9 +64,11 @@ fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_id
         } = child
         {
             if name != "w:r" {
-                // Recursively scan nested elements (e.g., w:sdt > w:sdtContent > w:r,
-                // w:hyperlink > w:r for hyperlink-wrapped highlighted text)
-                if name == "w:sdt" || name == "w:hyperlink" {
+                // Recursively scan nested elements so coordinate counting stays
+                // identical to save (w:sdt > w:sdtContent > w:r and
+                // w:hyperlink > w:r). Skipping w:sdtContent shifts every
+                // run index after the sdt, breaking markId matching on reload.
+                if name == "w:sdt" || name == "w:sdtContent" || name == "w:hyperlink" {
                     scan_paragraph_runs(children, index, paragraph_idx);
                 }
                 continue;

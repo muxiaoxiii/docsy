@@ -329,8 +329,8 @@ fn wrap_paragraph_runs(
         let is_wr = matches!(&children[i], XmlNode::Element { name, .. } if name == "w:r");
         if !is_wr {
             // Nested containers whose runs participate in coordinates must be
-            // traversed exactly like scan does (w:sdt, w:hyperlink).
-            if matches!(&children[i], XmlNode::Element { name, .. } if name == "w:sdt" || name == "w:hyperlink") {
+            // traversed exactly like scan does (w:sdt, w:sdtContent, w:hyperlink).
+            if matches!(&children[i], XmlNode::Element { name, .. } if name == "w:sdt" || name == "w:sdtContent" || name == "w:hyperlink") {
                 if let XmlNode::Element { children: sub, .. } = &mut children[i] {
                     wrap_paragraph_runs(sub, part, cursor, coord_map)?;
                 }

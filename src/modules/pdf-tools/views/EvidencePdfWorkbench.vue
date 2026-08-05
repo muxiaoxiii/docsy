@@ -256,11 +256,25 @@
           <div class="rule-item merge-row">
             <label>合并文件名</label>
             <el-input v-model="mergeFileName" :disabled="outputMode === 'files_only'" />
-            <el-checkbox
-              v-if="outputMode !== 'files_only'"
-              v-model="bookmarkEnabled"
-              class="bookmark-inline"
-            >添加书签</el-checkbox>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="showProcessingControls && outputMode !== 'files_only'" class="rule-block">
+        <div class="block-title">PDF 书签</div>
+        <div class="rule-grid bookmark-rule-grid">
+          <div class="rule-item">
+            <el-checkbox v-model="bookmarkEnabled">添加书签</el-checkbox>
+          </div>
+          <div class="rule-item">
+            <el-checkbox v-model="bookmarkRemoveExisting">删除已有书签</el-checkbox>
+          </div>
+          <div v-if="bookmarkEnabled" class="rule-item">
+            <label>书签文字</label>
+            <el-radio-group v-model="bookmarkLabelSource">
+              <el-radio value="header">用页眉文字</el-radio>
+              <el-radio value="filename">用文件名</el-radio>
+            </el-radio-group>
           </div>
         </div>
       </div>
@@ -458,20 +472,22 @@
         <el-table-column type="expand" width="36">
           <template #default="{ row, $index }">
             <div class="content-subrows">
-              <template v-for="cr in buildFileContentRows(row, $index, currentRules)" :key="cr.id">
-                <div
-                  class="content-subrow"
-                  :class="[
-                    `status-${cr.status}`,
-                    { selected: cr.group && row.path === selectedOverlayFile?.path && cr.group.id === selectedGroupFor(row, cr.kind)?.id },
-                  ]"
-                  @click.stop="cr.group && focusGroup(row, cr.kind, cr.group.id)"
-                >
-                  <span class="content-kind-tag">{{ contentKindLabel(cr.kind) }}</span>
-                  <span class="content-status-tag" :class="`tag-${cr.status}`">{{ contentStatusLabel(cr.status) }}</span>
-                  <span class="content-text">
+              <el-table
+                :data="buildFileContentRows(row, $index, currentRules).filter(r => r.status !== 'confirmed')"
+                size="small"
+                border
+                class="content-subtable"
+                @click.stop
+              >
+                <el-table-column label="类型" width="80">
+                  <template #default="{ row: cr }">
+                    <span class="content-kind-tag" :class="`source-${cr.source}`">{{ contentKindLabel(cr.kind) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="文本" min-width="200">
+                  <template #default="{ row: cr }">
                     <el-input
-                      v-if="editingContentRowId === cr.id"
+                      v-if="editingContentRowId === `${row.path}|${cr.id}`"
                       v-model="editingContentRowValue"
                       size="small"
                       @click.stop
@@ -483,8 +499,17 @@
                       class="editable-text"
                       @dblclick.stop="startContentRowEdit(row, cr)"
                     >{{ displayContentRowText(row, $index, cr) || '-' }}</span>
-                  </span>
-                  <span class="content-actions">
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="80">
+                  <template #default="{ row: cr }">
+                    <el-tag size="small" :type="contentStatusTagType(cr.status)">
+                      {{ contentStatusLabel(cr.status) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="100">
+                  <template #default="{ row: cr }">
                     <el-button
                       v-if="cr.source === 'existing' && cr.status !== 'existing'"
                       link
@@ -505,10 +530,13 @@
                       type="danger"
                       @click.stop="removeContentRowExisting(row, cr)"
                     >删除</el-button>
-                  </span>
-                </div>
-              </template>
-              <div v-if="!buildFileContentRows(row, $index, currentRules).length" class="content-subrow muted">
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div
+                v-if="!buildFileContentRows(row, $index, currentRules).filter(r => r.status !== 'confirmed').length"
+                class="content-subrow muted"
+              >
                 <span class="content-text">该文件未配置页眉页脚页码</span>
               </div>
             </div>
@@ -899,6 +927,8 @@ const a4Orientation = ref('preserve')
 const rasterDpi = ref(DEFAULT_RASTER_DPI)
 const removeAnnotations = ref(false)
 const bookmarkEnabled = ref(false)
+const bookmarkRemoveExisting = ref(false)
+const bookmarkLabelSource = ref('header')
 const existingBookmarkCount = ref(0)
 const existingBookmarkAlertVisible = ref(true)
 const annotationKinds = ref([
@@ -1334,6 +1364,7 @@ const hasApplicableProcessingRule = computed(
     normalizeA4.value ||
     removeAnnotations.value ||
     bookmarkEnabled.value ||
+    bookmarkRemoveExisting.value ||
     hasExistingEditRule.value ||
     hasExistingConvertRule.value ||
     hasExistingRemovalRule.value ||
@@ -1347,6 +1378,8 @@ const currentRules = computed(() => ({
   rasterDpi: rasterDpi.value,
   removeAnnotations: removeAnnotations.value,
   bookmarkEnabled: bookmarkEnabled.value,
+  bookmarkRemoveExisting: bookmarkRemoveExisting.value,
+  bookmarkLabelSource: bookmarkLabelSource.value,
   annotationKinds: annotationKinds.value,
   cleanupHeaderEnabled: autoCleanupHeaderEnabled.value,
   cleanupFooterEnabled: autoCleanupFooterEnabled.value,
@@ -2290,9 +2323,19 @@ function contentStatusLabel(status) {
   if (status === 'pending-write') return '待写入'
   if (status === 'pending-add') return '待添加'
   if (status === 'existing') return '已有'
+  if (status === 'confirmed') return '已确认'
   if (status === 'pending-edit') return '待编辑'
   if (status === 'pending-delete') return '待删除'
   return status
+}
+
+function contentStatusTagType(status) {
+  if (status === 'pending-write' || status === 'pending-add') return 'primary'
+  if (status === 'confirmed') return 'success'
+  if (status === 'existing') return 'info'
+  if (status === 'pending-edit') return 'warning'
+  if (status === 'pending-delete') return 'danger'
+  return 'info'
 }
 
 function displayContentRowText(file, index, cr) {
@@ -2921,6 +2964,37 @@ h3 {
 .overlay-table {
   margin-top: 0;
   width: 100%;
+}
+
+.bookmark-rule-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+}
+
+.content-subrows {
+  padding: 6px 12px;
+}
+
+.content-subtable {
+  width: 100%;
+}
+
+.content-kind-tag {
+  display: inline-block;
+  min-width: 52px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  text-align: center;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+}
+
+.content-kind-tag.source-new {
+  background: var(--docsy-accent-subtle, rgba(64, 158, 255, 0.15));
+  color: var(--docsy-accent, #409eff);
 }
 
 .preview-controls {

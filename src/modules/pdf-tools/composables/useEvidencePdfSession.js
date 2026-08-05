@@ -289,9 +289,10 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
     const existingKind = kind === 'footerText' ? 'footerText' : kind
     for (const element of file.existingElements || []) {
       if (element.kind !== existingKind) continue
-      const decision = element.decision || 'keep'
+      const decision = element.decision
       let status = 'existing'
-      if (decision === 'edit') status = 'pending-edit'
+      if (decision === 'keep') status = 'confirmed'
+      else if (decision === 'edit') status = 'pending-edit'
       else if (decision === 'delete') status = 'pending-delete'
       rows.push({
         kind,
@@ -571,6 +572,16 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             pageIndex: 0,
           }
         : null,
+      bookmarks: rules.bookmarkEnabled
+        ? [{
+            enabled: true,
+            label: rules.bookmarkLabelSource === 'filename'
+              ? stripPdf(file.name)
+              : buildHeaderText(file, index, rules) || stripPdf(file.name),
+            pageIndex: 0,
+          }]
+        : [],
+      bookmarkRemoveExisting: rules.bookmarkRemoveExisting || false,
     }
   })
 }

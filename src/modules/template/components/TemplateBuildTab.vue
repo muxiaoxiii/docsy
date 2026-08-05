@@ -608,7 +608,7 @@ import {
   isMarkerType,
   isConnectorRow,
   displayMarkText,
-  isGroupedField,
+  isGroupedField as isGroupedFieldFn,
   groupedFieldSummary,
   referenceSourceLabel,
   hasUnseenReferenceSuggestion as hasUnseenReferenceSuggestionFn,
@@ -709,6 +709,10 @@ const documentPreviewRef = ref(null)
 // Functions that need fieldRows
 function relationSummary(row) {
   return relationSummaryFn(row, props.fieldRows)
+}
+
+function isGroupedField(row) {
+  return isGroupedFieldFn(row, props.fieldRows)
 }
 
 function structureTargetDisplayName(row) {
