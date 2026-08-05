@@ -1659,12 +1659,20 @@ const {
   refreshOverlayPageCounts,
 })
 
-watch(selectedOverlayFile, () => {
+watch(selectedOverlayFile, (newFile, oldFile) => {
   previewPage.value = 1
   truePreview.value = null
-  selectedFooterCandidateKey.value = selectedOverlayFile.value?.footerCandidateChoices?.[0]
-    ? candidateKey(selectedOverlayFile.value.footerCandidateChoices[0])
+  selectedFooterCandidateKey.value = newFile?.footerCandidateChoices?.[0]
+    ? candidateKey(newFile.footerCandidateChoices[0])
     : ''
+  // Parameter following: when switching to a new file, sync its group params
+  // from the first file (overlayFiles[0]) if the new file still has defaults.
+  if (newFile && oldFile && newFile !== oldFile) {
+    const source = overlayFiles.value[0]
+    if (source && source !== newFile) {
+      syncGroupParamsFromSource(source, newFile)
+    }
+  }
 })
 
 watch(
@@ -1676,6 +1684,33 @@ watch(
     deep: true,
   },
 )
+
+// Parameter following: copy style params from source file's group to target,
+// only if target still has default values (never been explicitly set).
+const STYLE_KEYS = ['align', 'fontSize', 'fontFamily', 'marginMm', 'offsetXMm', 'color']
+const DEFAULTS = {
+  header: { align: 'center', fontSize: 12, fontFamily: 'auto', marginMm: 15, offsetXMm: 0, color: '#000000' },
+  footerText: { align: 'left', fontSize: 9, fontFamily: 'auto', marginMm: 10, offsetXMm: 0, color: '#000000' },
+  pageNumber: { align: 'center', fontSize: 9, fontFamily: 'auto', marginMm: 10, offsetXMm: 0, color: '#000000' },
+}
+
+function syncGroupParamsFromSource(source, target) {
+  for (const kind of ['header', 'footerText', 'pageNumber']) {
+    const srcGroup = selectedGroupFor(source, kind)
+    const tgtGroup = selectedGroupFor(target, kind)
+    if (!srcGroup || !tgtGroup) continue
+    const defaults = DEFAULTS[kind]
+    // Only sync if target group still has all default values
+    const isDefault = STYLE_KEYS.every(k => tgtGroup[k] === defaults[k] || tgtGroup[k] == null)
+    if (!isDefault) continue
+    // Copy style params from source
+    for (const k of STYLE_KEYS) {
+      if (srcGroup[k] != null) tgtGroup[k] = srcGroup[k]
+    }
+  }
+  // Trigger reactivity
+  overlayFiles.value = [...overlayFiles.value]
+}
 
 function applyWorkflowDefaults() {
   if (workflowMode.value === 'split') {
