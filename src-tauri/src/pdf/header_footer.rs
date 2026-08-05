@@ -24,9 +24,9 @@ use super::page_info::{get_page_infos, PageSize};
 use super::preview::{render_preview, PreviewResult};
 use super::qpdf;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct HeaderFooterJob {
+pub struct HeaderFooterJob {
     #[serde(alias = "input")]
     input_path: String,
     #[serde(alias = "output")]
@@ -51,7 +51,7 @@ struct HeaderFooterJob {
     extra_overlays: Vec<OverlayTextConfig>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CleanupConfig {
     #[serde(default)]
@@ -76,7 +76,7 @@ struct CleanupConfig {
     footer_replacement: Option<OverlayTextConfig>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PlainTextCleanupTargetConfig {
     text: String,
@@ -90,7 +90,7 @@ struct PlainTextCleanupTargetConfig {
     bbox: Option<PlainTextCleanupBBoxConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PlainTextCleanupBBoxConfig {
     x0: f32,
@@ -102,7 +102,7 @@ struct PlainTextCleanupBBoxConfig {
     height: f32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OverlayTextConfig {
     text: String,
@@ -134,7 +134,7 @@ struct OverlayTextConfig {
     artifact_kind: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PreviewAnnotationRule {
     #[serde(default, alias = "remove")]

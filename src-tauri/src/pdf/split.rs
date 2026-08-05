@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::external::ExternalTool;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitMergedArgs {
     #[serde(alias = "input")]
@@ -15,7 +15,7 @@ pub struct SplitMergedArgs {
     cleanup: SplitCleanup,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitCleanup {
     #[serde(default)]

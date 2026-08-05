@@ -8,9 +8,9 @@ use crate::external::ExternalTool;
 
 use super::page_info::get_page_infos;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PreviewArgs {
+pub struct PreviewArgs {
     input_path: String,
     #[serde(default = "default_preview_page")]
     page: u32,

@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 // page's XML/text/object sample in memory is not safe for a desktop workflow.
 const MAX_SPLIT_ANALYSIS_PAGES: u32 = 600;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionArgs {
     #[serde(alias = "input")]
@@ -44,7 +44,7 @@ pub struct DetectionResult {
     footer_candidates: Vec<HeaderFooterCandidate>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitSuggestionArgs {
     #[serde(alias = "input")]

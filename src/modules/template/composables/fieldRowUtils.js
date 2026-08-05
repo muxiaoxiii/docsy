@@ -928,3 +928,131 @@ export function buildPreviewSampleFields(rows) {
   }
   return fields
 }
+
+// ── Reference suggestion helpers ───────────────────────────────────────────
+
+function findReferenceTarget(row, text, rowIndex, fieldRows) {
+  const previousRows = fieldRows.slice(0, rowIndex).reverse()
+  const partyTotalsBeforeRow = partySourceTotalsBefore(rowIndex, fieldRows)
+  for (const item of previousRows) {
+    if (!item.enabled || rowUsage(item) !== 'field' || isMarkerType(item.type)) continue
+    if (normalizeComparableText(item.text) === text) {
+      return {
+        row: item,
+        kind: 'field',
+        label: item.name || item.label || item.text,
+      }
+    }
+    if (item.type === 'party_list') {
+      const itemIndex = (item.partyItems || []).findIndex((party) => normalizeComparableText(party) === text)
+      if (itemIndex >= 0) {
+        const sourceIndex = partySourceIndexForRow(item, rowIndex, partyTotalsBeforeRow, fieldRows) + itemIndex
+        return {
+          row: item,
+          kind: 'party_item',
+          sourceIndex,
+          label: `${item.name || item.label || '当事人列表'} · 第 ${sourceIndex + 1} 项`,
+        }
+      }
+    }
+  }
+  return null
+}
+
+function partySourceTotalsBefore(rowIndex, fieldRows) {
+  const totals = new Map()
+  for (const item of fieldRows.slice(0, Math.max(0, rowIndex))) {
+    if (!item.enabled || rowUsage(item) !== 'field' || item.type !== 'party_list') continue
+    const name = item.name?.trim()
+    if (!name) continue
+    totals.set(name, (totals.get(name) || 0) + Math.max(1, item.partyItems?.length || 0))
+  }
+  return totals
+}
+
+function partySourceIndexForRow(row, rowIndex, totalsBeforeRow, fieldRows) {
+  const name = row?.name?.trim()
+  if (!name) return 0
+  let cursor = (totalsBeforeRow || partySourceTotalsBefore(rowIndex, fieldRows)).get(name) || 0
+  for (let index = Math.max(0, rowIndex) - 1; index >= 0; index -= 1) {
+    const item = fieldRows[index]
+    if (item === row) return cursor - Math.max(1, item.partyItems?.length || 0)
+    if (!item.enabled || rowUsage(item) !== 'field' || item.type !== 'party_list' || item.name?.trim() !== name)
+      continue
+    cursor -= Math.max(1, item.partyItems?.length || 0)
+  }
+  return 0
+}
+
+function adjacentStructureRows(row, usage, fieldRows) {
+  const index = fieldRows.indexOf(row)
+  if (index < 0) return []
+  const direction = usage === 'prefix' ? -1 : 1
+  const rows = []
+  for (let cursor = index + direction; cursor >= 0 && cursor < fieldRows.length; cursor += direction) {
+    const candidate = fieldRows[cursor]
+    if (rowUsage(candidate) !== usage) break
+    rows.push(candidate)
+  }
+  return usage === 'prefix' ? rows.reverse() : rows
+}
+
+export function referenceSuggestion(row, fieldRows) {
+  if (!row || rowUsage(row) !== 'field' || isMarkerType(row.type)) return null
+  const text = normalizeComparableText(row.text)
+  if (!text) return null
+  const rowIndex = fieldRows.indexOf(row)
+  if (rowIndex <= 0) return null
+  const target = findReferenceTarget(row, text, rowIndex, fieldRows)
+  if (!target) return null
+  return {
+    target: target.row,
+    targetLabel: target.label,
+    targetKind: target.kind,
+    sourceIndex: target.sourceIndex,
+    prefixRows: adjacentStructureRows(row, 'prefix', fieldRows),
+    suffixRows: adjacentStructureRows(row, 'suffix', fieldRows),
+  }
+}
+
+export function referenceSourceOptions(row, fieldRows) {
+  if (!row || rowUsage(row) !== 'field' || row.type !== 'reference') return []
+  const options = [
+    { key: referenceSourceKey('auto'), label: '填写时选择' },
+  ]
+  if (row.semanticKey?.trim()) {
+    options.push({ key: referenceSourceKey('semantic', row.semanticKey.trim()), label: `通用字段名：${row.semanticKey.trim()}` })
+  }
+  const rowIndex = fieldRows.indexOf(row)
+  const seen = new Set()
+  for (let i = 0; i < rowIndex; i += 1) {
+    const item = fieldRows[i]
+    if (!item.enabled || rowUsage(item) !== 'field' || isMarkerType(item.type)) continue
+    const name = (item.name || '').trim()
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    if (item.type === 'party_list' && item.partyItems?.length > 1) {
+      for (let p = 0; p < item.partyItems.length; p += 1) {
+        options.push({
+          key: referenceSourceKey('field', name, p),
+          label: `${item.label || name} · 第 ${p + 1} 项`,
+        })
+      }
+    } else {
+      options.push({
+        key: referenceSourceKey('field', name),
+        label: item.label || name,
+      })
+    }
+  }
+  return options
+}
+
+export function allReferenceSuggestions(fieldRows) {
+  return fieldRows.filter((row) => referenceSuggestion(row, fieldRows))
+}
+
+export function hasUnseenReferenceSuggestion(row, fieldRows) {
+  const suggestion = referenceSuggestion(row, fieldRows)
+  return suggestion && !row.referenceHintSeen
+}

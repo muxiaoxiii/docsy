@@ -2,980 +2,116 @@
   <div class="template-view">
     <el-tabs v-model="activeTab" class="template-tabs">
       <el-tab-pane label="制作模板" name="build">
-        <section class="workspace">
-          <div class="panel">
-            <div class="panel-header">
-              <div>
-                <h3>导入标黄 Word</h3>
-                <p>在 Word 里把可替换文字或勾选符号标黄，再导入确认字段。</p>
-              </div>
-              <el-button type="primary" :loading="scanning" @click="selectSourceDocx">选择 Word</el-button>
-            </div>
-
-            <el-descriptions v-if="sourceDocx" :column="1" size="small" border>
-              <el-descriptions-item label="文件">{{ sourceDocx }}</el-descriptions-item>
-              <el-descriptions-item label="识别">
-                {{ marks.length }} 个标黄片段，{{ checkboxLikeCount }} 个疑似勾选符号
-              </el-descriptions-item>
-            </el-descriptions>
-          </div>
-
-          <div v-if="fieldRows.length" class="panel field-panel">
-            <div class="panel-header compact">
-              <div>
-                <h3>确认字段</h3>
-                <p>同名字段会共用一个值；空值处理是字段属性，可以设为全部同名共用或仅当前位置生效。</p>
-              </div>
-              <div class="panel-actions">
-                <el-popover placement="bottom-end" trigger="hover" width="420" popper-class="field-rules-popper">
-                  <template #reference>
-                    <el-button size="small" text class="help-button">
-                      <el-icon><QuestionFilled /></el-icon>
-                      字段规则
-                    </el-button>
-                  </template>
-                  <div class="field-rules">
-                    <section>
-                      <h4>类型怎么选</h4>
-                      <div v-for="item in typeHelpItems" :key="item.value" class="type-help-item">
-                        <strong>{{ item.label }}</strong>
-                        <span>{{ item.description }}</span>
-                      </div>
-                    </section>
-                    <section>
-                      <h4>前缀 / 后缀</h4>
-                      <p>
-                        前缀和后缀不是填写字段，只在归属字段为空时随字段一起消失。前缀可以包含语法连接符，例如“，第三人”。
-                      </p>
-                      <p>例：标黄“（案号：”设为前缀，案号设为文本，标黄“）”设为后缀，三行字段名都填“案号”。</p>
-                    </section>
-                    <section>
-                      <h4>列表与勾选</h4>
-                      <p>当事人列表会按填写顺序用顿号连接；勾选组只改方框符号，选项文字保留 Word 原文。</p>
-                    </section>
-                  </div>
-                </el-popover>
-                <el-input v-model="templateName" class="template-name" placeholder="模板名称" />
-              </div>
-            </div>
-
-            <div v-if="selectedRows.length" class="selection-tools">
-              <span class="selection-count">已选 {{ selectedRows.length }} 个片段</span>
-              <el-input v-model="groupName" class="group-input" size="small" placeholder="字段名" />
-              <el-input v-model="groupLabel" class="group-input" size="small" placeholder="显示名" />
-              <el-select v-model="groupType" class="type-input" size="small">
-                <el-option label="文本" value="text" />
-                <el-option label="日期" value="date" />
-                <el-option label="下拉选择" value="select" />
-                <el-option label="列表" value="party_list" />
-                <el-option label="引用" value="reference" />
-                <el-option label="互斥勾选组" value="radio_group" />
-                <el-option label="多选勾选组" value="checkbox_group" />
-              </el-select>
-              <el-button size="small" type="primary" @click="groupSelectedRows">合并为字段</el-button>
-              <el-button size="small" @click="setSelectedRowsUsage('prefix')">设为前缀</el-button>
-              <el-button size="small" @click="setSelectedRowsUsage('suffix')">设为后缀</el-button>
-              <el-button size="small" text @click="clearSelectedRows">取消选择</el-button>
-            </div>
-
-            <el-table
-              ref="fieldTableRef"
-              :data="fieldTableRows"
-              size="small"
-              border
-              row-key="rowId"
-              :row-class-name="fieldRowClassName"
-              @selection-change="selectedRows = $event.filter((row) => !row.displayOnly)"
-              @wheel="handleFieldTableWheel"
-            >
-              <el-table-column type="selection" width="38" :selectable="isSelectableFieldRow" />
-              <el-table-column label="拆分" width="58" align="center">
-                <template #default="{ row }">
-                  <el-button
-                    link
-                    type="primary"
-                    :disabled="
-                      row.displayOnly ||
-                      rowUsage(row) !== 'field' ||
-                      isMarkerType(row.type) ||
-                      row.type === 'party_list'
-                    "
-                    @click="openSplitDialog(row)"
-                  >
-                    拆分
-                  </el-button>
-                </template>
-              </el-table-column>
-              <el-table-column label="标黄文字" min-width="220" show-overflow-tooltip>
-                <template #default="{ row }">
-                  <div class="mark-cell" :class="{ 'structure-mark': rowUsage(row) !== 'field' }">
-                    <span v-if="row.displayOnly && !row.virtualPartyGroup" class="party-item-arrow">→</span>
-                    <span v-else-if="row.partyGroupChild" class="party-item-arrow">→</span>
-                    <span v-else-if="rowUsage(row) === 'prefix'" class="relation-arrow">↳</span>
-                    <span v-else-if="rowUsage(row) === 'suffix'" class="relation-arrow">↰</span>
-                    <span class="mark-text">{{ displayMarkText(row) }}</span>
-                    <span v-if="row.optionLabel && isMarkerType(row.type)" class="option-preview">
-                      {{ row.optionLabel }}
-                    </span>
-                    <span v-if="row.type === 'party_list' && row.partyItems?.length > 1" class="option-preview">
-                      已识别 {{ row.partyItems.length }} 项
-                    </span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="类型" width="132">
-                <template #default="{ row }">
-                  <span v-if="row.virtualPartyGroup" class="muted">当事人列表</span>
-                  <span v-else-if="row.displayOnly" class="muted">当事人项</span>
-                  <span v-else-if="isConnectorRow(row)" class="muted">连接符</span>
-                  <el-select v-else v-model="row.type" size="small" @change="onRowTypeChange(row)">
-                    <el-option
-                      v-for="item in typeHelpItems"
-                      :key="item.value"
-                      :label="item.label"
-                      :value="item.value"
-                    />
-                  </el-select>
-                </template>
-              </el-table-column>
-              <el-table-column label="字段" min-width="210">
-                <template #default="{ row }">
-                  <div v-if="row.virtualPartyGroup" class="field-cell party-child-field">
-                    <span>{{ row.name }}</span>
-                    <span class="field-label">共 {{ row.partyItemCount }} 项</span>
-                  </div>
-                  <div v-else-if="row.displayOnly" class="field-cell party-child-field">
-                    <span>{{ row.name }}</span>
-                    <span class="field-label">第 {{ row.partyItemIndex + 1 }} 项，共 {{ row.partyItemCount }} 项</span>
-                  </div>
-                  <div v-else-if="rowUsage(row) === 'ignore'" class="muted">保留原文，不生成字段</div>
-                  <div v-else-if="rowUsage(row) === 'delete_text'" class="muted">删除此段文字</div>
-                  <div v-else-if="isConnectorRow(row)" class="field-cell">
-                    <span>连接符</span>
-                    <span class="field-label">跟随右侧字段：{{ structureTargetDisplayName(row) }}</span>
-                  </div>
-                  <div v-else-if="row.type === 'reference'" class="field-cell">
-                    <el-input v-model="row.name" size="small" placeholder="引用字段名" @input="onFieldNameInput(row)" />
-                    <span class="field-label">引用：{{ referenceSourceLabel(row) || '未指定来源' }}</span>
-                  </div>
-                  <div v-else class="field-cell">
-                    <el-input
-                      v-model="row.name"
-                      size="small"
-                      :placeholder="rowUsage(row) === 'field' ? '法院' : '归属字段名'"
-                      @input="onFieldNameInput(row)"
-                    />
-                    <span class="field-label">{{ fieldCellSecondaryLabel(row) }}</span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="必填" width="58" align="center">
-                <template #default="{ row }">
-                  <el-checkbox
-                    v-if="!row.displayOnly && rowUsage(row) === 'field' && !isMarkerType(row.type)"
-                    v-model="row.required"
-                  />
-                  <span v-else class="muted">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="关系" min-width="150" show-overflow-tooltip>
-                <template #default="{ row }">
-                  <el-tag v-if="row.virtualPartyGroup" size="small" type="success">当事人列表</el-tag>
-                  <el-tag v-else-if="row.displayOnly" size="small" type="success">列表项</el-tag>
-                  <el-tag v-else-if="rowUsage(row) === 'prefix'" size="small" type="info">{{
-                    relationSummary(row)
-                  }}</el-tag>
-                  <el-tag v-else-if="rowUsage(row) === 'suffix'" size="small" type="info">{{
-                    relationSummary(row)
-                  }}</el-tag>
-                  <el-tag v-else-if="rowUsage(row) === 'delete_text'" size="small" type="danger">删除文本</el-tag>
-                  <el-tag v-else-if="row.type === 'reference'" size="small" type="warning">
-                    引用 {{ referenceSourceLabel(row) || '未指定' }}
-                  </el-tag>
-                  <el-tag v-else-if="isGroupedField(row)" size="small" type="success">{{
-                    groupedFieldSummary(row)
-                  }}</el-tag>
-                  <span v-else class="muted">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="设置" width="64" align="center">
-                <template #default="{ row }">
-                  <span v-if="row.displayOnly" class="muted">-</span>
-                  <template v-else>
-                    <el-popover placement="left-start" trigger="click" width="420">
-                      <template #reference>
-                        <el-badge
-                          v-if="hasUnseenReferenceSuggestion(row)"
-                          value="!"
-                          type="danger"
-                          class="settings-badge"
-                        >
-                          <el-button size="small" circle @click="row.referenceHintSeen = true">⋯</el-button>
-                        </el-badge>
-                        <el-button v-else size="small" circle @click="row.referenceHintSeen = true">⋯</el-button>
-                      </template>
-                      <div class="row-settings">
-                        <h4>{{ row.text || row.name }}</h4>
-                        <p class="setting-caption">{{ relationSummary(row) }}</p>
-
-                        <div v-if="referenceSuggestion(row)" class="reference-suggestion">
-                          <p>
-                            字段内容与前面的“{{
-                              referenceSuggestion(row).targetLabel
-                            }}”相同，建议改成引用，共用同一个填写值。
-                            <span v-if="referenceSuggestion(row).targetKind === 'party_item'">
-                              这是当事人列表中的单个成员。
-                            </span>
-                          </p>
-                          <el-checkbox v-model="row.referenceIncludePrefix">
-                            包含当前这处的前缀
-                            <span class="setting-caption">
-                              {{ referenceSuggestion(row).prefixRows.length ? '会一并归属到引用字段' : '当前未检测到' }}
-                            </span>
-                          </el-checkbox>
-                          <el-checkbox v-model="row.referenceIncludeSuffix">
-                            包含当前这处的后缀
-                            <span class="setting-caption">
-                              {{ referenceSuggestion(row).suffixRows.length ? '会一并归属到引用字段' : '当前未检测到' }}
-                            </span>
-                          </el-checkbox>
-                          <div class="reference-actions">
-                            <el-button size="small" type="primary" @click="applyReferenceSuggestion(row)">
-                              改成引用
-                            </el-button>
-                            <el-button
-                              size="small"
-                              :disabled="!allReferenceSuggestions().length"
-                              @click="applyAllReferenceSuggestions"
-                            >
-                              全部应用
-                            </el-button>
-                          </div>
-                        </div>
-
-                        <el-form label-width="84px" size="small">
-                          <el-form-item label="显示名" v-if="rowUsage(row) === 'field'">
-                            <el-input v-model="row.label" />
-                          </el-form-item>
-                          <el-form-item label="通用字段名" v-if="rowUsage(row) === 'field'">
-                            <el-input
-                              v-model="row.semanticKey"
-                              :placeholder="`默认跟随字段名：${row.name || '未命名'}`"
-                            />
-                          </el-form-item>
-
-                          <template v-if="rowUsage(row) === 'field' && row.type === 'reference'">
-                            <el-form-item label="引用来源">
-                              <el-select
-                                v-model="row.referenceSourceKey"
-                                filterable
-                                @change="syncReferenceSourceFromKey(row)"
-                              >
-                                <el-option
-                                  v-for="item in referenceSourceOptions(row)"
-                                  :key="item.key"
-                                  :label="item.label"
-                                  :value="item.key"
-                                />
-                              </el-select>
-                            </el-form-item>
-                            <el-alert
-                              title="留空时会在填写页选择来源；选择通用字段名时会按通用字段名取值。"
-                              type="info"
-                              show-icon
-                              :closable="false"
-                            />
-                          </template>
-
-                          <template
-                            v-if="rowUsage(row) === 'field' && !isMarkerType(row.type) && row.type !== 'reference'"
-                          >
-                            <el-form-item
-                              v-if="row.type === 'party_list' && row.partyItems?.length > 1"
-                              label="列表成员"
-                            >
-                              <div class="party-detected-items">
-                                <el-tag v-for="item in row.partyItems" :key="item" size="small">{{ item }}</el-tag>
-                              </div>
-                            </el-form-item>
-                            <el-form-item label="空值规则">
-                              <el-checkbox v-model="row.optionalWhenEmpty">字段为空时处理周围文字</el-checkbox>
-                            </el-form-item>
-                            <el-form-item v-if="row.optionalWhenEmpty" label="范围">
-                              <el-select v-model="row.optionalScope">
-                                <el-option label="仅此位置" value="position" />
-                                <el-option label="全部同名" value="field" />
-                              </el-select>
-                            </el-form-item>
-                            <el-form-item v-if="row.optionalWhenEmpty" label="空值前缀">
-                              <el-input v-model="row.optionalPrefix" placeholder="如 原告、（案号：" />
-                            </el-form-item>
-                            <el-form-item v-if="row.optionalWhenEmpty" label="空值后缀">
-                              <el-input v-model="row.optionalSuffix" placeholder="如 律师、）" />
-                            </el-form-item>
-                          </template>
-
-                          <template v-if="rowUsage(row) === 'field' && isMarkerType(row.type)">
-                            <el-form-item label="选项ID">
-                              <el-input v-model="row.optionId" />
-                            </el-form-item>
-                            <el-form-item label="选项名">
-                              <el-input v-model="row.optionLabel" />
-                            </el-form-item>
-                            <el-form-item label="选中符号">
-                              <el-select v-model="row.checkedText" allow-create filterable>
-                                <el-option
-                                  v-for="item in checkedSymbolOptions"
-                                  :key="item"
-                                  :label="item"
-                                  :value="item"
-                                />
-                              </el-select>
-                            </el-form-item>
-                            <el-form-item label="未选符号">
-                              <el-select v-model="row.uncheckedText" allow-create filterable>
-                                <el-option
-                                  v-for="item in uncheckedSymbolOptions"
-                                  :key="item"
-                                  :label="item"
-                                  :value="item"
-                                />
-                              </el-select>
-                            </el-form-item>
-                            <el-form-item label="批量符号">
-                              <el-button size="small" @click="syncMarkerSymbols(row)">同步到同组</el-button>
-                            </el-form-item>
-                            <el-form-item label="组成员">
-                              <el-select
-                                :model-value="markerGroupMembers(row)"
-                                multiple
-                                filterable
-                                collapse-tags
-                                collapse-tags-tooltip
-                                @change="(members) => applyMarkerGroupMembers(row, members)"
-                              >
-                                <el-option
-                                  v-for="item in markerRowOptions"
-                                  :key="item.rowId"
-                                  :label="item.label"
-                                  :value="item.rowId"
-                                />
-                              </el-select>
-                            </el-form-item>
-                          </template>
-
-                          <template v-if="rowUsage(row) === 'field' && row.type === 'select'">
-                            <el-form-item label="下拉选项">
-                              <div class="select-options-editor">
-                                <div
-                                  v-for="(opt, optIdx) in row.selectOptions || []"
-                                  :key="optIdx"
-                                  class="select-option-row"
-                                >
-                                  <el-input
-                                    v-model="opt.label"
-                                    size="small"
-                                    placeholder="选项文本"
-                                    class="select-option-input"
-                                  />
-                                  <el-input
-                                    v-model="opt.checkedText"
-                                    size="small"
-                                    placeholder="输出值（留空同文本）"
-                                    class="select-option-input"
-                                  />
-                                  <el-button
-                                    size="small"
-                                    text
-                                    type="danger"
-                                    @click="(row.selectOptions || []).splice(optIdx, 1)"
-                                  >
-                                    删除
-                                  </el-button>
-                                </div>
-                                <el-button size="small" @click="addSelectOption(row)"> 添加选项 </el-button>
-                              </div>
-                            </el-form-item>
-                          </template>
-
-                          <template v-if="rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix'">
-                            <el-form-item label="归属字段">
-                              <el-select
-                                v-model="row.name"
-                                filterable
-                                allow-create
-                                @change="onStructureTargetNameChange(row)"
-                              >
-                                <el-option v-for="name in fieldNameOptions" :key="name" :label="name" :value="name" />
-                              </el-select>
-                            </el-form-item>
-                            <el-alert
-                              :title="
-                                rowUsage(row) === 'prefix'
-                                  ? '字段为空时，此前缀随字段删除。'
-                                  : '字段为空时，此后缀随字段删除。'
-                              "
-                              type="info"
-                              show-icon
-                              :closable="false"
-                            />
-                          </template>
-                        </el-form>
-                      </div>
-                    </el-popover>
-                  </template>
-                </template>
-              </el-table-column>
-            </el-table>
-
-            <el-collapse v-if="optionalRuleSummaries.length" class="rule-summary-collapse">
-              <el-collapse-item :title="`空值规则概览（${optionalRuleSummaries.length} 条）`" name="optional-rules">
-                <div class="rule-summary-list">
-                  <div v-for="item in optionalRuleSummaries" :key="item.key" class="rule-summary-item">
-                    <strong>{{ item.target }}</strong>
-                    <span>{{ item.description }}</span>
-                  </div>
-                </div>
-              </el-collapse-item>
-            </el-collapse>
-
-            <div class="template-build-actions">
-              <el-button :disabled="!documentText" @click="showDocumentText = !showDocumentText">
-                {{ showDocumentText ? '收起全文' : '查看模板全文' }}
-              </el-button>
-              <el-button :disabled="!documentText" @click="showTemplatePreview = !showTemplatePreview">
-                {{ showTemplatePreview ? '收起预览' : '预览模板' }}
-              </el-button>
-              <el-button :disabled="!undoStack.length" @click="undoLastAction">撤销</el-button>
-              <el-button :disabled="!fieldRows.length" type="success" :loading="saving" @click="saveTemplate">
-                保存模板
-              </el-button>
-            </div>
-
-            <div v-if="showDocumentText" class="preview-panel">
-              <div class="preview-panel-header">
-                <h3>模板全文</h3>
-              </div>
-              <pre
-                ref="documentPreviewRef"
-                class="document-preview"
-                @mouseup="rememberSourcePreviewSelection"
-                @keyup="rememberSourcePreviewSelection"
-                >{{ documentText }}</pre>
-            </div>
-
-            <div v-if="showTemplatePreview" class="preview-panel">
-              <div class="preview-panel-header">
-                <h3>模板预览</h3>
-                <p>文本级预览用于检查字段、前缀和后缀；Word 版式以最终生成文件为准。</p>
-              </div>
-              <div class="template-preview-grid">
-                <section>
-                  <h4>原文标记</h4>
-                  <div
-                    ref="sourcePreviewRef"
-                    class="template-preview-text source-preview-text"
-                    @mouseup="rememberSourcePreviewSelection"
-                    @keyup="rememberSourcePreviewSelection"
-                  >
-                    <template v-for="segment in templatePreview.original" :key="segment.id">
-                      <span
-                        v-if="segment.row"
-                        class="preview-token"
-                        :class="[previewTokenClass(segment.row), previewFormatClass(segment)]"
-                        :data-run-id="segment.runId"
-                        :data-start="segment.start"
-                        :data-end="segment.end"
-                        @click="focusPreviewRow(segment.row)"
-                      >
-                        {{ segment.text }}
-                      </span>
-                      <span
-                        v-else
-                        class="source-run"
-                        :class="previewFormatClass(segment)"
-                        :data-run-id="segment.runId"
-                        :data-start="segment.start"
-                        :data-end="segment.end"
-                        >{{ segment.text }}</span
-                      >
-                    </template>
-                  </div>
-                </section>
-                <section>
-                  <h4>渲染示意</h4>
-                  <div v-if="previewSampleFields.length" class="preview-sample-form">
-                    <el-input
-                      v-for="field in previewSampleFields"
-                      :key="field.name"
-                      :model-value="previewSampleValues[field.name] || ''"
-                      size="small"
-                      :placeholder="fillFieldLabel(field)"
-                      @input="(value) => setPreviewSampleValue(field.name, value)"
-                      @clear="setPreviewSampleValue(field.name, '')"
-                    >
-                      <template #prepend>{{ fillFieldLabel(field) }}</template>
-                    </el-input>
-                  </div>
-                  <div class="template-preview-text">
-                    <template v-for="segment in templatePreview.rendered" :key="segment.id">
-                      <button
-                        v-if="segment.row"
-                        class="preview-token"
-                        :class="[previewTokenClass(segment.row, segment), previewFormatClass(segment)]"
-                        type="button"
-                        @click="focusPreviewRow(segment.row)"
-                      >
-                        {{ segment.text }}
-                      </button>
-                      <span v-else :class="previewFormatClass(segment)">{{ segment.text }}</span>
-                    </template>
-                  </div>
-                </section>
-              </div>
-              <div class="preview-legend">
-                <span v-if="sourcePreviewSelectionPayload?.text" class="preview-selection-status">
-                  已选中：{{ sourcePreviewSelectionPayload.text }}
-                </span>
-                <button
-                  v-for="item in previewLegendItems"
-                  :key="item.className"
-                  class="legend-token"
-                  :class="item.className"
-                  type="button"
-                  @pointerdown.capture="rememberSourcePreviewSelection"
-                  @click.prevent.stop="triggerPreviewSelectionAdd(item.type)"
-                >
-                  {{ item.label }}
-                </button>
-                <button
-                  class="legend-token preview-delete-text"
-                  type="button"
-                  @pointerdown.capture="rememberSourcePreviewSelection"
-                  @click.prevent.stop="triggerPreviewSelectionAdd('delete_text')"
-                >
-                  删除文本
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
+        <TemplateBuildTab
+          ref="buildTabRef"
+          :source-docx="sourceDocx"
+          :scanning="scanning"
+          :marks="marks"
+          :document-text="documentText"
+          v-model:template-name="templateName"
+          :field-rows="fieldRows"
+          :selected-rows="selectedRows"
+          :saving="saving"
+          v-model:show-document-text="showDocumentText"
+          v-model:show-template-preview="showTemplatePreview"
+          v-model:group-name="groupName"
+          v-model:group-label="groupLabel"
+          v-model:group-type="groupType"
+          :undo-stack="undoStack"
+          :preview-sample-values="previewSampleValues"
+          :source-preview-selection-payload="sourcePreviewSelectionPayload"
+          :preview-focused-row-id="previewFocusedRowId"
+          :template-preview="templatePreview"
+          @select-source-docx="selectSourceDocx"
+          @group-selected-rows="groupSelectedRows"
+          @set-selected-rows-usage="setSelectedRowsUsage"
+          @clear-selected-rows="clearSelectedRows"
+          @selection-change="handleSelectionChange"
+          @field-table-wheel="handleFieldTableWheel"
+          @open-split-dialog="openSplitDialog"
+          @row-type-change="onRowTypeChange"
+          @field-name-input="onFieldNameInput"
+          @structure-target-name-change="onStructureTargetNameChange"
+          @apply-reference-suggestion="applyReferenceSuggestion"
+          @apply-all-reference-suggestions="applyAllReferenceSuggestions"
+          @sync-reference-source-from-key="syncReferenceSourceFromKey"
+          @sync-marker-symbols="syncMarkerSymbols"
+          @apply-marker-group-members="applyMarkerGroupMembers"
+          @add-select-option="addSelectOption"
+          @undo-last-action="undoLastAction"
+          @save-template="saveTemplate"
+          @remember-source-preview-selection="rememberSourcePreviewSelection"
+          @focus-preview-row="focusPreviewRow"
+          @trigger-preview-selection-add="triggerPreviewSelectionAdd"
+          @set-preview-sample-value="setPreviewSampleValue"
+        />
       </el-tab-pane>
 
       <el-tab-pane label="填写模板" name="render">
-        <section class="workspace">
-          <div class="panel">
-            <div class="panel-header">
-              <div>
-                <h3>模板库</h3>
-                <p>保存到 Docsy 的模板会显示在这里，选择后直接填写。</p>
-              </div>
-              <div class="actions inline">
-                <el-button :loading="templateLibraryLoading" @click="loadTemplateLibrary">刷新</el-button>
-                <el-button @click="selectTemplatePackage">选择外部模板</el-button>
-              </div>
-            </div>
-
-            <div v-if="templateLibrary.length" class="template-library-grid">
-              <div
-                v-for="item in templateLibrary"
-                :key="item.path"
-                class="template-library-card"
-                :class="{ active: item.path === templatePath }"
-                @click="openTemplateFromLibrary(item)"
-              >
-                <strong>{{ item.name }}</strong>
-                <span>{{ item.fieldCount }} 个字段</span>
-                <small>{{ shortDateTime(item.updated) }}</small>
-                <div class="template-card-actions">
-                  <el-button size="small" text type="danger" @click.stop="deleteTemplate(item)">删除</el-button>
-                </div>
-              </div>
-            </div>
-            <el-empty v-else description="还没有保存到软件内部的模板" />
-          </div>
-
-          <div v-if="templateManifest" class="panel form-panel">
-            <div class="panel-header compact">
-              <div>
-                <h3>{{ templateManifest.template.name }}</h3>
-                <p>{{ renderableTemplateFields.length }} 个字段。输入时会从历史和通用字段里即时检索。</p>
-              </div>
-              <div class="actions inline field-filter-actions">
-                <el-input v-model="fieldSearch" size="small" clearable placeholder="搜索字段" class="field-search-input" />
-                <el-button size="small" text @click="collapseAllFields">折叠全部</el-button>
-                <el-button size="small" text @click="expandAllFields">展开全部</el-button>
-              </div>
-              <el-button type="success" :loading="rendering" @click="renderTemplate">生成 Word</el-button>
-              <el-dropdown @command="handleBatchCommand" trigger="click">
-                <el-button :loading="batchProcessing"
-                  >批量填写 <el-icon class="el-icon--right"><arrow-down /></el-icon
-                ></el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="export">导出字段表</el-dropdown-item>
-                    <el-dropdown-item command="import">导入并生成</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </div>
-
-            <div class="template-form-grid">
-              <section v-for="field in filteredRenderableFields" :key="field.id" class="fill-field-card">
-                <div class="fill-field-header" @click="toggleFieldCollapse(field)">
-                  <strong>{{ fillFieldLabel(field) }}</strong>
-                  <span v-if="field.semanticKey && field.semanticKey !== field.name">{{ field.semanticKey }}</span>
-                  <em v-if="field.required">必填</em>
-                  <el-tag v-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
-                    填一次将自动填充到所有位置
-                  </el-tag>
-                  <span class="field-collapse-toggle">{{ collapsedFields.has(field.id) ? '▸' : '▾' }}</span>
-                </div>
-                <div v-show="!collapsedFields.has(field.id)" class="fill-field-body">
-                <div v-if="fieldStructureHints(field).length" class="fill-structure-hints">
-                  <span v-for="hint in fieldStructureHints(field)" :key="hint.key" class="fill-structure-hint">
-                    {{ hint.label }}：<code :class="{ empty: hint.empty }">{{ hint.text }}</code>
-                    <em>空值时删除</em>
-                  </span>
-                </div>
-                <el-date-picker
-                  v-if="effectiveFieldType(field) === 'date'"
-                  v-model="formValues[fieldFormKey(field)]"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  @change="scheduleHistoryRefresh"
-                />
-                <el-checkbox
-                  v-else-if="effectiveFieldType(field) === 'checkbox'"
-                  v-model="formValues[fieldFormKey(field)]"
-                  @change="scheduleHistoryRefresh"
-                >
-                  {{ firstOptionLabel(field) || '选中' }}
-                </el-checkbox>
-                <el-radio-group
-                  v-else-if="effectiveFieldType(field) === 'radio_group'"
-                  v-model="formValues[fieldFormKey(field)]"
-                  @change="scheduleHistoryRefresh"
-                >
-                  <el-radio v-for="option in field.options" :key="option.id" :label="option.id">
-                    {{ option.label }}
-                  </el-radio>
-                </el-radio-group>
-                <el-checkbox-group
-                  v-else-if="effectiveFieldType(field) === 'checkbox_group'"
-                  v-model="formValues[fieldFormKey(field)]"
-                  @change="scheduleHistoryRefresh"
-                >
-                  <el-checkbox v-for="option in field.options" :key="option.id" :label="option.id">
-                    {{ option.label }}
-                  </el-checkbox>
-                </el-checkbox-group>
-                <div v-else-if="effectiveFieldType(field) === 'party_list'" class="party-list-editor">
-                  <div
-                    v-for="(item, index) in partyListRows(field)"
-                    :key="index"
-                    class="party-list-row compact"
-                    :class="{ 'no-suffix': !partyFieldUsesSuffix(field) }"
-                  >
-                    <span class="party-order">{{ index + 1 }}</span>
-                    <el-autocomplete
-                      v-model="item.text"
-                      size="small"
-                      placeholder="名称"
-                      :fetch-suggestions="(query, cb) => completeField(field, query, cb)"
-                      @input="scheduleHistoryRefresh"
-                    />
-                    <el-select
-                      v-if="partyFieldUsesSuffix(field)"
-                      v-model="item.suffix"
-                      size="small"
-                      filterable
-                      allow-create
-                      default-first-option
-                      placeholder="后缀"
-                      @change="scheduleHistoryRefresh"
-                    >
-                      <el-option
-                        v-for="suffix in partySuffixOptions(field)"
-                        :key="suffix"
-                        :label="suffix"
-                        :value="suffix"
-                      />
-                    </el-select>
-                    <div class="party-row-actions">
-                      <el-button size="small" text :disabled="index === 0" @click="movePartyItem(field, index, -1)">
-                        上移
-                      </el-button>
-                      <el-button
-                        size="small"
-                        text
-                        :disabled="index === partyListRows(field).length - 1"
-                        @click="movePartyItem(field, index, 1)"
-                      >
-                        下移
-                      </el-button>
-                      <el-button size="small" text type="danger" @click="removePartyItem(field, index)">
-                        删除
-                      </el-button>
-                    </div>
-                  </div>
-                  <div v-if="partyFieldStructureHint(field)" class="field-structure-hint">
-                    {{ partyFieldStructureHint(field) }}
-                  </div>
-                  <div class="party-list-add-row">
-                    <el-button size="small" @click="addPartyItem(field)">添加一项</el-button>
-                  </div>
-                </div>
-                <div v-else-if="effectiveFieldType(field) === 'reference'" class="reference-fill-editor">
-                  <el-select
-                    v-model="referenceSelections[fieldFormKey(field)]"
-                    filterable
-                    clearable
-                    placeholder="从已填字段取值"
-                    @change="onReferenceSelectionChange(field, $event)"
-                  >
-                    <el-option
-                      v-for="item in referenceFillOptions(field)"
-                      :key="item.key"
-                      :label="item.label"
-                      :value="item.key"
-                    />
-                  </el-select>
-                  <el-input
-                    v-model="formValues[fieldFormKey(field)]"
-                    type="textarea"
-                    :autosize="{ minRows: 1, maxRows: 6 }"
-                    resize="none"
-                    clearable
-                    placeholder="引用文本，可单独修改"
-                    @input="scheduleHistoryRefresh"
-                  />
-                </div>
-                <el-select
-                  v-else-if="effectiveFieldType(field) === 'select'"
-                  v-model="formValues[fieldFormKey(field)]"
-                  filterable
-                  allow-create
-                  default-first-option
-                  clearable
-                  placeholder="选择或输入"
-                  @change="scheduleHistoryRefresh"
-                >
-                  <el-option
-                    v-for="opt in selectFieldOptions(field)"
-                    :key="opt.value"
-                    :label="opt.label"
-                    :value="opt.value"
-                  />
-                </el-select>
-                <el-input
-                  v-else
-                  v-model="formValues[fieldFormKey(field)]"
-                  type="textarea"
-                  :autosize="{ minRows: 1, maxRows: 6 }"
-                  resize="none"
-                  clearable
-                  @input="scheduleHistoryRefresh"
-                />
-                <div v-if="templateStoredSuggestionItems(field).length" class="suggestion-row">
-                  <el-tag
-                    v-for="item in templateStoredSuggestionItems(field)"
-                    :key="`${field.name}-${item.source}-${item.display}`"
-                    size="small"
-                    effect="plain"
-                    class="suggestion-tag"
-                    @click="applySuggestion(field, item.value)"
-                  >
-                    {{ item.display }}
-                    <span v-if="item.count">×{{ item.count }}</span>
-                  </el-tag>
-                </div>
-                <el-popover placement="bottom-end" trigger="click" width="280">
-                  <template #reference>
-                    <button class="field-more-button" type="button">…</button>
-                  </template>
-                  <div class="fill-structure-editor">
-                    <strong>{{ structureEditorTitle(field) }}</strong>
-                    <div class="setting-row">
-                      <span class="setting-label">字段类型</span>
-                      <el-select
-                        :model-value="effectiveFieldType(field)"
-                        size="small"
-                        @change="(type) => setFieldTypeOverride(field, type)"
-                      >
-                        <el-option
-                          v-for="item in typeHelpItems.filter((t) => ['text', 'date', 'select'].includes(t.value))"
-                          :key="item.value"
-                          :value="item.value"
-                          :label="item.label"
-                        />
-                      </el-select>
-                    </div>
-                    <el-input
-                      v-model="structureOverrideForField(field).prefix"
-                      size="small"
-                      placeholder="前缀"
-                      @input="scheduleHistoryRefresh"
-                    >
-                      <template #prepend>前缀</template>
-                    </el-input>
-                    <el-input
-                      v-if="!fieldUsesRepeatableSuffix(field)"
-                      v-model="structureOverrideForField(field).suffix"
-                      size="small"
-                      placeholder="后缀"
-                      @input="scheduleHistoryRefresh"
-                    >
-                      <template #prepend>后缀</template>
-                    </el-input>
-                    <p v-else class="setting-caption">这是列表项后缀，每一项单独设置；字段整体后缀不在这里修改。</p>
-                  </div>
-                </el-popover>
-                </div>
-              </section>
-            </div>
-          </div>
-        </section>
+        <TemplateRenderTab
+          :template-path="templatePath"
+          :template-manifest="templateManifest"
+          :template-library="templateLibrary"
+          :template-library-loading="templateLibraryLoading"
+          :form-values="formValues"
+          :reference-selections="referenceSelections"
+          :structure-overrides="structureOverrides"
+          :type-overrides="typeOverrides"
+          :history-context="historyContext"
+          :rendering="rendering"
+          :batch-processing="batchProcessing"
+          v-model:field-search="fieldSearch"
+          :collapsed-fields="collapsedFields"
+          :renderable-template-fields="renderableTemplateFields"
+          :filtered-renderable-fields="filteredRenderableFields"
+          @load-template-library="loadTemplateLibrary"
+          @select-template-package="selectTemplatePackage"
+          @open-template-from-library="openTemplateFromLibrary"
+          @delete-template="deleteTemplate"
+          @collapse-all-fields="collapseAllFields"
+          @expand-all-fields="expandAllFields"
+          @render-template="renderTemplate"
+          @batch-command="handleBatchCommand"
+          @toggle-field-collapse="toggleFieldCollapse"
+          @schedule-history-refresh="scheduleHistoryRefresh"
+          @complete-field="completeField"
+          @move-party-item="movePartyItem"
+          @remove-party-item="removePartyItem"
+          @add-party-item="addPartyItem"
+          @reference-selection-change="onReferenceSelectionChange"
+          @apply-suggestion="applySuggestion"
+          @set-field-type-override="setFieldTypeOverride"
+          @update-form-value="handleUpdateFormValue"
+          @update-structure-override="handleUpdateStructureOverride"
+        />
       </el-tab-pane>
 
       <el-tab-pane label="填写历史" name="history">
-        <section class="workspace">
-          <div class="panel">
-            <div class="panel-header">
-              <div>
-                <h3>完整表单历史</h3>
-                <p>按模板分组保存每次生成文书时填写的完整表单。点击记录可直接带入字段并切到填写页。</p>
-              </div>
-              <el-button :loading="historyRunsLoading" @click="loadTemplateHistoryRuns">刷新</el-button>
-            </div>
-
-            <div v-if="groupedHistoryRuns.length" class="history-group-list">
-              <section v-for="group in groupedHistoryRuns" :key="group.templateId" class="history-group">
-                <div class="history-group-header">
-                  <div>
-                    <h4>{{ group.templateName }}</h4>
-                    <span>{{ group.runs.length }} 条记录</span>
-                  </div>
-                  <el-button size="small" text @click="openHistoryTemplate(group.templatePath)">打开模板</el-button>
-                </div>
-                <div class="history-run-list">
-                  <article
-                    v-for="run in visibleGroupRuns(group)"
-                    :key="run.id"
-                    class="history-run-card"
-                    @click="applyHistoryRun(run)"
-                  >
-                    <div class="history-run-main">
-                      <div class="history-run-title-row">
-                        <strong>{{ historyTime(run.generatedAt) }}</strong>
-                        <el-tag v-if="run.source === 'batch'" size="small" type="warning" effect="plain">
-                          批量填写记录
-                        </el-tag>
-                      </div>
-                      <span>{{ fileName(run.outputPath) }}</span>
-                      <div class="history-run-fields">
-                        <el-tag
-                          v-for="item in historyRunSummary(run)"
-                          :key="`${run.id}-${item.label}-${item.display}`"
-                          size="small"
-                          effect="plain"
-                        >
-                          {{ item.label }}：{{ item.display }}
-                        </el-tag>
-                      </div>
-                    </div>
-                    <div class="history-run-actions">
-                      <el-button size="small" type="primary" @click.stop="applyHistoryRun(run)">填入</el-button>
-                      <el-button size="small" text @click.stop="openPath(run.outputPath)">打开文档</el-button>
-                    </div>
-                  </article>
-                  <div v-if="group.runs.length > HISTORY_PAGE_SIZE && !expandedHistoryGroups.has(group.templateId)" class="history-expand-row">
-                    <el-button size="small" text type="primary" @click="expandHistoryGroup(group.templateId)">
-                      展开全部 {{ group.runs.length }} 条
-                    </el-button>
-                  </div>
-                  <div v-else-if="expandedHistoryGroups.has(group.templateId)" class="history-expand-row">
-                    <el-button size="small" text @click="collapseHistoryGroup(group.templateId)">收起</el-button>
-                  </div>
-                </div>
-              </section>
-            </div>
-            <el-empty v-else description="还没有生成记录" />
-          </div>
-        </section>
+        <TemplateHistoryTab
+          :history-runs="historyRuns"
+          :history-runs-loading="historyRunsLoading"
+          :grouped-history-runs="groupedHistoryRuns"
+          :expanded-history-groups="expandedHistoryGroups"
+          @refresh-history="loadTemplateHistoryRuns"
+          @apply-history-run="applyHistoryRun"
+          @open-history-template="openHistoryTemplate"
+          @open-path="openPath"
+          @expand-history-group="expandHistoryGroup"
+          @collapse-history-group="collapseHistoryGroup"
+        />
       </el-tab-pane>
       <el-tab-pane label="设置" name="settings">
-        <section class="workspace">
-          <div class="panel">
-            <div class="panel-header">
-              <div>
-                <h3>模板模块设置</h3>
-                <p>这些规则会应用到所有模板的填写与生成。</p>
-              </div>
-            </div>
-            <div class="settings-form">
-              <div class="settings-row">
-                <div class="settings-label">
-                  <strong>多项字段连接符</strong>
-                  <span>列表字段（当事人、诉讼请求等）填入多个值时，项与项之间使用的分隔符。留空时默认使用顿号“、”。</span>
-                </div>
-                <el-input
-                  v-model="itemSeparatorSetting"
-                  size="small"
-                  class="settings-separator-input"
-                  placeholder="、"
-                  @change="saveItemSeparatorSetting"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-header">
-              <div>
-                <h3>模板回收站</h3>
-                <p>删除的模板先进入回收站；彻底删除会同时删除该模板的内部填写数据。</p>
-              </div>
-              <el-button size="small" :loading="templateTrashLoading" @click="loadTemplateTrash">刷新</el-button>
-            </div>
-            <el-table v-if="templateTrash.length" :data="templateTrash" size="small" border>
-              <el-table-column prop="name" label="模板" min-width="180" />
-              <el-table-column label="字段" width="80">
-                <template #default="{ row }">{{ row.fieldCount }}</template>
-              </el-table-column>
-              <el-table-column prop="updated" label="更新时间" min-width="140">
-                <template #default="{ row }">{{ shortDateTime(row.updated) }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="180" fixed="right">
-                <template #default="{ row }">
-                  <el-button size="small" link type="primary" @click="restoreTemplate(row)">恢复</el-button>
-                  <el-button size="small" link type="danger" @click="permanentlyDeleteTemplate(row)">彻底删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-else description="回收站为空" />
-          </div>
-
-          <div class="panel">
-            <div class="panel-header">
-              <div>
-                <h3>填写历史数据库</h3>
-                <p>模板填写历史保存在本地数据库中（含字段值和引用建议来源）。清理后无法恢复。</p>
-              </div>
-            </div>
-            <div class="settings-form">
-              <div class="settings-row">
-                <div class="settings-label">
-                  <strong>清空全部填写历史</strong>
-                  <span>删除所有模板的生成记录和字段值。模板库文件不受影响。</span>
-                </div>
-                <el-button type="danger" plain size="small" :loading="clearingHistory" @click="clearAllHistory">
-                  清空历史
-                </el-button>
-              </div>
-            </div>
-          </div>
-        </section>
+        <TemplateSettingsTab
+          v-model:item-separator-setting="itemSeparatorSetting"
+          :template-trash="templateTrash"
+          :template-trash-loading="templateTrashLoading"
+          :clearing-history="clearingHistory"
+          @save-separator="saveItemSeparatorSetting"
+          @restore-template="restoreTemplate"
+          @permanently-delete-template="permanentlyDeleteTemplate"
+          @clear-all-history="clearAllHistory"
+          @refresh-trash="loadTemplateTrash"
+        />
       </el-tab-pane>
     </el-tabs>
 
@@ -1006,7 +142,7 @@
         </el-table-column>
         <el-table-column label="输出文件" prop="outputPath" min-width="200" show-overflow-tooltip />
       </el-table>
-      <p class="hint-text">勾选需要保存到模板填写历史的行，点击“保存数据”录入；之后可在填写页看到这些历史建议。</p>
+      <p class="hint-text">勾选需要保存到模板填写历史的行，点击"保存数据"录入；之后可在填写页看到这些历史建议。</p>
       <template #footer>
         <el-button @click="batchSaveVisible = false">取消</el-button>
         <el-button type="primary" :disabled="!batchSaveSelected.length" @click="submitBatchSave">保存数据</el-button>
@@ -1018,7 +154,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { QuestionFilled, ArrowDown } from '@element-plus/icons-vue'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
 import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
@@ -1035,6 +170,12 @@ import {
   prefixTargetRule,
   suffixTargetRule,
 } from '../rules/publicRules.js'
+
+// Tab components
+import TemplateBuildTab from '../components/TemplateBuildTab.vue'
+import TemplateRenderTab from '../components/TemplateRenderTab.vue'
+import TemplateHistoryTab from '../components/TemplateHistoryTab.vue'
+import TemplateSettingsTab from '../components/TemplateSettingsTab.vue'
 
 const activeTab = ref('build')
 const itemSeparatorSetting = ref(window.localStorage.getItem('docsy.template.itemSeparator') || '、')
@@ -1071,7 +212,7 @@ async function permanentlyDeleteTemplate(row) {
   let migrateToCommon = false
   try {
     await ElMessageBox.confirm(
-      `彻底删除“${row.name}”？可以先把该模板的内部填写数据迁移为模板通用数据，供其他模板按通用字段名继续检索。`,
+      `彻底删除"${row.name}"？可以先把该模板的内部填写数据迁移为模板通用数据，供其他模板按通用字段名继续检索。`,
       '彻底删除模板',
       {
         confirmButtonText: '迁移数据并删除',
@@ -1129,29 +270,12 @@ const typeHelpItems = [
   {
     value: 'prefix',
     label: '前缀',
-    description: '字段为空时随字段一起删除的前缀文字，如“原告”“，第三人”“（案号：”。',
+    description: '字段为空时随字段一起删除的前缀文字，如"原告""，第三人""（案号："。',
   },
-  { value: 'suffix', label: '后缀', description: '字段为空时随字段一起删除的后置文字，如“律师”“）”。' },
+  { value: 'suffix', label: '后缀', description: '字段为空时随字段一起删除的后置文字，如"律师""）"。' },
   { value: 'delete_text', label: '删除文本', description: '保存模板时从 Word 原文中删除这段文字。' },
   { value: 'ignore', label: '保留原文', description: '不作为字段或规则保存；保存模板时只清除黄色高亮，正文仍保留。' },
 ]
-
-const previewLegendItems = [
-  { className: 'preview-text', label: '文本', type: 'text' },
-  { className: 'preview-text', label: '下拉选择', type: 'select' },
-  { className: 'preview-date', label: '日期', type: 'date' },
-  { className: 'preview-party', label: '列表', type: 'party_list' },
-  { className: 'preview-reference', label: '引用', type: 'reference' },
-  { className: 'preview-checkbox', label: '单个勾选', type: 'checkbox' },
-  { className: 'preview-radio', label: '互斥勾选组', type: 'radio_group' },
-  { className: 'preview-checkbox-group', label: '多选勾选组', type: 'checkbox_group' },
-  { className: 'preview-prefix', label: '前缀', type: 'prefix' },
-  { className: 'preview-suffix', label: '后缀', type: 'suffix' },
-  { className: 'preview-ignore', label: '保留原文', type: 'ignore' },
-]
-
-const checkedSymbolOptions = ['☑', '☒', '✓', '√', '✔', '●', '(√)']
-const uncheckedSymbolOptions = ['☐', '□', '○', '( )']
 
 const sourceDocx = ref('')
 const templateName = ref('')
@@ -1161,9 +285,7 @@ const documentRuns = ref([])
 const fieldRows = ref([])
 const previewSampleValues = reactive({})
 const selectedRows = ref([])
-const fieldTableRef = ref(null)
-const sourcePreviewRef = ref(null)
-const documentPreviewRef = ref(null)
+const buildTabRef = ref(null)
 const sourcePreviewSelection = ref(null)
 const sourcePreviewSelectionPayload = ref(null)
 const scanning = ref(false)
@@ -1255,32 +377,10 @@ let cachedSemanticSuggestions = null
 let templateOpenRequestSeq = 0
 let historyContextRequestSeq = 0
 
-const fieldNameOptions = computed(() =>
-  Array.from(
-    new Set(
-      fieldRows.value
-        .filter((row) => row.enabled && rowUsage(row) === 'field' && row.name.trim())
-        .map((row) => row.name.trim()),
-    ),
-  ),
-)
-const markerRowOptions = computed(() =>
-  fieldRows.value
-    .filter((row) => row.enabled && rowUsage(row) === 'field' && isMarkerType(row.type))
-    .map((row) => ({
-      rowId: row.rowId,
-      label: `${row.name || '未命名'} · ${row.optionLabel || row.text}`,
-    })),
-)
-const optionalRuleSummaries = computed(() => buildOptionalRuleSummaries(fieldRows.value))
-const fieldTableRows = computed(() => buildFieldTableRows(fieldRows.value))
-const previewSampleFields = computed(() => buildPreviewSampleFields(fieldRows.value))
 const groupedHistoryRuns = computed(() => groupHistoryRuns(historyRuns.value))
 const templatePreview = computed(() =>
   buildTemplatePreview(documentRuns.value, documentText.value, fieldRows.value, previewSampleValues),
 )
-
-const checkboxLikeCount = computed(() => marks.value.filter((mark) => mark.checkboxLike).length)
 
 onMounted(() => {
   document.addEventListener('selectionchange', rememberSourcePreviewSelection)
@@ -1320,110 +420,6 @@ function rowUsage(row) {
 
 function typeLabel(type) {
   return typeHelpItems.find((item) => item.value === type)?.label || type
-}
-
-function fieldRowClassName({ row }) {
-  if (row.virtualPartyGroup) {
-    return `party-group-row grouped-field-row grouped-field-row-${groupColorIndex(row)}`
-  }
-  if (row.displayOnly) {
-    return `party-child-row grouped-field-row grouped-field-row-${groupColorIndex(row)}`
-  }
-  if (!row.enabled) return 'disabled-field-row'
-  if (rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix') return 'structure-field-row'
-  if (rowUsage(row) === 'delete_text') return 'delete-field-row'
-  if (rowUsage(row) === 'ignore') return 'ignored-field-row'
-  if (isGroupedField(row)) return `grouped-field-row grouped-field-row-${groupColorIndex(row)}`
-  return ''
-}
-
-function isSelectableFieldRow(row) {
-  return !row.displayOnly
-}
-
-function buildFieldTableRows(rows) {
-  const result = []
-  for (const row of rows) {
-    row.partyGroupChild = false
-    row.partyItemIndex = null
-    row.partyItemCount = null
-    row.partyGroupKey = ''
-  }
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index]
-    const group = consecutivePartyRows(rows, index)
-    if (group.length > 1) {
-      const partyGroupKey = groupedRowKey(row)
-      result.push({
-        rowId: `party-group:${row.name}:${index}`,
-        displayOnly: true,
-        virtualPartyGroup: true,
-        text: row.name,
-        type: row.type,
-        name: row.name,
-        label: row.label || row.name,
-        partyItemCount: group.length,
-        partyGroupKey,
-      })
-      for (const [itemIndex, child] of group.entries()) {
-        child.partyGroupChild = true
-        child.partyItemIndex = itemIndex
-        child.partyItemCount = group.length
-        child.partyGroupKey = partyGroupKey
-        result.push(child)
-      }
-      index += group.length - 1
-      continue
-    }
-    result.push(row)
-  }
-  return result
-}
-
-function consecutivePartyRows(rows, startIndex) {
-  const first = rows[startIndex]
-  if (!isPartyFieldRow(first)) return []
-  const group = [first]
-  for (let cursor = startIndex + 1; cursor < rows.length; cursor += 1) {
-    const row = rows[cursor]
-    if (!isPartyFieldRow(row) || row.name.trim() !== first.name.trim()) break
-    group.push(row)
-  }
-  return group
-}
-
-function isPartyFieldRow(row) {
-  return row?.enabled && rowUsage(row) === 'field' && row.type === 'party_list' && row.name?.trim()
-}
-
-function relationSummary(row) {
-  const usage = rowUsage(row)
-  if (usage === 'prefix') return prefixRelationSummary(row)
-  if (usage === 'suffix') return `后缀归属：${structureTargetDisplayName(row)}`
-  if (usage === 'delete_text') return '保存模板时删除'
-  if (usage === 'ignore') return '保留原文，仅清除高亮'
-  if (isMarkerType(row.type)) return `${typeLabel(row.type)}：${row.optionLabel || row.text}`
-  if (isGroupedField(row)) return groupedFieldSummary(row)
-  if (row.optionalWhenEmpty) return `空值处理：${row.optionalScope === 'field' ? '全部同名' : '仅此位置'}`
-  return '普通字段'
-}
-
-function displayMarkText(row) {
-  if (row.virtualPartyGroup) return row.name || row.label || '当事人列表'
-  if (row.partyGroupChild) return row.text
-  if (isConnectorRow(row)) return `连接符：${row.text}`
-  if (row.type === 'party_list' && row.partyItems?.length > 1) return row.name || row.label || row.text
-  return row.text
-}
-
-function prefixRelationSummary(row) {
-  if (isConnectorRow(row)) return `连接符归属：${structureTargetDisplayName(row)}`
-  return `前缀归属：${structureTargetDisplayName(row)}`
-}
-
-function fieldCellSecondaryLabel(row) {
-  if (rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix') return structureTargetDisplayName(row)
-  return row.label || row.name || relationSummary(row)
 }
 
 function structureTargetDisplayName(row) {
@@ -1526,17 +522,8 @@ function sameFieldRows(row) {
   )
 }
 
-function isGroupedField(row) {
-  return rowUsage(row) === 'field' && sameFieldRows(row).length > 1
-}
-
-function groupedFieldSummary(row) {
-  if (isMarkerType(row.type)) return '同一勾选组'
-  return '同一字段'
-}
-
 function handleFieldTableWheel(event) {
-  const wrap = fieldTableRef.value?.$el?.querySelector('.el-table__body-wrapper .el-scrollbar__wrap')
+  const wrap = buildTabRef.value?.fieldTableRef?.$el?.querySelector('.el-table__body-wrapper .el-scrollbar__wrap')
   if (!wrap) return
   const maxScrollLeft = wrap.scrollWidth - wrap.clientWidth
   if (maxScrollLeft <= 1) return
@@ -1547,35 +534,6 @@ function handleFieldTableWheel(event) {
   if (next === before) return
   wrap.scrollLeft = next
   event.preventDefault()
-}
-
-function groupColorIndex(row) {
-  if (!row) return 0
-  const groups = []
-  const seen = new Set()
-  for (const item of fieldRows.value) {
-    if (!isGroupedField(item)) continue
-    const key = groupedRowKey(item)
-    if (seen.has(key)) continue
-    seen.add(key)
-    groups.push(key)
-  }
-  const key = row.partyGroupKey || groupedRowKey(row)
-  return Math.max(0, groups.indexOf(key)) % 6
-}
-
-function groupedRowKey(row) {
-  return `${row?.type || ''}:${String(row?.name || '').trim()}`
-}
-
-function markerGroupMembers(row) {
-  return sameFieldRows(row)
-    .filter((item) => isMarkerType(item.type))
-    .map((item) => item.rowId)
-}
-
-function hasUnseenReferenceSuggestion(row) {
-  return Boolean(referenceSuggestion(row) && !row.referenceHintSeen)
 }
 
 function referenceSuggestion(row) {
@@ -1673,7 +631,7 @@ function applyReferenceSuggestion(row) {
   if (!suggestion) return
   pushUndoSnapshot('改成引用')
   applyReferenceSuggestionToRow(row, suggestion)
-  ElMessage.success(`已改为引用“${suggestion.target.name}”`)
+  ElMessage.success(`已改为引用"${suggestion.target.name}"`)
 }
 
 function applyReferenceSuggestionToRow(row, suggestion) {
@@ -1736,84 +694,6 @@ function parseReferenceSourceKey(key) {
     sourceSemanticKey: mode === 'semantic' ? source : '',
     sourceIndex: sourceIndexText === '' ? null : Number(sourceIndexText),
   }
-}
-
-function referenceSourceLabel(row) {
-  const source = normalizedReferenceSource(row)
-  if (source.mode === 'auto') return '填写时选择'
-  if (source.mode === 'semantic') return `通用字段名：${source.sourceSemanticKey}`
-  if (!source.sourceField) return ''
-  return source.sourceIndex == null ? source.sourceField : `${source.sourceField}第 ${source.sourceIndex + 1} 项`
-}
-
-function referenceSourceOptions(row) {
-  const rowIndex = fieldRows.value.indexOf(row)
-  const options = [{ key: referenceSourceKey('auto', '', null), label: '填写时选择来源' }]
-  const seen = new Set()
-  const semanticKeys = new Set()
-  const partyCounts = new Map()
-  for (const item of fieldRows.value.slice(0, Math.max(0, rowIndex))) {
-    if (!item.enabled || rowUsage(item) !== 'field' || isMarkerType(item.type) || item.type === 'reference') continue
-    const name = item.name?.trim()
-    if (!name) continue
-    const semanticKey = item.semanticKey?.trim()
-    if (semanticKey && !semanticKeys.has(semanticKey)) {
-      semanticKeys.add(semanticKey)
-      const key = referenceSourceKey('semantic', semanticKey, null)
-      options.push({ key, label: `通用字段名：${semanticKey}` })
-    }
-    if (item.type === 'party_list') {
-      const baseIndex = partyCounts.get(name) || 0
-      const items = item.partyItems?.length ? item.partyItems : [item.text]
-      for (const [offset, text] of items.entries()) {
-        const index = baseIndex + offset
-        const key = referenceSourceKey('field', name, index)
-        if (seen.has(key)) continue
-        seen.add(key)
-        options.push({ key, label: `${name}第 ${index + 1} 项：${text || name}` })
-      }
-      partyCounts.set(name, baseIndex + Math.max(1, items.length))
-    } else {
-      const key = referenceSourceKey('field', name, null)
-      if (seen.has(key)) continue
-      seen.add(key)
-      options.push({ key, label: name })
-    }
-  }
-  return options
-}
-
-function referenceFillOptions(field) {
-  const options = []
-  const seen = new Set()
-  const source = fixedReferenceSource(field.reference)
-  const semanticFilter = source.mode === 'semantic' ? source.sourceSemanticKey : ''
-  for (const item of templateManifest.value?.fields || []) {
-    if (!isRenderableField(item) || item.name === field.name || item.type === 'reference') continue
-    if (semanticFilter && item.semanticKey !== semanticFilter) continue
-    if (source.mode === 'field' && item.name !== source.sourceField) continue
-    if (item.type === 'party_list') {
-      const values = partyItemsToValues(formValues[fieldFormKey(item)] || [])
-      if (values.length) {
-        const allKey = referenceSourceKey('field', item.name, null)
-        options.push({ key: allKey, label: `${fillFieldLabel(item)}：全部` })
-      }
-      values.forEach((value, index) => {
-        const key = referenceSourceKey('field', item.name, index)
-        if (seen.has(key)) return
-        seen.add(key)
-        options.push({ key, label: `${fillFieldLabel(item)}第 ${index + 1} 项：${value}` })
-      })
-    } else {
-      const value = formValues[fieldFormKey(item)]
-      if (isEmptyValue(value)) continue
-      const key = referenceSourceKey('field', item.name, null)
-      if (seen.has(key)) continue
-      seen.add(key)
-      options.push({ key, label: `${fillFieldLabel(item)}：${displayValue(value)}` })
-    }
-  }
-  return options
 }
 
 function onReferenceSelectionChange(field, key) {
@@ -2500,7 +1380,7 @@ function groupSelectedRows() {
     fieldRows.value = fieldRows.value.filter((row) => !selectedRows.value.includes(row))
     fieldRows.value.splice(firstIndex, 0, mergedRow)
     selectedRows.value = []
-    fieldTableRef.value?.clearSelection?.()
+    buildTabRef.value?.fieldTableRef?.clearSelection?.()
     ElMessage.success('已合并为一个字段')
     return
   }
@@ -2530,7 +1410,7 @@ function setSelectedRowsUsage(usage) {
 
 function clearSelectedRows() {
   selectedRows.value = []
-  fieldTableRef.value?.clearSelection?.()
+  buildTabRef.value?.fieldTableRef?.clearSelection?.()
 }
 
 function rowsSnapshot() {
@@ -2540,7 +1420,7 @@ function rowsSnapshot() {
 function restoreRows(snapshot) {
   fieldRows.value = JSON.parse(JSON.stringify(snapshot))
   selectedRows.value = []
-  fieldTableRef.value?.clearSelection?.()
+  buildTabRef.value?.fieldTableRef?.clearSelection?.()
 }
 
 function reorderRowsByDocumentPosition(rows) {
@@ -2577,67 +1457,6 @@ function undoLastAction() {
   }
   restoreRows(item.snapshot)
   ElMessage.success(`已撤销：${item.label}`)
-}
-
-function buildOptionalRuleSummaries(rows) {
-  const items = []
-  for (const [index, row] of rows.entries()) {
-    if (!row.enabled) continue
-    const usage = rowUsage(row)
-    if (usage === 'prefix' || usage === 'suffix') {
-      items.push({
-        key: `${row.rowId}:${usage}:${index}`,
-        target: row.name || '未指定字段',
-        description: `${usage === 'prefix' ? prefixSummaryAction(row) : '字段为空时删除后缀'}：“${row.text}”`,
-      })
-    } else if (rowUsage(row) === 'field' && row.optionalWhenEmpty) {
-      const parts = []
-      if (row.optionalPrefix) parts.push(`前缀“${row.optionalPrefix}”`)
-      if (row.optionalSuffix) parts.push(`后缀“${row.optionalSuffix}”`)
-      items.push({
-        key: `${row.rowId}:optional:${index}`,
-        target: row.name || '未命名字段',
-        description: `字段为空时删除${parts.join('、') || '周围文字'}（${row.optionalScope === 'field' ? '全部同名' : '仅此位置'}）`,
-      })
-    }
-  }
-  return items
-}
-
-function prefixSummaryAction(row) {
-  if (isConnectorRow(row)) return '字段为空时删除连接符'
-  return '字段为空时删除前缀'
-}
-
-function buildPreviewSampleFields(rows) {
-  const fields = []
-  const seen = new Set()
-  for (const row of rows) {
-    if (!row.enabled || rowUsage(row) !== 'field' || isMarkerType(row.type)) continue
-    if (row.type === 'reference') continue
-    if (!row.name?.trim() || seen.has(row.name.trim())) continue
-    seen.add(row.name.trim())
-    fields.push({
-      name: row.name.trim(),
-      label: previewFieldLabel(row),
-      type: row.type,
-    })
-  }
-  return fields
-}
-
-function previewFieldLabel(row) {
-  if (isGeneratedFieldName(row.name)) return row.name.trim()
-  if (row.type === 'party_list') return row.name.trim()
-  return row.label || row.name.trim()
-}
-
-function fillFieldLabel(field) {
-  if (!field) return ''
-  if (isGeneratedFieldName(field.name)) return field.name || field.label || ''
-  if (field.type === 'party_list') return field.name || field.label || ''
-  if (['前缀', '后缀', '连接符', '列表项'].includes(field.label)) return field.name || field.label || ''
-  return field.label || field.name || ''
 }
 
 function buildTemplatePreview(runs, fallbackText, rows, sampleValues = {}) {
@@ -2805,35 +1624,11 @@ function sliceChars(text, start, end) {
   return [...String(text || '')].slice(start, end).join('')
 }
 
-function previewTokenClass(row, segment = {}) {
-  return {
-    'preview-text': rowUsage(row) === 'field' && ['text', 'select', 'party_list'].includes(row.type),
-    'preview-reference': rowUsage(row) === 'field' && row.type === 'reference',
-    'preview-date': rowUsage(row) === 'field' && row.type === 'date',
-    'preview-checkbox': rowUsage(row) === 'field' && row.type === 'checkbox',
-    'preview-radio': rowUsage(row) === 'field' && row.type === 'radio_group',
-    'preview-checkbox-group': rowUsage(row) === 'field' && row.type === 'checkbox_group',
-    'preview-prefix': rowUsage(row) === 'prefix',
-    'preview-suffix': rowUsage(row) === 'suffix',
-    'preview-delete-text': rowUsage(row) === 'delete_text',
-    'preview-ignore': rowUsage(row) === 'ignore',
-    'preview-deleted': segment.deleted,
-    'preview-focused': previewFocusedRowId.value === row.rowId,
-  }
-}
-
-function previewFormatClass(segment) {
-  return {
-    'source-bold': segment.bold,
-    'source-italic': segment.italic,
-    'source-underline': segment.underline,
-  }
-}
 
 function focusPreviewRow(row) {
   previewFocusedRowId.value = row.rowId
   row.referenceHintSeen = true
-  fieldTableRef.value?.setCurrentRow?.(row)
+  buildTabRef.value?.fieldTableRef?.setCurrentRow?.(row)
 }
 
 function triggerPreviewSelectionAdd(type) {
@@ -3033,9 +1828,9 @@ function collectSourcePreviewSelection() {
 }
 
 function resolvePreviewSelection(range) {
-  const sourceRoot = sourcePreviewRef.value
+  const sourceRoot = buildTabRef.value?.sourcePreviewRef
   if (sourceRoot && rangeIntersectsRoot(range, sourceRoot)) return resolveSourcePreviewRange(sourceRoot, range)
-  const documentRoot = documentPreviewRef.value
+  const documentRoot = buildTabRef.value?.documentPreviewRef
   if (documentRoot && rangeIntersectsRoot(range, documentRoot)) return resolveDocumentPreviewRange(documentRoot, range)
   return { text: '', refs: [], context: '' }
 }
@@ -3398,7 +2193,7 @@ async function maybeSeedTemplateHistory(path) {
   if (!Object.keys(values).length) return
   try {
     await ElMessageBox.confirm(
-      '是否把当前模板中的标黄示例值存入这个模板的内部数据库？选择“否”则该模板的数据从空开始。',
+      '是否把当前模板中的标黄示例值存入这个模板的内部数据库？选择"否"则该模板的数据从空开始。',
       '保存模板数据',
       {
         confirmButtonText: '存入',
@@ -3459,7 +2254,7 @@ function validateFieldRowsBeforeSave() {
   if (missingMarks.length) {
     const samples = missingMarks
       .slice(0, 3)
-      .map((mark) => `“${mark.text}”`)
+      .map((mark) => `"${mark.text}"`)
       .join('、')
     return `仍有 ${missingMarks.length} 处标黄文本未处理：${samples}。请设为字段、前缀、后缀、保留原文或删除文本后再保存`
   }
@@ -3468,17 +2263,17 @@ function validateFieldRowsBeforeSave() {
     if (rowUsage(row) === 'delete_text') continue
     const currentName = effectiveRowName(row)
     if (!currentName.trim()) {
-      return `“${row.text}”还没有填写字段名`
+      return `"${row.text}"还没有填写字段名`
     }
     if (rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix') {
       const targets = fieldRows.value.filter(
         (target) => target.enabled && rowUsage(target) === 'field' && target.name.trim() === currentName.trim(),
       )
       if (!targets.length) {
-        return `“${row.text}”设为${rowUsage(row) === 'prefix' ? '前缀' : '后缀'}，但找不到同名字段`
+        return `"${row.text}"设为${rowUsage(row) === 'prefix' ? '前缀' : '后缀'}，但找不到同名字段`
       }
       if (targets.some((target) => isMarkerType(target.type))) {
-        return `“${row.text}”不能挂到勾选字段上，请改成文本、日期、下拉或当事人列表字段`
+        return `"${row.text}"不能挂到勾选字段上，请改成文本、日期、下拉或当事人列表字段`
       }
     }
   }
@@ -3726,26 +2521,6 @@ function groupHistoryRuns(runs) {
   return Array.from(groups.values())
 }
 
-function historyRunSummary(run) {
-  const summaries = Array.isArray(run.fieldSummaries) ? run.fieldSummaries : []
-  if (summaries.length) {
-    return summaries
-      .filter((item) => item.display)
-      .slice(0, 6)
-      .map((item) => ({
-        label: item.label || item.name,
-        display: item.display,
-      }))
-  }
-  return Object.entries(run.fieldValues || {})
-    .filter(([, value]) => displayValue(value))
-    .slice(0, 6)
-    .map(([name, value]) => ({
-      label: name,
-      display: displayValue(value),
-    }))
-}
-
 async function applyHistoryRun(run) {
   if (!run?.templatePath) return
   const opened = await openTemplatePackage(run.templatePath)
@@ -3758,7 +2533,7 @@ async function applyHistoryRun(run) {
 async function deleteTemplate(item) {
   if (!item?.path) return
   try {
-    await ElMessageBox.confirm(`删除“${item.name}”？模板会先放入回收站，可在设置里恢复。`, '删除模板', {
+    await ElMessageBox.confirm(`删除"${item.name}"？模板会先放入回收站，可在设置里恢复。`, '删除模板', {
       confirmButtonText: '删除',
       cancelButtonText: '取消',
       type: 'warning',
@@ -3924,70 +2699,6 @@ function scheduleHistoryRefresh() {
   }, 350)
 }
 
-function firstOptionLabel(field) {
-  return field.options?.[0]?.label || ''
-}
-
-function selectFieldOptions(field) {
-  return (field.options || [])
-    .map((opt) => ({
-      label: opt.label || '',
-      value: opt.checkedText || opt.label || '',
-    }))
-    .filter((opt) => opt.label)
-}
-
-function fieldStructureHints(field) {
-  const override = existingStructureOverrideForField(field)
-  const prefixes = override ? [override.prefix ?? ''] : [sourceFieldPrefix(field)].filter((text) => text !== '')
-  const suffixes = fieldUsesRepeatableSuffix(field)
-    ? []
-    : override
-      ? [override.suffix ?? '']
-      : structureTextsForField(field, 'removeEmptySuffix')
-  return [
-    ...prefixes.map((text, index) => ({
-      key: `prefix-${index}-${text}`,
-      label: '前缀',
-      text: displayStructureText(text),
-      empty: !cleanStructureText(text),
-    })),
-    ...suffixes.map((text, index) => ({
-      key: `suffix-${index}-${text}`,
-      label: '后缀',
-      text: displayStructureText(text),
-      empty: !cleanStructureText(text),
-    })),
-  ]
-}
-
-function existingStructureOverrideForField(field) {
-  const key = structureOverrideKey(field)
-  return key ? structureOverrides[key] : null
-}
-
-function displayStructureText(text) {
-  const value = cleanStructureText(text)
-  return value || '无'
-}
-
-function structureTextsForField(field, key) {
-  const values = []
-  if (field.optionalRule?.[key]) values.push(field.optionalRule[key])
-  for (const markRef of field.markRefs || []) {
-    if (markRef.optionalRule?.[key]) values.push(markRef.optionalRule[key])
-  }
-  return Array.from(new Set(values.map(cleanStructureText).filter(Boolean)))
-}
-
-function cleanStructureText(text) {
-  const value = String(text || '').trim()
-  if (!value) return ''
-  const withoutConnector = value.replace(/^(?:以及|或者|[，,、;；和与及\s])+/u, '')
-  if (!withoutConnector) return ''
-  return withoutConnector
-}
-
 async function renderTemplate() {
   if (!templatePath.value || !templateManifest.value) return
   const missing = requiredMissingFields()
@@ -4059,7 +2770,7 @@ async function exportBatchTemplate() {
     return
   }
   ElMessage.success('字段表已导出')
-  ElMessage.info('若模板有填写历史，第 3 行为最近一次填写示例（标“否”不会生成数据）；需要可复制一行后填写')
+  ElMessage.info('若模板有填写历史，第 3 行为最近一次填写示例（标"否"不会生成数据）；需要可复制一行后填写')
   const openResult = await openPath(result.data)
   if (!openResult.ok) {
     ElMessage.warning('字段表已导出但无法自动打开，请到保存目录查看')
@@ -4402,51 +3113,8 @@ function resolveReferenceValueFromSource(source, values) {
   return source.sourceIndex == null && raw != null ? String(raw) : ''
 }
 
-function sourceFieldPrefix(field) {
-  if (!field) return ''
-  const prefixes = structureTextsForField(field, 'removeEmptyPrefix')
-  const prefix = prefixes[0] || ''
-  return defaultPrefixForField(field, prefix)
-}
-
-function sourceFieldSuffix(field) {
-  if (!field) return ''
-  if (fieldUsesRepeatableSuffix(field)) return ''
-  const suffixes = structureTextsForField(field, 'removeEmptySuffix')
-  return suffixes[0] || ''
-}
-
-function structureEditorTargetField(field) {
-  return field
-}
-
-function structureEditorTitle(field) {
-  return fillFieldLabel(field)
-}
-
-function structureOverrideForField(field) {
-  return structureOverrideForTargetField(structureEditorTargetField(field))
-}
-
-function structureOverrideForTargetField(field) {
-  const key = structureOverrideKey(field)
-  if (!key) return { prefix: '', suffix: '' }
-  if (!structureOverrides[key]) {
-    structureOverrides[key] = {
-      prefix: sourceFieldPrefix(field),
-      suffix: sourceFieldSuffix(field),
-    }
-  }
-  return structureOverrides[key]
-}
-
 function structureOverrideKey(field) {
   return field?.id || field?.name || ''
-}
-
-function defaultPrefixForField(field, prefix) {
-  const value = cleanStructureText(prefix)
-  return value
 }
 
 function splitPartyInput(value) {
@@ -4479,14 +3147,6 @@ function fieldUsesRepeatableSuffix(field) {
   return (
     field?.type === 'party_list' && (field.markRefs || []).some((markRef) => markRef.optionalRule?.removeEmptySuffix)
   )
-}
-
-function partyFieldStructureHint(field) {
-  const suffixes = Array.from(
-    new Set((field.markRefs || []).map((markRef) => markRef.optionalRule?.removeEmptySuffix).filter(Boolean)),
-  )
-  if (!suffixes.length) return ''
-  return `可为每一项选择或输入后缀，默认来自模板：${suffixes.join('、')}。`
 }
 
 function partySuffixOptions(field) {
@@ -4594,10 +3254,6 @@ function allFieldSuggestionItems(field) {
   })
 }
 
-function templateStoredSuggestionItems(field) {
-  return (historyContext.value.fieldSuggestions?.[field.id] || []).slice(0, 6)
-}
-
 function completeField(field, query, callback) {
   const rawTokens = String(query || '')
     .split(/\s+/)
@@ -4693,28 +3349,7 @@ function displayValue(value) {
   return value.name || value.label || JSON.stringify(value)
 }
 
-function shortDateTime(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
-// History cards show date + time so same-day runs are distinguishable.
-function historyTime(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-const HISTORY_PAGE_SIZE = 20
 const expandedHistoryGroups = reactive(new Set())
-function visibleGroupRuns(group) {
-  if (expandedHistoryGroups.has(group.templateId)) return group.runs
-  return group.runs.slice(0, HISTORY_PAGE_SIZE)
-}
 function expandHistoryGroup(templateId) {
   expandedHistoryGroups.add(templateId)
 }
@@ -4728,6 +3363,23 @@ function todayText() {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+// ── Wrapper functions for component emits ────────────────────────────────────
+
+function handleSelectionChange(filteredRows) {
+  selectedRows.value = filteredRows
+}
+
+function handleUpdateFormValue(key, value) {
+  formValues[key] = value
+}
+
+function handleUpdateStructureOverride(key, prop, value) {
+  if (!structureOverrides[key]) {
+    structureOverrides[key] = { prefix: '', suffix: '' }
+  }
+  structureOverrides[key][prop] = value
 }
 </script>
 

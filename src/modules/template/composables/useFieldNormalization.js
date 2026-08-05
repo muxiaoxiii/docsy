@@ -9,7 +9,6 @@ import {
   isGeneratedFieldName,
   isConnectorRow,
   charLength,
-  sliceChars,
   markRefsForTextRange,
   refsForRowTextRange,
   markSegmentsFromRefs,
@@ -23,20 +22,13 @@ import {
   splitPartyLabelText,
   splitPartyLabelSegments,
   stableFieldId,
-  hashText,
   normalizedReferenceSource,
   structureTargetRow,
-  structureOverrideKey,
-  displayValue,
-  isEmptyValue,
-  partyItemsToValues,
-  displayMarkText,
   leadingConnectorInfo,
   knownSuffixAtEnd,
   isLikelyPrefixMark,
   isLikelySuffixMark,
   referenceSourceKey,
-  syncReferenceSourceFromKey,
   defaultCheckedText,
   defaultUncheckedText,
 } from './fieldRowUtils.js'
@@ -495,7 +487,7 @@ function isPunctuationFragment(text) {
 
 // ── buildFields ──────────────────────────────────────────────────────────────
 
-export function buildFields(fieldRows, marksRef) {
+export function buildFields(fieldRows) {
   const rows = fieldRows.filter(
     (row) =>
       row.enabled &&

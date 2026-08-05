@@ -20,7 +20,7 @@ import {
 } from './fieldRowUtils.js'
 import { inferFieldFromText } from './useFieldNormalization.js'
 
-export function usePreviewSelection(documentRuns, documentText, fieldRows, previewSampleValues) {
+export function usePreviewSelection(documentRuns, documentText, fieldRows, _previewSampleValues) {
   const sourcePreviewRef = ref(null)
   const documentPreviewRef = ref(null)
   const sourcePreviewSelection = ref(null)
@@ -283,17 +283,13 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, previ
   }
 
   function triggerPreviewSelectionAdd(type) {
-    try {
-      const payload = sourcePreviewSelectionPayload.value
-      const key = `${type}:${payload?.text || ''}:${payload?.refs?.map((ref) => `${ref.markId}:${ref.start}:${ref.end}`).join('|') || ''}`
-      const now = Date.now()
-      if (key && key === lastPreviewAddKey && now - lastPreviewAddAt < 350) return
-      lastPreviewAddKey = key
-      lastPreviewAddAt = now
-      addPreviewSelection(type)
-    } catch (err) {
-      throw err
-    }
+    const payload = sourcePreviewSelectionPayload.value
+    const key = `${type}:${payload?.text || ''}:${payload?.refs?.map((ref) => `${ref.markId}:${ref.start}:${ref.end}`).join('|') || ''}`
+    const now = Date.now()
+    if (key && key === lastPreviewAddKey && now - lastPreviewAddAt < 350) return
+    lastPreviewAddKey = key
+    lastPreviewAddAt = now
+    addPreviewSelection(type)
   }
 
   function addPreviewSelection(type) {
