@@ -186,6 +186,7 @@
         </div>
         <HeaderFooterRuleFields
           v-if="insertHeaderFooterEnabled"
+          ref="inlineHfFieldsRef"
           class="rule-grid"
           v-model:header-groups="headerGroupsModel"
           v-model:selected-header-group-id="selectedHeaderGroupId"
@@ -824,7 +825,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Bottom, Plus, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
@@ -860,6 +861,7 @@ import { useEvidencePdfExistingEditing } from '../composables/useEvidencePdfExis
 import { renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
 import { elementIdentity } from '../composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
+import { useHistory } from '../../../core/composables/useHistory.js'
 import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
@@ -1130,6 +1132,77 @@ const editingContentRowValue = ref('')
 const selectedFooterCandidateKey = ref('')
 const existingElementsVisible = ref(false)
 const existingElementsFilter = ref('all')
+
+// --- Text edit undo/redo ---
+const editUndoStack = ref([])
+const editRedoStack = ref([])
+const inlineHfFieldsRef = ref(null)
+
+function pushEditUndo(snap) {
+  editUndoStack.value.push(snap)
+  if (editUndoStack.value.length > 30) editUndoStack.value.shift()
+  editRedoStack.value = []
+}
+
+function undoEdit() {
+  const snap = editUndoStack.value.pop()
+  if (!snap) return false
+  editRedoStack.value.push(snap)
+  const file = overlayFiles.value.find(f => f.path === snap.filePath)
+  if (!file) return true
+  if (snap.type === 'group') {
+    const groups = groupsFor(file, snap.kind)
+    const group = groups.find(g => g.id === snap.groupId)
+    if (group) group.text = snap.oldValue
+  } else if (snap.type === 'element') {
+    const el = (file.existingElements || []).find(e => e.id === snap.elementId)
+    if (el) {
+      el.editedText = snap.oldValue
+      el.decision = snap.oldDecision
+      syncLegacyField(file, snap.kind, el)
+    }
+  }
+  overlayFiles.value = [...overlayFiles.value]
+  return true
+}
+
+function redoEdit() {
+  const snap = editRedoStack.value.pop()
+  if (!snap) return false
+  editUndoStack.value.push(snap)
+  const file = overlayFiles.value.find(f => f.path === snap.filePath)
+  if (!file) return true
+  if (snap.type === 'group') {
+    const groups = groupsFor(file, snap.kind)
+    const group = groups.find(g => g.id === snap.groupId)
+    if (group) group.text = snap.newValue
+  } else if (snap.type === 'element') {
+    const el = (file.existingElements || []).find(e => e.id === snap.elementId)
+    if (el) {
+      el.editedText = snap.newValue
+      el.decision = snap.newDecision
+      syncLegacyField(file, snap.kind, el)
+    }
+  }
+  overlayFiles.value = [...overlayFiles.value]
+  return true
+}
+
+function syncLegacyField(file, kind, el) {
+  if (kind === 'header') {
+    file.existingHeaderText = el.editedText
+    file.existingHeaderEdited = el.decision === 'edit'
+    if (el.source !== 'artifact') file.convertPlainHeader = el.decision === 'edit'
+  } else if (kind === 'footerText') {
+    file.existingFooterText = el.editedText
+    file.existingFooterEdited = el.decision === 'edit'
+    if (el.source !== 'artifact') file.convertPlainFooter = el.decision === 'edit'
+  } else {
+    file.existingPageNumberText = el.editedText
+    file.existingPageNumberEdited = el.decision === 'edit'
+    if (el.source !== 'artifact') file.convertPlainPageNumber = el.decision === 'edit'
+  }
+}
 
 watch(
   () => selectedHeaderGroup.value.mode,
@@ -2516,6 +2589,8 @@ function finishNewContentRowEdit(row, cr, value) {
       row.selectedPageNumberGroupId = group.id
     }
   }
+  // Record old value for undo
+  const oldValue = cr.kind === 'pageNumber' ? (group.template || '{page}/{total}') : (group.text || '')
   if (cr.kind === 'header') {
     group.text = value
     if (group.mode === 'filename' || group.mode === 'seq' || group.mode === 'seq_cn') {
@@ -2533,6 +2608,14 @@ function finishNewContentRowEdit(row, cr, value) {
     }
     group.template = value
   }
+  pushEditUndo({
+    type: 'group',
+    filePath: row.path,
+    kind: cr.kind,
+    groupId: group.id,
+    oldValue,
+    newValue: cr.kind === 'pageNumber' ? group.template : group.text,
+  })
   // Force Vue reactivity: ref([]) doesn't track deep property mutations,
   // so we trigger a shallow update to make the table re-render.
   overlayFiles.value = [...overlayFiles.value]
@@ -2542,6 +2625,8 @@ function finishExistingContentRowEdit(row, cr, value) {
   const element = cr.element
   if (!element) return
   const original = element.detectedText || ''
+  const oldDecision = element.decision
+  const oldEditedText = element.editedText || element.detectedText || ''
   if (!value) {
     // Empty → mark delete
     element.decision = 'delete'
@@ -2569,6 +2654,21 @@ function finishExistingContentRowEdit(row, cr, value) {
   const status = fileExistingStatus(row)
   row.statusText = status.text
   row.statusType = status.type
+  // Record for undo
+  const newDecision = element.decision
+  const newEditedText = element.editedText || element.detectedText || ''
+  if (newDecision !== oldDecision || newEditedText !== oldEditedText) {
+    pushEditUndo({
+      type: 'element',
+      filePath: row.path,
+      kind: cr.kind,
+      elementId: element.id,
+      oldDecision,
+      oldValue: oldEditedText,
+      newDecision,
+      newValue: newEditedText,
+    })
+  }
   // Force Vue reactivity for deep property mutations
   overlayFiles.value = [...overlayFiles.value]
 }
@@ -2616,6 +2716,22 @@ function clearContentRowEdit() {
   editingContentRowKind.value = ''
   editingContentRowValue.value = ''
 }
+
+// --- Global keyboard shortcut: Ctrl+Z / Ctrl+Shift+Z ---
+function handleGlobalKeydown(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.key !== 'z') return
+  const tag = (e.target?.tagName || '').toLowerCase()
+  if (tag === 'input' || tag === 'textarea') return
+  e.preventDefault()
+  if (e.shiftKey) {
+    if (!redoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.redo()
+  } else {
+    if (!undoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.undo()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', handleGlobalKeydown))
+onUnmounted(() => window.removeEventListener('keydown', handleGlobalKeydown))
 </script>
 
 <style scoped>

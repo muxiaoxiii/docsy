@@ -7,6 +7,13 @@
         <el-button size="small" circle :disabled="!headerInsertEnabled" @click="addGroup">
           <el-icon><Plus /></el-icon>
         </el-button>
+        <UndoRedoButtons
+          :can-undo="headerHistory.canUndo"
+          :can-redo="headerHistory.canRedo"
+          @undo="headerHistory.undo()"
+          @redo="headerHistory.redo()"
+          compact
+        />
       </div>
     </div>
     <template v-if="headerInsertEnabled">
@@ -85,6 +92,13 @@
         <el-button size="small" circle :disabled="!footerInsertEnabled" @click="addFooterTextGroup">
           <el-icon><Plus /></el-icon>
         </el-button>
+        <UndoRedoButtons
+          :can-undo="footerTextHistory.canUndo"
+          :can-redo="footerTextHistory.canRedo"
+          @undo="footerTextHistory.undo()"
+          @redo="footerTextHistory.redo()"
+          compact
+        />
       </div>
     </div>
     <template v-if="footerInsertEnabled">
@@ -136,6 +150,13 @@
         <el-button size="small" circle :disabled="!pageNumberEnabled" @click="addPageNumberGroup">
           <el-icon><Plus /></el-icon>
         </el-button>
+        <UndoRedoButtons
+          :can-undo="pageNumberHistory.canUndo"
+          :can-redo="pageNumberHistory.canRedo"
+          @undo="pageNumberHistory.undo()"
+          @redo="pageNumberHistory.redo()"
+          compact
+        />
       </div>
     </div>
     <template v-if="pageNumberEnabled">
@@ -238,10 +259,20 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import TextPlacementFields from './TextPlacementFields.vue'
 import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
+import { useHistory } from '../../../core/composables/useHistory.js'
+import UndoRedoButtons from '../../../components/UndoRedoButtons.vue'
+
+function debounce(fn, ms) {
+  let timer
+  return (...args) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn(...args), ms)
+  }
+}
 
 const PRESETS_WITH_TOTAL = [
   { value: '{page}/{total}', label: '1/35' },
@@ -351,6 +382,99 @@ const emit = defineEmits([
     'pageNumberColor',
   ].map((key) => `update:${key}`),
 ])
+
+// --- Undo/Redo history for each section ---
+const headerHistory = useHistory({
+  snapshot: () => ({
+    align: props.headerAlign,
+    fontSize: props.headerFontSize,
+    fontFamily: props.headerFontFamily,
+    marginMm: props.headerMarginMm,
+    offsetXMm: props.headerOffsetXMm,
+    color: props.headerColor,
+  }),
+  restore: (s) => {
+    emit('update:headerAlign', s.align)
+    emit('update:headerFontSize', s.fontSize)
+    emit('update:headerFontFamily', s.fontFamily)
+    emit('update:headerMarginMm', s.marginMm)
+    emit('update:headerOffsetXMm', s.offsetXMm)
+    emit('update:headerColor', s.color)
+  },
+  onChange: () => emit('change'),
+})
+
+const footerTextHistory = useHistory({
+  snapshot: () => ({
+    align: props.footerTextAlign,
+    fontSize: props.footerTextFontSize,
+    fontFamily: props.footerTextFontFamily,
+    marginMm: props.footerTextMarginMm,
+    offsetXMm: props.footerTextOffsetXMm,
+    color: props.footerTextColor,
+  }),
+  restore: (s) => {
+    emit('update:footerTextAlign', s.align)
+    emit('update:footerTextFontSize', s.fontSize)
+    emit('update:footerTextFontFamily', s.fontFamily)
+    emit('update:footerTextMarginMm', s.marginMm)
+    emit('update:footerTextOffsetXMm', s.offsetXMm)
+    emit('update:footerTextColor', s.color)
+  },
+  onChange: () => emit('change'),
+})
+
+const pageNumberHistory = useHistory({
+  snapshot: () => ({
+    align: props.pageNumberAlign,
+    fontSize: props.pageNumberFontSize,
+    fontFamily: props.pageNumberFontFamily,
+    marginMm: props.pageNumberMarginMm,
+    offsetXMm: props.pageNumberOffsetXMm,
+    color: props.pageNumberColor,
+  }),
+  restore: (s) => {
+    emit('update:pageNumberAlign', s.align)
+    emit('update:pageNumberFontSize', s.fontSize)
+    emit('update:pageNumberFontFamily', s.fontFamily)
+    emit('update:pageNumberMarginMm', s.marginMm)
+    emit('update:pageNumberOffsetXMm', s.offsetXMm)
+    emit('update:pageNumberColor', s.color)
+  },
+  onChange: () => emit('change'),
+})
+
+// Debounced watches: push history when placement params change
+watch(
+  () => [props.headerAlign, props.headerFontSize, props.headerFontFamily, props.headerMarginMm, props.headerOffsetXMm, props.headerColor],
+  debounce(() => headerHistory.push(), 500),
+  { deep: true },
+)
+watch(
+  () => [props.footerTextAlign, props.footerTextFontSize, props.footerTextFontFamily, props.footerTextMarginMm, props.footerTextOffsetXMm, props.footerTextColor],
+  debounce(() => footerTextHistory.push(), 500),
+  { deep: true },
+)
+watch(
+  () => [props.pageNumberAlign, props.pageNumberFontSize, props.pageNumberFontFamily, props.pageNumberMarginMm, props.pageNumberOffsetXMm, props.pageNumberColor],
+  debounce(() => pageNumberHistory.push(), 500),
+  { deep: true },
+)
+
+// Expose undo/redo for parent-level keyboard shortcut dispatch
+function undo() {
+  if (headerHistory.canUndo.value) { headerHistory.undo(); return true }
+  if (footerTextHistory.canUndo.value) { footerTextHistory.undo(); return true }
+  if (pageNumberHistory.canUndo.value) { pageNumberHistory.undo(); return true }
+  return false
+}
+function redo() {
+  if (headerHistory.canRedo.value) { headerHistory.redo(); return true }
+  if (footerTextHistory.canRedo.value) { footerTextHistory.redo(); return true }
+  if (pageNumberHistory.canRedo.value) { pageNumberHistory.redo(); return true }
+  return false
+}
+defineExpose({ undo, redo })
 
 function model(key) {
   return computed({ get: () => props[key], set: (value) => emit(`update:${key}`, value) })
