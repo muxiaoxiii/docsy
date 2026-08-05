@@ -37,6 +37,11 @@
                 <div v-for="item in typeHelpItems" :key="item.value" class="type-help-item">
                   <strong>{{ item.label }}</strong>
                   <span>{{ item.description }}</span>
+                  <div v-if="item.subTypes" class="type-help-sub">
+                    <div v-for="sub in item.subTypes" :key="sub.value" class="type-help-sub-item">
+                      <strong>{{ sub.label }}</strong>：{{ sub.description }}
+                    </div>
+                  </div>
                 </div>
               </section>
               <section>
@@ -142,19 +147,40 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="132">
+        <el-table-column label="类型" width="168">
           <template #default="{ row }">
             <span v-if="row.virtualPartyGroup" class="muted">当事人列表</span>
             <span v-else-if="row.displayOnly" class="muted">当事人项</span>
             <span v-else-if="isConnectorRow(row)" class="muted">连接符</span>
-            <el-select v-else v-model="row.type" size="small" @change="$emit('row-type-change', row)">
-              <el-option
-                v-for="item in typeHelpItems"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-              />
-            </el-select>
+            <template v-else>
+              <el-select
+                :model-value="typeGroupOf(row.type)"
+                size="small"
+                class="type-group-select"
+                @update:model-value="(group) => onTypeGroupChange(row, group)"
+              >
+                <el-option
+                  v-for="item in typeGroupOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+              <el-select
+                v-if="typeGroupSubOptions(row.type)"
+                :model-value="row.type"
+                size="small"
+                class="type-sub-select"
+                @update:model-value="(type) => $emit('row-type-change', row, type)"
+              >
+                <el-option
+                  v-for="sub in typeGroupSubOptions(row.type)"
+                  :key="sub.value"
+                  :label="sub.label"
+                  :value="sub.value"
+                />
+              </el-select>
+            </template>
           </template>
         </el-table-column>
         <el-table-column label="字段" min-width="210">
@@ -625,6 +651,10 @@ import {
   previewTokenClass,
   previewFormatClass,
   fillFieldLabel,
+  FIELD_TYPE_GROUPS,
+  typeGroupOf,
+  typeGroupSubOptions,
+  typeActualOf,
   typeHelpItems,
   previewLegendItems,
   checkedSymbolOptions,
@@ -713,6 +743,14 @@ const dateFormatOptions = [
   { value: 'en_ordinal', label: '英文序数 2026 August 5th' },
   { value: 'blank', label: '留空 年月日手写' },
 ]
+
+const typeGroupOptions = FIELD_TYPE_GROUPS
+
+function onTypeGroupChange(row, group) {
+  const actual = typeActualOf(group, null)
+  row.type = actual
+  emit('row-type-change', row)
+}
 
 const checkboxLikeCount = computed(() => props.marks.filter((mark) => mark.checkboxLike).length)
 const fieldTableRows = computed(() => buildFieldTableRows(props.fieldRows))
@@ -934,6 +972,23 @@ p {
 
 .type-help-item strong {
   color: var(--docsy-text-strong);
+}
+
+.type-help-sub {
+  padding-left: 10px;
+  border-left: 2px solid var(--docsy-border-subtle, #e4e7ed);
+  display: grid;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.type-help-sub-item {
+  color: var(--docsy-text-muted, #909399);
+  line-height: 1.45;
+}
+
+.type-help-sub-item strong {
+  color: var(--docsy-text);
 }
 
 .field-rules {

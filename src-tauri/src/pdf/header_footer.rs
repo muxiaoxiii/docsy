@@ -112,13 +112,13 @@ struct PlainTextCleanupBBoxConfig {
 #[serde(rename_all = "camelCase")]
 pub struct BookmarkConfig {
     #[serde(default)]
-    enabled: bool,
+    pub enabled: bool,
     #[serde(default)]
-    label: String,
+    pub label: String,
     #[serde(default)]
-    page_index: u32,
+    pub page_index: u32,
     #[serde(default)]
-    remove_existing: bool,
+    pub remove_existing: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -372,7 +372,7 @@ fn apply_bookmark(output: &Path, config: &BookmarkConfig) -> Result<()> {
 }
 
 /// 写入多个书签，创建 /First /Last /Next /Prev 链
-fn apply_bookmarks(output: &Path, bookmarks: &[BookmarkConfig], remove_existing: bool) -> Result<()> {
+pub fn apply_bookmarks(output: &Path, bookmarks: &[BookmarkConfig], remove_existing: bool) -> Result<()> {
     if remove_existing {
         remove_pdf_bookmarks(output)?;
     }
@@ -2389,4 +2389,14 @@ mod tests {
         doc.trailer.set("Root", catalog_id);
         doc.save(path).unwrap();
     }
+}
+
+#[test]
+fn bookmark_serde_camelcase() {
+    let json = r#"{"inputPath":"/tmp/a.pdf","outputPath":"/tmp/b.pdf","bookmarks":[{"enabled":true,"label":"测试","pageIndex":0}],"bookmarkRemoveExisting":false}"#;
+    let job: HeaderFooterJob = serde_json::from_str(json).unwrap();
+    assert_eq!(job.bookmarks.len(), 1, "bookmarks should have 1 item");
+    assert_eq!(job.bookmarks[0].label, "测试");
+    assert_eq!(job.bookmarks[0].page_index, 0);
+    assert!(!job.bookmark_remove_existing);
 }

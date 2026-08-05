@@ -12,24 +12,71 @@ import {
 
 // ── Type / usage helpers ─────────────────────────────────────────────────────
 
-export const typeHelpItems = [
+// Merged field-type groups shown in the type picker. Groups with subTypes
+// expose a second "方式" selector; the stored type stays the concrete one
+// (checkbox/radio_group/…), so the backend/scan/render logic is untouched.
+export const FIELD_TYPE_GROUPS = [
   { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、律所名称。' },
-  { value: 'date', label: '日期', description: '日期字段，填写时用日期选择器，生成时输出中文日期格式。' },
+  { value: 'date', label: '日期', description: '日期字段，填写时用日期选择器；可设输出格式或留空手写。' },
   { value: 'select', label: '下拉选择', description: '从预设选项中选择或手动输入，如案由、诉讼阶段。' },
   { value: 'party_list', label: '列表', description: '适合当事人、律师等多项内容；多个名称按顺序用顿号连接。' },
   { value: 'reference', label: '引用', description: '复用前面字段的值；来源由填写时选择或在设置里指定。' },
-  { value: 'checkbox', label: '单个勾选', description: '一个独立方框，只控制是否勾选。' },
-  { value: 'radio_group', label: '互斥勾选组', description: '多个方框只能选一个，如一般授权/特别授权。' },
-  { value: 'checkbox_group', label: '多选勾选组', description: '多个方框可同时选中，如多个保全事项。' },
   {
-    value: 'prefix',
-    label: '前缀',
-    description: '字段为空时随字段一起删除的前缀文字，如"原告""，第三人""（案号："。',
+    value: 'check',
+    label: '勾选',
+    description: '方框勾选，可设为单个、互斥组或多选组。',
+    subTypes: [
+      { value: 'checkbox', label: '单个勾选', description: '一个独立方框，只控制是否勾选。' },
+      { value: 'radio_group', label: '互斥勾选组', description: '多个方框只能选一个，如一般授权/特别授权。' },
+      { value: 'checkbox_group', label: '多选勾选组', description: '多个方框可同时选中，如多个保全事项。' },
+    ],
   },
-  { value: 'suffix', label: '后缀', description: '字段为空时随字段一起删除的后置文字，如"律师""）"。' },
-  { value: 'delete_text', label: '删除文本', description: '保存模板时从 Word 原文中删除这段文字。' },
-  { value: 'ignore', label: '保留原文', description: '不作为字段或规则保存；保存模板时只清除黄色高亮，正文仍保留。' },
+  {
+    value: 'link',
+    label: '连接文字',
+    description: '字段为空时随字段一起删除的连接文字（前缀/后缀）。',
+    subTypes: [
+      { value: 'prefix', label: '前缀', description: '如"原告""，第三人""（案号："。' },
+      { value: 'suffix', label: '后缀', description: '如"律师""）"。' },
+    ],
+  },
+  {
+    value: 'action',
+    label: '文本处理',
+    description: '对这段标黄文字的特殊处理。',
+    subTypes: [
+      { value: 'delete_text', label: '删除文本', description: '保存模板时从 Word 原文中删除这段文字。' },
+      { value: 'ignore', label: '保留原文', description: '不作为字段或规则保存；保存模板时只清除黄色高亮。' },
+    ],
+  },
 ]
+
+export const typeHelpItems = FIELD_TYPE_GROUPS
+
+// Map a concrete stored type to its merged group (or itself).
+export function typeGroupOf(type) {
+  if (['checkbox', 'radio_group', 'checkbox_group'].includes(type)) return 'check'
+  if (type === 'prefix' || type === 'suffix') return 'link'
+  if (type === 'delete_text' || type === 'ignore') return 'action'
+  return type
+}
+
+// The 方式 sub-options for a stored type's group (null when no sub types).
+export function typeGroupSubOptions(type) {
+  const group = typeGroupOf(type)
+  const entry = FIELD_TYPE_GROUPS.find((g) => g.value === group)
+  return entry?.subTypes || null
+}
+
+// Concrete type for a (group, sub) selection; plain groups use the group value.
+export function typeActualOf(group, sub) {
+  const entry = FIELD_TYPE_GROUPS.find((g) => g.value === group)
+  if (entry?.subTypes?.length) {
+    const chosen = entry.subTypes.find((s) => s.value === sub)
+    return chosen ? chosen.value : entry.subTypes[0].value
+  }
+  return group
+}
 
 export const previewLegendItems = [
   { className: 'preview-text', label: '文本', type: 'text' },

@@ -93,7 +93,7 @@
                 <em>空值时删除</em>
               </span>
             </div>
-            <template v-if="field.editable || field.isReference">
+            <template v-if="field.editable || field.isReference || hasSlotTypeOverride(field)">
             <div v-if="effectiveFieldType(field) === 'date'" class="date-fill-row">
               <el-date-picker
                 v-if="getEntryValue(field) !== '留空'"
@@ -103,7 +103,9 @@
                 @update:model-value="setEntryValue(field, $event)"
               />
               <span v-else class="date-blank-text">留空</span>
-              <button type="button" class="date-blank-btn" @click="toggleDateBlank(field)">留空</button>
+              <button type="button" class="date-blank-btn" @click="toggleDateBlank(field)">
+                {{ getEntryValue(field) === '留空' ? '输入日期' : '留空' }}
+              </button>
             </div>
             <el-checkbox
               v-else-if="effectiveFieldType(field) === 'checkbox'"
@@ -263,15 +265,30 @@
                 <div class="setting-row">
                   <span class="setting-label">字段类型</span>
                   <el-select
-                    :model-value="effectiveFieldType(field)"
+                    :model-value="typeGroupOf(effectiveFieldType(field))"
                     size="small"
-                    @change="(type) => $emit('set-field-type-override', field, type)"
+                    class="type-group-select"
+                    @update:model-value="(group) => onFieldTypeGroupChange(field, group)"
                   >
                     <el-option
-                      v-for="item in typeHelpItems.filter((t) => ['text', 'date', 'select'].includes(t.value))"
+                      v-for="item in fieldTypeOverrideGroups"
                       :key="item.value"
                       :value="item.value"
                       :label="item.label"
+                    />
+                  </el-select>
+                  <el-select
+                    v-if="typeGroupSubOptions(effectiveFieldType(field))"
+                    :model-value="effectiveFieldType(field)"
+                    size="small"
+                    class="type-sub-select"
+                    @update:model-value="(type) => $emit('set-field-type-override', field, type)"
+                  >
+                    <el-option
+                      v-for="sub in typeGroupSubOptions(effectiveFieldType(field))"
+                      :key="sub.value"
+                      :value="sub.value"
+                      :label="sub.label"
                     />
                   </el-select>
                 </div>
@@ -344,7 +361,10 @@ import { ArrowDown } from '@element-plus/icons-vue'
 import {
   shortDateTime,
   fillFieldLabel,
-  typeHelpItems,
+  FIELD_TYPE_GROUPS,
+  typeGroupOf,
+  typeGroupSubOptions,
+  typeActualOf,
   partyFieldUsesSuffix,
   partySuffixOptions,
   partyFieldStructureHint,
@@ -416,13 +436,33 @@ function fieldFormKey(field) {
 
 function effectiveFieldType(field) {
   const slotKey = slotKeyFor(field)
-  return props.typeOverrides[slotKey] || props.typeOverrides[field.id] || field.type
+  if (props.typeOverrides[slotKey]) return props.typeOverrides[slotKey]
+  if (props.typeOverrides[field.id]) return props.typeOverrides[field.id]
+  // Follower positions of same-name multi-position fields behave as references
+  // to the first position: their type shows as "引用" until overridden.
+  if ((field.posIndex ?? 0) > 0 && field.fillAllPositions) return 'reference'
+  return field.type
 }
 
 function slotKeyFor(field) {
   const base = field?.id || field?.name || ''
   const pos = field?.posIndex ?? 0
   return pos > 0 ? `${base}#${pos}` : base
+}
+
+// A follower made independent by a type change or a custom reference source
+// stores its own slot value.
+function hasSlotTypeOverride(field) {
+  return Boolean(props.typeOverrides[slotKeyFor(field)])
+}
+
+// Types offered in the fill-page "…" menu (fillable types only; the structural
+// link/action types belong to the build page).
+const fieldTypeOverrideGroups = FIELD_TYPE_GROUPS.filter((g) => !['link', 'action'].includes(g.value))
+
+function onFieldTypeGroupChange(field, group) {
+  const actual = typeActualOf(group, null)
+  emit('set-field-type-override', field, actual)
 }
 
 function getEntryValue(field) {
@@ -488,10 +528,6 @@ function selectFieldOptions(field) {
 
 // ── Form value accessors (emit events instead of mutating props) ────────────
 
-function getFormValue(field) {
-  return props.formValues[fieldFormKey(field)]
-}
-
 function getFormValueByPrimary(field) {
   // For duplicate fields, get the value from the first field with the same name
   const primary = props.renderableTemplateFields.find(
@@ -499,10 +535,6 @@ function getFormValueByPrimary(field) {
   )
   if (primary) return props.formValues[fieldFormKey(primary)]
   return props.formValues[fieldFormKey(field)]
-}
-
-function setFormValue(field, value) {
-  emit('update-form-value', fieldFormKey(field), value)
 }
 
 function getReferenceSelection(field) {
@@ -639,6 +671,30 @@ function structureEditorTitle(field) {
 </script>
 
 <style scoped>
+.date-fill-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-blank-text {
+  color: var(--docsy-text-muted, #909399);
+  font-size: 12px;
+}
+
+.date-blank-btn {
+  border: none;
+  background: transparent;
+  color: var(--docsy-text-muted, #909399);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.date-blank-btn:hover {
+  color: var(--docsy-accent, #409eff);
+}
+
 .workspace {
   display: grid;
   gap: 14px;

@@ -2506,8 +2506,20 @@ function finishContentRowEdit(row, cr) {
 function finishNewContentRowEdit(row, cr, value) {
   // Fallback: if group reference is stale (e.g. groups array was rebuilt),
   // resolve it from the file's current groups.
-  const group = cr.group || selectedGroupFor(row, cr.kind) || groupsFor(row, cr.kind)[0]
-  if (!group) return
+  let group = cr.group || selectedGroupFor(row, cr.kind) || groupsFor(row, cr.kind)[0]
+  if (!group) {
+    // No groups exist for this kind — auto-create a default one
+    if (cr.kind === 'header') {
+      group = createDefaultHeaderGroup()
+      row.headerGroups = [group]
+    } else if (cr.kind === 'footerText') {
+      group = createDefaultFooterTextGroup()
+      row.footerTextGroups = [group]
+    } else {
+      group = createDefaultPageNumberGroup()
+      row.pageNumberGroups = [group]
+    }
+  }
   if (cr.kind === 'header') {
     group.text = value
     // Sync per_file mode to row.header

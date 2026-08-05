@@ -7,8 +7,6 @@
       <el-button size="small" @click="selectAll">全选</el-button>
       <el-button size="small" @click="invertSelection">反选</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="clearSelection">取消选择</el-button>
-      <el-button size="small" @click="selectByKind('pageNumber')">选中全部页码</el-button>
-      <el-button size="small" @click="selectByKind('header')">选中全部页眉</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('keep')">保留</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" type="danger" @click="applyDecision('delete')">标记删除</el-button>
@@ -72,7 +70,7 @@
         </template>
       </el-table-column>
     </el-table>
-    <p class="hint-text">右键点击行可切换勾选状态</p>
+    <p class="hint-text">右键点击行可取消选择</p>
     <template #footer>
       <el-button @click="visibleModel = false">完成</el-button>
     </template>
@@ -176,8 +174,6 @@ function handleRowRightClick(_row, _column, event) {
   const idx = selectedKeys.value.indexOf(key)
   if (idx >= 0) {
     selectedKeys.value = selectedKeys.value.filter(k => k !== key)
-  } else {
-    selectedKeys.value = [...selectedKeys.value, key]
   }
 }
 function handleRowClick(row) {
