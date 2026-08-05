@@ -22,7 +22,7 @@ export function detectedElementFromCandidate(candidate, kind, index = 0) {
     labels: [...(candidate?.labels || [])],
     sequenceForm: candidate?.sequenceForm || null,
     hasTotal: Boolean(candidate?.hasTotal),
-    decision: 'keep',
+    decision: null,
     reasons: [...(candidate?.reasons || [])],
   }
 }
@@ -51,7 +51,7 @@ export function mergeExistingElements(previous = [], detected = []) {
     if (!existing) return element
     return {
       ...element,
-      decision: existing.decision || 'keep',
+      decision: existing.decision ?? null,
       editedText: existing.editedText || element.detectedText,
     }
   })
