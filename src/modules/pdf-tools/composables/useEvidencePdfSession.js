@@ -443,8 +443,25 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     // When global apply is ON, infer enabled state from group content
     // Global mode: all files share the same group instance.
     const headerGroup = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
-    const footerTextGroup = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
-    const pageNumberGroup = rules._globalPageNumberGroup || selectedGroupFor(file, 'pageNumber')
+    let footerTextGroup = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
+    let pageNumberGroup = rules._globalPageNumberGroup || selectedGroupFor(file, 'pageNumber')
+    // When global apply is ON, inherit header settings for footer/pageNumber
+    if (rules._globalApply && headerGroup) {
+      const inheritIfDefault = (group, keys) => {
+        if (!group) return group
+        const overrides = {}
+        let changed = false
+        for (const k of keys) {
+          if (group[k] === 'auto' || group[k] === undefined || group[k] === null) {
+            overrides[k] = headerGroup[k]
+            changed = true
+          }
+        }
+        return changed ? { ...group, ...overrides } : group
+      }
+      footerTextGroup = inheritIfDefault(footerTextGroup, ['fontFamily'])
+      pageNumberGroup = inheritIfDefault(pageNumberGroup, ['fontFamily'])
+    }
     const headerInsertEnabled = rules._globalApply
       ? (headerGroup && headerGroup.enabled !== false && headerGroup.mode !== 'none')
       : rules.headerInsertEnabled !== false
