@@ -472,12 +472,21 @@
         </el-button>
         <el-button :disabled="!undoStack.length" @click="$emit('undo-last-action')">撤销</el-button>
         <el-button
+          v-if="editingLibraryTemplatePath"
           :disabled="!fieldRows.length"
-          type="success"
+          type="warning"
           :loading="saving"
-          @click="$emit('save-template')"
+          @click="$emit('save-template', true)"
         >
-          保存模板
+          覆盖保存
+        </el-button>
+        <el-button
+          :disabled="!fieldRows.length"
+          :type="editingLibraryTemplatePath ? 'primary' : 'success'"
+          :loading="saving"
+          @click="$emit('save-template', false)"
+        >
+          {{ editingLibraryTemplatePath ? '另存为' : '保存模板' }}
         </el-button>
       </div>
 
@@ -648,6 +657,8 @@ const props = defineProps({
   previewFocusedRowId: { type: String, default: '' },
   // Computed from parent
   templatePreview: { type: Object, default: () => ({ original: [], rendered: [] }) },
+  // Editing state
+  editingLibraryTemplatePath: { type: String, default: '' },
 })
 
 defineEmits([

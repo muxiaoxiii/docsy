@@ -96,6 +96,26 @@ pub async fn inspect_docsytpl(
     run_blocking(move || crate::docx_template::inspect_template_package(&path)).await
 }
 
+/// Extract documentRuns + documentText from the docx embedded in a `.docsytpl`
+/// package. Used by the frontend to reconstruct fieldRows when editing a
+/// library template.
+#[tauri::command]
+pub async fn inspect_docsytpl_content(
+    path: String,
+) -> Result<crate::docx_template::DocsytplContent, String> {
+    run_blocking(move || {
+        let (_manifest, pkg) =
+            crate::docx_template::package::read_docsytpl_package(std::path::Path::new(&path))?;
+        let (document_runs, _marks, document_text) =
+            crate::docx_template::engine::scan_package_to_runs_and_marks(&pkg)?;
+        Ok(crate::docx_template::DocsytplContent {
+            document_text,
+            document_runs,
+        })
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn render_docx_template(args: crate::docx_template::RenderTemplateArgs) -> Result<String, String> {
     run_blocking(move || crate::docx_template::engine::render_docx(args, "single")).await

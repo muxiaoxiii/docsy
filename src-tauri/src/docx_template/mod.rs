@@ -194,6 +194,15 @@ pub struct SaveTemplateResult {
     pub manifest: TemplateManifest,
 }
 
+/// Document content extracted from a `.docsytpl` package for field-row
+/// reconstruction when editing a library template.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocsytplContent {
+    pub document_text: String,
+    pub document_runs: Vec<TemplateTextRun>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateLibraryItem {

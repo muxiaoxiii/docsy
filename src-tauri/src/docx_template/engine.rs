@@ -296,8 +296,9 @@ impl Drop for TempPathGuard {
     }
 }
 
-/// Scan all XML parts and produce runs + marks for the Tauri inspect response
-fn scan_package_to_runs_and_marks(
+/// Scan all XML parts and produce runs + marks for the Tauri inspect response.
+/// Also used by `inspect_docsytpl_content` to extract documentRuns from a package.
+pub fn scan_package_to_runs_and_marks(
     pkg: &HashMap<String, Vec<u8>>,
 ) -> Result<(Vec<TemplateTextRun>, Vec<TemplateMark>, String)> {
     use crate::docx_template::scan;

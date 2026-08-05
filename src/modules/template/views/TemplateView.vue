@@ -22,6 +22,7 @@
           :source-preview-selection-payload="sourcePreviewSelectionPayload"
           :preview-focused-row-id="previewFocusedRowId"
           :template-preview="templatePreview"
+          :editing-library-template-path="editingLibraryTemplatePath"
           @select-source-docx="selectSourceDocx"
           @group-selected-rows="groupSelectedRows"
           @set-selected-rows-usage="setSelectedRowsUsage"
@@ -1129,7 +1130,7 @@ function defaultUncheckedText(text) {
   return '☐'
 }
 
-async function saveTemplate() {
+async function saveTemplate(overwrite = false) {
   const validationError = validateFieldRowsBeforeSave()
   if (validationError) {
     ElMessage.warning(validationError)
@@ -1140,7 +1141,7 @@ async function saveTemplate() {
     ElMessage.warning('请至少确认一个字段')
     return
   }
-  const isEditingExisting = Boolean(editingLibraryTemplatePath.value)
+  const isEditingExisting = overwrite && Boolean(editingLibraryTemplatePath.value)
   let confirmedName = templateName.value || '未命名模板'
   if (!isEditingExisting) {
     try {
@@ -1330,10 +1331,177 @@ async function openTemplateFromLibrary(item) {
   await openTemplatePackage(item.path, item.manifest)
 }
 
+function manifestToFieldRows(manifest) {
+  const rows = []
+  const fields = manifest.fields || []
+
+  for (const field of fields) {
+    if (field.type === 'checkbox' || field.type === 'radio_group' || field.type === 'checkbox_group') {
+      // Marker fields: one row per option
+      for (const opt of field.options || []) {
+        rows.push({
+          rowId: `edit:${field.id}:${opt.id}`,
+          displayId: opt.markerMarkId || '',
+          markId: opt.markerMarkId || '',
+          markRefs: opt.markerMarkId ? [{ markId: opt.markerMarkId, start: null, end: null }] : [],
+          markSegments: [],
+          charStart: null,
+          charEnd: null,
+          text: opt.label || '',
+          context: '',
+          enabled: true,
+          type: field.type,
+          name: field.name,
+          label: field.label,
+          semanticKey: field.semanticKey,
+          required: field.required,
+          optionalWhenEmpty: false,
+          optionalScope: 'position',
+          optionalPrefix: '',
+          optionalSuffix: '',
+          optionId: opt.id,
+          optionLabel: opt.label || '',
+          checkedText: opt.checkedText || '☑',
+          uncheckedText: opt.uncheckedText || '☐',
+          partyItems: [],
+          referenceHintSeen: true,
+          referenceIncludePrefix: true,
+          referenceIncludeSuffix: true,
+          referenceSourceMode: 'auto',
+          referenceSourceField: '',
+          referenceSourceSemanticKey: '',
+          referenceSourceIndex: null,
+          referenceSourceKey: referenceSourceKey('auto', '', null),
+          options: [],
+          selectOptions: [],
+        })
+      }
+    } else if (field.type === 'select') {
+      // Select field: one row with options
+      rows.push(createSimpleFieldRow(field, field.options || []))
+    } else if (field.name?.startsWith('delete_')) {
+      // Delete text field
+      rows.push({
+        rowId: field.name.replace('delete_', ''),
+        displayId: field.marks?.[0] || '',
+        markId: field.marks?.[0] || '',
+        markRefs: field.markRefs || [],
+        markSegments: [],
+        charStart: null,
+        charEnd: null,
+        text: field.label || '',
+        context: '',
+        enabled: true,
+        type: 'delete_text',
+        name: field.name,
+        label: field.label,
+        semanticKey: '',
+        required: false,
+        optionalWhenEmpty: false,
+        optionalScope: 'position',
+        optionalPrefix: '',
+        optionalSuffix: '',
+        optionId: '',
+        optionLabel: '',
+        checkedText: '☑',
+        uncheckedText: '☐',
+        partyItems: [],
+        referenceHintSeen: true,
+        referenceIncludePrefix: true,
+        referenceIncludeSuffix: true,
+        referenceSourceMode: 'auto',
+        referenceSourceField: '',
+        referenceSourceSemanticKey: '',
+        referenceSourceIndex: null,
+        referenceSourceKey: referenceSourceKey('auto', '', null),
+        options: [],
+        selectOptions: [],
+      })
+    } else {
+      // Regular field (text, date, party_list, reference): one row
+      const row = createSimpleFieldRow(field, [])
+      // Set reference properties
+      if (field.type === 'reference' && field.reference) {
+        row.referenceSourceMode = field.reference.sourceMode || 'auto'
+        row.referenceSourceField = field.reference.sourceField || ''
+        row.referenceSourceSemanticKey = field.reference.sourceSemanticKey || ''
+        row.referenceSourceIndex = field.reference.sourceIndex ?? null
+        row.referenceSourceKey = referenceSourceKey(
+          row.referenceSourceMode,
+          row.referenceSourceField || row.referenceSourceSemanticKey,
+          row.referenceSourceIndex,
+        )
+      }
+      rows.push(row)
+    }
+  }
+
+  return rows
+}
+
+function createSimpleFieldRow(field, options) {
+  return {
+    rowId: `edit:${field.id}`,
+    displayId: field.marks?.[0] || '',
+    markId: field.marks?.[0] || '',
+    markRefs: field.markRefs || [],
+    markSegments: [],
+    charStart: null,
+    charEnd: null,
+    text: field.label || field.name,
+    context: '',
+    enabled: true,
+    type: field.type,
+    name: field.name,
+    label: field.label,
+    semanticKey: field.semanticKey,
+    required: field.required,
+    optionalWhenEmpty: false,
+    optionalScope: 'position',
+    optionalPrefix: '',
+    optionalSuffix: '',
+    optionId: '',
+    optionLabel: '',
+    checkedText: '☑',
+    uncheckedText: '☐',
+    partyItems: [],
+    referenceHintSeen: true,
+    referenceIncludePrefix: true,
+    referenceIncludeSuffix: true,
+    referenceSourceMode: 'auto',
+    referenceSourceField: '',
+    referenceSourceSemanticKey: '',
+    referenceSourceIndex: null,
+    referenceSourceKey: referenceSourceKey('auto', '', null),
+    options: options.map((opt, i) => ({
+      id: opt.id || `opt_${i + 1}`,
+      label: opt.label || '',
+      checkedText: opt.checkedText || '',
+      uncheckedText: '',
+    })),
+    selectOptions: options.map((opt) => ({
+      label: opt.label || '',
+      checkedText: opt.checkedText || '',
+    })),
+  }
+}
+
 async function editTemplateFromLibrary(item) {
   if (!item?.path) return
-  const opened = await openTemplatePackage(item.path, item.manifest)
-  if (!opened) return
+  const result = await tauriCallSafe('inspect_docsytpl', { path: item.path })
+  if (!result.ok) {
+    ElMessage.error(result.error || '读取模板失败')
+    return
+  }
+  const manifest = result.data
+  templatePath.value = item.path
+  templateManifest.value = manifest
+  templateName.value = manifest.name || item.name || ''
+
+  // Convert manifest fields back to editable fieldRows
+  const rows = manifestToFieldRows(manifest)
+  fieldRows.value = rows
+
   editingLibraryTemplatePath.value = item.path
   activeTab.value = 'build'
 }
