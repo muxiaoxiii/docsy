@@ -472,6 +472,7 @@ pub fn batch_render(
     name_pattern: &str,
     skip_rows: &[usize],
     structure_overrides: &HashMap<String, super::StructureOverride>,
+    item_separator: &str,
 ) -> Result<BatchRenderResult> {
     let mut workbook: Xlsx<_> =
         open_workbook(xlsx_path).with_context(|| format!("打开 Excel 失败: {xlsx_path}"))?;
@@ -573,13 +574,14 @@ pub fn batch_render(
         let output_path = unique_output_path(output_dir_path, &filename);
 
         let args = RenderTemplateArgs {
+            item_separator: item_separator.to_string(),
             template_path: template_path.to_string(),
             output_path: output_path.display().to_string(),
             values,
             structure_overrides: structure_overrides.clone(),
         };
 
-        match engine::render_docx(args, "batch") {
+        match engine::render_docx(args, "") {
             Ok(path) => {
                 result.outputs.push(path.clone());
                 result.rows.push(BatchRenderRow {
@@ -731,5 +733,10 @@ fn unique_output_path(dir: &Path, filename: &str) -> PathBuf {
             return candidate;
         }
     }
-    path
+    // Never overwrite: fall back to a timestamped name.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    dir.join(format!("{stem}-{stamp}.docx"))
 }

@@ -56,6 +56,16 @@ pub fn build_template_docx(
 }
 
 fn validate_coordinate_targets(fields: &[TemplateField], index: &DocumentIndex) -> Result<()> {
+    // Pre-index (part, paragraph, run) → node so per-mark lookup is O(1).
+    let mut node_index: HashMap<(String, usize, usize), &super::index::TextNodeRef> = HashMap::new();
+    for (part, part_index) in &index.parts {
+        for node in &part_index.nodes {
+            node_index.insert(
+                (part.clone(), node.paragraph_index, node.run_index),
+                node,
+            );
+        }
+    }
     let mut occupied: HashMap<(String, usize, usize), Vec<(usize, usize)>> = HashMap::new();
     for field in fields {
         let targets: Vec<(&str, Option<usize>, Option<usize>)> =
@@ -82,14 +92,9 @@ fn validate_coordinate_targets(fields: &[TemplateField], index: &DocumentIndex) 
         for (mark_id, start, end) in targets {
             let (part, paragraph_index, run_index) = parse_mark_coords(mark_id)
                 .with_context(|| format!("字段“{}”包含无效标记坐标", field.label))?;
-            let node = index
-                .parts
-                .get(&part)
-                .and_then(|part_index| {
-                    part_index.nodes.iter().find(|node| {
-                        node.paragraph_index == paragraph_index && node.run_index == run_index
-                    })
-                })
+            let node = node_index
+                .get(&(part.clone(), paragraph_index, run_index))
+                .copied()
                 .with_context(|| {
                     format!(
                         "字段“{}”的标记已不在源 Word 中。请重新读取 Word 后再保存模板",
@@ -227,7 +232,8 @@ fn is_marker_field(field_type: &str) -> bool {
     matches!(field_type, "checkbox" | "radio_group" | "checkbox_group")
 }
 
-/// Detect existing content controls in the tree and reject if found inside marked areas
+/// Detect content controls overlapping the yellow marks and reject them.
+/// Ordinary Word content controls outside marked areas are left untouched.
 fn detect_existing_sdt(root: &XmlNode, part_name: &str) -> Result<()> {
     let mut sdt_paths = Vec::new();
     find_sdt_elements(root, &mut sdt_paths, Vec::new());
@@ -239,7 +245,7 @@ fn detect_existing_sdt(root: &XmlNode, part_name: &str) -> Result<()> {
             .collect::<Vec<_>>()
             .join("; ");
         anyhow::bail!(
-            "模板中存在 Word 自带的内容控件（{} 处）: {}。请先在 Word 中移除这些内容控件后重新保存。\n文件: {}",
+            "模板的标黄区域中包含 Word 自带的内容控件（{} 处）: {}。请先在 Word 中移除这些内容控件后重新保存。\n文件: {}",
             sdt_paths.len(),
             paths,
             part_name
@@ -252,14 +258,36 @@ fn find_sdt_elements(node: &XmlNode, paths: &mut Vec<Vec<String>>, current: Vec<
     if let XmlNode::Element { name, children, .. } = node {
         let mut path = current.clone();
         path.push(name.clone());
-        if name == "w:sdt" {
-            paths.push(path);
-            return; // don't descend into existing sdt to avoid double-counting
+        if name == "w:sdt" && subtree_has_yellow(children) {
+            paths.push(path.clone());
         }
         for child in children {
             find_sdt_elements(child, paths, path.clone());
         }
     }
+}
+
+fn subtree_has_yellow(nodes: &[XmlNode]) -> bool {
+    for node in nodes {
+        match node {
+            XmlNode::Element { name, attrs, children } => {
+                if name == "w:highlight" {
+                    let is_yellow = attrs.iter().any(|(k, v)| {
+                        k == "w:val"
+                            && (v == "yellow" || v == "'yellow'" || v == "\"yellow\"")
+                    });
+                    if is_yellow {
+                        return true;
+                    }
+                }
+                if subtree_has_yellow(children) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Walk the tree and wrap runs at specified coordinates.
@@ -300,6 +328,13 @@ fn wrap_paragraph_runs(
     while i < children.len() {
         let is_wr = matches!(&children[i], XmlNode::Element { name, .. } if name == "w:r");
         if !is_wr {
+            // Nested containers whose runs participate in coordinates must be
+            // traversed exactly like scan does (w:sdt, w:hyperlink).
+            if matches!(&children[i], XmlNode::Element { name, .. } if name == "w:sdt" || name == "w:hyperlink") {
+                if let XmlNode::Element { children: sub, .. } = &mut children[i] {
+                    wrap_paragraph_runs(sub, part, cursor, coord_map)?;
+                }
+            }
             i += 1;
             continue;
         }
@@ -747,13 +782,20 @@ mod tests {
     }
 
     #[test]
-    fn detect_existing_sdt_rejects() {
-        let xml = r#"<w:document><w:body><w:p>
+    fn detect_existing_sdt_rejects_only_yellow_marked() {
+        // sdt without yellow marks is an ordinary content control — allowed
+        let plain = r#"<w:document><w:body><w:p>
             <w:sdt><w:sdtPr/><w:sdtContent><w:r><w:t>old</w:t></w:r></w:sdtContent></w:sdt>
         </w:p></w:body></w:document>"#;
-        let tree = XmlTree::parse(xml.as_bytes()).unwrap();
-        let err = detect_existing_sdt(&tree.root, "word/document.xml");
-        assert!(err.is_err(), "should reject existing sdt: {:?}", err.err());
+        let tree = XmlTree::parse(plain.as_bytes()).unwrap();
+        assert!(detect_existing_sdt(&tree.root, "word/document.xml").is_ok());
+
+        // sdt inside a yellow-marked area must be rejected
+        let marked = r#"<w:document><w:body><w:p>
+            <w:sdt><w:sdtPr/><w:sdtContent><w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>old</w:t></w:r></w:sdtContent></w:sdt>
+        </w:p></w:body></w:document>"#;
+        let tree = XmlTree::parse(marked.as_bytes()).unwrap();
+        assert!(detect_existing_sdt(&tree.root, "word/document.xml").is_err());
     }
 
     #[test]

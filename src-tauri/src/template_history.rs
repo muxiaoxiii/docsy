@@ -73,17 +73,6 @@ pub fn record_generation(
     record_history_run(template_path, manifest, output_path, values, "single")
 }
 
-/// Record a batch-fill generation run (marked "batch" in history).
-#[allow(dead_code)]
-pub fn record_batch_generation(
-    template_path: &str,
-    manifest: &TemplateManifest,
-    output_path: &str,
-    values: &HashMap<String, Value>,
-) -> Result<()> {
-    record_history_run(template_path, manifest, output_path, values, "batch")
-}
-
 pub fn record_template_seed(
     template_path: &str,
     manifest: &TemplateManifest,
@@ -93,6 +82,16 @@ pub fn record_template_seed(
         return Ok(());
     }
     record_history_run(template_path, manifest, "[template-seed]", values, "seed")
+}
+
+/// Delete every recorded fill run and its field values (history database only;
+/// templates and their files are untouched). Returns the number of deleted runs.
+pub fn clear_history() -> Result<usize> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    let deleted = conn.execute("DELETE FROM generation_runs", [])?;
+    conn.execute("DELETE FROM field_history", [])?;
+    Ok(deleted)
 }
 
 pub fn record_history_run(
@@ -278,10 +277,68 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
     }
 
     let mut runs = valid_runs;
+    // Batch-load summaries for all runs with a single query (avoids N+1).
+    let run_ids: Vec<i64> = runs.iter().map(|run| run.id).collect();
+    let summaries_by_run = query_run_field_summaries_for_runs(&conn, &run_ids)?;
     for run in &mut runs {
-        run.field_summaries = query_run_field_summaries(&conn, run.id)?;
+        run.field_summaries = summaries_by_run.get(&run.id).cloned().unwrap_or_default();
     }
     Ok(runs)
+}
+
+fn query_run_field_summaries_for_runs(
+    conn: &Connection,
+    run_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, Vec<TemplateHistoryFieldSummary>>> {
+    let mut result = std::collections::HashMap::new();
+    if run_ids.is_empty() {
+        return Ok(result);
+    }
+    let placeholders = run_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT run_id, field_name, field_label, display_value
+         FROM field_history
+         WHERE run_id IN ({placeholders})
+         ORDER BY run_id ASC, id ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params = rusqlite::params_from_iter(run_ids.iter());
+    let rows = stmt.query_map(params, |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            TemplateHistoryFieldSummary {
+                name: row.get(1)?,
+                label: row.get(2)?,
+                display: row.get(3)?,
+            },
+        ))
+    })?;
+    for item in rows {
+        let (run_id, summary) = item?;
+        result.entry(run_id).or_insert_with(Vec::new).push(summary);
+    }
+    Ok(result)
+}
+
+/// Point all history records of a template at its current library path
+/// (used after restoring a template from trash, where the path may change).
+pub fn update_template_path(template_id: &str, new_path: &str) -> Result<()> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE generation_runs SET template_path = ?2 WHERE template_id = ?1",
+        params![template_id, new_path],
+    )?;
+    conn.execute(
+        "UPDATE template_meta SET template_path = ?2, updated_at = ?3 WHERE template_id = ?1",
+        params![template_id, new_path, now],
+    )?;
+    Ok(())
 }
 
 pub fn mark_template_trashed(template_id: &str, trashed: bool) -> Result<()> {
@@ -347,6 +404,9 @@ fn open_db() -> Result<Connection> {
     }
     let conn = Connection::open(path)?;
     conn.busy_timeout(Duration::from_secs(5))?;
+    // WAL allows concurrent readers (multiple windows) without write blocking;
+    // synchronous=NORMAL keeps durability with far fewer fsyncs.
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
     Ok(conn)
 }
 
@@ -471,26 +531,17 @@ fn ensure_template_meta(
     template_path: &str,
 ) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    // Update name/path only if the record already exists
-    let updated = conn.execute(
-        "UPDATE template_meta
-         SET template_name = ?2, template_path = ?3, updated_at = ?4
-         WHERE template_id = ?1",
-        params![
-            manifest.template.id,
-            manifest.template.name,
-            template_path,
-            now
-        ],
+    // Single atomic upsert — the former UPDATE-then-INSERT raced under
+    // concurrent writers and could hit the PRIMARY KEY conflict.
+    conn.execute(
+        "INSERT INTO template_meta (template_id, template_name, template_path, trashed, updated_at)
+         VALUES (?1, ?2, ?3, 0, ?4)
+         ON CONFLICT(template_id) DO UPDATE SET
+            template_name = excluded.template_name,
+            template_path = excluded.template_path,
+            updated_at = excluded.updated_at",
+        params![manifest.template.id, manifest.template.name, template_path, now],
     )?;
-    if updated == 0 {
-        // Record doesn't exist yet; insert with trashed = 0
-        conn.execute(
-            "INSERT INTO template_meta (template_id, template_name, template_path, trashed, updated_at)
-             VALUES (?1, ?2, ?3, 0, ?4)",
-            params![manifest.template.id, manifest.template.name, template_path, now],
-        )?;
-    }
     Ok(())
 }
 
@@ -515,6 +566,7 @@ pub fn last_field_values_for_template(template_id: &str) -> Result<HashMap<Strin
     query_last_values(&conn, template_id)
 }
 
+#[allow(dead_code)]
 fn query_run_field_summaries(
     conn: &Connection,
     run_id: i64,
@@ -591,12 +643,18 @@ fn query_association_suggestions(
     values: &HashMap<String, Value>,
 ) -> Result<Vec<AssociationSuggestion>> {
     let mut suggestions = Vec::new();
+    // The frontend injects the same value under id/name/semantic keys; dedupe
+    // by display value so one trigger is only queried once.
+    let mut seen_triggers = std::collections::HashSet::new();
     for (trigger_field, trigger_value) in values {
         if trigger_field == &target.id {
             continue;
         }
         let trigger_display = value_display(trigger_value);
         if trigger_display.trim().is_empty() {
+            continue;
+        }
+        if !seen_triggers.insert(trigger_display.clone()) {
             continue;
         }
         let mut stmt = conn.prepare(

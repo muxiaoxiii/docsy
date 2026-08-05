@@ -205,6 +205,7 @@ pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
         &manifest,
         &args.values,
         &args.structure_overrides,
+        &args.item_separator,
     )?;
 
     let mut out_pkg = HashMap::new();
@@ -223,14 +224,17 @@ pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
     package::write_docx_package(&output_path, &out_pkg)?;
 
     let output_path_str = output_path.display().to_string();
-    // History recording is best-effort; file is already written
-    let _ = crate::template_history::record_history_run(
-        &args.template_path,
-        &manifest,
-        &output_path_str,
-        &args.values,
-        source,
-    );
+    // History recording is best-effort; file is already written. An empty
+    // source skips recording entirely (batch renders wait for explicit save).
+    if !source.is_empty() {
+        let _ = crate::template_history::record_history_run(
+            &args.template_path,
+            &manifest,
+            &output_path_str,
+            &args.values,
+            source,
+        );
+    }
     Ok(output_path_str)
 }
 
@@ -523,6 +527,7 @@ mod tests {
         );
 
         let render_args = RenderTemplateArgs {
+            item_separator: "、".to_string(),
             template_path: saved.output_path.clone(),
             output_path: output_dir.join("output.docx").display().to_string(),
             values,
@@ -705,6 +710,7 @@ mod tests {
                 output_path: output_dir.join("rendered.docx").display().to_string(),
                 values,
                 structure_overrides: HashMap::new(),
+                item_separator: "、".to_string(),
             },
             "single",
         )

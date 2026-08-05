@@ -99,32 +99,6 @@
       </div>
     </el-card>
 
-    <el-card class="settings-section" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>模板回收站</span>
-          <el-button size="small" :loading="templateTrashLoading" @click="loadTemplateTrash">刷新</el-button>
-        </div>
-      </template>
-      <p class="section-desc">删除的模板先进入回收站；彻底删除会同时删除该模板的内部填写数据。</p>
-      <el-table v-if="templateTrash.length" :data="templateTrash" size="small" border>
-        <el-table-column prop="name" label="模板" min-width="180" />
-        <el-table-column label="字段" width="80">
-          <template #default="{ row }">{{ row.fieldCount }}</template>
-        </el-table-column>
-        <el-table-column prop="updated" label="更新时间" min-width="140">
-          <template #default="{ row }">{{ shortDate(row.updated) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="restoreTemplate(row)">恢复</el-button>
-            <el-button size="small" link type="danger" @click="permanentlyDeleteTemplate(row)">彻底删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-else description="回收站为空" />
-    </el-card>
-
     <!-- App Settings -->
     <el-card class="settings-section" shadow="never">
       <template #header>
@@ -286,8 +260,6 @@ const diagnostic = ref({
   poppler: null,
   ffmpeg: null,
 })
-const templateTrash = ref([])
-const templateTrashLoading = ref(false)
 
 function defaultToolStatus() {
   return {
@@ -326,64 +298,6 @@ async function saveSettings() {
   } else {
     ElMessage.error(result.error || '保存设置失败')
   }
-}
-
-async function loadTemplateTrash() {
-  templateTrashLoading.value = true
-  const result = await tauriCallSafe('list_template_trash')
-  templateTrashLoading.value = false
-  if (result.ok) {
-    templateTrash.value = result.data || []
-  } else {
-    ElMessage.error(result.error || '读取模板回收站失败')
-  }
-}
-
-async function restoreTemplate(row) {
-  const result = await tauriCallSafe('restore_template_from_trash', { args: { path: row.path } })
-  if (!result.ok) {
-    ElMessage.error(result.error || '恢复失败')
-    return
-  }
-  ElMessage.success('模板已恢复')
-  await loadTemplateTrash()
-  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
-}
-
-async function permanentlyDeleteTemplate(row) {
-  let migrateToCommon = false
-  try {
-    await ElMessageBox.confirm(
-      `彻底删除“${row.name}”？可以先把该模板的内部填写数据迁移为模板通用数据，供其他模板按通用字段名继续检索。`,
-      '彻底删除模板',
-      {
-        confirmButtonText: '迁移数据并删除',
-        cancelButtonText: '直接删除数据',
-        distinguishCancelAndClose: true,
-        type: 'warning',
-      },
-    )
-    migrateToCommon = true
-  } catch (action) {
-    if (action !== 'cancel') return
-  }
-  const result = await tauriCallSafe('permanently_delete_template', {
-    args: { path: row.path, migrateToCommon },
-  })
-  if (!result.ok) {
-    ElMessage.error(result.error || '彻底删除失败')
-    return
-  }
-  ElMessage.success(migrateToCommon ? '模板已删除，数据已迁移为模板通用数据' : '模板和内部数据已删除')
-  await loadTemplateTrash()
-  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
-}
-
-function shortDate(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 function normalizedMenuOrder() {
@@ -570,7 +484,6 @@ onMounted(() => {
   loadSettings()
   loadManagedToolsDir()
   loadDiagnostic()
-  loadTemplateTrash()
   checkTools()
 })
 </script>

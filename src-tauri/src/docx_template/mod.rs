@@ -234,6 +234,13 @@ pub struct RenderTemplateArgs {
     pub values: HashMap<String, Value>,
     #[serde(default)]
     pub structure_overrides: HashMap<String, StructureOverride>,
+    /// Separator between items of multi-value (party_list) fields.
+    #[serde(default = "default_item_separator")]
+    pub item_separator: String,
+}
+
+fn default_item_separator() -> String {
+    "、".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -393,6 +400,12 @@ pub fn restore_template_from_trash(args: TemplateRestoreArgs) -> Result<String> 
     let manifest = read_template_manifest(&source)?;
     let target = move_template_file(&source, &template_library_dir())?;
     crate::template_history::mark_template_trashed(&manifest.template.id, false)?;
+    // The restored path may differ (unique suffix); keep history records pointing
+    // at the live file so they aren't re-trashed on the next refresh.
+    crate::template_history::update_template_path(
+        &manifest.template.id,
+        &target.display().to_string(),
+    )?;
     Ok(target.display().to_string())
 }
 
@@ -513,7 +526,18 @@ pub(super) fn read_file_with_limit(path: &Path, limit: u64, label: &str) -> Resu
             limit / 1024 / 1024
         );
     }
-    std::fs::read(path).with_context(|| format!("读取{label}失败: {}", path.display()))
+    // Bounded read (TOCTOU-safe): never read more than limit+1 bytes even if
+    // the file grows between metadata and read.
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("读取{label}失败: {}", path.display()))?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut reader = std::io::BufReader::new(file).take(limit + 1);
+    std::io::Read::read_to_end(&mut reader, &mut bytes)
+        .with_context(|| format!("读取{label}失败: {}", path.display()))?;
+    if bytes.len() as u64 > limit {
+        anyhow::bail!("{}过大，无法安全读取", label);
+    }
+    Ok(bytes)
 }
 
 pub(super) fn read_vec_with_limit<R: Read>(

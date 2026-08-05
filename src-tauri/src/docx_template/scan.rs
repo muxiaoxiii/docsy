@@ -64,8 +64,9 @@ fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_id
         } = child
         {
             if name != "w:r" {
-                // Recursively scan nested elements (e.g., w:sdt > w:sdtContent > w:r)
-                if name == "w:sdt" {
+                // Recursively scan nested elements (e.g., w:sdt > w:sdtContent > w:r,
+                // w:hyperlink > w:r for hyperlink-wrapped highlighted text)
+                if name == "w:sdt" || name == "w:hyperlink" {
                     scan_paragraph_runs(children, index, paragraph_idx);
                 }
                 continue;
@@ -216,8 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_multiple_paragraphs() {
-        let tree = parse_xml(
+    fn scan_multiple_paragraphs() {        let tree = parse_xml(
             r#"<w:document><w:body>
             <w:p><w:r><w:t>A</w:t></w:r></w:p>
             <w:p><w:r><w:t>B</w:t></w:r></w:p>
@@ -229,6 +229,19 @@ mod tests {
         assert_eq!(index.paragraph_count, 2);
         assert_eq!(index.nodes[0].paragraph_index, 0);
         assert_eq!(index.nodes[1].paragraph_index, 1);
+    }
+
+    #[test]
+    fn scan_hyperlink_nested_yellow_run() {
+        // Highlighted text inside w:hyperlink must be discovered too.
+        let tree = parse_xml(
+            r#"<w:document><w:body><w:p>
+            <w:hyperlink r:id="rId1"><w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>链接标黄</w:t></w:r></w:hyperlink>
+        </w:p></w:body></w:document>"#,
+        );
+        let index = scan_document_index("word/document.xml", &tree).unwrap();
+        assert_eq!(index.total_text_nodes(), 1);
+        assert!(index.nodes[0].highlighted, "hyperlink run should be highlighted");
     }
 
     #[test]

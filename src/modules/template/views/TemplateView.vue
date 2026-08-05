@@ -601,6 +601,11 @@
                 <h3>{{ templateManifest.template.name }}</h3>
                 <p>{{ renderableTemplateFields.length }} 个字段。输入时会从历史和通用字段里即时检索。</p>
               </div>
+              <div class="actions inline field-filter-actions">
+                <el-input v-model="fieldSearch" size="small" clearable placeholder="搜索字段" class="field-search-input" />
+                <el-button size="small" text @click="collapseAllFields">折叠全部</el-button>
+                <el-button size="small" text @click="expandAllFields">展开全部</el-button>
+              </div>
               <el-button type="success" :loading="rendering" @click="renderTemplate">生成 Word</el-button>
               <el-dropdown @command="handleBatchCommand" trigger="click">
                 <el-button :loading="batchProcessing"
@@ -616,15 +621,17 @@
             </div>
 
             <div class="template-form-grid">
-              <section v-for="field in renderableTemplateFields" :key="field.id" class="fill-field-card">
-                <div class="fill-field-header">
+              <section v-for="field in filteredRenderableFields" :key="field.id" class="fill-field-card">
+                <div class="fill-field-header" @click="toggleFieldCollapse(field)">
                   <strong>{{ fillFieldLabel(field) }}</strong>
                   <span v-if="field.semanticKey && field.semanticKey !== field.name">{{ field.semanticKey }}</span>
                   <em v-if="field.required">必填</em>
                   <el-tag v-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
                     填一次将自动填充到所有位置
                   </el-tag>
+                  <span class="field-collapse-toggle">{{ collapsedFields.has(field.id) ? '▸' : '▾' }}</span>
                 </div>
+                <div v-show="!collapsedFields.has(field.id)" class="fill-field-body">
                 <div v-if="fieldStructureHints(field).length" class="fill-structure-hints">
                   <span v-for="hint in fieldStructureHints(field)" :key="hint.key" class="fill-structure-hint">
                     {{ hint.label }}：<code :class="{ empty: hint.empty }">{{ hint.text }}</code>
@@ -824,6 +831,7 @@
                     <p v-else class="setting-caption">这是列表项后缀，每一项单独设置；字段整体后缀不在这里修改。</p>
                   </div>
                 </el-popover>
+                </div>
               </section>
             </div>
           </div>
@@ -852,14 +860,14 @@
                 </div>
                 <div class="history-run-list">
                   <article
-                    v-for="run in group.runs"
+                    v-for="run in visibleGroupRuns(group)"
                     :key="run.id"
                     class="history-run-card"
                     @click="applyHistoryRun(run)"
                   >
                     <div class="history-run-main">
                       <div class="history-run-title-row">
-                        <strong>{{ shortDateTime(run.generatedAt) }}</strong>
+                        <strong>{{ historyTime(run.generatedAt) }}</strong>
                         <el-tag v-if="run.source === 'batch'" size="small" type="warning" effect="plain">
                           批量填写记录
                         </el-tag>
@@ -881,10 +889,91 @@
                       <el-button size="small" text @click.stop="openPath(run.outputPath)">打开文档</el-button>
                     </div>
                   </article>
+                  <div v-if="group.runs.length > HISTORY_PAGE_SIZE && !expandedHistoryGroups.has(group.templateId)" class="history-expand-row">
+                    <el-button size="small" text type="primary" @click="expandHistoryGroup(group.templateId)">
+                      展开全部 {{ group.runs.length }} 条
+                    </el-button>
+                  </div>
+                  <div v-else-if="expandedHistoryGroups.has(group.templateId)" class="history-expand-row">
+                    <el-button size="small" text @click="collapseHistoryGroup(group.templateId)">收起</el-button>
+                  </div>
                 </div>
               </section>
             </div>
             <el-empty v-else description="还没有生成记录" />
+          </div>
+        </section>
+      </el-tab-pane>
+      <el-tab-pane label="设置" name="settings">
+        <section class="workspace">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>模板模块设置</h3>
+                <p>这些规则会应用到所有模板的填写与生成。</p>
+              </div>
+            </div>
+            <div class="settings-form">
+              <div class="settings-row">
+                <div class="settings-label">
+                  <strong>多项字段连接符</strong>
+                  <span>列表字段（当事人、诉讼请求等）填入多个值时，项与项之间使用的分隔符。留空时默认使用顿号“、”。</span>
+                </div>
+                <el-input
+                  v-model="itemSeparatorSetting"
+                  size="small"
+                  class="settings-separator-input"
+                  placeholder="、"
+                  @change="saveItemSeparatorSetting"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>模板回收站</h3>
+                <p>删除的模板先进入回收站；彻底删除会同时删除该模板的内部填写数据。</p>
+              </div>
+              <el-button size="small" :loading="templateTrashLoading" @click="loadTemplateTrash">刷新</el-button>
+            </div>
+            <el-table v-if="templateTrash.length" :data="templateTrash" size="small" border>
+              <el-table-column prop="name" label="模板" min-width="180" />
+              <el-table-column label="字段" width="80">
+                <template #default="{ row }">{{ row.fieldCount }}</template>
+              </el-table-column>
+              <el-table-column prop="updated" label="更新时间" min-width="140">
+                <template #default="{ row }">{{ shortDateTime(row.updated) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="180" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" link type="primary" @click="restoreTemplate(row)">恢复</el-button>
+                  <el-button size="small" link type="danger" @click="permanentlyDeleteTemplate(row)">彻底删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-else description="回收站为空" />
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>填写历史数据库</h3>
+                <p>模板填写历史保存在本地数据库中（含字段值和引用建议来源）。清理后无法恢复。</p>
+              </div>
+            </div>
+            <div class="settings-form">
+              <div class="settings-row">
+                <div class="settings-label">
+                  <strong>清空全部填写历史</strong>
+                  <span>删除所有模板的生成记录和字段值。模板库文件不受影响。</span>
+                </div>
+                <el-button type="danger" plain size="small" :loading="clearingHistory" @click="clearAllHistory">
+                  清空历史
+                </el-button>
+              </div>
+            </div>
           </div>
         </section>
       </el-tab-pane>
@@ -902,7 +991,7 @@
     <el-dialog v-model="batchSaveVisible" title="保存批量填写记录到模板历史" width="min(820px, 94vw)" append-to-body>
       <div class="batch-save-toolbar">
         <el-button size="small" @click="toggleBatchSaveAll(true)">全选</el-button>
-        <el-button size="small" @click="toggleBatchSaveAll(false)">反选</el-button>
+        <el-button size="small" @click="invertBatchSaveSelection">反选</el-button>
         <span class="batch-save-count">已选 {{ batchSaveSelected.length }} / {{ batchSaveRows.length }} 行</span>
       </div>
       <el-table :data="batchSaveRows" size="small" border max-height="52vh" row-key="key" @row-click="(row) => toggleBatchSaveRow(row.key)">
@@ -927,7 +1016,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { QuestionFilled, ArrowDown } from '@element-plus/icons-vue'
 import { open, save } from '@tauri-apps/plugin-dialog'
@@ -948,6 +1037,85 @@ import {
 } from '../rules/publicRules.js'
 
 const activeTab = ref('build')
+const itemSeparatorSetting = ref(window.localStorage.getItem('docsy.template.itemSeparator') || '、')
+function saveItemSeparatorSetting() {
+  window.localStorage.setItem('docsy.template.itemSeparator', itemSeparatorSetting.value || '、')
+  ElMessage.success('已保存多项字段连接符设置')
+}
+
+// ── Settings: template trash + history database ─────────────────────────────
+const templateTrash = ref([])
+const templateTrashLoading = ref(false)
+const clearingHistory = ref(false)
+async function loadTemplateTrash() {
+  templateTrashLoading.value = true
+  const result = await tauriCallSafe('list_template_trash')
+  templateTrashLoading.value = false
+  if (result.ok) {
+    templateTrash.value = result.data || []
+  } else {
+    ElMessage.error(result.error || '读取模板回收站失败')
+  }
+}
+async function restoreTemplate(row) {
+  const result = await tauriCallSafe('restore_template_from_trash', { args: { path: row.path } })
+  if (!result.ok) {
+    ElMessage.error(result.error || '恢复失败')
+    return
+  }
+  ElMessage.success('模板已恢复')
+  await loadTemplateTrash()
+  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
+}
+async function permanentlyDeleteTemplate(row) {
+  let migrateToCommon = false
+  try {
+    await ElMessageBox.confirm(
+      `彻底删除“${row.name}”？可以先把该模板的内部填写数据迁移为模板通用数据，供其他模板按通用字段名继续检索。`,
+      '彻底删除模板',
+      {
+        confirmButtonText: '迁移数据并删除',
+        cancelButtonText: '直接删除数据',
+        distinguishCancelAndClose: true,
+        type: 'warning',
+      },
+    )
+    migrateToCommon = true
+  } catch (action) {
+    if (action !== 'cancel') return
+  }
+  const result = await tauriCallSafe('permanently_delete_template', {
+    args: { path: row.path, migrateToCommon },
+  })
+  if (!result.ok) {
+    ElMessage.error(result.error || '彻底删除失败')
+    return
+  }
+  ElMessage.success(migrateToCommon ? '模板已删除，数据已迁移为模板通用数据' : '模板和内部数据已删除')
+  await loadTemplateTrash()
+  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
+}
+async function clearAllHistory() {
+  try {
+    await ElMessageBox.confirm(
+      '确定清空全部填写历史？删除后无法恢复，模板库文件不受影响。',
+      '清空填写历史',
+      { confirmButtonText: '清空', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  clearingHistory.value = true
+  const result = await tauriCallSafe('clear_template_history')
+  clearingHistory.value = false
+  if (!result.ok) {
+    ElMessage.error(result.error || '清空历史失败')
+    return
+  }
+  ElMessage.success(`已清空 ${result.data ?? 0} 条填写记录`)
+  await loadHistoryContext(true)
+  await loadTemplateHistoryRuns()
+}
 
 const typeHelpItems = [
   { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、律所名称。' },
@@ -1022,6 +1190,40 @@ const templateLibraryLoading = ref(false)
 const historyRuns = ref([])
 const historyRunsLoading = ref(false)
 const renderableTemplateFields = computed(() => (templateManifest.value?.fields || []).filter(isRenderableField))
+const fieldSearch = ref('')
+const collapsedFields = reactive(new Set())
+const filteredRenderableFields = computed(() => {
+  const query = fieldSearch.value.trim().toLowerCase()
+  if (!query) return renderableTemplateFields.value
+  return renderableTemplateFields.value.filter(
+    (field) =>
+      field.label?.toLowerCase().includes(query) ||
+      field.name?.toLowerCase().includes(query) ||
+      (field.semanticKey || '').toLowerCase().includes(query),
+  )
+})
+function toggleFieldCollapse(field) {
+  if (collapsedFields.has(field.id)) {
+    collapsedFields.delete(field.id)
+  } else {
+    collapsedFields.add(field.id)
+  }
+}
+function collapseAllFields() {
+  collapsedFields.clear()
+  for (const field of renderableTemplateFields.value) {
+    collapsedFields.add(field.id)
+  }
+}
+function expandAllFields() {
+  collapsedFields.clear()
+}
+// Searching should surface matches even if they were collapsed.
+watch(fieldSearch, (value) => {
+  if (String(value || '').trim()) {
+    collapsedFields.clear()
+  }
+})
 const formValues = reactive({})
 const referenceSelections = reactive({})
 const structureOverrides = reactive({})
@@ -3793,6 +3995,7 @@ async function renderTemplate() {
       outputPath: finalOutputPath,
       values: normalizeValues(),
       structureOverrides: normalizeStructureOverrides(),
+      itemSeparator: itemSeparatorSetting.value || '、',
     },
   })
   rendering.value = false
@@ -3900,6 +4103,7 @@ async function importAndBatchRender() {
     namePattern: '',
     skipRows,
     structureOverrides: normalizeStructureOverrides(),
+    itemSeparator: itemSeparatorSetting.value || '、',
   })
   batchProcessing.value = false
 
@@ -3957,6 +4161,13 @@ function toggleBatchSaveAll(value) {
   } else {
     batchSaveSelected.value = []
   }
+}
+
+function invertBatchSaveSelection() {
+  const selected = new Set(batchSaveSelected.value)
+  batchSaveSelected.value = batchSaveRows.value
+    .map((row) => row.key)
+    .filter((key) => !selected.has(key))
 }
 
 function toggleBatchSaveRow(key) {
@@ -4472,6 +4683,28 @@ function shortDateTime(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// History cards show date + time so same-day runs are distinguishable.
+function historyTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+const HISTORY_PAGE_SIZE = 20
+const expandedHistoryGroups = reactive(new Set())
+function visibleGroupRuns(group) {
+  if (expandedHistoryGroups.has(group.templateId)) return group.runs
+  return group.runs.slice(0, HISTORY_PAGE_SIZE)
+}
+function expandHistoryGroup(templateId) {
+  expandedHistoryGroups.add(templateId)
+}
+function collapseHistoryGroup(templateId) {
+  expandedHistoryGroups.delete(templateId)
 }
 
 function todayText() {
@@ -5192,6 +5425,13 @@ p {
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
   background: var(--docsy-surface-elevated);
+}
+
+/* Keep the card's grid layout when wrapping the controls for collapse:
+   display:contents makes the wrapper transparent to layout, while v-show
+   still hides/shows it via inline display:none. */
+.fill-field-body {
+  display: contents;
 }
 
 .field-more-button {

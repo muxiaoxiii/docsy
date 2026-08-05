@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TextNodeRef {
@@ -48,16 +48,17 @@ impl TextIndex {
     }
 }
 
-/// A unified text index for an entire docx (all XML parts)
+/// A unified text index for an entire docx (all XML parts).
+/// BTreeMap keeps part traversal in a deterministic order (document.xml first).
 #[derive(Debug, Clone)]
 pub struct DocumentIndex {
-    pub parts: HashMap<String, TextIndex>,
+    pub parts: BTreeMap<String, TextIndex>,
 }
 
 impl DocumentIndex {
     pub fn new() -> Self {
         Self {
-            parts: HashMap::new(),
+            parts: BTreeMap::new(),
         }
     }
 

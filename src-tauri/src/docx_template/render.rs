@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Result};
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -18,6 +18,7 @@ pub fn render_docx(
     manifest: &TemplateManifest,
     values: &HashMap<String, Value>,
     structure_overrides: &HashMap<String, StructureOverride>,
+    item_separator: &str,
 ) -> Result<Vec<(String, Vec<u8>)>> {
     let tag_map = build_tag_map(manifest);
 
@@ -29,7 +30,13 @@ pub fn render_docx(
         }
 
         let mut tree = XmlTree::parse(xml_bytes)?;
-        render_tree(&mut tree.root, &tag_map, values, structure_overrides)?;
+        render_tree(
+            &mut tree.root,
+            &tag_map,
+            values,
+            structure_overrides,
+            item_separator,
+        )?;
 
         let out_xml = tree.to_xml()?;
         results.push((part_name.clone(), out_xml.into_bytes()));
@@ -80,6 +87,7 @@ fn render_tree(
     tag_map: &TagMap<'_>,
     values: &HashMap<String, Value>,
     overrides: &HashMap<String, StructureOverride>,
+    item_separator: &str,
 ) -> Result<()> {
     if let XmlNode::Element { children, .. } = node {
         // Process children right-to-left so splice doesn't invalidate indices
@@ -91,7 +99,7 @@ fn render_tree(
             if let XmlNode::Element { name, .. } = &children[i] {
                 if name == "w:tr" {
                     if let Some(new_rows) =
-                        try_expand_table_row(children, i, tag_map, values, overrides)?
+                        try_expand_table_row(children, i, tag_map, values, overrides, item_separator)?
                     {
                         children.splice(i..i + 1, new_rows);
                         continue; // new rows already rendered by try_expand_table_row
@@ -116,7 +124,7 @@ fn render_tree(
                             let value = value_for_field(values, field)
                                 .cloned()
                                 .unwrap_or(Value::Null);
-                            let rendered = rendered_base_text(field, *slot, &value);
+                            let rendered = rendered_base_text(field, *slot, &value, item_separator);
 
                             if rendered.is_empty() {
                                 if field.field_type == "party_list" {
@@ -153,6 +161,7 @@ fn render_tree(
                                     *slot,
                                     &tag,
                                     &value,
+                                    item_separator,
                                 )?;
                                 let sdt = std::mem::replace(
                                     &mut children[sdt_index],
@@ -163,7 +172,7 @@ fn render_tree(
                                 continue;
                             }
 
-                            replace_sdt_content(&mut children[i], field, *slot, &tag, &value)?;
+                            replace_sdt_content(&mut children[i], field, *slot, &tag, &value, item_separator)?;
                             let sdt =
                                 std::mem::replace(&mut children[i], XmlNode::Text(String::new()));
                             let content = unwrap_sdt_content(sdt);
@@ -175,7 +184,7 @@ fn render_tree(
             }
 
             // Standard recursive walk for non-content-control nodes.
-            render_tree(&mut children[i], tag_map, values, overrides)?;
+            render_tree(&mut children[i], tag_map, values, overrides, item_separator)?;
         }
     }
     Ok(())
@@ -187,16 +196,12 @@ fn try_expand_table_row(
     tag_map: &TagMap<'_>,
     values: &HashMap<String, Value>,
     overrides: &HashMap<String, StructureOverride>,
+    item_separator: &str,
 ) -> Result<Option<Vec<XmlNode>>> {
-    let row_xml = {
-        let row = &children[idx];
-        if !matches!(row, XmlNode::Element { name, .. } if name == "w:tr") {
-            return Ok(None);
-        }
-        XmlTree { root: row.clone() }
-            .to_xml()
-            .context("表格行: 序列化失败")?
-    };
+    let row_node = &children[idx];
+    if !matches!(row_node, XmlNode::Element { name, .. } if name == "w:tr") {
+        return Ok(None);
+    }
 
     // Find the first party_list field with >1 items
     let sdt_tags = collect_sdt_tags_in_tree_simple(&children[idx]);
@@ -210,17 +215,18 @@ fn try_expand_table_row(
                 .unwrap_or(Value::Null);
             let items = party_items(&value);
             if items.len() > 1 {
-                let mut new_rows = Vec::new();
+                let mut new_rows = Vec::with_capacity(items.len());
                 for item in &items {
                     let mut item_values = values.clone();
                     item_values.insert(
                         field.id.clone(),
                         serde_json::json!({ "text": item.text, "suffix": item.suffix }),
                     );
-                    let mut row_tree =
-                        XmlTree::parse(row_xml.as_bytes()).context("表格行复制: 解析失败")?;
-                    render_tree(&mut row_tree.root, tag_map, &item_values, overrides)?;
-                    new_rows.push(row_tree.root);
+                    // Clone the row subtree directly instead of a serialize →
+                    // parse round-trip per item.
+                    let mut row_clone = children[idx].clone();
+                    render_tree(&mut row_clone, tag_map, &item_values, overrides, item_separator)?;
+                    new_rows.push(row_clone);
                 }
                 return Ok(Some(new_rows));
             }
@@ -273,6 +279,7 @@ fn replace_sdt_content(
     slot: Option<usize>,
     tag: &str,
     value: &Value,
+    item_separator: &str,
 ) -> Result<()> {
     if let XmlNode::Element { children, .. } = sdt {
         for child in children.iter_mut() {
@@ -287,7 +294,7 @@ fn replace_sdt_content(
                 }
 
                 // Preserve ALL run formatting: write rendered text into first w:r, clear rest
-                let text = rendered_text_for_field(field, slot, tag, value);
+                let text = rendered_text_for_field(field, slot, tag, value, item_separator);
                 let rendered = render_into_existing_runs(content_children, &text);
                 *child = rendered;
                 return Ok(());
@@ -303,6 +310,7 @@ fn rendered_text_for_field(
     slot: Option<usize>,
     tag: &str,
     value: &Value,
+    item_separator: &str,
 ) -> String {
     if matches!(
         field.field_type.as_str(),
@@ -310,11 +318,16 @@ fn rendered_text_for_field(
     ) {
         marker_text_for_tag(field, tag, value)
     } else {
-        rendered_base_text(field, slot, value)
+        rendered_base_text(field, slot, value, item_separator)
     }
 }
 
-fn rendered_base_text(field: &TemplateField, slot: Option<usize>, value: &Value) -> String {
+fn rendered_base_text(
+    field: &TemplateField,
+    slot: Option<usize>,
+    value: &Value,
+    item_separator: &str,
+) -> String {
     if field.field_type == "party_list" {
         let items = party_items(value);
         return match (field.mark_refs.len(), slot) {
@@ -322,12 +335,12 @@ fn rendered_base_text(field: &TemplateField, slot: Option<usize>, value: &Value)
                 .iter()
                 .map(PartyItem::rendered)
                 .collect::<Vec<_>>()
-                .join("、"),
+                .join(item_separator),
             (0..=1, Some(index)) => items
                 .iter()
                 .map(|item| render_party_item(field, index, item, items.len() > 1))
                 .collect::<Vec<_>>()
-                .join("、"),
+                .join(item_separator),
             (count, Some(index)) if index >= count => String::new(),
             (count, Some(index)) if index + 1 == count && items.len() > count => {
                 // The last source slot carries the overflow. Its static suffix
@@ -336,7 +349,7 @@ fn rendered_base_text(field: &TemplateField, slot: Option<usize>, value: &Value)
                     .iter()
                     .map(PartyItem::rendered)
                     .collect::<Vec<_>>()
-                    .join("、")
+                    .join(item_separator)
             }
             (_, Some(index)) => items
                 .get(index)
@@ -1062,7 +1075,7 @@ mod tests {
         let mut vals = HashMap::new();
         vals.insert("f1".to_string(), Value::String("新值".to_string()));
 
-        render_tree(&mut tree.root, &fm, &vals, &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &fm, &vals, &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
 
         assert!(out.contains("新值"), "rendered text missing");
@@ -1091,7 +1104,7 @@ mod tests {
         let mut vals = HashMap::new();
         vals.insert("c1".to_string(), Value::String("☑".to_string()));
 
-        render_tree(&mut tree.root, &fm, &vals, &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &fm, &vals, &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
 
         assert!(out.contains("☑"), "checkbox marker updated");
@@ -1117,7 +1130,7 @@ mod tests {
 
         let m = manifest(vec![field]);
         let fm = field_map(&m);
-        render_tree(&mut tree.root, &fm, &HashMap::new(), &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &fm, &HashMap::new(), &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
         assert!(
             !out.contains("旧值"),
@@ -1138,7 +1151,7 @@ mod tests {
 
         let m = manifest(vec![field("d1", "delete_text")]);
         let fm = field_map(&m);
-        render_tree(&mut tree.root, &fm, &HashMap::new(), &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &fm, &HashMap::new(), &HashMap::new(), "、").unwrap();
         assert!(
             !tree.to_xml().unwrap().contains("del"),
             "delete_text sdt removed"
@@ -1167,7 +1180,7 @@ mod tests {
         let mut vals = HashMap::new();
         vals.insert("pl".to_string(), Value::String("张三、李四".to_string()));
 
-        render_tree(&mut tree.root, &fm, &vals, &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &fm, &vals, &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
 
         assert!(out.contains("张三"), "first item rendered");
@@ -1192,7 +1205,7 @@ mod tests {
         let mut vals = HashMap::new();
         vals.insert("f1".to_string(), Value::String("x".to_string()));
 
-        render_tree(&mut tree.root, &fm, &vals, &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &fm, &vals, &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
         assert!(out.contains("plain text"), "unrelated text preserved");
     }
@@ -1226,7 +1239,7 @@ mod tests {
             ]),
         );
 
-        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
         assert!(out.contains("李琼律师"));
         assert!(out.contains("吕晗实习律师"));
@@ -1256,7 +1269,7 @@ mod tests {
         let mut values = HashMap::new();
         values.insert("party".to_string(), Value::String("原告甲".to_string()));
 
-        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
         assert_eq!(out.matches("原告甲").count(), 1);
     }
@@ -1285,7 +1298,7 @@ mod tests {
         let mut values = HashMap::new();
         values.insert("party".to_string(), Value::String("原告甲".to_string()));
 
-        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new()).unwrap();
+        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
         assert_eq!(out.matches("原告甲").count(), 2);
     }
@@ -1331,6 +1344,7 @@ mod tests {
             &field_map(&manifest(vec![field])),
             &values,
             &HashMap::new(),
+            "、",
         )
         .unwrap();
         let out = tree.to_xml().unwrap();
@@ -1372,6 +1386,7 @@ mod tests {
             &field_map(&manifest(vec![field])),
             &values,
             &overrides,
+            "、",
         )
         .unwrap();
         let out = tree.to_xml().unwrap();
@@ -1424,6 +1439,7 @@ mod tests {
             &field_map(&manifest(vec![field])),
             &values,
             &HashMap::new(),
+            "、",
         )
         .unwrap();
         assert_eq!(compact_text(&tree.root), "甲律师、乙实习律师");

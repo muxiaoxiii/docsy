@@ -115,6 +115,12 @@ pub async fn list_template_generation_runs(
     run_blocking(move || crate::template_history::list_generation_runs(limit.unwrap_or(200))).await
 }
 
+/// Clear the template history database (all recorded fill runs).
+#[tauri::command]
+pub async fn clear_template_history() -> Result<usize, String> {
+    run_blocking(crate::template_history::clear_history).await
+}
+
 #[tauri::command]
 pub async fn seed_template_history(
     template_path: String,
@@ -164,6 +170,7 @@ pub async fn batch_render_from_xlsx(
     name_pattern: Option<String>,
     skip_rows: Option<Vec<usize>>,
     structure_overrides: Option<HashMap<String, crate::docx_template::StructureOverride>>,
+    item_separator: Option<String>,
 ) -> Result<crate::docx_template::batch::BatchRenderResult, String> {
     run_blocking(move || {
         let manifest = crate::docx_template::inspect_template_package(&template_path)?;
@@ -175,6 +182,7 @@ pub async fn batch_render_from_xlsx(
             name_pattern.as_deref().unwrap_or(""),
             &skip_rows.unwrap_or_default(),
             &structure_overrides.unwrap_or_default(),
+            &item_separator.unwrap_or_else(|| "、".to_string()),
         )
     })
     .await
@@ -188,7 +196,7 @@ pub struct BatchHistoryRow {
     values: HashMap<String, serde_json::Value>,
 }
 
-/// Save selected batch rows into the template history database (source "manual").
+/// Save selected batch rows into the template history database (source "batch").
 #[tauri::command]
 pub async fn save_batch_history_rows(
     rows: Vec<BatchHistoryRow>,
@@ -202,7 +210,7 @@ pub async fn save_batch_history_rows(
                 &manifest,
                 &row.output_path,
                 &row.values,
-                "manual",
+                "batch",
             )?;
             saved += 1;
         }
