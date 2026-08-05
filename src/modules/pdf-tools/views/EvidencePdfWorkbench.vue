@@ -473,7 +473,7 @@
           <template #default="{ row, $index }">
             <div class="content-subrows">
               <el-table
-                :data="buildFileContentRows(row, $index, currentRules).filter(r => r.status !== 'confirmed')"
+                :data="buildFileContentRows(row, $index, currentRules)"
                 size="small"
                 border
                 class="content-subtable"
@@ -534,7 +534,7 @@
                 </el-table-column>
               </el-table>
               <div
-                v-if="!buildFileContentRows(row, $index, currentRules).filter(r => r.status !== 'confirmed').length"
+                v-if="!buildFileContentRows(row, $index, currentRules).length"
                 class="content-subrow muted"
               >
                 <span class="content-text">该文件未配置页眉页脚页码</span>
