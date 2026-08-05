@@ -414,11 +414,20 @@ function effectiveFieldType(field) {
 function setFieldTypeOverride(field, type) {
   // Per-position override for follower cards (fillAllPositions slots).
   const slotKey = (field?.posIndex ?? 0) > 0 ? `${field.id}#${field.posIndex}` : field.id
-  if (!type || type === field.type) {
+  const isFollower = (field?.posIndex ?? 0) > 0 && field.fillAllPositions
+  if (!type) {
     delete typeOverrides[slotKey]
-  } else {
-    typeOverrides[slotKey] = type
+    return
   }
+  // Plain fields: picking the original type clears the override. Follower
+  // positions are independent by default (following is the fillAllPositions
+  // behaviour, not a type), so any type pick — including the stored one —
+  // detaches this slot from the primary value for good.
+  if (!isFollower && type === field.type) {
+    delete typeOverrides[slotKey]
+    return
+  }
+  typeOverrides[slotKey] = type
 }
 const rendering = ref(false)
 const historyContext = ref({
@@ -750,8 +759,10 @@ async function onSaveFieldReference(field, key) {
     ElMessage.success('引用来源已保存到模板')
   } else {
     delete referenceSelections[slotKey]
-    // Back to following the primary position's value.
-    formValues[slotBase] = formValues[fieldFormKey(field)] ?? ''
+    // Back to following the primary position's value: drop any type override
+    // that made this slot independent.
+    delete typeOverrides[slotKey]
+    delete formValues[slotBase]
     const result = await tauriCallSafe('save_template_field_settings', {
       templatePath: templatePath.value,
       fieldId: field.id,
@@ -2135,11 +2146,16 @@ function normalizeValues() {
     }
   }
   // Per-position values for follower cards made independent by a type change
-  // or a custom reference source (stored under field.id#posIndex keys).
-  for (const [slotKey, slotValue] of Object.entries(formValues)) {
-    if (slotKey.includes('#') && slotValue !== undefined) {
-      values[slotKey] = slotValue
-    }
+  // or a custom reference source (field.id#posIndex keys). Emit empty strings
+  // for overridden slots so rendering does not fall back to the primary value.
+  const independentSlots = new Set(
+    Object.keys(typeOverrides).filter((k) => k.includes('#')),
+  )
+  for (const key of Object.keys(referenceSelections)) {
+    if (key.includes('#')) independentSlots.add(key)
+  }
+  for (const slotKey of independentSlots) {
+    values[slotKey] = formValues[slotKey] ?? ''
   }
   return values
 }

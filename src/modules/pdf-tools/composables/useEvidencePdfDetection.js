@@ -259,7 +259,7 @@ export function useEvidencePdfDetection({
 
   function footerCandidatesNeedReview(file) {
     const candidates = file?.footerCandidateChoices || []
-    if (candidates.length <= 1) return false
+    if (candidates.length === 0) return false
     return candidates.some((candidate) => footerCandidateRoleForFile(file, candidate) === '')
   }
 

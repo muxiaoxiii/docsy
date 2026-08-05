@@ -481,79 +481,88 @@
         <el-table-column type="expand" width="36">
           <template #default="{ row, $index }">
             <div class="content-subrows">
-              <el-table
-                :data="buildFileContentRows(row, $index, currentRules)"
-                size="small"
-                border
-                class="content-subtable"
-                @click.stop
-              >
-                <el-table-column label="类型" width="80">
-                  <template #default="{ row: cr }">
-                    <span class="content-kind-tag" :class="`source-${cr.source}`">{{ contentKindLabel(cr.kind) }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="文本" min-width="200">
-                  <template #default="{ row: cr }">
-                    <el-input
-                      v-if="editingContentRowId === `${row.path}|${cr.id}`"
-                      v-model="editingContentRowValue"
-                      size="small"
-                      @click.stop
-                      @blur="cr.source === 'existing' ? cancelContentRowEdit() : finishContentRowEdit(row, cr)"
-                      @keyup.enter="finishContentRowEdit(row, cr)"
-                    />
-                    <span
-                      v-else
-                      class="editable-text"
-                      @dblclick.stop="startContentRowEdit(row, cr)"
-                    >{{ displayContentRowText(row, $index, cr) || '-' }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="状态" width="80">
-                  <template #default="{ row: cr }">
-                    <el-tag size="small" :type="contentStatusTagType(cr.status)">
-                      {{ contentStatusLabel(cr.status) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="70">
-                  <template #default="{ row: cr }">
-                    <el-button
-                      v-if="cr.source === 'existing' && cr.status !== 'existing'"
-                      link
-                      size="small"
-                      @click.stop="cancelExistingDecision(row, cr)"
-                    >
-                      <el-icon><RefreshLeft /></el-icon>
-                    </el-button>
-                    <el-button
-                      v-if="cr.source === 'new'"
-                      link
-                      size="small"
-                      type="danger"
-                      @click.stop="removeContentRowNew(row, cr)"
-                    >
-                      <el-icon><Delete /></el-icon>
-                    </el-button>
-                    <el-button
-                      v-if="cr.source === 'existing'"
-                      link
-                      size="small"
-                      type="danger"
-                      @click.stop="removeContentRowExisting(row, cr)"
-                    >
-                      <el-icon><Delete /></el-icon>
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-              <div
-                v-if="!buildFileContentRows(row, $index, currentRules).length"
-                class="content-subrow muted"
-              >
-                <span class="content-text">该文件未配置页眉页脚页码</span>
-              </div>
+              <template v-for="contentRows in [buildFileContentRows(row, $index, currentRules)]" :key="row.path">
+                <el-table
+                  :data="contentRows"
+                  size="small"
+                  border
+                  class="content-subtable"
+                  @click.stop
+                >
+                  <el-table-column label="类型" width="80">
+                    <template #default="{ row: cr }">
+                      <span class="content-kind-tag" :class="`source-${cr.source}`">{{ contentKindLabel(cr.kind) }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="文本" min-width="200">
+                    <template #default="{ row: cr }">
+                      <el-input
+                        v-if="editingContentRowId === `${row.path}|${cr.id}`"
+                        v-model="editingContentRowValue"
+                        size="small"
+                        @click.stop
+                        @blur="cr.source === 'existing' ? cancelContentRowEdit() : finishContentRowEdit(row, cr)"
+                        @keyup.enter="finishContentRowEdit(row, cr)"
+                      />
+                      <el-tooltip
+                        v-else
+                        :content="displayContentRowText(row, $index, cr) || '-'"
+                        placement="top"
+                        :show-after="300"
+                        :disabled="!displayContentRowText(row, $index, cr)"
+                      >
+                        <span
+                          class="editable-text"
+                          @dblclick.stop="startContentRowEdit(row, cr)"
+                        >{{ displayContentRowText(row, $index, cr) || '-' }}</span>
+                      </el-tooltip>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="状态" width="80">
+                    <template #default="{ row: cr }">
+                      <el-tag size="small" :type="contentStatusTagType(cr.status)">
+                        {{ contentStatusLabel(cr.status) }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="70">
+                    <template #default="{ row: cr }">
+                      <el-button
+                        v-if="cr.source === 'existing' && cr.status !== 'existing'"
+                        link
+                        size="small"
+                        @click.stop="cancelExistingDecision(row, cr)"
+                      >
+                        <el-icon><RefreshLeft /></el-icon>
+                      </el-button>
+                      <el-button
+                        v-if="cr.source === 'new'"
+                        link
+                        size="small"
+                        type="danger"
+                        @click.stop="removeContentRowNew(row, cr)"
+                      >
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
+                      <el-button
+                        v-if="cr.source === 'existing'"
+                        link
+                        size="small"
+                        type="danger"
+                        @click.stop="removeContentRowExisting(row, cr)"
+                      >
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div
+                  v-if="!contentRows.length"
+                  class="content-subrow muted"
+                >
+                  <span class="content-text">该文件未配置页眉页脚页码</span>
+                </div>
+              </template>
             </div>
           </template>
         </el-table-column>
@@ -2512,16 +2521,25 @@ function finishNewContentRowEdit(row, cr, value) {
     if (cr.kind === 'header') {
       group = createDefaultHeaderGroup()
       row.headerGroups = [group]
+      row.selectedHeaderGroupId = group.id
     } else if (cr.kind === 'footerText') {
       group = createDefaultFooterTextGroup()
       row.footerTextGroups = [group]
+      row.selectedFooterTextGroupId = group.id
     } else {
       group = createDefaultPageNumberGroup()
       row.pageNumberGroups = [group]
+      row.selectedPageNumberGroupId = group.id
     }
   }
   if (cr.kind === 'header') {
     group.text = value
+    // For modes that compute text (filename/seq/seq_cn), editing inline means
+    // the user wants per-file custom text — switch mode so the edit persists
+    // across rebuilds of buildFileContentRows.
+    if (group.mode === 'filename' || group.mode === 'seq' || group.mode === 'seq_cn') {
+      group.mode = 'per_file'
+    }
     // Sync per_file mode to row.header
     if (group.mode === 'per_file') {
       row.header = value
@@ -3093,6 +3111,12 @@ h3 {
 
 .editable-text {
   cursor: text;
+  display: inline-block;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .overlay-table {

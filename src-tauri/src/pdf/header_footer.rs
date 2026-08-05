@@ -590,11 +590,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         && semantic_rebuild_overlays.is_empty()
     {
         fs::copy(work_input, output).context("复制 PDF 失败")?;
-        if !args.bookmarks.is_empty() || args.bookmark_remove_existing {
-            apply_bookmarks(output, &args.bookmarks, args.bookmark_remove_existing)?;
-        } else if let Some(bookmark) = &args.bookmark {
-            apply_bookmark(output, bookmark)?;
-        }
+        // Bookmarks are now written after merge, not during per-file processing
         cleanup_temp(normalized_path);
         cleanup_plain_text_temp(plain_deleted_path);
         cleanup_semantic_temp(semantic_deleted_path);
@@ -649,11 +645,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         );
     }
     write_optimized_or_copy(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
-    if !args.bookmarks.is_empty() || args.bookmark_remove_existing {
-        apply_bookmarks(output, &args.bookmarks, args.bookmark_remove_existing)?;
-    } else if let Some(bookmark) = &args.bookmark {
-        apply_bookmark(output, bookmark)?;
-    }
+    // Bookmarks are now written after merge, not during per-file processing
 
     Ok(HeaderFooterResult {
         input_path: args.input_path.clone(),

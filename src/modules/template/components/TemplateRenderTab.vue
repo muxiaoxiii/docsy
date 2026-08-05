@@ -438,9 +438,6 @@ function effectiveFieldType(field) {
   const slotKey = slotKeyFor(field)
   if (props.typeOverrides[slotKey]) return props.typeOverrides[slotKey]
   if (props.typeOverrides[field.id]) return props.typeOverrides[field.id]
-  // Follower positions of same-name multi-position fields behave as references
-  // to the first position: their type shows as "引用" until overridden.
-  if ((field.posIndex ?? 0) > 0 && field.fillAllPositions) return 'reference'
   return field.type
 }
 
