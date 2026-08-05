@@ -355,6 +355,43 @@ fn apply_bookmark(output: &Path, config: &BookmarkConfig) -> Result<()> {
     Ok(())
 }
 
+/// 检查 PDF 的 Catalog 是否包含 /Outlines（即已有书签）
+pub fn has_pdf_bookmarks(path: &Path) -> Result<bool> {
+    let doc = Document::load(path)
+        .with_context(|| format!("加载 PDF 失败: {}", path.display()))?;
+    let catalog_id = doc
+        .trailer
+        .get(b"Root")
+        .and_then(|obj| obj.as_reference())
+        .context("找不到 PDF Catalog")?;
+    let has = doc
+        .objects
+        .get(&catalog_id)
+        .and_then(|obj| obj.as_dict().ok())
+        .map(|dict| dict.has(b"Outlines"))
+        .unwrap_or(false);
+    Ok(has)
+}
+
+/// 删除 PDF 的 /Outlines 对象并从 Catalog 移除引用
+pub fn remove_pdf_bookmarks(path: &Path) -> Result<()> {
+    let temp = temp_named_path("docsy_rm_bookmarks", "pdf");
+    let mut doc = Document::load(path)
+        .with_context(|| format!("加载 PDF 失败: {}", path.display()))?;
+    let catalog_id = doc
+        .trailer
+        .get(b"Root")
+        .and_then(|obj| obj.as_reference())
+        .context("找不到 PDF Catalog")?;
+    if let Some(Object::Dictionary(catalog)) = doc.objects.get_mut(&catalog_id) {
+        catalog.remove(b"Outlines");
+    }
+    doc.save(&temp).context("保存 PDF 失败")?;
+    fs::copy(&temp, path).context("复制 PDF 失败")?;
+    let _ = fs::remove_file(&temp);
+    Ok(())
+}
+
 fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     let input = Path::new(&args.input_path);
     if !input.exists() {

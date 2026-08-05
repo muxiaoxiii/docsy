@@ -253,14 +253,14 @@
               <el-option label="只生成合并 PDF" value="merge_only" />
             </el-select>
           </div>
-          <div class="rule-item">
+          <div class="rule-item merge-row">
             <label>合并文件名</label>
             <el-input v-model="mergeFileName" :disabled="outputMode === 'files_only'" />
-          </div>
-          <div class="rule-item">
-            <label>PDF 书签</label>
-            <el-switch v-model="bookmarkEnabled" active-text="添加" inactive-text="不添加" />
-            <span class="field-hint">为每个文件添加书签，方便快速导航</span>
+            <el-checkbox
+              v-if="outputMode !== 'files_only'"
+              v-model="bookmarkEnabled"
+              class="bookmark-inline"
+            >添加书签</el-checkbox>
           </div>
         </div>
       </div>
@@ -427,6 +427,23 @@
           </el-table-column>
         </el-table>
       </div>
+
+      <el-alert
+        v-if="existingBookmarkCount > 0 && existingBookmarkAlertVisible"
+        title="检测到已有书签"
+        type="warning"
+        show-icon
+        closable
+        @close="existingBookmarkAlertVisible = false"
+        class="bookmark-alert"
+      >
+        <template #default>
+          <span>{{ existingBookmarkCount }} 个文件包含已有书签，新书签会叠加在已有书签上。</span>
+          <el-button size="small" type="warning" @click="clearExistingBookmarks" style="margin-left: 8px">
+            清除已有书签
+          </el-button>
+        </template>
+      </el-alert>
 
       <el-table
         v-if="overlayFiles.length"
@@ -882,6 +899,8 @@ const a4Orientation = ref('preserve')
 const rasterDpi = ref(DEFAULT_RASTER_DPI)
 const removeAnnotations = ref(false)
 const bookmarkEnabled = ref(false)
+const existingBookmarkCount = ref(0)
+const existingBookmarkAlertVisible = ref(true)
 const annotationKinds = ref([
   'Text',
   'FreeText',
@@ -1109,6 +1128,10 @@ watch(
 
 watch(pageNumberSequence, (value) => {
   footerContinuous.value = value !== 'per-file'
+})
+
+watch(outputMode, (mode) => {
+  if (mode === 'files_only') bookmarkEnabled.value = false
 })
 
 // Pipeline: when dialog closes during quick cleanup, proceed with processing
@@ -1590,6 +1613,43 @@ async function loadEvidenceFiles(paths) {
   selectedOverlayIndex.value = 0
   await refreshOverlayPageCounts()
   await detectAllHeaderFooter({ silent: true })
+  await checkExistingBookmarks()
+}
+
+async function checkExistingBookmarks() {
+  existingBookmarkCount.value = 0
+  existingBookmarkAlertVisible.value = true
+  const files = overlayFiles.value
+  if (!files.length) return
+  let count = 0
+  for (const file of files) {
+    try {
+      const result = await tauriCallSafe('has_pdf_bookmarks', { input: file.path })
+      if (result.ok && result.data) count++
+    } catch {
+      // 忽略单个文件检查失败
+    }
+  }
+  existingBookmarkCount.value = count
+}
+
+async function clearExistingBookmarks() {
+  const files = overlayFiles.value
+  let cleared = 0
+  for (const file of files) {
+    try {
+      const result = await tauriCallSafe('has_pdf_bookmarks', { input: file.path })
+      if (result.ok && result.data) {
+        const rm = await tauriCallSafe('remove_pdf_bookmarks', { input: file.path })
+        if (rm.ok) cleared++
+      }
+    } catch {
+      // 忽略单个文件失败
+    }
+  }
+  existingBookmarkCount.value = 0
+  existingBookmarkAlertVisible.value = false
+  ElMessage.success(`已清除 ${cleared} 个文件的书签`)
 }
 
 useWindowFileDrop({

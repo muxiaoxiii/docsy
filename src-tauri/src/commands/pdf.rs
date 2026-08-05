@@ -291,3 +291,13 @@ pub async fn remove_anti_copy(input: String, output: String) -> Result<usize, St
     })
     .await
 }
+
+#[tauri::command]
+pub async fn has_pdf_bookmarks(input: String) -> Result<bool, String> {
+    run_blocking(move || crate::pdf::header_footer::has_pdf_bookmarks(std::path::Path::new(&input))).await
+}
+
+#[tauri::command]
+pub async fn remove_pdf_bookmarks(input: String) -> Result<(), String> {
+    run_blocking(move || crate::pdf::header_footer::remove_pdf_bookmarks(std::path::Path::new(&input))).await
+}
