@@ -91,7 +91,7 @@ export function useEvidencePdfDetection({
         .filter((candidate) => bestReliableHeaderCandidate([candidate], totalPages))
         .map((candidate, index) => detectedElementFromCandidate(candidate, 'header', index)),
       ...footerCandidates
-        .filter((candidate) => !isPageNumberCandidate(candidate))
+        .filter((candidate) => !isPageNumberCandidate(candidate) && isStrongNonPageFooterCandidate(candidate))
         .map((candidate, index) => detectedElementFromCandidate(candidate, 'footerText', index)),
       ...pageNumberCandidates.map((candidate, index) => detectedElementFromCandidate(candidate, 'pageNumber', index)),
     ]
@@ -258,9 +258,12 @@ export function useEvidencePdfDetection({
   }
 
   function footerCandidatesNeedReview(file) {
-    const candidates = file?.footerCandidateChoices || []
-    if (candidates.length === 0) return false
-    return candidates.some((candidate) => footerCandidateRoleForFile(file, candidate) === '')
+    // Only check existingElements (strong candidates that entered the confirmation dialog)
+    const elements = file?.existingElements || []
+    const footerElements = elements.filter(e => e.kind === 'footerText' || e.kind === 'pageNumber')
+    if (footerElements.length === 0) return false
+    // Need review if any footer/pageNumber element has no decision yet
+    return footerElements.some(e => !e.decision)
   }
 
   function footerCandidateRoleForFile(file, candidate) {

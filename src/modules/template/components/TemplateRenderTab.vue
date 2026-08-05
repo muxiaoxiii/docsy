@@ -79,8 +79,8 @@
             <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
               同名字段，自动同步
             </el-tag>
-            <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0" size="small" effect="plain" class="fill-all-tag">
-              {{ field.reference?.sourceField ? `引用：${field.reference.sourceField}` : '引用首个位置' }}
+            <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0 && !hasSlotTypeOverride(field)" size="small" effect="plain" class="fill-all-tag">
+              {{ followerReferenceLabel(field) }}
             </el-tag>
             <el-tag v-else-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
               填一次将自动填充到所有位置
@@ -268,6 +268,7 @@
                     :model-value="typeGroupOf(effectiveFieldType(field))"
                     size="small"
                     class="type-group-select"
+                    teleported
                     @update:model-value="(group) => onFieldTypeGroupChange(field, group)"
                   >
                     <el-option
@@ -282,6 +283,7 @@
                     :model-value="effectiveFieldType(field)"
                     size="small"
                     class="type-sub-select"
+                    teleported
                     @update:model-value="(type) => $emit('set-field-type-override', field, type)"
                   >
                     <el-option
@@ -318,6 +320,7 @@
                     clearable
                     placeholder="同字段首个位置"
                     size="small"
+                    teleported
                     @update:model-value="(key) => $emit('save-field-reference', field, key || '')"
                   >
                     <el-option
@@ -334,6 +337,7 @@
                   <el-select
                     :model-value="field.dateFormat || 'iso'"
                     size="small"
+                    teleported
                     @update:model-value="(fmt) => $emit('save-field-date-format', field, fmt)"
                   >
                     <el-option v-for="item in dateFormatOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -371,6 +375,7 @@ import {
   fieldUsesRepeatableSuffix,
   isEmptyValue,
   displayValue,
+  parseReferenceSourceKey,
 } from '../composables/fieldRowUtils.js'
 
 const props = defineProps({
@@ -438,6 +443,9 @@ function effectiveFieldType(field) {
   const slotKey = slotKeyFor(field)
   if (props.typeOverrides[slotKey]) return props.typeOverrides[slotKey]
   if (props.typeOverrides[field.id]) return props.typeOverrides[field.id]
+  // Follower positions without an explicit override display as "reference"
+  // (following the primary position is the fillAllPositions behavior, not a type).
+  if ((field.posIndex ?? 0) > 0 && field.fillAllPositions) return 'reference'
   return field.type
 }
 
@@ -506,12 +514,29 @@ const dateFormatOptions = [
 // Follower positions (fillAllPositions slot > 0) and reference fields can
 // repoint their data source from the "…" menu.
 function isReferenceablePosition(field) {
-  return field.isReference || (field.fillAllPositions && (field.posIndex ?? 0) > 0)
+  if (field.isReference) return true
+  // Followers show the reference source dropdown only when in reference mode
+  // (no type override, or override is 'reference'). Once changed to an
+  // independent type (e.g. 'text'), the dropdown is hidden.
+  if (field.fillAllPositions && (field.posIndex ?? 0) > 0) {
+    return effectiveFieldType(field) === 'reference'
+  }
+  return false
 }
 
 function getSavedReferenceKey(field) {
   const ref = props.referenceSelections[`${field.id}#${field.posIndex ?? 0}`]
   return ref || ''
+}
+
+function followerReferenceLabel(field) {
+  const savedKey = getSavedReferenceKey(field)
+  if (savedKey) {
+    const parsed = parseReferenceSourceKey(savedKey)
+    if (parsed.sourceField) return `引用：${parsed.sourceField}`
+  }
+  if (field.reference?.sourceField) return `引用：${field.reference.sourceField}`
+  return '引用首个位置'
 }
 
 function selectFieldOptions(field) {

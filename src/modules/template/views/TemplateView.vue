@@ -419,6 +419,14 @@ function setFieldTypeOverride(field, type) {
     delete typeOverrides[slotKey]
     return
   }
+  // Follower picking "reference" restores following behavior: clear all
+  // per-slot state so the position reverts to the primary value.
+  if (isFollower && type === 'reference') {
+    delete typeOverrides[slotKey]
+    delete formValues[slotKey]
+    delete referenceSelections[slotKey]
+    return
+  }
   // Plain fields: picking the original type clears the override. Follower
   // positions are independent by default (following is the fillAllPositions
   // behaviour, not a type), so any type pick — including the stored one —
@@ -2155,7 +2163,17 @@ function normalizeValues() {
     if (key.includes('#')) independentSlots.add(key)
   }
   for (const slotKey of independentSlots) {
-    values[slotKey] = formValues[slotKey] ?? ''
+    const slotType = typeOverrides[slotKey]
+    const rawValue = formValues[slotKey] ?? ''
+    if (slotType === 'date') {
+      const fieldId = slotKey.split('#')[0]
+      const baseField = renderableTemplateFields.value.find((f) => f.id === fieldId)
+      values[slotKey] = formatDateValue(rawValue, baseField?.dateFormat)
+    } else if (slotType === 'party_list') {
+      values[slotKey] = partyItemsToValues(rawValue)
+    } else {
+      values[slotKey] = rawValue
+    }
   }
   return values
 }
