@@ -477,12 +477,12 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             ),
             style: pageNumberGroup.style || 'arabic',
             region: pageNumberGroup.region || 'footer',
-            align: pageNumberGroup.align || 'center',
-            fontSize: pageNumberGroup.fontSize || 9,
-            fontFamily: pageNumberGroup.fontFamily || 'auto',
-            marginMm: pageNumberGroup.marginMm ?? 10,
-            offsetXMm: pageNumberGroup.offsetXMm ?? 0,
-            color: pageNumberGroup.color || '#000000',
+            align: pageNumberGroup.align || rules.footerAlign || 'center',
+            fontSize: pageNumberGroup.fontSize || rules.footerFontSize || 9,
+            fontFamily: pageNumberGroup.fontFamily || rules.footerFontFamily || 'auto',
+            marginMm: pageNumberGroup.marginMm ?? rules.footerMarginMm ?? 10,
+            offsetXMm: pageNumberGroup.offsetXMm ?? rules.footerOffsetXMm ?? 0,
+            color: pageNumberGroup.color || rules.footerColor || '#000000',
             overrides: pageNumberGroup.overrides || rules.pageNumberOverrides || [],
           })
         : []
@@ -502,7 +502,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       for (const g of groupsFor(file, 'footerText')) {
         if (g.id === footerTextGroup?.id || g.enabled === false) continue
         if (g.text) {
-          extraOverlays.push(footerTextOverlayConfigForGroup(g.text, g))
+          extraOverlays.push(footerTextOverlayConfigForGroup(g.text, g, rules))
         }
       }
     }
@@ -524,12 +524,12 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             ),
             style: g.style || 'arabic',
             region: g.region || 'footer',
-            align: g.align || 'center',
-            fontSize: g.fontSize || 9,
-            fontFamily: g.fontFamily || 'auto',
-            marginMm: g.marginMm ?? 10,
-            offsetXMm: g.offsetXMm ?? 0,
-            color: g.color || '#000000',
+            align: g.align || rules.footerAlign || 'center',
+            fontSize: g.fontSize || rules.footerFontSize || 9,
+            fontFamily: g.fontFamily || rules.footerFontFamily || 'auto',
+            marginMm: g.marginMm ?? rules.footerMarginMm ?? 10,
+            offsetXMm: g.offsetXMm ?? rules.footerOffsetXMm ?? 0,
+            color: g.color || rules.footerColor || '#000000',
             overrides: g.overrides || rules.pageNumberOverrides || [],
           }),
         )
@@ -563,7 +563,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
           ? (footerInsertEnabled ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules) : null)
           : footerInsertEnabled && footerTextGroup && footerTextGroup.enabled !== false && (footerTextGroup.text || rules.footerTextContent)
-            ? footerTextOverlayConfigForGroup(footerTextGroup.text || rules.footerTextContent, footerTextGroup)
+            ? footerTextOverlayConfigForGroup(footerTextGroup.text || rules.footerTextContent, footerTextGroup, rules)
             : null,
       extraOverlays,
       bookmarks: rules.bookmarkEnabled
@@ -580,17 +580,17 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
   })
 }
 
-function footerTextOverlayConfigForGroup(text, group) {
+function footerTextOverlayConfigForGroup(text, group, rules = {}) {
   return {
     text,
     region: 'footer',
     artifactKind: 'FooterText',
-    fontSize: group.fontSize || 9,
-    fontFamily: group.fontFamily || 'auto',
-    marginMm: group.marginMm || 10,
-    align: group.align || 'left',
-    offsetXMm: group.offsetXMm || 0,
-    color: group.color || '#000000',
+    fontSize: group.fontSize || rules.footerTextFontSize || rules.footerFontSize || 9,
+    fontFamily: group.fontFamily || rules.footerTextFontFamily || rules.footerFontFamily || 'auto',
+    marginMm: group.marginMm || rules.footerTextMarginMm || rules.footerMarginMm || 10,
+    align: group.align || rules.footerTextAlign || rules.footerAlign || 'left',
+    offsetXMm: group.offsetXMm || rules.footerTextOffsetXMm || rules.footerOffsetXMm || 0,
+    color: group.color || rules.footerTextColor || rules.footerColor || '#000000',
   }
 }
 
