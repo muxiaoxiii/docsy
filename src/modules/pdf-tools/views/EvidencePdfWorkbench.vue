@@ -92,8 +92,8 @@
         <div class="block-title-row">
           <div class="block-title">原页眉页脚</div>
           <div class="block-actions">
-            <el-button size="small" :loading="detectingAllHeaderFooter" @click="detectAllHeaderFooter"
-              >重新检测</el-button
+            <el-button size="small" @click="confirmAllExistingElements"
+              >一键确认</el-button
             >
             <el-button
               size="small"
@@ -2255,6 +2255,26 @@ function previewExistingElement(row) {
   selectedFooterCandidateKey.value = row.element.id
   truePreview.value = null
   refreshPreview()
+}
+
+function confirmAllExistingElements() {
+  let count = 0
+  for (const file of overlayFiles.value) {
+    for (const el of file.existingElements || []) {
+      if (!el.decision) {
+        el.decision = 'keep'
+        count++
+      }
+    }
+    const status = fileExistingStatus(file)
+    file.statusText = status.text
+    file.statusType = status.type
+  }
+  if (count > 0) {
+    ElMessage.success(`已确认 ${count} 个检测项`)
+  } else {
+    ElMessage.info('没有待确认的检测项')
+  }
 }
 
 async function markRemoveExistingHeaderFooter() {
