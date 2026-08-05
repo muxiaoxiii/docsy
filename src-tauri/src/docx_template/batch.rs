@@ -12,13 +12,19 @@ use super::{RenderTemplateArgs, TemplateField, TemplateManifest};
 
 // ── Export ──────────────────────────────────────────────────────────────────
 
+/// Column label appended to the header row; "否" marks a sample row that must
+/// not be rendered (filled from the last recorded values).
+const GENERATE_COL_LABEL: &str = "是否生成";
+const SAMPLE_ROW_FLAG: &str = "否";
+
 /// Export template fields as an xlsx fill sheet.
 /// Row 1 (hidden): metadata — template_id | field_id | field_type per column
-/// Row 2: field labels (user-visible headers)
-/// Row 3: current default values (reference row, deletable)
+/// Row 2: field labels (user-visible headers) + "是否生成" column
+/// Row 3: sample row filled from the most recent recorded values (flag "否")
+/// Row 4+: empty data rows
 pub fn export_fields_xlsx(
     manifest: &TemplateManifest,
-    _default_values: &HashMap<String, serde_json::Value>,
+    default_values: &HashMap<String, serde_json::Value>,
     output_path: &str,
 ) -> Result<String> {
     let renderable: Vec<&TemplateField> = manifest
@@ -26,6 +32,15 @@ pub fn export_fields_xlsx(
         .iter()
         .filter(|f| is_renderable(&f.field_type))
         .collect();
+
+    // Prefer the last recorded run values as the sample row, fall back to the
+    // caller-provided defaults.
+    let mut sample_values: HashMap<String, serde_json::Value> =
+        crate::template_history::last_field_values_for_template(&manifest.template.id)
+            .unwrap_or_default();
+    for (field, value) in default_values {
+        sample_values.entry(field.clone()).or_insert_with(|| value.clone());
+    }
 
     let mut wb = Workbook::new();
     let ws = wb.add_worksheet();
@@ -41,7 +56,7 @@ pub fn export_fields_xlsx(
         ws.write_string(0, col, &meta)?;
     }
 
-    // Row 1: field labels
+    // Row 1: field labels + generate flag column
     for (col, field) in renderable.iter().enumerate() {
         let col = col as u16;
         let label = if field.label.is_empty() {
@@ -51,9 +66,17 @@ pub fn export_fields_xlsx(
         };
         ws.write_string(1, col, label)?;
     }
+    ws.write_string(1, renderable.len() as u16, GENERATE_COL_LABEL)?;
 
-    // Row 2: empty data start row (no default values to avoid being treated as a task)
-    // Users fill data starting from this row.
+    // Row 2: sample row from the last recorded values (flag "否", not rendered)
+    if !sample_values.is_empty() {
+        for (col, field) in renderable.iter().enumerate() {
+            if let Some(value) = sample_values.get(&field.id) {
+                ws.write_string(2, col as u16, &value_to_display(value))?;
+            }
+        }
+        ws.write_string(2, renderable.len() as u16, SAMPLE_ROW_FLAG)?;
+    }
 
     // Auto-fit column widths (approximate)
     for (col, field) in renderable.iter().enumerate() {
@@ -172,6 +195,8 @@ pub fn validate_imported_xlsx(
     let meta_row = &rows[0];
     let mut column_mapping = Vec::new();
     let mut template_id_match = true;
+    let mut id_mismatch_warning: Option<String> = None;
+    let mut generate_col_idx: Option<usize> = None;
     let renderable: Vec<&TemplateField> = manifest
         .fields
         .iter()
@@ -188,6 +213,9 @@ pub fn validate_imported_xlsx(
 
             if tpl_id != manifest.template.id {
                 template_id_match = false;
+                id_mismatch_warning.get_or_insert_with(|| {
+                    "模板 ID 与当前模板不一致，已按字段名称/ID 匹配导入".to_string()
+                });
             }
 
             let matched_field = renderable.iter().find(|f| f.id == field_id);
@@ -208,6 +236,10 @@ pub fn validate_imported_xlsx(
                     .cloned()
                     .unwrap_or(calamine::Data::Empty),
             );
+            if label == GENERATE_COL_LABEL {
+                generate_col_idx = Some(col_idx);
+                continue;
+            }
             let matched_field = renderable
                 .iter()
                 .find(|f| f.label == label || f.name == label);
@@ -230,6 +262,13 @@ pub fn validate_imported_xlsx(
         .map(|m| m.field_id.as_str())
         .collect();
     let mut warnings = Vec::new();
+    if let Some(message) = id_mismatch_warning {
+        warnings.push(BatchValidationWarning {
+            col: 0,
+            field_name: "模板".to_string(),
+            message,
+        });
+    }
 
     // Unmatched columns warning
     for mapping in &column_mapping {
@@ -263,6 +302,16 @@ pub fn validate_imported_xlsx(
         renderable.iter().map(|f| (f.id.as_str(), *f)).collect();
 
     for (row_idx, row) in rows.iter().enumerate().skip(2) {
+        // Skip sample rows (the "是否生成" flag is "否")
+        if let Some(generate_col) = generate_col_idx {
+            let flag = row
+                .get(generate_col)
+                .cloned()
+                .unwrap_or(calamine::Data::Empty);
+            if cell_to_string(&flag).trim() == SAMPLE_ROW_FLAG {
+                continue;
+            }
+        }
         let mut row_valid = true;
         for mapping in &column_mapping {
             if !mapping.matched {
@@ -318,7 +367,8 @@ pub fn validate_imported_xlsx(
 
     let total_data_rows = rows.len().saturating_sub(2);
     Ok(BatchValidationResult {
-        valid: template_id_match && errors.is_empty(),
+        // ID mismatch is a warning (matched by name); only errors block import
+        valid: errors.is_empty(),
         template_id_match,
         total_rows: total_data_rows,
         valid_rows,
@@ -392,6 +442,16 @@ pub struct BatchRenderResult {
     pub failed: usize,
     pub outputs: Vec<String>,
     pub errors: Vec<BatchRenderError>,
+    /// Structured values per successfully rendered row (for history saving).
+    #[serde(default)]
+    pub rows: Vec<BatchRenderRow>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchRenderRow {
+    pub output_path: String,
+    pub values: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -440,6 +500,7 @@ pub fn batch_render(
         .collect();
 
     let mut col_map: Vec<(usize, &TemplateField)> = Vec::new();
+    let mut generate_col_idx: Option<usize> = None;
     for (col_idx, meta_cell) in meta_row.iter().enumerate() {
         let meta_str = cell_to_string(meta_cell);
         let parts: Vec<&str> = meta_str.split('\t').collect();
@@ -447,6 +508,16 @@ pub fn batch_render(
             let field_id = parts[1];
             if let Some(field) = renderable.iter().find(|f| f.id == field_id) {
                 col_map.push((col_idx, field));
+            }
+        } else {
+            let label = cell_to_string(
+                &rows[1]
+                    .get(col_idx)
+                    .cloned()
+                    .unwrap_or(calamine::Data::Empty),
+            );
+            if label == GENERATE_COL_LABEL {
+                generate_col_idx = Some(col_idx);
             }
         }
     }
@@ -464,10 +535,20 @@ pub fn batch_render(
         failed: 0,
         outputs: Vec::new(),
         errors: Vec::new(),
+        rows: Vec::new(),
     };
 
     for (row_idx, row) in rows.iter().enumerate().skip(2) {
-        // Skip metadata + header
+        // Skip sample rows (the "是否生成" flag is "否")
+        if let Some(generate_col) = generate_col_idx {
+            let flag = row
+                .get(generate_col)
+                .cloned()
+                .unwrap_or(calamine::Data::Empty);
+            if cell_to_string(&flag).trim() == SAMPLE_ROW_FLAG {
+                continue;
+            }
+        }
         // Check if row has any data
         let has_data = col_map.iter().any(|(col, _)| {
             let cell = row.get(*col).cloned().unwrap_or(calamine::Data::Empty);
@@ -498,9 +579,13 @@ pub fn batch_render(
             structure_overrides: structure_overrides.clone(),
         };
 
-        match engine::render_docx(args) {
+        match engine::render_docx(args, "batch") {
             Ok(path) => {
-                result.outputs.push(path);
+                result.outputs.push(path.clone());
+                result.rows.push(BatchRenderRow {
+                    output_path: path,
+                    values: build_row_values(row, &col_map, manifest),
+                });
                 result.success += 1;
             }
             Err(e) => {

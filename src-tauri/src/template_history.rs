@@ -50,6 +50,9 @@ pub struct TemplateHistoryRun {
     pub generated_at: String,
     pub field_values: HashMap<String, Value>,
     pub field_summaries: Vec<TemplateHistoryFieldSummary>,
+    /// "single" | "batch" | "seed" — where the run came from
+    #[serde(default)]
+    pub source: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -60,13 +63,25 @@ pub struct TemplateHistoryFieldSummary {
     pub display: String,
 }
 
+#[allow(dead_code)]
 pub fn record_generation(
     template_path: &str,
     manifest: &TemplateManifest,
     output_path: &str,
     values: &HashMap<String, Value>,
 ) -> Result<()> {
-    record_history_run(template_path, manifest, output_path, values)
+    record_history_run(template_path, manifest, output_path, values, "single")
+}
+
+/// Record a batch-fill generation run (marked "batch" in history).
+#[allow(dead_code)]
+pub fn record_batch_generation(
+    template_path: &str,
+    manifest: &TemplateManifest,
+    output_path: &str,
+    values: &HashMap<String, Value>,
+) -> Result<()> {
+    record_history_run(template_path, manifest, output_path, values, "batch")
 }
 
 pub fn record_template_seed(
@@ -77,14 +92,15 @@ pub fn record_template_seed(
     if values.is_empty() {
         return Ok(());
     }
-    record_history_run(template_path, manifest, "[template-seed]", values)
+    record_history_run(template_path, manifest, "[template-seed]", values, "seed")
 }
 
-fn record_history_run(
+pub fn record_history_run(
     template_path: &str,
     manifest: &TemplateManifest,
     output_path: &str,
     values: &HashMap<String, Value>,
+    source: &str,
 ) -> Result<()> {
     let mut conn = open_db()?;
     init_db(&conn)?;
@@ -95,15 +111,16 @@ fn record_history_run(
     let values_json = serde_json::to_string(&stored_values)?;
     let tx = conn.transaction()?;
     tx.execute(
-        "INSERT INTO generation_runs (template_id, template_name, template_path, output_path, generated_at, field_values)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO generation_runs (template_id, template_name, template_path, output_path, generated_at, field_values, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             manifest.template.id,
             manifest.template.name,
             template_path,
             output_path,
             now,
-            values_json
+            values_json,
+            source
         ],
     )?;
     let run_id = tx.last_insert_rowid();
@@ -215,7 +232,8 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
                 runs.template_path,
                 runs.output_path,
                 runs.generated_at,
-                runs.field_values
+                runs.field_values,
+                runs.source
          FROM generation_runs AS runs
          JOIN template_meta AS meta ON meta.template_id = runs.template_id
          WHERE runs.output_path != '[template-seed]'
@@ -234,6 +252,7 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
             generated_at: row.get(5)?,
             field_values: serde_json::from_str(&values_json).unwrap_or_default(),
             field_summaries: Vec::new(),
+            source: row.get(7).unwrap_or_else(|_| "single".to_string()),
         })
     })?;
 
@@ -349,7 +368,8 @@ fn init_db(conn: &Connection) -> Result<()> {
             template_path TEXT NOT NULL,
             output_path TEXT NOT NULL,
             generated_at TEXT NOT NULL,
-            field_values TEXT NOT NULL
+            field_values TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'single'
         );
         CREATE TABLE IF NOT EXISTS field_history (
             id INTEGER PRIMARY KEY,
@@ -377,6 +397,7 @@ fn init_db(conn: &Connection) -> Result<()> {
         ",
     )?;
     ensure_field_history_id_column(conn)?;
+    ensure_generation_source_column(conn)?;
     Ok(())
 }
 
@@ -399,6 +420,20 @@ fn ensure_field_history_id_column(conn: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_field_history_template_field_id ON field_history(template_id, field_id)",
         [],
     )?;
+    Ok(())
+}
+
+fn ensure_generation_source_column(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(generation_runs)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|column| column == "source") {
+        conn.execute(
+            "ALTER TABLE generation_runs ADD COLUMN source TEXT NOT NULL DEFAULT 'single'",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -459,7 +494,7 @@ fn ensure_template_meta(
     Ok(())
 }
 
-fn query_last_values(conn: &Connection, template_id: &str) -> Result<HashMap<String, Value>> {
+pub fn query_last_values(conn: &Connection, template_id: &str) -> Result<HashMap<String, Value>> {
     let mut stmt = conn.prepare(
         "SELECT field_values FROM generation_runs
          WHERE template_id = ?1
@@ -472,6 +507,12 @@ fn query_last_values(conn: &Connection, template_id: &str) -> Result<HashMap<Str
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(HashMap::new()),
         Err(err) => Err(err.into()),
     }
+}
+
+/// Last recorded field values for a template (empty map when none exist yet).
+pub fn last_field_values_for_template(template_id: &str) -> Result<HashMap<String, Value>> {
+    let conn = open_db()?;
+    query_last_values(&conn, template_id)
 }
 
 fn query_run_field_summaries(

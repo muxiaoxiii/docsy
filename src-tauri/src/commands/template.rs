@@ -86,7 +86,7 @@ pub async fn inspect_docsytpl(
 pub async fn render_docx_template(args: serde_json::Value) -> Result<String, String> {
     run_blocking(move || {
         let args: crate::docx_template::RenderTemplateArgs = serde_json::from_value(args)?;
-        crate::docx_template::engine::render_docx(args)
+        crate::docx_template::engine::render_docx(args, "single")
     })
     .await
 }
@@ -176,6 +176,37 @@ pub async fn batch_render_from_xlsx(
             &skip_rows.unwrap_or_default(),
             &structure_overrides.unwrap_or_default(),
         )
+    })
+    .await
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchHistoryRow {
+    template_path: String,
+    output_path: String,
+    values: HashMap<String, serde_json::Value>,
+}
+
+/// Save selected batch rows into the template history database (source "manual").
+#[tauri::command]
+pub async fn save_batch_history_rows(
+    rows: Vec<BatchHistoryRow>,
+) -> Result<usize, String> {
+    run_blocking(move || {
+        let mut saved = 0;
+        for row in rows {
+            let manifest = crate::docx_template::inspect_template_package(&row.template_path)?;
+            crate::template_history::record_history_run(
+                &row.template_path,
+                &manifest,
+                &row.output_path,
+                &row.values,
+                "manual",
+            )?;
+            saved += 1;
+        }
+        Ok(saved)
     })
     .await
 }

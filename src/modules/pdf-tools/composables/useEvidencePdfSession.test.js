@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assignPageRanges,
   buildEvidencePdfRulePayload,
+  buildFileContentRows,
   buildHeaderFooterItems,
   buildHeaderText,
   buildMergeOutputPath,
@@ -583,5 +584,50 @@ describe('Evidence PDF session helpers', () => {
     expect(pn).toBeTruthy()
     expect(pn.text).not.toContain('{total}')
     expect(pn.text).toBe('{page}')
+  })
+
+  it('builds content rows in kind order and skips disabled kinds', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    file.footerTextGroups[0].text = '内部资料'
+    const rules = {
+      insertHeaderFooterEnabled: true,
+      headerInsertEnabled: true,
+      footerInsertEnabled: true,
+      pageNumberEnabled: true,
+    }
+    const rows = buildFileContentRows(file, 0, rules)
+    const kinds = rows.map((r) => r.kind)
+    expect(kinds).toEqual(['header', 'footerText', 'pageNumber'])
+    expect(rows[0].source).toBe('new')
+    expect(rows[0].status).toBe('pending-write')
+
+    // header disabled → no header row
+    const noHeader = buildFileContentRows(file, 0, { ...rules, headerInsertEnabled: false })
+    expect(noHeader.some((r) => r.kind === 'header')).toBe(false)
+
+    // master switch off → empty
+    expect(buildFileContentRows(file, 0, { ...rules, insertHeaderFooterEnabled: false })).toEqual([])
+  })
+
+  it('merges detected existing elements into content rows with pending status', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    file.existingElements = [
+      { kind: 'header', decision: 'edit', detectedText: '旧页眉', editedText: '新页眉文字', id: 'e1' },
+      { kind: 'pageNumber', decision: 'delete', detectedText: '1/13 页', id: 'e2' },
+    ]
+    const rules = {
+      insertHeaderFooterEnabled: true,
+      headerInsertEnabled: true,
+      footerInsertEnabled: true,
+      pageNumberEnabled: true,
+    }
+    const rows = buildFileContentRows(file, 0, rules)
+    const existingHeader = rows.find((r) => r.id === 'existing-e1')
+    const existingPn = rows.find((r) => r.id === 'existing-e2')
+    expect(existingHeader).toBeTruthy()
+    expect(existingHeader.source).toBe('existing')
+    expect(existingHeader.status).toBe('pending-edit')
+    expect(existingHeader.text).toBe('新页眉文字')
+    expect(existingPn.status).toBe('pending-delete')
   })
 })

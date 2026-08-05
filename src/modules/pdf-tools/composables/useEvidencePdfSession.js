@@ -219,6 +219,101 @@ export function pageRangeText(file, sequence) {
   return `${file.pageStart}-${end}`
 }
 
+/**
+ * Build a flat list of content rows for a file, used by the unified
+ * "页眉/页脚文本" column and expand subrows.
+ *
+ * Row order: header → footerText → pageNumber; within each kind:
+ *   new selected group → new extra enabled groups → existing detected elements.
+ *
+ * @param {object} file  The evidence file object
+ * @param {number} [index=0]  File index in the list (for header text rendering)
+ * @param {object} [rules={}]  Current rules object
+ * @returns {Array<{kind:string, source:string, status:string, id:string, text:string, group?:object, element?:object}>}
+ */
+export function buildFileContentRows(file, index = 0, rules = {}) {
+  if (!file) return []
+  if (rules.insertHeaderFooterEnabled === false) return []
+
+  const rows = []
+  const kinds = [
+    { kind: 'header', enabled: rules.headerInsertEnabled !== false },
+    { kind: 'footerText', enabled: rules.footerInsertEnabled !== false },
+    { kind: 'pageNumber', enabled: (rules.pageNumberEnabled ?? rules.footerEnabled) !== false },
+  ]
+
+  for (const { kind, enabled } of kinds) {
+    if (!enabled) continue
+
+    const selectedGroup = selectedGroupFor(file, kind)
+    const allGroups = groupsFor(file, kind)
+    const selectedId = selectedGroup?.id
+
+    // 1. New selected group
+    if (selectedGroup) {
+      const text = contentRowText(file, index, kind, selectedGroup, rules)
+      // header with mode==='none' → skip; footerText with empty text → skip
+      if (kind === 'header' && selectedGroup.mode === 'none') {
+        // skip
+      } else if (kind === 'footerText' && !text) {
+        // skip
+      } else {
+        rows.push({
+          kind,
+          source: 'new',
+          status: 'pending-write',
+          id: `${kind}-${selectedGroup.id}`,
+          text,
+          group: selectedGroup,
+        })
+      }
+    }
+
+    // 2. New extra enabled groups (not the selected one)
+    for (const g of allGroups) {
+      if (g.id === selectedId || g.enabled === false) continue
+      if (kind === 'header' && g.mode === 'none') continue
+      const text = contentRowText(file, index, kind, g, rules)
+      if (kind === 'footerText' && !text) continue
+      rows.push({
+        kind,
+        source: 'new',
+        status: 'pending-add',
+        id: `${kind}-${g.id}`,
+        text,
+        group: g,
+      })
+    }
+
+    // 3. Existing detected elements
+    const existingKind = kind === 'footerText' ? 'footerText' : kind
+    for (const element of file.existingElements || []) {
+      if (element.kind !== existingKind) continue
+      const decision = element.decision || 'keep'
+      let status = 'existing'
+      if (decision === 'edit') status = 'pending-edit'
+      else if (decision === 'delete') status = 'pending-delete'
+      rows.push({
+        kind,
+        source: 'existing',
+        status,
+        id: `existing-${element.id || element.detectedText}`,
+        text: element.editedText || element.detectedText || '',
+        element,
+      })
+    }
+  }
+
+  return rows
+}
+
+function contentRowText(file, index, kind, group, rules) {
+  if (kind === 'header') return buildHeaderTextForGroup(file, index, group, rules)
+  if (kind === 'footerText') return group.text || ''
+  // pageNumber
+  return pageNumberTemplateWithShowTotal(group.template || '{page}/{total}', rules.pageNumberShowTotal)
+}
+
 export function buildHeaderText(file, index, rules) {
   if (file?.headerEdited) {
     return decorateHeaderText(file.header ?? '', file, index, rules)

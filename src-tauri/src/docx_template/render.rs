@@ -345,9 +345,12 @@ fn rendered_base_text(field: &TemplateField, slot: Option<usize>, value: &Value)
         };
     }
     let text = scalar_value(value);
-    // A field may have multiple document positions. A later occurrence must be
-    // made an explicit reference rather than silently duplicating a value.
-    if slot.unwrap_or(0) > 0 && field.mark_refs.len() > 1 {
+    // A field may have multiple document positions. When fill_all_positions is
+    // set (same text marked in several separate places), every position gets the
+    // value. Otherwise a later position is only filled when it is an explicit
+    // reference — never silently duplicating (a single position split across
+    // multiple runs with different formatting must stay single-valued).
+    if slot.unwrap_or(0) > 0 && field.mark_refs.len() > 1 && !field.fill_all_positions {
         String::new()
     } else {
         text
@@ -1256,6 +1259,35 @@ mod tests {
         render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new()).unwrap();
         let out = tree.to_xml().unwrap();
         assert_eq!(out.matches("原告甲").count(), 1);
+    }
+
+    #[test]
+    fn fill_all_positions_duplicates_value_to_every_slot() {
+        let mut field = field("party", "text");
+        field.fill_all_positions = true;
+        field.mark_refs = vec![
+            super::super::TemplateMarkRef {
+                tag: "party.ref.1".to_string(),
+                ..Default::default()
+            },
+            super::super::TemplateMarkRef {
+                tag: "party.ref.2".to_string(),
+                ..Default::default()
+            },
+        ];
+        let m = manifest(vec![field]);
+        let mut tree = parse_xml(
+            r#"<w:p>
+          <w:sdt><w:sdtPr><w:tag w:val="party.ref.1"/></w:sdtPr><w:sdtContent><w:r><w:t>one</w:t></w:r></w:sdtContent></w:sdt>
+          <w:sdt><w:sdtPr><w:tag w:val="party.ref.2"/></w:sdtPr><w:sdtContent><w:r><w:t>two</w:t></w:r></w:sdtContent></w:sdt>
+        </w:p>"#,
+        );
+        let mut values = HashMap::new();
+        values.insert("party".to_string(), Value::String("原告甲".to_string()));
+
+        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new()).unwrap();
+        let out = tree.to_xml().unwrap();
+        assert_eq!(out.matches("原告甲").count(), 2);
     }
 
     #[test]

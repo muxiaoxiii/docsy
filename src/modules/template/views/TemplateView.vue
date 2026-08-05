@@ -621,6 +621,9 @@
                   <strong>{{ fillFieldLabel(field) }}</strong>
                   <span v-if="field.semanticKey && field.semanticKey !== field.name">{{ field.semanticKey }}</span>
                   <em v-if="field.required">必填</em>
+                  <el-tag v-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
+                    填一次将自动填充到所有位置
+                  </el-tag>
                 </div>
                 <div v-if="fieldStructureHints(field).length" class="fill-structure-hints">
                   <span v-for="hint in fieldStructureHints(field)" :key="hint.key" class="fill-structure-hint">
@@ -629,21 +632,21 @@
                   </span>
                 </div>
                 <el-date-picker
-                  v-if="field.type === 'date'"
+                  v-if="effectiveFieldType(field) === 'date'"
                   v-model="formValues[fieldFormKey(field)]"
                   type="date"
                   value-format="YYYY-MM-DD"
                   @change="scheduleHistoryRefresh"
                 />
                 <el-checkbox
-                  v-else-if="field.type === 'checkbox'"
+                  v-else-if="effectiveFieldType(field) === 'checkbox'"
                   v-model="formValues[fieldFormKey(field)]"
                   @change="scheduleHistoryRefresh"
                 >
                   {{ firstOptionLabel(field) || '选中' }}
                 </el-checkbox>
                 <el-radio-group
-                  v-else-if="field.type === 'radio_group'"
+                  v-else-if="effectiveFieldType(field) === 'radio_group'"
                   v-model="formValues[fieldFormKey(field)]"
                   @change="scheduleHistoryRefresh"
                 >
@@ -652,7 +655,7 @@
                   </el-radio>
                 </el-radio-group>
                 <el-checkbox-group
-                  v-else-if="field.type === 'checkbox_group'"
+                  v-else-if="effectiveFieldType(field) === 'checkbox_group'"
                   v-model="formValues[fieldFormKey(field)]"
                   @change="scheduleHistoryRefresh"
                 >
@@ -660,7 +663,7 @@
                     {{ option.label }}
                   </el-checkbox>
                 </el-checkbox-group>
-                <div v-else-if="field.type === 'party_list'" class="party-list-editor">
+                <div v-else-if="effectiveFieldType(field) === 'party_list'" class="party-list-editor">
                   <div
                     v-for="(item, index) in partyListRows(field)"
                     :key="index"
@@ -716,7 +719,7 @@
                     <el-button size="small" @click="addPartyItem(field)">添加一项</el-button>
                   </div>
                 </div>
-                <div v-else-if="field.type === 'reference'" class="reference-fill-editor">
+                <div v-else-if="effectiveFieldType(field) === 'reference'" class="reference-fill-editor">
                   <el-select
                     v-model="referenceSelections[fieldFormKey(field)]"
                     filterable
@@ -731,16 +734,18 @@
                       :value="item.key"
                     />
                   </el-select>
-                  <el-autocomplete
+                  <el-input
                     v-model="formValues[fieldFormKey(field)]"
-                    :fetch-suggestions="(query, cb) => completeField(field, query, cb)"
+                    type="textarea"
+                    :autosize="{ minRows: 1, maxRows: 6 }"
+                    resize="none"
                     clearable
                     placeholder="引用文本，可单独修改"
                     @input="scheduleHistoryRefresh"
                   />
                 </div>
                 <el-select
-                  v-else-if="field.type === 'select'"
+                  v-else-if="effectiveFieldType(field) === 'select'"
                   v-model="formValues[fieldFormKey(field)]"
                   filterable
                   allow-create
@@ -756,10 +761,12 @@
                     :value="opt.value"
                   />
                 </el-select>
-                <el-autocomplete
+                <el-input
                   v-else
                   v-model="formValues[fieldFormKey(field)]"
-                  :fetch-suggestions="(query, cb) => completeField(field, query, cb)"
+                  type="textarea"
+                  :autosize="{ minRows: 1, maxRows: 6 }"
+                  resize="none"
                   clearable
                   @input="scheduleHistoryRefresh"
                 />
@@ -782,6 +789,21 @@
                   </template>
                   <div class="fill-structure-editor">
                     <strong>{{ structureEditorTitle(field) }}</strong>
+                    <div class="setting-row">
+                      <span class="setting-label">字段类型</span>
+                      <el-select
+                        :model-value="effectiveFieldType(field)"
+                        size="small"
+                        @change="(type) => setFieldTypeOverride(field, type)"
+                      >
+                        <el-option
+                          v-for="item in typeHelpItems.filter((t) => ['text', 'date', 'select'].includes(t.value))"
+                          :key="item.value"
+                          :value="item.value"
+                          :label="item.label"
+                        />
+                      </el-select>
+                    </div>
                     <el-input
                       v-model="structureOverrideForField(field).prefix"
                       size="small"
@@ -836,7 +858,12 @@
                     @click="applyHistoryRun(run)"
                   >
                     <div class="history-run-main">
-                      <strong>{{ shortDateTime(run.generatedAt) }}</strong>
+                      <div class="history-run-title-row">
+                        <strong>{{ shortDateTime(run.generatedAt) }}</strong>
+                        <el-tag v-if="run.source === 'batch'" size="small" type="warning" effect="plain">
+                          批量填写记录
+                        </el-tag>
+                      </div>
                       <span>{{ fileName(run.outputPath) }}</span>
                       <div class="history-run-fields">
                         <el-tag
@@ -869,6 +896,31 @@
       <template #footer>
         <el-button @click="splitDialog.visible = false">取消</el-button>
         <el-button type="primary" @click="applySplitDialog">应用拆分</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="batchSaveVisible" title="保存批量填写记录到模板历史" width="min(820px, 94vw)" append-to-body>
+      <div class="batch-save-toolbar">
+        <el-button size="small" @click="toggleBatchSaveAll(true)">全选</el-button>
+        <el-button size="small" @click="toggleBatchSaveAll(false)">反选</el-button>
+        <span class="batch-save-count">已选 {{ batchSaveSelected.length }} / {{ batchSaveRows.length }} 行</span>
+      </div>
+      <el-table :data="batchSaveRows" size="small" border max-height="52vh" row-key="key" @row-click="(row) => toggleBatchSaveRow(row.key)">
+        <el-table-column width="44">
+          <template #default="{ row }">
+            <el-checkbox :model-value="batchSaveSelected.includes(row.key)" @click.stop @change="() => toggleBatchSaveRow(row.key)" />
+          </template>
+        </el-table-column>
+        <el-table-column type="index" label="#" width="44" />
+        <el-table-column label="填写内容" min-width="240" show-overflow-tooltip>
+          <template #default="{ row }">{{ batchSaveRowSummary(row) }}</template>
+        </el-table-column>
+        <el-table-column label="输出文件" prop="outputPath" min-width="200" show-overflow-tooltip />
+      </el-table>
+      <p class="hint-text">勾选需要保存到模板填写历史的行，点击“保存数据”录入；之后可在填写页看到这些历史建议。</p>
+      <template #footer>
+        <el-button @click="batchSaveVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!batchSaveSelected.length" @click="submitBatchSave">保存数据</el-button>
       </template>
     </el-dialog>
   </div>
@@ -973,6 +1025,20 @@ const renderableTemplateFields = computed(() => (templateManifest.value?.fields 
 const formValues = reactive({})
 const referenceSelections = reactive({})
 const structureOverrides = reactive({})
+// Per-field temporary type override editable from the fill page's "…" menu
+const typeOverrides = reactive({})
+
+function effectiveFieldType(field) {
+  return typeOverrides[field.id] || field.type
+}
+
+function setFieldTypeOverride(field, type) {
+  if (!type || type === field.type) {
+    delete typeOverrides[field.id]
+  } else {
+    typeOverrides[field.id] = type
+  }
+}
 const rendering = ref(false)
 const batchProcessing = ref(false)
 const historyContext = ref({
@@ -3254,6 +3320,7 @@ function buildFields() {
         markRefs: [],
         optionalRule: null,
         options: [],
+        fillAllPositions: false,
         reference:
           row.type === 'reference'
             ? {
@@ -3264,6 +3331,13 @@ function buildFields() {
               }
             : null,
       })
+    } else {
+      // Several independent rows merged into one field: the value must fill
+      // every position (single-row multiple refs stay single-valued).
+      const existing = byKey.get(key)
+      if (existing && !isMarkerType(type) && rowUsage(row) !== 'delete_text') {
+        existing.fillAllPositions = true
+      }
     }
     const field = byKey.get(key)
     if (row.optionalWhenEmpty && row.optionalScope === 'field' && !field.optionalRule) {
@@ -3767,6 +3841,7 @@ async function exportBatchTemplate() {
     return
   }
   ElMessage.success('字段表已导出')
+  ElMessage.info('若模板有填写历史，第 3 行为最近一次填写示例（标“否”不会生成数据）；需要可复制一行后填写')
   const openResult = await openPath(result.data)
   if (!openResult.ok) {
     ElMessage.warning('字段表已导出但无法自动打开，请到保存目录查看')
@@ -3834,14 +3909,96 @@ async function importAndBatchRender() {
   }
 
   const r = result.data
-  const msg = `批量生成完成：成功 ${r.success} 份` + (r.failed > 0 ? `，失败 ${r.failed} 份` : '')
-  ElMessage.success(msg)
+  const outputDirText = typeof outputDir === 'string' ? outputDir : ''
+  const lines = [`批量填写完成：成功 ${r.success} 份` + (r.failed > 0 ? `，失败 ${r.failed} 份` : '')]
+  if (outputDirText) lines.push(`输出目录：${outputDirText}`)
+  if (r.rows?.length) lines.push(`本次生成了 ${r.rows.length} 行填写数据，可保存到模板填写历史`)
 
-  if (r.outputs?.length) {
-    const openResult = await openPath(r.outputs[0])
-    if (!openResult.ok) {
-      ElMessage.warning('文书已生成但无法自动打开，请到输出目录查看')
+  let saveData = false
+  try {
+    await ElMessageBox.confirm(lines.join('\n'), '批量填写完成', {
+      confirmButtonText: outputDirText ? '打开输出目录' : '完成',
+      cancelButtonText: r.rows?.length ? '保存数据' : '',
+      type: 'success',
+      customStyle: { whiteSpace: 'pre-line' },
+    })
+    if (outputDirText) {
+      const openResult = await openPath(outputDirText)
+      if (!openResult.ok) {
+        ElMessage.warning('无法打开输出目录，请手动查看')
+      }
     }
+  } catch {
+    saveData = true
+  }
+  if (saveData && r.rows?.length) {
+    openBatchSaveDialog(r.rows)
+  }
+}
+
+const batchSaveVisible = ref(false)
+const batchSaveRows = ref([])
+const batchSaveSelected = ref([])
+
+function openBatchSaveDialog(rows) {
+  batchSaveRows.value = (rows || []).map((row, index) => ({
+    key: `${index}`,
+    outputPath: row.outputPath || '',
+    values: row.values || {},
+    selected: true,
+  }))
+  batchSaveSelected.value = []
+  batchSaveVisible.value = true
+}
+
+function toggleBatchSaveAll(value) {
+  if (value) {
+    batchSaveSelected.value = batchSaveRows.value.map((row) => row.key)
+  } else {
+    batchSaveSelected.value = []
+  }
+}
+
+function toggleBatchSaveRow(key) {
+  const idx = batchSaveSelected.value.indexOf(key)
+  if (idx >= 0) {
+    batchSaveSelected.value = batchSaveSelected.value.filter((k) => k !== key)
+  } else {
+    batchSaveSelected.value = [...batchSaveSelected.value, key]
+  }
+}
+
+function batchSaveRowSummary(row) {
+  const values = row.values || {}
+  const parts = Object.values(values)
+    .map((value) => {
+      if (Array.isArray(value)) return value.map((item) => (item?.text ?? item?.name ?? '')).filter(Boolean).join('、')
+      if (value && typeof value === 'object') return value.text ?? value.name ?? ''
+      return String(value ?? '')
+    })
+    .filter((text) => text && text.length <= 30)
+    .slice(0, 3)
+  return parts.length ? parts.join(' | ') : '（空）'
+}
+
+async function submitBatchSave() {
+  const rows = batchSaveRows.value.filter((row) => batchSaveSelected.value.includes(row.key))
+  if (!rows.length) {
+    ElMessage.warning('请至少选择一行')
+    return
+  }
+  const payload = rows.map((row) => ({
+    templatePath: templatePath.value,
+    outputPath: row.outputPath,
+    values: row.values,
+  }))
+  const result = await tauriCallSafe('save_batch_history_rows', { rows: payload })
+  if (result.ok) {
+    ElMessage.success(`已保存 ${result.data} 行填写记录到模板历史`)
+    batchSaveVisible.value = false
+    loadTemplateHistoryRuns()
+  } else {
+    ElMessage.error(result.error || '保存填写记录失败')
   }
 }
 
@@ -3850,7 +4007,7 @@ async function showValidationDialog(validation) {
   const lines = []
 
   if (!v.templateIdMatch) {
-    lines.push('❌ Excel 文件的模板 ID 与当前模板不匹配，无法生成。请使用当前模板导出的字段表。')
+    lines.push('⚠️ Excel 文件的模板 ID 与当前模板不一致，将按字段名称匹配导入。')
     lines.push('')
   }
 
@@ -3883,20 +4040,6 @@ async function showValidationDialog(validation) {
   if (v.validRows === 0 && v.totalRows > 0) {
     lines.push('')
     lines.push('❌ 没有有效数据行，无法生成。')
-  }
-
-  // Block if template ID mismatch
-  if (!v.templateIdMatch) {
-    try {
-      await ElMessageBox.alert(lines.join('\n'), '模板不匹配', {
-        confirmButtonText: '知道了',
-        type: 'error',
-        customStyle: { whiteSpace: 'pre-line' },
-      })
-    } catch {
-      // User dismissed the alert — proceed to return false
-    }
-    return { proceed: false, skipRows: [] }
   }
 
   // Block if no valid rows
@@ -3945,7 +4088,7 @@ function normalizeValues() {
     const key = fieldFormKey(field)
     const value = formValues[key]
     let normalizedValue
-    if (field.type === 'party_list') {
+    if (effectiveFieldType(field) === 'party_list') {
       normalizedValue = partyItemsToValues(value)
     } else {
       normalizedValue = value
@@ -3954,7 +4097,7 @@ function normalizeValues() {
     if (!(field.name in values)) {
       values[field.name] = normalizedValue
     }
-    if (field.type !== 'reference') {
+    if (effectiveFieldType(field) !== 'reference') {
       addSemanticAliasValue(values, field, normalizedValue)
     }
   }

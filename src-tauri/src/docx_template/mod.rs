@@ -117,6 +117,12 @@ pub struct TemplateField {
     pub optional_rule: Option<OptionalFieldRule>,
     #[serde(default)]
     pub reference: Option<TemplateFieldReference>,
+    /// When true, every document position of this field gets the same value
+    /// (a field marked in multiple separate places); when false, only the
+    /// first position is filled and later ones stay empty (a single position
+    /// split across multiple runs with different formatting).
+    #[serde(default)]
+    pub fill_all_positions: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

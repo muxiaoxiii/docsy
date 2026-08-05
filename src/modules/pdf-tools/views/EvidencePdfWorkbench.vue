@@ -434,70 +434,60 @@
         @sort-change="sortOverlayFiles"
       >
         <el-table-column type="expand" width="36">
-          <template #default="{ row }">
-            <div class="group-subrows">
-              <template v-for="group in row.headerGroups || []" :key="`h-${group.id}`">
+          <template #default="{ row, $index }">
+            <div class="content-subrows">
+              <template v-for="cr in buildFileContentRows(row, $index, currentRules)" :key="cr.id">
                 <div
-                  class="group-subrow"
-                  :class="{ selected: row.path === selectedOverlayFile?.path && group.id === selectedHeaderGroupId }"
-                  @click.stop="focusGroup(row, 'header', group.id)"
+                  class="content-subrow"
+                  :class="[
+                    `status-${cr.status}`,
+                    { selected: cr.group && row.path === selectedOverlayFile?.path && cr.group.id === selectedGroupFor(row, cr.kind)?.id },
+                  ]"
+                  @click.stop="cr.group && focusGroup(row, cr.kind, cr.group.id)"
                 >
-                  <span class="group-kind">页眉</span>
-                  <span class="group-label">{{ group.label || '页眉' }}</span>
-                  <span class="group-summary">{{ headerGroupSummary(group) }}</span>
-                  <el-switch
-                    :model-value="group.enabled"
-                    size="small"
-                    @click.stop
-                    @change="(v) => setGroupEnabled(row, 'header', group.id, v)"
-                  />
-                  <el-button link size="small" type="danger" @click.stop="removeGroupFromFile(row, 'header', group.id)"
-                    >删除</el-button
-                  >
+                  <span class="content-kind-tag">{{ contentKindLabel(cr.kind) }}</span>
+                  <span class="content-status-tag" :class="`tag-${cr.status}`">{{ contentStatusLabel(cr.status) }}</span>
+                  <span class="content-text">
+                    <el-input
+                      v-if="editingContentRowId === cr.id"
+                      v-model="editingContentRowValue"
+                      size="small"
+                      @click.stop
+                      @blur="cr.source === 'existing' ? cancelContentRowEdit() : finishContentRowEdit(row, cr)"
+                      @keyup.enter="finishContentRowEdit(row, cr)"
+                    />
+                    <span
+                      v-else
+                      class="editable-text"
+                      @dblclick.stop="startContentRowEdit(row, cr)"
+                    >{{ displayContentRowText(row, $index, cr) || '-' }}</span>
+                  </span>
+                  <span class="content-actions">
+                    <el-button
+                      v-if="cr.source === 'existing' && cr.status !== 'existing'"
+                      link
+                      size="small"
+                      @click.stop="cancelExistingDecision(row, cr)"
+                    >取消</el-button>
+                    <el-button
+                      v-if="cr.source === 'new'"
+                      link
+                      size="small"
+                      type="danger"
+                      @click.stop="removeContentRowNew(row, cr)"
+                    >删除</el-button>
+                    <el-button
+                      v-if="cr.source === 'existing'"
+                      link
+                      size="small"
+                      type="danger"
+                      @click.stop="removeContentRowExisting(row, cr)"
+                    >删除</el-button>
+                  </span>
                 </div>
               </template>
-              <template v-for="group in row.footerTextGroups || []" :key="`ft-${group.id}`">
-                <div
-                  class="group-subrow"
-                  :class="{ selected: row.path === selectedOverlayFile?.path && group.id === selectedFooterTextGroupId }"
-                  @click.stop="focusGroup(row, 'footerText', group.id)"
-                >
-                  <span class="group-kind">页脚文字</span>
-                  <span class="group-label">{{ group.label || '页脚文字' }}</span>
-                  <span class="group-summary">{{ group.text || '（空）' }}</span>
-                  <el-switch
-                    :model-value="group.enabled"
-                    size="small"
-                    @click.stop
-                    @change="(v) => setGroupEnabled(row, 'footerText', group.id, v)"
-                  />
-                  <el-button link size="small" type="danger" @click.stop="removeGroupFromFile(row, 'footerText', group.id)"
-                    >删除</el-button
-                  >
-                </div>
-              </template>
-              <template v-for="group in row.pageNumberGroups || []" :key="`pn-${group.id}`">
-                <div
-                  class="group-subrow"
-                  :class="{ selected: row.path === selectedOverlayFile?.path && group.id === selectedPageNumberGroupId }"
-                  @click.stop="focusGroup(row, 'pageNumber', group.id)"
-                >
-                  <span class="group-kind">页码</span>
-                  <span class="group-label">{{ group.label || '页码' }}</span>
-                  <span class="group-summary">{{ group.template || '{page}/{total}' }}</span>
-                  <el-switch
-                    :model-value="group.enabled"
-                    size="small"
-                    @click.stop
-                    @change="(v) => setGroupEnabled(row, 'pageNumber', group.id, v)"
-                  />
-                  <el-button link size="small" type="danger" @click.stop="removeGroupFromFile(row, 'pageNumber', group.id)"
-                    >删除</el-button
-                  >
-                </div>
-              </template>
-              <div v-if="!(row.headerGroups?.length || row.footerTextGroups?.length || row.pageNumberGroups?.length)" class="group-subrow muted">
-                <span class="group-summary">该文件未配置页眉页脚页码组</span>
+              <div v-if="!buildFileContentRows(row, $index, currentRules).length" class="content-subrow muted">
+                <span class="content-text">该文件未配置页眉页脚页码</span>
               </div>
             </div>
           </template>
@@ -526,23 +516,20 @@
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="新页眉" prop="header" sortable="custom" min-width="130" show-overflow-tooltip>
+        <el-table-column label="页眉/页脚文本" min-width="160" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <el-input
-              v-if="isEditingHeader(row)"
-              v-model="row.header"
+              v-if="editingContentRowId && editingContentRowId.startsWith(`${row.path}|`)"
+              v-model="editingContentRowValue"
               size="small"
               @click.stop
-              @blur="finishHeaderEdit(row)"
-              @keyup.enter="finishHeaderEdit(row)"
+              @blur="finishMainColumnContentEdit(row)"
+              @keyup.enter="finishMainColumnContentEdit(row)"
             />
-            <span v-else class="table-text editable-text" @dblclick.stop="startHeaderEdit(row, $index)">
-              {{ displayRowHeader(row, $index) || '-' }}
+            <span v-else class="table-text editable-text" @dblclick.stop="startMainColumnContentEdit(row, $index)">
+              {{ mainColumnContentText(row, $index) }}
             </span>
           </template>
-        </el-table-column>
-        <el-table-column v-if="footerInsertEnabled" label="新页脚文字" min-width="110" show-overflow-tooltip>
-          <template #default>{{ footerTextContent || '-' }}</template>
         </el-table-column>
         <el-table-column label="页数" prop="pages" sortable="custom" width="70">
           <template #default="{ row }">{{ row.pages || '-' }}</template>
@@ -805,6 +792,7 @@ import PageNumberRuleDialog from '../components/PageNumberRuleDialog.vue'
 import ExistingPdfElementsDialog from '../components/ExistingPdfElementsDialog.vue'
 import {
   buildEvidencePdfRulePayload,
+  buildFileContentRows,
   buildMergeOutputPath,
   buildOutputDir,
   createDefaultFooterTextGroup,
@@ -1086,6 +1074,9 @@ const editingFooterPath = ref('')
 const editingExistingHeaderPath = ref('')
 const editingExistingFooterPath = ref('')
 const editingExistingPageNumberPath = ref('')
+const editingContentRowId = ref('')
+const editingContentRowKind = ref('')
+const editingContentRowValue = ref('')
 const selectedFooterCandidateKey = ref('')
 const existingElementsVisible = ref(false)
 const existingElementsFilter = ref('all')
@@ -1848,12 +1839,6 @@ async function applyHeaderFooter() {
 }
 
 const {
-  isEditingHeader,
-  startHeaderEdit,
-  finishHeaderEdit,
-  isEditingFooter,
-  startFooterEdit,
-  finishFooterEdit,
   rowHeaderPreview,
   displayRowHeader,
   displayRowFooter,
@@ -2141,22 +2126,6 @@ function sourceRangeText(row) {
   return `${row.sourcePageStart}-${row.sourcePageEnd}`
 }
 
-function rowPageNumberPreview(row) {
-  if (!insertHeaderFooterEnabled.value || !footerEnabled.value) return ''
-  const page = pageNumberSequence.value === 'per-file' ? 1 : Number(row.pageStart || 1)
-  const total = pageNumberSequence.value === 'per-file' ? Number(row.pages || 1) : totalOverlayPages.value
-  let tpl = row.footer || footerText.value
-  if (!pageNumberShowTotal.value) tpl = tpl
-    .replace(/共\s*\{total\}\s*页/g, '')
-    .replace(/\bof\s*\{total\}/gi, '')
-    .replaceAll('{total}', '')
-    .replace(/[，,]\s*$/, '')
-    .replace(/\s+$/, '')
-    .replaceAll('//', '/')
-    .replace(/\/+$/, '')
-  return renderPageNumberTemplate(tpl, page, total, pageNumberStyle.value)
-}
-
 function sortOverlayFiles({ prop, order }) {
   if (!prop || !order) return
   const selectedPath = selectedOverlayFile.value?.path
@@ -2223,25 +2192,10 @@ function removeOverlayFile(index) {
   refreshPreview()
 }
 
-function headerGroupSummary(group) {
-  if (group.mode === 'none') return '不插入'
-  if (group.mode === 'per_file') return '按列表名称'
-  if (group.mode === 'filename') return '文件名'
-  if (group.mode === 'custom' || group.mode === 'template') return group.text || '固定文本'
-  return group.mode || '文件名'
-}
-
 function focusGroup(row, kind, groupId) {
   const index = overlayRows.value.findIndex((item) => item.path === row.path)
   if (index >= 0) selectedOverlayIndex.value = index
   setSelectedGroup(row, kind, groupId)
-  refreshPreview()
-}
-
-function setGroupEnabled(row, kind, groupId, enabled) {
-  const groups = groupsFor(row, kind)
-  const group = groups.find((g) => g.id === groupId)
-  if (group) group.enabled = Boolean(enabled)
   refreshPreview()
 }
 
@@ -2256,6 +2210,196 @@ function removeGroupFromFile(row, kind, groupId) {
   if (row.selectedFooterTextGroupId === groupId) row.selectedFooterTextGroupId = updated[0]?.id || ''
   if (row.selectedPageNumberGroupId === groupId) row.selectedPageNumberGroupId = updated[0]?.id || ''
   refreshPreview()
+}
+
+function contentKindLabel(kind) {
+  if (kind === 'header') return '页眉'
+  if (kind === 'footerText') return '页脚文字'
+  return '页码'
+}
+
+function contentStatusLabel(status) {
+  if (status === 'pending-write') return '待写入'
+  if (status === 'pending-add') return '待添加'
+  if (status === 'existing') return '已有'
+  if (status === 'pending-edit') return '待编辑'
+  if (status === 'pending-delete') return '待删除'
+  return status
+}
+
+function displayContentRowText(file, index, cr) {
+  if (cr.source === 'new') {
+    if (cr.kind === 'pageNumber') {
+      // Show rendered page number
+      const group = cr.group
+      const seq = group.sequence || 'continuous'
+      const continuous = seq !== 'per-file'
+      const page = continuous ? file.pageStart || 1 : 1
+      const total = continuous ? totalOverlayPages.value : file.pages || 1
+      return renderPageNumberTemplate(cr.text, page, total, group.style || 'arabic')
+    }
+    return cr.text || '-'
+  }
+  // existing
+  return cr.text || '-'
+}
+
+function mainColumnContentText(file, index) {
+  const rows = buildFileContentRows(file, index, currentRules.value)
+  if (!rows.length) return '-'
+  return displayContentRowText(file, index, rows[0])
+}
+
+function startMainColumnContentEdit(row, index) {
+  const rows = buildFileContentRows(row, index, currentRules.value)
+  if (!rows.length) return
+  const cr = rows[0]
+  startContentRowEdit(row, cr)
+}
+
+function finishMainColumnContentEdit(row) {
+  // Find the currently editing content row by id prefix
+  const rowPrefix = `${row.path}|`
+  if (!editingContentRowId.value.startsWith(rowPrefix)) return
+  const crId = editingContentRowId.value.slice(rowPrefix.length)
+  // Rebuild rows to find the matching content row
+  const index = overlayRows.value.findIndex((item) => item.path === row.path)
+  const rows = buildFileContentRows(row, index, currentRules.value)
+  const cr = rows.find((r) => r.id === crId)
+  if (cr && cr.source === 'existing') {
+    // Blur on an existing row discards the edit (恢复原文)
+    clearContentRowEdit()
+  } else if (cr) {
+    finishContentRowEdit(row, cr)
+  } else {
+    clearContentRowEdit()
+  }
+}
+
+/** Discard an in-progress edit (existing rows blur outside → 放弃编辑). */
+function cancelContentRowEdit() {
+  clearContentRowEdit()
+}
+
+function startContentRowEdit(row, cr) {
+  // Cancel any existing edit first
+  clearContentRowEdit()
+  editingContentRowId.value = `${row.path}|${cr.id}`
+  editingContentRowKind.value = cr.kind
+  if (cr.source === 'existing') {
+    editingContentRowValue.value = cr.element?.editedText || cr.element?.detectedText || ''
+  } else if (cr.kind === 'pageNumber') {
+    // Show template in edit mode
+    editingContentRowValue.value = cr.group?.template || '{page}/{total}'
+  } else {
+    editingContentRowValue.value = cr.text || ''
+  }
+}
+
+function finishContentRowEdit(row, cr) {
+  const value = String(editingContentRowValue.value ?? '').trim()
+  if (cr.source === 'new') {
+    finishNewContentRowEdit(row, cr, value)
+  } else {
+    finishExistingContentRowEdit(row, cr, value)
+  }
+  clearContentRowEdit()
+  refreshPreview()
+}
+
+function finishNewContentRowEdit(row, cr, value) {
+  if (cr.kind === 'header') {
+    cr.group.text = value
+    // Sync per_file mode to row.header
+    if (cr.group.mode === 'per_file') {
+      row.header = value
+    }
+  } else if (cr.kind === 'footerText') {
+    cr.group.text = value
+  } else if (cr.kind === 'pageNumber') {
+    // Validate {page} placeholder
+    if (!value.includes('{page}')) {
+      ElMessage.warning('页码模板必须包含 {page} 占位符')
+      return
+    }
+    cr.group.template = value
+  }
+}
+
+function finishExistingContentRowEdit(row, cr, value) {
+  const element = cr.element
+  if (!element) return
+  const original = element.detectedText || ''
+  if (!value) {
+    // Empty → mark delete
+    element.decision = 'delete'
+    element.editedText = ''
+  } else if (value !== original) {
+    // Changed → mark edit
+    element.decision = 'edit'
+    element.editedText = value
+    // Also update legacy fields
+    if (cr.kind === 'header') {
+      row.existingHeaderText = value
+      row.existingHeaderEdited = true
+      if (element.source !== 'artifact') row.convertPlainHeader = true
+    } else if (cr.kind === 'footerText') {
+      row.existingFooterText = value
+      row.existingFooterEdited = true
+      if (element.source !== 'artifact') row.convertPlainFooter = true
+    } else {
+      row.existingPageNumberText = value
+      row.existingPageNumberEdited = true
+      if (element.source !== 'artifact') row.convertPlainPageNumber = true
+    }
+  }
+  syncLegacyExistingElementState(row)
+  const status = fileExistingStatus(row)
+  row.statusText = status.text
+  row.statusType = status.type
+}
+
+function cancelExistingDecision(row, cr) {
+  const element = cr.element
+  if (!element) return
+  element.decision = 'keep'
+  element.editedText = element.detectedText
+  syncLegacyExistingElementState(row)
+  const status = fileExistingStatus(row)
+  row.statusText = status.text
+  row.statusType = status.type
+  refreshPreview()
+}
+
+function removeContentRowNew(row, cr) {
+  if (!cr.group) return
+  removeGroupFromFile(row, cr.kind, cr.group.id)
+}
+
+async function removeContentRowExisting(row, cr) {
+  const element = cr.element
+  if (!element) return
+  try {
+    await ElMessageBox.confirm(
+      '确认删除该条已检测到的内容？',
+      '删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  element.decision = 'delete'
+  syncLegacyExistingElementState(row)
+  const status = fileExistingStatus(row)
+  row.statusText = status.text
+  row.statusType = status.type
+  refreshPreview()
+}
+
+function clearContentRowEdit() {
+  editingContentRowId.value = ''
+  editingContentRowKind.value = ''
+  editingContentRowValue.value = ''
 }
 </script>
 

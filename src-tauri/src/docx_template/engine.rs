@@ -188,7 +188,7 @@ fn is_punctuation_only(text: &str) -> bool {
 }
 
 /// Render a docx template using the quick-xml engine
-pub fn render_docx(args: RenderTemplateArgs) -> Result<String> {
+pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
     let template_path = std::path::Path::new(&args.template_path);
     let output_path = unique_docx_output_path(std::path::Path::new(&args.output_path))?;
     let (manifest, pkg) = package::read_docsytpl_package(template_path)?;
@@ -224,11 +224,12 @@ pub fn render_docx(args: RenderTemplateArgs) -> Result<String> {
 
     let output_path_str = output_path.display().to_string();
     // History recording is best-effort; file is already written
-    let _ = crate::template_history::record_generation(
+    let _ = crate::template_history::record_history_run(
         &args.template_path,
         &manifest,
         &output_path_str,
         &args.values,
+        source,
     );
     Ok(output_path_str)
 }
@@ -527,7 +528,7 @@ mod tests {
             values,
             structure_overrides: HashMap::new(),
         };
-        let output_path = render_docx(render_args).unwrap();
+        let output_path = render_docx(render_args, "single").unwrap();
 
         // 5. Verify rendered output
         let rendered_pkg = package::read_docx_package(std::path::Path::new(&output_path)).unwrap();
@@ -698,12 +699,15 @@ mod tests {
             serde_json::Value::String("2026年7月20日".to_string()),
         );
 
-        let output_path = render_docx(RenderTemplateArgs {
-            template_path: saved.output_path.clone(),
-            output_path: output_dir.join("rendered.docx").display().to_string(),
-            values,
-            structure_overrides: HashMap::new(),
-        })
+        let output_path = render_docx(
+            RenderTemplateArgs {
+                template_path: saved.output_path.clone(),
+                output_path: output_dir.join("rendered.docx").display().to_string(),
+                values,
+                structure_overrides: HashMap::new(),
+            },
+            "single",
+        )
         .unwrap();
 
         let rendered_pkg = package::read_docx_package(std::path::Path::new(&output_path)).unwrap();
