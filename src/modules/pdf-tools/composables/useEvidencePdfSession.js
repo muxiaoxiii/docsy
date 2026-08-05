@@ -233,7 +233,6 @@ export function pageRangeText(file, sequence) {
  */
 export function buildFileContentRows(file, index = 0, rules = {}) {
   if (!file) return []
-  if (rules.insertHeaderFooterEnabled === false) return []
 
   const rows = []
   const kinds = [
@@ -242,15 +241,15 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
     { kind: 'pageNumber', enabled: (rules.pageNumberEnabled ?? rules.footerEnabled) !== false },
   ]
 
-  for (const { kind, enabled } of kinds) {
-    if (!enabled) continue
+  const newEnabled = rules.insertHeaderFooterEnabled !== false
 
+  for (const { kind, enabled } of kinds) {
     const selectedGroup = selectedGroupFor(file, kind)
     const allGroups = groupsFor(file, kind)
     const selectedId = selectedGroup?.id
 
-    // 1. New selected group
-    if (selectedGroup) {
+    // 1. New selected group (only when insert toggle is on)
+    if (newEnabled && enabled && selectedGroup) {
       const text = contentRowText(file, index, kind, selectedGroup, rules)
       // header with mode==='none' → skip; footerText with empty text → skip
       if (kind === 'header' && selectedGroup.mode === 'none') {
@@ -269,8 +268,8 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
       }
     }
 
-    // 2. New extra enabled groups (not the selected one)
-    for (const g of allGroups) {
+    // 2. New extra enabled groups (not the selected one) — only when insert enabled
+    if (newEnabled && enabled) for (const g of allGroups) {
       if (g.id === selectedId || g.enabled === false) continue
       if (kind === 'header' && g.mode === 'none') continue
       const text = contentRowText(file, index, kind, g, rules)
