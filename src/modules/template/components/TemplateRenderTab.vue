@@ -93,7 +93,7 @@
                 <em>空值时删除</em>
               </span>
             </div>
-            <template v-if="field.editable || field.isReference || hasSlotTypeOverride(field)">
+            <template v-if="field.editable || field.isReference || hasSlotTypeOverride(field) || effectiveFieldType(field) === 'reference'">
             <div v-if="effectiveFieldType(field) === 'date'" class="date-fill-row">
               <el-date-picker
                 v-if="getEntryValue(field) !== '留空'"
@@ -194,10 +194,15 @@
               </div>
             </div>
             <div v-else-if="effectiveFieldType(field) === 'reference'" class="reference-fill-editor">
+              <div v-if="isReferenceSingleCandidate(field)" class="reference-fixed-value">
+                {{ referenceFixedDisplayLabel(field) }}
+              </div>
               <el-select
+                v-else
                 :model-value="getReferenceSelection(field)"
                 filterable
                 clearable
+                class="reference-select-muted"
                 placeholder="从已填字段取值"
                 @update:model-value="$emit('reference-selection-change', field, $event)"
               >
@@ -208,7 +213,10 @@
                   :value="item.key"
                 />
               </el-select>
-              <p class="setting-caption">引用字段从已填字段取值，不能手动输入；前后缀在"…"菜单里设置。</p>
+              <p v-if="(field.posIndex ?? 0) > 0 && field.fillAllPositions && !hasSlotTypeOverride(field)" class="setting-caption">
+                此位置引用第一个位置的值；如需单独填写，可在"…"菜单里修改类型。
+              </p>
+              <p v-else class="setting-caption">引用字段从已填字段取值，不能手动输入；前后缀在"…"菜单里设置。</p>
             </div>
             <el-select
               v-else-if="effectiveFieldType(field) === 'select'"
@@ -560,7 +568,66 @@ function getFormValueByPrimary(field) {
 }
 
 function getReferenceSelection(field) {
-  return props.referenceSelections[fieldFormKey(field)]
+  const slotKey = slotKeyFor(field)
+  return props.referenceSelections[slotKey] || props.referenceSelections[fieldFormKey(field)]
+}
+
+// Determine the reference source for a field: checks slot-level saved reference,
+// field-level reference selection, and template-level reference config.
+function resolveReferenceSource(field) {
+  const slotKey = slotKeyFor(field)
+  const slotRef = props.referenceSelections[slotKey]
+  if (slotRef) {
+    const parsed = parseReferenceSourceKey(slotRef)
+    if (parsed.mode !== 'auto' && (parsed.sourceField || parsed.sourceSemanticKey)) {
+      return { fixed: true, ...parsed }
+    }
+  }
+  const fieldRef = props.referenceSelections[fieldFormKey(field)]
+  if (fieldRef) {
+    const parsed = parseReferenceSourceKey(fieldRef)
+    if (parsed.mode !== 'auto' && (parsed.sourceField || parsed.sourceSemanticKey)) {
+      return { fixed: true, ...parsed }
+    }
+  }
+  if (field.reference) {
+    const mode = field.reference.sourceMode || 'auto'
+    if (mode !== 'auto' && (field.reference.sourceField || field.reference.sourceSemanticKey)) {
+      return {
+        fixed: true,
+        mode,
+        sourceField: field.reference.sourceField || '',
+        sourceSemanticKey: field.reference.sourceSemanticKey || '',
+        sourceIndex: field.reference.sourceIndex ?? null,
+      }
+    }
+  }
+  return { fixed: false, mode: 'auto', sourceField: '', sourceSemanticKey: '', sourceIndex: null }
+}
+
+// Single candidate: follower following first position, or fixed source reference.
+function isReferenceSingleCandidate(field) {
+  if ((field.posIndex ?? 0) > 0 && field.fillAllPositions && !hasSlotTypeOverride(field)) {
+    return true
+  }
+  return resolveReferenceSource(field).fixed
+}
+
+// Display label for single-candidate reference: "引用：X 第 N 项" etc.
+function referenceFixedDisplayLabel(field) {
+  if ((field.posIndex ?? 0) > 0 && field.fillAllPositions && !hasSlotTypeOverride(field)) {
+    return followerReferenceLabel(field)
+  }
+  const source = resolveReferenceSource(field)
+  if (source.fixed) {
+    if (source.sourceField) {
+      return source.sourceIndex != null
+        ? `引用：${source.sourceField} 第 ${source.sourceIndex + 1} 项`
+        : `引用：${source.sourceField}`
+    }
+    if (source.sourceSemanticKey) return `引用：${source.sourceSemanticKey}`
+  }
+  return '引用'
 }
 
 function getPartyListRows(field) {
@@ -913,6 +980,19 @@ p {
   display: grid;
   gap: 6px;
   min-width: 0;
+}
+
+.reference-fixed-value {
+  padding: 5px 11px;
+  border-radius: 4px;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reference-select-muted :deep(.el-input__wrapper) {
+  background-color: var(--docsy-surface-muted);
 }
 
 .party-list-row {

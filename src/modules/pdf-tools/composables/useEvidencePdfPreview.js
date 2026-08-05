@@ -34,6 +34,7 @@ export function useEvidencePdfPreview({
   footerInsertEnabled,
   footerEnabled,
   footerContinuous,
+  selectedFooterTextGroup,
   totalOverlayPages,
   headerAlign,
   headerMarginMm,
@@ -64,16 +65,16 @@ export function useEvidencePdfPreview({
   })
 
   const previewFooterText = computed(() => {
-    // Legacy per-file footer text (file.footer); page numbers render via convertedExistingPreviewOverlays
-    const legacyFooter = selectedOverlayFile.value?.footer
-    if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || !footerEnabled.value || !legacyFooter)
+    if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || !footerInsertEnabled.value)
       return ''
     if (!shouldShowLiveFooter(selectedOverlayFile.value)) return ''
+    const group = selectedFooterTextGroup.value
+    if (!group || group.enabled === false || !group.text) return ''
     const page = footerContinuous.value
       ? selectedOverlayFile.value.pageStart + previewPage.value - 1
       : previewPage.value
     const total = footerContinuous.value ? totalOverlayPages.value : selectedOverlayFile.value.pages || 1
-    return expandPlaceholders(legacyFooter, page, total)
+    return expandPlaceholders(group.text, page, total)
   })
 
   const previewHeaderStyle = computed(() =>

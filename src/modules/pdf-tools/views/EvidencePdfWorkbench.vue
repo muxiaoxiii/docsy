@@ -1506,6 +1506,7 @@ const {
   footerOffsetXMm,
   footerColor,
   footerText,
+  selectedFooterTextGroup,
   pageNumberStyle,
   removeAnnotations,
   annotationKinds,
