@@ -88,16 +88,17 @@ export function useEvidencePdfPreview({
     }),
   )
 
-  const previewFooterStyle = computed(() =>
-    textOverlayStyle('footer', previewData.value, {
-      align: footerAlign.value,
-      marginMm: footerMarginMm.value,
-      fontSize: footerFontSize.value,
-      fontFamily: footerFontFamily.value,
-      offsetXMm: footerOffsetXMm.value,
-      color: footerColor.value,
-    }),
-  )
+  const previewFooterStyle = computed(() => {
+    const g = selectedFooterTextGroup.value || {}
+    return textOverlayStyle('footer', previewData.value, {
+      align: g.align || 'left',
+      marginMm: g.marginMm ?? 10,
+      fontSize: g.fontSize ?? 9,
+      fontFamily: g.fontFamily || 'auto',
+      offsetXMm: g.offsetXMm ?? 0,
+      color: g.color || '#000000',
+    })
+  })
 
   const truePreviewFrameStyle = computed(() => ({
     aspectRatio:
