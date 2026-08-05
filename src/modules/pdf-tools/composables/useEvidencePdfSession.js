@@ -238,7 +238,7 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
   const kinds = [
     { kind: 'header', enabled: rules.headerInsertEnabled !== false },
     { kind: 'footerText', enabled: rules.footerInsertEnabled !== false },
-    { kind: 'pageNumber', enabled: (rules.pageNumberEnabled ?? rules.footerEnabled) !== false },
+    { kind: 'pageNumber', enabled: rules._globalApply ? true : (rules.pageNumberEnabled ?? rules.footerEnabled) !== false },
   ]
 
   const newEnabled = rules.insertHeaderFooterEnabled !== false
@@ -437,10 +437,16 @@ export function expandPlaceholders(template, page, total) {
 export function buildHeaderFooterItems(files, rules, outputDir = '') {
   const rangedFiles = assignPageRanges(files)
   const total = totalPages(rangedFiles)
+  const isGlobal = Boolean(rules._globalApply)
   return rangedFiles.map((file, index) => {
     const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
-    const headerInsertEnabled = rules.headerInsertEnabled !== false
-    const footerInsertEnabled = rules.footerInsertEnabled !== false
+    // When global apply is ON, infer enabled state from group content
+    const headerInsertEnabled = rules._globalApply
+      ? (headerGroup && headerGroup.enabled !== false && headerGroup.mode !== 'none')
+      : rules.headerInsertEnabled !== false
+    const footerInsertEnabled = rules._globalApply
+      ? (footerTextGroup && footerTextGroup.enabled !== false && Boolean(footerTextGroup.text || rules.footerTextContent))
+      : rules.footerInsertEnabled !== false
     // Global mode: all files share the same group instance.
     const headerGroup = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
     const footerTextGroup = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
@@ -455,7 +461,9 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       suffixEnabled: rules.fileSuffixEnabled !== false,
       suffixText: rules.fileSuffixText || 'processed',
     })
-    const pageNumberEnabled = legacyFooterMode ? false : (rules.pageNumberEnabled ?? rules.footerEnabled ?? true)
+    const pageNumberEnabled = rules._globalApply
+      ? (pageNumberGroup && pageNumberGroup.enabled !== false)
+      : (legacyFooterMode ? false : (rules.pageNumberEnabled ?? rules.footerEnabled ?? true))
     const pageNumberSequence =
       rules.pageNumberSequence ??
       (rules.footerContinuous === false ? 'per-file' : undefined) ??
