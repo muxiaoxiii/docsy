@@ -475,11 +475,13 @@
         :row-key="row => row.path"
         size="small"
         border
+        ref="overlayTableRef"
         class="overlay-table"
         highlight-current-row
-        :row-class-name="({ row, rowIndex }) => buildFileContentRows(row, rowIndex, currentRules).length ? '' : 'no-expand'" 
+
         @row-click="selectPreviewRow"
         @sort-change="sortOverlayFiles"
+        @expand-change="handleExpandChange"
       >
         <el-table-column type="expand" width="36">
           <template #default="{ row, $index }">
