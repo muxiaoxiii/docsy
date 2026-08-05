@@ -768,38 +768,6 @@
         </div>
       </div>
 
-      <div v-if="footerCandidatePanelVisible" class="footer-candidate-panel">
-        <div class="candidate-panel-head">
-          <div>
-            <div class="block-title">页脚候选确认</div>
-            <p class="hint">检测到多个底部文本候选，请指定它是页脚、页码或忽略</p>
-          </div>
-        </div>
-        <div class="footer-candidate-list">
-          <div
-            v-for="candidate in selectedFooterCandidates"
-            :key="candidateKey(candidate)"
-            class="footer-candidate-item"
-            :class="{ active: selectedFooterCandidateKey === candidateKey(candidate) }"
-          >
-            <button class="candidate-main" type="button" @click="previewFooterCandidate(candidate)">
-              <strong>{{ candidate.text || candidate.normalizedText }}</strong>
-              <span>{{ footerCandidateMeta(candidate) }}</span>
-            </button>
-            <el-tag size="small" :type="footerCandidateRoleType(candidate)">{{
-              footerCandidateRoleText(candidate)
-            }}</el-tag>
-            <el-button link size="small" type="primary" @click="assignFooterCandidate(candidate, 'footer')"
-              >设为页脚</el-button
-            >
-            <el-button link size="small" type="primary" @click="assignFooterCandidate(candidate, 'pageNumber')"
-              >设为页码</el-button
-            >
-            <el-button link size="small" @click="assignFooterCandidate(candidate, 'ignore')">忽略</el-button>
-          </div>
-        </div>
-      </div>
-
       <div v-if="truePreview" class="true-preview-stage">
         <div class="true-preview-page" :style="truePreviewFrameStyle">
           <img :src="truePreview.imageDataUrl" alt="PDF 真实预览" />
@@ -822,13 +790,7 @@
           >
             <span>{{ marker.label }}</span>
           </div>
-          <div
-            v-if="footerCandidatePreviewMarker"
-            class="footer-candidate-marker"
-            :style="footerCandidatePreviewMarker.style"
-          >
-            <span>{{ footerCandidatePreviewMarker.label }}</span>
-          </div>
+
           <div
             v-for="overlay in convertedExistingPreviewOverlays"
             :key="overlay.key"
