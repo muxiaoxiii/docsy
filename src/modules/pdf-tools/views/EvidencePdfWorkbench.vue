@@ -517,28 +517,34 @@
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column label="操作" width="100">
+                <el-table-column label="操作" width="70">
                   <template #default="{ row: cr }">
                     <el-button
                       v-if="cr.source === 'existing' && cr.status !== 'existing'"
                       link
                       size="small"
                       @click.stop="cancelExistingDecision(row, cr)"
-                    >取消</el-button>
+                    >
+                      <el-icon><RefreshLeft /></el-icon>
+                    </el-button>
                     <el-button
                       v-if="cr.source === 'new'"
                       link
                       size="small"
                       type="danger"
                       @click.stop="removeContentRowNew(row, cr)"
-                    >删除</el-button>
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
                     <el-button
                       v-if="cr.source === 'existing'"
                       link
                       size="small"
                       type="danger"
                       @click.stop="removeContentRowExisting(row, cr)"
-                    >删除</el-button>
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
                   </template>
                 </el-table-column>
               </el-table>
@@ -551,31 +557,33 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column width="42" align="center">
+        <el-table-column width="44" align="center" class-name="index-drag-col">
           <template #default="{ $index }">
-            <button
-              type="button"
-              class="table-drag-handle"
-              :data-reorder-index="$index"
-              title="拖动调整处理顺序"
-              @pointerdown.stop="startOverlayReorder($index, $event)"
-              @pointermove.stop="moveOverlayReorder"
-              @pointerup.stop="finishOverlayReorder"
-              @pointercancel.stop="resetOverlayReorder"
-            >
-              <el-icon><Rank /></el-icon>
-            </button>
+            <span class="index-drag-cell">
+              <span class="index-number">{{ $index + 1 }}</span>
+              <button
+                type="button"
+                class="table-drag-handle index-drag-overlay"
+                :data-reorder-index="$index"
+                title="拖动调整处理顺序"
+                @pointerdown.stop="startOverlayReorder($index, $event)"
+                @pointermove.stop="moveOverlayReorder"
+                @pointerup.stop="finishOverlayReorder"
+                @pointercancel.stop="resetOverlayReorder"
+              >
+                <el-icon><Rank /></el-icon>
+              </button>
+            </span>
           </template>
         </el-table-column>
-        <el-table-column type="index" label="#" width="44" />
-        <el-table-column label="文件" prop="name" sortable="custom" min-width="150" show-overflow-tooltip>
+        <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <button class="file-link" type="button" :data-reorder-index="$index" @click.stop="openEvidenceFile(row)">
               {{ row.name }}
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="页眉/页脚文本" min-width="160" show-overflow-tooltip>
+        <el-table-column label="页眉/页脚文本" min-width="200" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <el-input
               v-if="editingContentRowId && editingContentRowId.startsWith(`${row.path}|`)"
@@ -622,19 +630,22 @@
         >
           <template #default="{ row }">{{ sourceRangeText(row) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="70" fixed="right">
           <template #default="{ $index }">
-            <el-button link size="small" :disabled="$index === 0" @click.stop="moveOverlayFile($index, -1)"
-              >上移</el-button
-            >
+            <el-button link size="small" :disabled="$index === 0" @click.stop="moveOverlayFile($index, -1)">
+              <el-icon><Top /></el-icon>
+            </el-button>
             <el-button
               link
               size="small"
               :disabled="$index === overlayRows.length - 1"
               @click.stop="moveOverlayFile($index, 1)"
-              >下移</el-button
             >
-            <el-button link type="danger" size="small" @click.stop="removeOverlayFile($index)">删除</el-button>
+              <el-icon><Bottom /></el-icon>
+            </el-button>
+            <el-button link type="danger" size="small" @click.stop="removeOverlayFile($index)">
+              <el-icon><Delete /></el-icon>
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -843,7 +854,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Rank } from '@element-plus/icons-vue'
+import { Delete, Bottom, Plus, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../components/PdfJsPreview.vue'
@@ -3002,6 +3013,39 @@ h3 {
   cursor: grab;
   touch-action: none;
   place-items: center;
+}
+
+.index-drag-cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.index-number {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+}
+
+.index-drag-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.15s;
+  display: inline-grid;
+  place-items: center;
+}
+
+.index-drag-cell:hover .index-number {
+  visibility: hidden;
+}
+
+.index-drag-cell:hover .index-drag-overlay {
+  opacity: 1;
 }
 
 .table-drag-handle:active {

@@ -736,6 +736,17 @@ async function onSaveFieldReference(field, key) {
       ElMessage.error(result.error || '保存引用来源失败')
       return
     }
+    if (templateManifest.value) {
+      const target = templateManifest.value.fields.find((f) => f.id === field.id)
+      if (target) {
+        target.reference = {
+          sourceMode: 'field',
+          sourceField: source.field || '',
+          sourceSemanticKey: '',
+          sourceIndex: source.index ?? null,
+        }
+      }
+    }
     ElMessage.success('引用来源已保存到模板')
   } else {
     delete referenceSelections[slotKey]
@@ -749,6 +760,11 @@ async function onSaveFieldReference(field, key) {
     })
     if (!result.ok) {
       ElMessage.error(result.error || '保存引用来源失败')
+      return
+    }
+    if (templateManifest.value) {
+      const target = templateManifest.value.fields.find((f) => f.id === field.id)
+      if (target) target.reference = null
     }
   }
   scheduleHistoryRefresh()
@@ -2118,10 +2134,11 @@ function normalizeValues() {
       addSemanticAliasValue(values, field, normalizedValue)
     }
   }
-  // Per-position values for follower cards made independent by a type change.
-  for (const [slotKey, slotValue] of Object.entries(typeOverrides)) {
-    if (slotKey.includes('#')) {
-      values[slotKey] = formValues[slotKey]
+  // Per-position values for follower cards made independent by a type change
+  // or a custom reference source (stored under field.id#posIndex keys).
+  for (const [slotKey, slotValue] of Object.entries(formValues)) {
+    if (slotKey.includes('#') && slotValue !== undefined) {
+      values[slotKey] = slotValue
     }
   }
   return values

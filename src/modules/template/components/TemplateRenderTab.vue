@@ -80,7 +80,7 @@
               同名字段，自动同步
             </el-tag>
             <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0" size="small" effect="plain" class="fill-all-tag">
-              引用首个位置
+              {{ field.reference?.sourceField ? `引用：${field.reference.sourceField}` : '引用首个位置' }}
             </el-tag>
             <el-tag v-else-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
               填一次将自动填充到所有位置
@@ -94,13 +94,17 @@
               </span>
             </div>
             <template v-if="field.editable || field.isReference">
-            <el-date-picker
-              v-if="effectiveFieldType(field) === 'date'"
-              :model-value="getEntryValue(field)"
-              type="date"
-              value-format="YYYY-MM-DD"
-              @update:model-value="setEntryValue(field, $event)"
-            />
+            <div v-if="effectiveFieldType(field) === 'date'" class="date-fill-row">
+              <el-date-picker
+                v-if="getEntryValue(field) !== '留空'"
+                :model-value="getEntryValue(field)"
+                type="date"
+                value-format="YYYY-MM-DD"
+                @update:model-value="setEntryValue(field, $event)"
+              />
+              <span v-else class="date-blank-text">留空</span>
+              <button type="button" class="date-blank-btn" @click="toggleDateBlank(field)">留空</button>
+            </div>
             <el-checkbox
               v-else-if="effectiveFieldType(field) === 'checkbox'"
               :model-value="getEntryValue(field)"
@@ -424,15 +428,27 @@ function slotKeyFor(field) {
 function getEntryValue(field) {
   if (field.isDuplicate) return getFormValueByPrimary(field)
   const slotKey = slotKeyFor(field)
-  // A follower made independent by a type change stores its own slot value.
-  if (props.typeOverrides[slotKey]) return props.formValues[slotKey]
-  return props.formValues[fieldFormKey(field)]
+  const base = fieldFormKey(field)
+  // A follower made independent by a type change or a custom reference source
+  // stores its own slot value.
+  if ((field.posIndex ?? 0) > 0) {
+    const slotValue = props.formValues[slotKey]
+    if (props.typeOverrides[slotKey] || slotValue !== undefined) return slotValue
+  }
+  return props.formValues[base]
 }
 
 function setEntryValue(field, value) {
   if (field.isDuplicate) return
   const slotKey = slotKeyFor(field)
   emit('update-form-value', props.typeOverrides[slotKey] ? slotKey : fieldFormKey(field), value)
+}
+
+// Toggle a date field between its picked value and the "留空" blank marker
+// (rendered as "    年  月  日" so the doc can be filled in by hand).
+function toggleDateBlank(field) {
+  const current = getEntryValue(field)
+  setEntryValue(field, current === '留空' ? '' : '留空')
 }
 
 function firstOptionLabel(field) {
