@@ -82,7 +82,6 @@ import { historyTime, historyRunSummary } from '../composables/fieldRowUtils.js'
 const HISTORY_PAGE_SIZE = 20
 
 const props = defineProps({
-  historyRuns: { type: Array, default: () => [] },
   historyRunsLoading: { type: Boolean, default: false },
   groupedHistoryRuns: { type: Array, default: () => [] },
   expandedHistoryGroups: { type: Object, default: () => new Set() },

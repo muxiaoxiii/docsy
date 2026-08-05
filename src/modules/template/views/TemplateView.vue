@@ -88,7 +88,6 @@
 
       <el-tab-pane label="填写历史" name="history">
         <TemplateHistoryTab
-          :history-runs="historyRuns"
           :history-runs-loading="historyRunsLoading"
           :grouped-history-runs="groupedHistoryRuns"
           :expanded-history-groups="expandedHistoryGroups"
@@ -158,17 +157,10 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
 import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 import {
-  inferTemplateField,
-  looksLikeDatePrefix,
-  looksLikePrefixMark,
-  looksLikeSuffixMark,
   normalizeSuggestionSearchText,
   PUBLIC_CAUSE_ACTIONS,
   PUBLIC_COURT_NAMES,
   PUBLIC_LITIGATION_STAGES,
-  prefixStructureInfo,
-  prefixTargetRule,
-  suffixTargetRule,
 } from '../rules/publicRules.js'
 
 // Tab components
@@ -176,87 +168,32 @@ import TemplateBuildTab from '../components/TemplateBuildTab.vue'
 import TemplateRenderTab from '../components/TemplateRenderTab.vue'
 import TemplateHistoryTab from '../components/TemplateHistoryTab.vue'
 import TemplateSettingsTab from '../components/TemplateSettingsTab.vue'
+import { useTemplateSettings } from '../composables/useTemplateSettings.js'
+import { useBatchFill } from '../composables/useBatchFill.js'
+import { markToRow, normalizeFieldRows, autoMergeMarks, inferFieldFromText, validateFieldRowsBeforeSave, buildFields } from '../composables/useFieldNormalization.js'
+import { usePreviewSelection } from '../composables/usePreviewSelection.js'
+import {
+  sliceChars,
+  referenceSourceKey,
+  parseReferenceSourceKey,
+  syncReferenceSourceFromKey,
+  normalizedReferenceSource,
+} from '../composables/fieldRowUtils.js'
 
 const activeTab = ref('build')
-const itemSeparatorSetting = ref(window.localStorage.getItem('docsy.template.itemSeparator') || '、')
-function saveItemSeparatorSetting() {
-  window.localStorage.setItem('docsy.template.itemSeparator', itemSeparatorSetting.value || '、')
-  ElMessage.success('已保存多项字段连接符设置')
-}
 
-// ── Settings: template trash + history database ─────────────────────────────
-const templateTrash = ref([])
-const templateTrashLoading = ref(false)
-const clearingHistory = ref(false)
-async function loadTemplateTrash() {
-  templateTrashLoading.value = true
-  const result = await tauriCallSafe('list_template_trash')
-  templateTrashLoading.value = false
-  if (result.ok) {
-    templateTrash.value = result.data || []
-  } else {
-    ElMessage.error(result.error || '读取模板回收站失败')
-  }
-}
-async function restoreTemplate(row) {
-  const result = await tauriCallSafe('restore_template_from_trash', { args: { path: row.path } })
-  if (!result.ok) {
-    ElMessage.error(result.error || '恢复失败')
-    return
-  }
-  ElMessage.success('模板已恢复')
-  await loadTemplateTrash()
-  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
-}
-async function permanentlyDeleteTemplate(row) {
-  let migrateToCommon = false
-  try {
-    await ElMessageBox.confirm(
-      `彻底删除"${row.name}"？可以先把该模板的内部填写数据迁移为模板通用数据，供其他模板按通用字段名继续检索。`,
-      '彻底删除模板',
-      {
-        confirmButtonText: '迁移数据并删除',
-        cancelButtonText: '直接删除数据',
-        distinguishCancelAndClose: true,
-        type: 'warning',
-      },
-    )
-    migrateToCommon = true
-  } catch (action) {
-    if (action !== 'cancel') return
-  }
-  const result = await tauriCallSafe('permanently_delete_template', {
-    args: { path: row.path, migrateToCommon },
-  })
-  if (!result.ok) {
-    ElMessage.error(result.error || '彻底删除失败')
-    return
-  }
-  ElMessage.success(migrateToCommon ? '模板已删除，数据已迁移为模板通用数据' : '模板和内部数据已删除')
-  await loadTemplateTrash()
-  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
-}
-async function clearAllHistory() {
-  try {
-    await ElMessageBox.confirm(
-      '确定清空全部填写历史？删除后无法恢复，模板库文件不受影响。',
-      '清空填写历史',
-      { confirmButtonText: '清空', type: 'warning' },
-    )
-  } catch {
-    return
-  }
-  clearingHistory.value = true
-  const result = await tauriCallSafe('clear_template_history')
-  clearingHistory.value = false
-  if (!result.ok) {
-    ElMessage.error(result.error || '清空历史失败')
-    return
-  }
-  ElMessage.success(`已清空 ${result.data ?? 0} 条填写记录`)
-  await loadHistoryContext(true)
-  await loadTemplateHistoryRuns()
-}
+// ── Settings: template trash + history database (composable) ────────────────
+const {
+  itemSeparatorSetting,
+  templateTrash,
+  templateTrashLoading,
+  clearingHistory,
+  saveItemSeparatorSetting,
+  loadTemplateTrash,
+  restoreTemplate,
+  permanentlyDeleteTemplate,
+  clearAllHistory,
+} = useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
 
 const typeHelpItems = [
   { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、律所名称。' },
@@ -286,8 +223,28 @@ const fieldRows = ref([])
 const previewSampleValues = reactive({})
 const selectedRows = ref([])
 const buildTabRef = ref(null)
-const sourcePreviewSelection = ref(null)
-const sourcePreviewSelectionPayload = ref(null)
+
+// ── Preview selection (composable) ──────────────────────────────────────────
+const {
+  sourcePreviewRef,
+  documentPreviewRef,
+  sourcePreviewSelection,
+  sourcePreviewSelectionPayload,
+  previewFocusedRowId,
+  buildTemplatePreview,
+  rememberSourcePreviewSelection,
+  collectSourcePreviewSelection,
+  nextReferenceFieldName,
+} = usePreviewSelection(documentRuns, documentText, fieldRows, previewSampleValues)
+
+// Sync composable's DOM refs with child component's exposed refs
+watch(buildTabRef, (ref) => {
+  if (ref) {
+    sourcePreviewRef.value = ref.sourcePreviewRef
+    documentPreviewRef.value = ref.documentPreviewRef
+  }
+}, { immediate: true })
+
 const scanning = ref(false)
 const saving = ref(false)
 let lastPreviewAddKey = ''
@@ -302,7 +259,6 @@ const splitDialog = reactive({
 })
 const showDocumentText = ref(false)
 const showTemplatePreview = ref(false)
-const previewFocusedRowId = ref('')
 const undoStack = ref([])
 
 const templatePath = ref('')
@@ -364,7 +320,6 @@ function setFieldTypeOverride(field, type) {
   }
 }
 const rendering = ref(false)
-const batchProcessing = ref(false)
 const historyContext = ref({
   lastValues: {},
   fieldSuggestions: {},
@@ -422,20 +377,6 @@ function typeLabel(type) {
   return typeHelpItems.find((item) => item.value === type)?.label || type
 }
 
-function structureTargetDisplayName(row) {
-  const target = structureTargetRow(row)
-  if (!target) return row.name || '未指定'
-  return displayNameForFieldRow(target) || row.name || '未指定'
-}
-
-function displayNameForFieldRow(row) {
-  if (!row) return ''
-  const label = String(row.label || '').trim()
-  const rawText = String(row.text || '').trim()
-  if (label && label !== rawText && !isGeneratedFieldName(label)) return label
-  return String(row.name || '').trim()
-}
-
 function structureTargetRow(structureRow) {
   const usage = rowUsage(structureRow)
   if (usage !== 'prefix' && usage !== 'suffix') return null
@@ -491,24 +432,6 @@ function uniqueFieldRowByName(name) {
     (item) => item.enabled && rowUsage(item) === 'field' && item.name.trim() === normalized,
   )
   return matches.length === 1 ? matches[0] : null
-}
-
-function isConnectorRow(row) {
-  if (rowUsage(row) !== 'prefix') return false
-  const info = prefixStructureInfo(row.text)
-  return Boolean(info.connectorText && !info.roleText)
-}
-
-function connectorTargetName(row) {
-  const target = connectorTargetRow(row)
-  return target?.name || row.name || ''
-}
-
-function connectorTargetRow(row) {
-  if (!isConnectorRow(row)) return null
-  const index = fieldRows.value.indexOf(row)
-  if (index < 0) return null
-  return findNeighborFieldRow(fieldRows.value, index, 1)
 }
 
 function sameFieldRows(row) {
@@ -680,35 +603,11 @@ function referenceFieldNameForRow(row) {
   return row?.name && !isGeneratedFieldName(row.name) ? row.name : nextReferenceFieldName()
 }
 
-function referenceSourceKey(mode = 'auto', source = '', sourceIndex = null) {
-  return `${mode || 'auto'}::${source || ''}::${sourceIndex == null ? '' : sourceIndex}`
-}
-
-function parseReferenceSourceKey(key) {
-  const parts = String(key || '').split('::')
-  const [mode = 'auto', source = '', sourceIndexText = ''] =
-    parts.length >= 3 ? parts : ['field', parts[0] || '', parts[1] || '']
-  return {
-    mode: mode || 'auto',
-    sourceField: mode === 'field' ? source : '',
-    sourceSemanticKey: mode === 'semantic' ? source : '',
-    sourceIndex: sourceIndexText === '' ? null : Number(sourceIndexText),
-  }
-}
-
 function onReferenceSelectionChange(field, key) {
   const source = parseReferenceFillKey(key)
   const values = normalizeValuesForReferenceSources()
   formValues[fieldFormKey(field)] = resolveReferenceValueFromSource(source, values)
   scheduleHistoryRefresh()
-}
-
-function syncReferenceSourceFromKey(row) {
-  const parsed = parseReferenceSourceKey(row.referenceSourceKey)
-  row.referenceSourceMode = parsed.mode
-  row.referenceSourceField = parsed.sourceField
-  row.referenceSourceSemanticKey = parsed.sourceSemanticKey
-  row.referenceSourceIndex = parsed.sourceIndex
 }
 
 function allReferenceSuggestions() {
@@ -794,386 +693,6 @@ async function inspectSourceDocx() {
   }
 }
 
-function markToRow(mark, index) {
-  const inferred = inferFieldFromText(mark.text, mark.context, mark.checkboxLike, index)
-  const partyItems = inferred.type === 'party_list' ? splitPartyLabelText(mark.text) : []
-  return {
-    rowId: `${mark.id}:${index}`,
-    displayId: mark.displayId || mark.id,
-    markId: mark.id,
-    markRefs: mark.markRefs || [{ markId: mark.id, start: null, end: null }],
-    markSegments: mark.markSegments || [{ markId: mark.id, text: mark.text }],
-    charStart: null,
-    charEnd: null,
-    text: mark.text,
-    context: mark.context,
-    enabled: true,
-    type: inferred.type,
-    name: inferred.name,
-    label: inferred.label,
-    semanticKey: inferred.semanticKey,
-    required: false,
-    optionalWhenEmpty: inferred.optionalWhenEmpty,
-    optionalScope: inferred.optionalScope,
-    optionalPrefix: inferred.optionalPrefix,
-    optionalSuffix: inferred.optionalSuffix,
-    optionId: `option_${index + 1}`,
-    optionLabel: mark.optionLabel || mark.text,
-    checkedText: defaultCheckedText(mark.text),
-    uncheckedText: defaultUncheckedText(mark.text),
-    partyItems,
-    referenceHintSeen: false,
-    referenceIncludePrefix: true,
-    referenceIncludeSuffix: true,
-    referenceSourceMode: 'auto',
-    referenceSourceField: '',
-    referenceSourceSemanticKey: '',
-    referenceSourceIndex: null,
-    referenceSourceKey: referenceSourceKey('auto', '', null),
-    options: inferred.options || [],
-    selectOptions: (inferred.options || []).map((opt) => ({
-      label: opt.label || '',
-      checkedText: opt.checkedText || '',
-    })),
-  }
-}
-
-function autoAssignStructureTargets(rows) {
-  for (const [index, row] of rows.entries()) {
-    if (rowUsage(row) === 'prefix') {
-      const target = findNeighborFieldRow(rows, index, 1)
-      if (target) {
-        const rule = prefixTargetRule(row.text)
-        if (rule && isGeneratedFieldName(target.name)) {
-          target.type = rule.targetType
-          target.name = rule.targetName
-          target.label = rule.targetLabel
-          target.semanticKey = rule.targetSemanticKey || rule.targetName
-        }
-        bindStructureRowToTarget(row, target)
-        row.name = rule?.targetName || target.name
-        row.label = prefixStructureLabel(row, target)
-      }
-    } else if (rowUsage(row) === 'suffix') {
-      const target = findNeighborFieldRow(rows, index, -1)
-      if (target) {
-        const rule = suffixTargetRule(row.text)
-        if (rule && isGeneratedFieldName(target.name)) {
-          target.type = rule.targetType
-          target.name = rule.targetName
-          target.label = rule.targetLabel
-          target.semanticKey = rule.targetSemanticKey || rule.targetName
-        }
-        bindStructureRowToTarget(row, target)
-        row.name = rule?.targetName || target.name
-        row.label = `${target.label || target.name}后缀`
-      }
-    }
-  }
-  return rows
-}
-
-function refreshPartyItemsForRows(rows) {
-  for (const row of rows) {
-    row.partyItems = row.type === 'party_list' ? splitPartyLabelText(row.text) : []
-  }
-  return rows
-}
-
-function normalizeFieldRows(rows) {
-  return reorderRowsByDocumentPosition(
-    refreshPartyItemsForRows(
-      autoSplitPartyListRows(
-        autoAssignStructureTargets(
-          dropGeneratedConnectorRows(
-            autoSplitLegalCompoundRows(autoSplitKnownSuffixRows(autoSplitLeadingConnectorRows(rows))),
-          ),
-        ),
-      ),
-    ),
-  )
-}
-
-function autoSplitPartyListRows(rows) {
-  const result = []
-  for (const row of rows) {
-    if (rowUsage(row) !== 'field' || row.type !== 'party_list') {
-      result.push(row)
-      continue
-    }
-    const segments = splitPartyLabelSegments(row.text)
-    if (segments.length <= 1) {
-      result.push(row)
-      continue
-    }
-    for (const [index, segment] of segments.entries()) {
-      const refs = markRefsForTextRange(row, segment.start, segment.end)
-      result.push({
-        ...row,
-        rowId: `${row.rowId}:party-item:${index}`,
-        text: segment.text,
-        label: segment.text,
-        markRefs: refs,
-        charStart: segment.start,
-        charEnd: segment.end,
-        markSegments: markSegmentsFromRefs(refs, segment.text),
-        partyItems: [segment.text],
-      })
-    }
-  }
-  return result
-}
-
-function dropGeneratedConnectorRows(rows) {
-  return rows.filter((row) => !(isGeneratedConnectorRow(row) && isPureConnectorText(row.text)))
-}
-
-function isGeneratedConnectorRow(row) {
-  return rowUsage(row) === 'prefix' && String(row.rowId || '').includes(':auto-connector')
-}
-
-function isPureConnectorText(text) {
-  const value = String(text || '').trim()
-  return Boolean(value) && /^(?:以及|或者|[，,、;；和与及\s])+$/.test(value)
-}
-
-function autoSplitLeadingConnectorRows(rows) {
-  const result = []
-  for (const row of rows) {
-    const split = splitLeadingConnectorRow(row)
-    if (split) result.push(...split)
-    else result.push(row)
-  }
-  return result
-}
-
-function splitLeadingConnectorRow(row) {
-  if (!row || rowUsage(row) !== 'field' || isMarkerType(row.type)) return null
-  const info = leadingConnectorInfo(row.text)
-  if (!info.connectorText || !info.restText) return null
-  const connectorLength = charLength(info.connectorText)
-  const textLength = charLength(row.text)
-  const inferred = inferFieldFromText(info.restText, row.context, false, fieldRows.value.length)
-  const fieldType = row.userSelectedType || inferred.type || row.type
-  const fieldName = !row.name || isGeneratedFieldName(row.name) ? inferred.name : row.name
-  const fieldLabel =
-    !row.label || row.label === row.text || isGeneratedFieldName(row.label) ? inferred.label : row.label
-  const fieldRefs = refsForRowTextRange(row, connectorLength, textLength)
-  const fieldText = info.restText
-  return [
-    {
-      ...row,
-      rowId: `${row.rowId}:auto-field`,
-      text: fieldText,
-      type: fieldType,
-      name: fieldName,
-      label: fieldLabel,
-      semanticKey: inferred.semanticKey || fieldName,
-      markRefs: fieldRefs,
-      charStart: connectorLength,
-      charEnd: textLength,
-      markSegments: markSegmentsFromRefs(fieldRefs, fieldText),
-      partyItems: fieldType === 'party_list' ? splitPartyLabelText(fieldText) : [],
-    },
-  ]
-}
-
-function autoSplitKnownSuffixRows(rows) {
-  const result = []
-  for (const row of rows) {
-    const split = splitKnownSuffixRow(row)
-    if (split) result.push(...split)
-    else result.push(row)
-  }
-  return result
-}
-
-function autoSplitLegalCompoundRows(rows) {
-  const result = []
-  for (const row of rows) {
-    const split = splitLegalCompoundRow(row)
-    if (split) result.push(...split)
-    else result.push(row)
-  }
-  return result
-}
-
-function splitKnownSuffixRow(row) {
-  if (!row || rowUsage(row) !== 'field' || isMarkerType(row.type)) return null
-  if (row.userSelectedType) return null
-  if (!row.markId || !row.text) return null
-  const suffixRule = knownSuffixAtEnd(row.text)
-  if (!suffixRule) return null
-  const suffixText = suffixRule.text
-  const trimmedText = String(row.text).trimEnd()
-  const suffixStartOffset = trimmedText.length - suffixText.length
-  const rawFieldText = trimmedText.slice(0, suffixStartOffset)
-  const fieldText = rawFieldText.trim()
-  if (!fieldText || fieldText.length > 12) return null
-  const fieldStartOffset = rawFieldText.length - rawFieldText.trimStart().length
-  const fieldStart = charLength(trimmedText.slice(0, fieldStartOffset))
-  const fieldEnd = fieldStart + charLength(fieldText)
-  const suffixStart = charLength(trimmedText.slice(0, suffixStartOffset))
-  const suffixEnd = suffixStart + charLength(suffixText)
-  const fieldRow = {
-    ...row,
-    rowId: `${row.rowId}:auto-field`,
-    text: fieldText,
-    type: suffixRule.targetType,
-    name: suffixRule.targetName,
-    label: suffixRule.targetLabel,
-    semanticKey: suffixRule.targetName,
-    markRefs: markRefsForTextRange(row, fieldStart, fieldEnd),
-    charStart: fieldStart,
-    charEnd: fieldEnd,
-  }
-  const suffixRow = {
-    ...row,
-    rowId: `${row.rowId}:auto-suffix`,
-    text: suffixText,
-    type: 'suffix',
-    name: suffixRule.targetName,
-    label: `${suffixRule.targetLabel}后缀`,
-    semanticKey: '',
-    required: false,
-    optionalWhenEmpty: false,
-    markRefs: markRefsForTextRange(row, suffixStart, suffixEnd),
-    charStart: suffixStart,
-    charEnd: suffixEnd,
-  }
-  return [fieldRow, suffixRow]
-}
-
-function splitLegalCompoundRow(row) {
-  if (!row || rowUsage(row) !== 'field' || isMarkerType(row.type)) return null
-  if (row.userSelectedType) return null
-  const text = String(row.text || '')
-  if (!text || charLength(text) < 8) return null
-
-  const pieces = []
-  const causeMatch = text.match(/[\u4e00-\u9fa5A-Za-z0-9、，,（）()·]{2,48}纠纷/)
-  if (causeMatch) {
-    const start = charLength(text.slice(0, causeMatch.index))
-    const end = start + charLength(causeMatch[0])
-    pieces.push(
-      makeRangeRow(row, start, end, { type: 'text', name: '案由', label: '案由', semanticKey: '案由' }, 'cause'),
-    )
-    const afterCause = text.slice(causeMatch.index + causeMatch[0].length)
-    if (afterCause.startsWith('一案')) {
-      pieces.push(
-        makeRangeRow(
-          row,
-          end,
-          end + 2,
-          { type: 'ignore', name: '', label: '保留原文', semanticKey: '' },
-          'cause-ignore',
-        ),
-      )
-    }
-  }
-
-  const caseMatch = text.match(
-    /[（(]\s*\d{4}\s*[）)]\s*[\u4e00-\u9fa5A-Za-z0-9]{1,12}(?:民|行|知|执|赔|破|清|申|再|终|初|保|诉前|民终|民初|行初|行终)[\u4e00-\u9fa5A-Za-z0-9-]*号/,
-  )
-  if (caseMatch) {
-    const caseStart = charLength(text.slice(0, caseMatch.index))
-    const caseEnd = caseStart + charLength(caseMatch[0])
-    const prefixStart = legalCaseNumberPrefixStart(text, caseMatch.index)
-    if (prefixStart >= 0 && prefixStart < caseMatch.index) {
-      pieces.push(
-        makeRangeRow(
-          row,
-          charLength(text.slice(0, prefixStart)),
-          caseStart,
-          { type: 'prefix', name: '案号', label: '案号前缀', semanticKey: '' },
-          'case-prefix',
-        ),
-      )
-    }
-    pieces.push(
-      makeRangeRow(
-        row,
-        caseStart,
-        caseEnd,
-        { type: 'text', name: '案号', label: '案号', semanticKey: '案号' },
-        'case-number',
-      ),
-    )
-    const closeChar = text.slice(caseMatch.index + caseMatch[0].length, caseMatch.index + caseMatch[0].length + 1)
-    if (closeChar === '）' || closeChar === ')') {
-      pieces.push(
-        makeRangeRow(
-          row,
-          caseEnd,
-          caseEnd + 1,
-          { type: 'suffix', name: '案号', label: '案号后缀', semanticKey: '' },
-          'case-suffix',
-        ),
-      )
-    }
-  }
-
-  if (pieces.length <= 1) return null
-  return dedupeRangeRows(pieces)
-}
-
-function legalCaseNumberPrefixStart(text, caseNumberIndex) {
-  const before = text.slice(0, caseNumberIndex)
-  const labelIndex = Math.max(before.lastIndexOf('案号：'), before.lastIndexOf('案号:'))
-  if (labelIndex < 0) return -1
-  const bracketIndex = Math.max(before.lastIndexOf('（', labelIndex), before.lastIndexOf('(', labelIndex))
-  return bracketIndex >= 0 && labelIndex - bracketIndex <= 2 ? bracketIndex : labelIndex
-}
-
-function makeRangeRow(row, start, end, attrs, suffix) {
-  return {
-    ...row,
-    ...attrs,
-    rowId: `${row.rowId}:auto-${suffix}`,
-    text: sliceChars(row.text, start, end),
-    markRefs: markRefsForTextRange(row, start, end),
-    charStart: start,
-    charEnd: end,
-    required: false,
-    optionalWhenEmpty: false,
-    referenceHintSeen: false,
-    partyItems: attrs.type === 'party_list' ? splitPartyLabelText(sliceChars(row.text, start, end)) : [],
-  }
-}
-
-function dedupeRangeRows(rows) {
-  const seen = new Set()
-  return rows.filter((row) => {
-    const key = `${row.charStart}:${row.charEnd}:${row.type}:${row.name}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return row.charEnd > row.charStart
-  })
-}
-
-function markRefsForTextRange(row, start, end) {
-  const segments = row.markSegments?.length ? row.markSegments : [{ markId: row.markId, text: row.text }]
-  const refs = []
-  let cursor = 0
-  for (const segment of segments) {
-    const length = charLength(segment.text)
-    const segmentStart = cursor
-    const segmentEnd = cursor + length
-    const overlapStart = Math.max(start, segmentStart)
-    const overlapEnd = Math.min(end, segmentEnd)
-    if (overlapEnd > overlapStart && segment.markId) {
-      refs.push({
-        markId: segment.markId,
-        start: overlapStart - segmentStart,
-        end: overlapEnd - segmentStart,
-      })
-    }
-    cursor = segmentEnd
-  }
-  if (!refs.length && row.markId) refs.push({ markId: row.markId, start, end })
-  return refs
-}
-
 function refsForRowTextRange(row, start, end) {
   const refs = row.markRefs?.length
     ? row.markRefs
@@ -1201,22 +720,6 @@ function refsForRowTextRange(row, start, end) {
   return result
 }
 
-function charLength(text) {
-  return [...String(text || '')].length
-}
-
-function knownSuffixAtEnd(text) {
-  const value = String(text || '').trim()
-  const suffixes = ['诉讼代理人', '实习律师', '代理人', '律师']
-  for (const suffix of suffixes) {
-    if (value.endsWith(suffix)) {
-      const rule = suffixTargetRule(suffix)
-      if (rule) return { ...rule, text: suffix }
-    }
-  }
-  return null
-}
-
 function findNeighborFieldRow(rows, startIndex, direction) {
   for (let index = startIndex + direction; index >= 0 && index < rows.length; index += direction) {
     const row = rows[index]
@@ -1227,120 +730,8 @@ function findNeighborFieldRow(rows, startIndex, direction) {
   return null
 }
 
-function prefixStructureLabel(row, target) {
-  return `${displayNameForFieldRow(target) || target.name}前缀`
-}
-
-function autoMergeMarks(rawMarks) {
-  const rows = []
-  let current = null
-  for (const mark of rawMarks || []) {
-    const normalized = {
-      ...mark,
-      markRefs: [{ markId: mark.id, start: null, end: null }],
-      markSegments: [{ markId: mark.id, text: mark.text }],
-    }
-    if (shouldMergeMark(current, normalized)) {
-      current.text += normalized.text
-      current.markRefs.push(...normalized.markRefs)
-      current.markSegments.push(...normalized.markSegments)
-      current.displayId = `${current.displayId || current.id}+${normalized.id}`
-      current.checkboxLike = current.checkboxLike && normalized.checkboxLike
-    } else {
-      if (current) rows.push(current)
-      current = normalized
-    }
-  }
-  if (current) rows.push(current)
-  return rows
-}
-
-function shouldMergeMark(current, next) {
-  if (!current || !next) return false
-  if (current.checkboxLike || next.checkboxLike) return false
-  if (current.part !== next.part || current.context !== next.context) return false
-  if (!Number.isFinite(current.runIndex) || !Number.isFinite(next.runIndex)) return false
-  if (next.runIndex !== current.runIndex + current.markRefs.length) return false
-  return shouldMergeText(current.text, next.text)
-}
-
-function shouldMergeText(left, right) {
-  const combined = `${left}${right}`
-  if (looksLikePrefixMark(left) || looksLikeSuffixMark(right)) return false
-  if (isDateLikePrefix(combined)) return true
-  if (isPunctuationFragment(right) || isPunctuationFragment(left)) return true
-  if (/[A-Za-z0-9]$/.test(left) || /^[A-Za-z0-9]/.test(right)) return true
-  if (isShortChineseFragment(left) || isShortChineseFragment(right)) return true
-  return false
-}
-
-function isShortChineseFragment(text) {
-  const value = String(text || '')
-  return /^[\u4e00-\u9fa5]{1,4}$/.test(value)
-}
-
-function isPunctuationFragment(text) {
-  return /^[（()）.,，.、:：;；\s_-]+$/.test(String(text || ''))
-}
-
-function isDateLikePrefix(text) {
-  return looksLikeDatePrefix(text)
-}
-
-function inferFieldFromText(text, context, checkboxLike, index) {
-  const publicInference = inferTemplateField({ text, context, checkboxLike, index })
-  if (checkboxLike) {
-    return publicInference
-  }
-  if (isLikelyPrefixMark(text)) {
-    return {
-      type: 'prefix',
-      name: '',
-      label: '前缀',
-      semanticKey: '',
-      optionalWhenEmpty: false,
-      optionalScope: 'position',
-      optionalPrefix: '',
-      optionalSuffix: '',
-    }
-  }
-  if (isLikelySuffixMark(text)) {
-    return {
-      type: 'suffix',
-      name: '',
-      label: '后缀',
-      semanticKey: '',
-      optionalWhenEmpty: false,
-      optionalScope: 'position',
-      optionalPrefix: '',
-      optionalSuffix: '',
-    }
-  }
-  if (publicInference?.name && !isGeneratedFieldName(publicInference.name)) {
-    return publicInference
-  }
-  return {
-    type: 'text',
-    name: `字段${index + 1}`,
-    label: text,
-    semanticKey: `字段${index + 1}`,
-    optionalWhenEmpty: false,
-    optionalScope: 'position',
-    optionalPrefix: '',
-    optionalSuffix: '',
-  }
-}
-
 function isGeneratedFieldName(name) {
   return /^field_\d+$/.test(String(name || '')) || /^字段\d+$/.test(String(name || ''))
-}
-
-function isLikelyPrefixMark(text) {
-  return looksLikePrefixMark(text)
-}
-
-function isLikelySuffixMark(text) {
-  return looksLikeSuffixMark(text)
 }
 
 function cleanTemplateName(name) {
@@ -1423,27 +814,6 @@ function restoreRows(snapshot) {
   buildTabRef.value?.fieldTableRef?.clearSelection?.()
 }
 
-function reorderRowsByDocumentPosition(rows) {
-  const runOrder = new Map()
-  for (const [index, run] of documentRuns.value.entries()) {
-    runOrder.set(run.id, Number.isFinite(run.runIndex) ? run.runIndex : index)
-  }
-  return [...rows]
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => rowDocumentOrder(a.row, runOrder) - rowDocumentOrder(b.row, runOrder) || a.index - b.index)
-    .map((item) => item.row)
-}
-
-function rowDocumentOrder(row, runOrder) {
-  const refs = row.markRefs?.length ? row.markRefs : [{ markId: row.markId }]
-  let min = Number.POSITIVE_INFINITY
-  for (const ref of refs) {
-    if (!ref?.markId || !runOrder.has(ref.markId)) continue
-    min = Math.min(min, runOrder.get(ref.markId))
-  }
-  return Number.isFinite(min) ? min : Number.MAX_SAFE_INTEGER
-}
-
 function pushUndoSnapshot(label) {
   const snapshot = rowsSnapshot()
   undoStack.value = [...undoStack.value.slice(-9), { label, snapshot }]
@@ -1458,172 +828,6 @@ function undoLastAction() {
   restoreRows(item.snapshot)
   ElMessage.success(`已撤销：${item.label}`)
 }
-
-function buildTemplatePreview(runs, fallbackText, rows, sampleValues = {}) {
-  if (!runs?.length) return buildTextFallbackPreview(fallbackText)
-  const original = []
-  const rendered = []
-  let segmentIndex = 0
-  let lastParagraph = null
-  const rangesByRun = previewRangesByRun(rows)
-  for (const run of runs) {
-    if (lastParagraph !== null && run.paragraphIndex !== lastParagraph) {
-      original.push(previewPlainSegment('\n', segmentIndex++))
-      rendered.push(previewPlainSegment('\n', segmentIndex++))
-    }
-    lastParagraph = run.paragraphIndex
-    const runText = String(run.text || '')
-    const ranges = rangesByRun.get(run.id) || []
-    let cursor = 0
-    for (const range of ranges) {
-      const start = Math.max(0, Math.min(charLength(runText), range.start ?? 0))
-      const end = Math.max(start, Math.min(charLength(runText), range.end ?? charLength(runText)))
-      if (end <= cursor) continue
-      const visibleStart = Math.max(cursor, start)
-      if (cursor < visibleStart) {
-        const plain = previewRunSegment(run, cursor, visibleStart, null, segmentIndex++)
-        original.push(plain)
-        rendered.push({ ...plain, id: `rendered-${plain.id}` })
-      }
-      const marked = previewRunSegment(run, visibleStart, end, range.row, segmentIndex++)
-      original.push({
-        ...marked,
-        text: range.occurrence === 0 ? previewSourceLabel(range.row) : '',
-        deleted: range.occurrence > 0,
-      })
-      const replacementText = range.occurrence === 0 ? previewReplacementText(range.row, sampleValues) : ''
-      rendered.push({
-        ...marked,
-        id: `rendered-${marked.id}`,
-        text: replacementText,
-        deleted: rowUsage(range.row) === 'delete_text' || !replacementText || range.occurrence > 0,
-      })
-      cursor = end
-    }
-    if (cursor < charLength(runText)) {
-      const tail = previewRunSegment(run, cursor, charLength(runText), null, segmentIndex++)
-      original.push(tail)
-      rendered.push({ ...tail, id: `rendered-${tail.id}` })
-    }
-  }
-  return { original, rendered }
-}
-
-function buildTextFallbackPreview(text) {
-  const source = String(text || '')
-  if (!source) return { original: [], rendered: [] }
-  return { original: [previewPlainSegment(source, 0)], rendered: [previewPlainSegment(source, 1)] }
-}
-
-function previewRangesByRun(rows) {
-  const map = new Map()
-  const occurrenceByRow = new Map()
-  for (const row of rows) {
-    if (!row.enabled) continue
-    const refs = row.markRefs?.length
-      ? row.markRefs
-      : [
-          {
-            markId: row.markId,
-            start: row.charStart,
-            end: row.charEnd,
-          },
-        ]
-    for (const ref of refs) {
-      if (!ref?.markId) continue
-      if (!map.has(ref.markId)) map.set(ref.markId, [])
-      const occurrenceKey = row.rowId
-      const occurrence = occurrenceByRow.get(occurrenceKey) || 0
-      occurrenceByRow.set(occurrenceKey, occurrence + 1)
-      map.get(ref.markId).push({ row, start: ref.start ?? 0, end: ref.end ?? undefined, occurrence })
-    }
-  }
-  for (const ranges of map.values()) {
-    ranges.sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
-  }
-  return map
-}
-
-function previewRunSegment(run, start, end, row, index) {
-  return {
-    id: `run-${run.id}-${start}-${end}-${index}`,
-    text: sliceChars(run.text, start, end),
-    row,
-    runId: run.id,
-    start,
-    end,
-    bold: run.bold,
-    italic: run.italic,
-    underline: run.underline,
-  }
-}
-
-function previewPlainSegment(text, index) {
-  return { id: `plain-${index}`, text, row: null, runId: '', start: 0, end: charLength(text) }
-}
-
-function previewSourceLabel(row) {
-  if (rowUsage(row) === 'ignore') return '【保留原文】'
-  if (rowUsage(row) === 'delete_text') return `【删除：${row.text}】`
-  if (rowUsage(row) === 'prefix')
-    return `【${isConnectorRow(row) ? '连接符' : '前缀'}：${structureTargetDisplayName(row)}】`
-  if (rowUsage(row) === 'suffix') return `【后缀：${structureTargetDisplayName(row)}】`
-  if (row.type === 'reference') return `【引用：${row.name || '引用'}】`
-  return `【${row.name || row.label || row.text}】`
-}
-
-function previewReplacementText(row, sampleValues = {}) {
-  const usage = rowUsage(row)
-  if (usage === 'ignore') return row.text
-  if (usage === 'delete_text') return ''
-  const hasSample = hasPreviewSampleValue(sampleValues, row.name)
-  if (usage === 'prefix' || usage === 'suffix')
-    return hasSample && isEmptyPreviewValue(sampleValues[row.name]) ? '' : row.text
-  if (row.type === 'reference') return previewReferenceValue(row, sampleValues) || row.text
-  const value = sampleValues[row.name]
-  if (row.type === 'date' && !isEmptyPreviewValue(value)) return normalizePreviewDate(value)
-  if (!isEmptyPreviewValue(value)) return Array.isArray(value) ? value.join('、') : String(value)
-  return row.text
-}
-
-function previewReferenceValue(row, sampleValues = {}) {
-  const source = normalizedReferenceSource(row)
-  if (source.mode === 'auto') return sampleValues[row.name] || ''
-  const value = source.mode === 'semantic' ? sampleValues[source.sourceSemanticKey] : sampleValues[source.sourceField]
-  if (Array.isArray(value)) {
-    return source.sourceIndex == null ? value.join('、') : String(value[source.sourceIndex] || '')
-  }
-  return source.sourceIndex == null && !isEmptyPreviewValue(value) ? String(value) : ''
-}
-
-function hasPreviewSampleValue(sampleValues, name) {
-  return Object.prototype.hasOwnProperty.call(sampleValues || {}, name)
-}
-
-function isEmptyPreviewValue(value) {
-  return value == null || value === '' || (Array.isArray(value) && value.length === 0)
-}
-
-function normalizePreviewDate(value) {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-  if (/今天|今日/.test(raw)) return todayText()
-  const compact = raw.replace(/\s+/g, '')
-  const ymd = compact.match(/^(\d{4})(\d{2})(\d{2})$/)
-  if (ymd) return `${Number(ymd[1])}年${Number(ymd[2])}月${Number(ymd[3])}日`
-  const md = compact.match(/^(\d{2})(\d{2})$/)
-  if (md) return `${new Date().getFullYear()}年${Number(md[1])}月${Number(md[2])}日`
-  const cn = compact.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日?$/)
-  if (cn) return `${Number(cn[1])}年${Number(cn[2])}月${Number(cn[3])}日`
-  const dashed = compact.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/)
-  if (dashed) return `${Number(dashed[1])}年${Number(dashed[2])}月${Number(dashed[3])}日`
-  return raw
-}
-
-function sliceChars(text, start, end) {
-  return [...String(text || '')].slice(start, end).join('')
-}
-
 
 function focusPreviewRow(row) {
   previewFocusedRowId.value = row.rowId
@@ -1754,22 +958,6 @@ function manualFieldMeta(text, effectiveType, inferredField) {
   return { name: fallbackName, label: fallbackName, semanticKey: fallbackName }
 }
 
-function nextReferenceFieldName() {
-  const base = '引用'
-  const used = new Set(
-    fieldRows.value
-      .filter((row) => row.enabled && rowUsage(row) === 'field')
-      .map((row) => String(row.name || '').trim())
-      .filter(Boolean),
-  )
-  if (!used.has(base)) return base
-  for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${base}${index}`
-    if (!used.has(candidate)) return candidate
-  }
-  return `${base}${Date.now()}`
-}
-
 function markSegmentsFromRefs(refs, text) {
   const segments = []
   let cursor = 0
@@ -1782,213 +970,6 @@ function markSegmentsFromRefs(refs, text) {
     cursor += length
   }
   return segments
-}
-
-function leadingConnectorInfo(text) {
-  const value = String(text || '')
-  const match = value.match(/^(?:以及|或者|[，,、;；和与及\s])+/)
-  const connectorText = match?.[0] || ''
-  return {
-    connectorText,
-    restText: connectorText ? value.slice(connectorText.length).trim() : '',
-  }
-}
-
-function rememberSourcePreviewSelection() {
-  const selection = window.getSelection?.()
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return
-  const range = selection.getRangeAt(0)
-  const resolved = resolvePreviewSelection(range)
-  if (!resolved.text) return
-  sourcePreviewSelection.value = range.cloneRange()
-  sourcePreviewSelectionPayload.value = resolved
-}
-
-function collectSourcePreviewSelection() {
-  const selection = window.getSelection?.()
-  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
-    const liveRange = selection.getRangeAt(0)
-    const resolved = resolvePreviewSelection(liveRange)
-    if (resolved.refs.length) {
-      sourcePreviewSelection.value = liveRange.cloneRange()
-      sourcePreviewSelectionPayload.value = resolved
-      return resolved
-    }
-  }
-
-  if (sourcePreviewSelection.value) {
-    const resolved = resolvePreviewSelection(sourcePreviewSelection.value)
-    if (resolved.refs.length) {
-      sourcePreviewSelectionPayload.value = resolved
-      return resolved
-    }
-  }
-
-  return sourcePreviewSelectionPayload.value || { text: '', refs: [], context: '' }
-}
-
-function resolvePreviewSelection(range) {
-  const sourceRoot = buildTabRef.value?.sourcePreviewRef
-  if (sourceRoot && rangeIntersectsRoot(range, sourceRoot)) return resolveSourcePreviewRange(sourceRoot, range)
-  const documentRoot = buildTabRef.value?.documentPreviewRef
-  if (documentRoot && rangeIntersectsRoot(range, documentRoot)) return resolveDocumentPreviewRange(documentRoot, range)
-  return { text: '', refs: [], context: '' }
-}
-
-function resolveSourcePreviewRange(root, range) {
-  const stream = sourcePreviewTextStream(root)
-  const selected = sourcePreviewSelectionParts(root, range)
-  const text = selected.text || range.toString()
-  if (!text) return { text: '', refs: [], context: '' }
-  return {
-    text,
-    refs: selected.refs,
-    context: documentText.value || stream.text || text,
-  }
-}
-
-function resolveDocumentPreviewRange(root, range) {
-  const stream = documentPreviewTextStream()
-  if (!stream.text) return { text: '', refs: [], context: '' }
-  const start = previewRootOffset(root, range, true)
-  const end = previewRootOffset(root, range, false)
-  const streamLength = charLength(stream.text)
-  const normalizedStart = Math.max(0, Math.min(streamLength, Math.min(start, end)))
-  const normalizedEnd = Math.max(normalizedStart, Math.min(streamLength, Math.max(start, end)))
-  const text = sliceChars(stream.text, normalizedStart, normalizedEnd)
-  const refs = refsForPreviewTextStreamRange(stream, normalizedStart, normalizedEnd)
-  const fallbackText = text || range.toString()
-  if (!fallbackText) return { text: '', refs: [], context: '' }
-  return {
-    text: fallbackText,
-    refs,
-    context: documentText.value || stream.text || fallbackText,
-  }
-}
-
-function documentPreviewTextStream() {
-  const chunks = []
-  let text = ''
-  let cursor = 0
-  let lastParagraph = null
-  for (const run of documentRuns.value || []) {
-    if (lastParagraph !== null && run.paragraphIndex !== lastParagraph) {
-      text += '\n'
-      cursor += 1
-    }
-    lastParagraph = run.paragraphIndex
-    const value = String(run.text || '')
-    const start = cursor
-    const end = start + charLength(value)
-    chunks.push({
-      text: value,
-      streamStart: start,
-      streamEnd: end,
-      runId: run.id,
-      runStart: 0,
-    })
-    text += value
-    cursor = end
-  }
-  return { text, chunks }
-}
-
-function previewRootOffset(root, range, useStart) {
-  const container = useStart ? range.startContainer : range.endContainer
-  const offset = useStart ? range.startOffset : range.endOffset
-  if (!root.contains(container)) return useStart ? 0 : charLength(root.textContent || '')
-  const before = document.createRange()
-  before.selectNodeContents(root)
-  before.setEnd(container, offset)
-  return charLength(before.toString())
-}
-
-function rangeIntersectsRoot(range, root) {
-  if (root.contains(range.commonAncestorContainer)) return true
-  return root.contains(range.startContainer) || root.contains(range.endContainer)
-}
-
-function sourcePreviewTextStream(root) {
-  const chunks = []
-  let text = ''
-  let cursor = 0
-  for (const node of root.querySelectorAll('[data-run-id]')) {
-    const value = node.textContent || ''
-    const start = cursor
-    const end = start + charLength(value)
-    chunks.push({
-      node,
-      text: value,
-      streamStart: start,
-      streamEnd: end,
-      runId: node.dataset.runId,
-      runStart: Number(node.dataset.start || 0),
-    })
-    text += value
-    cursor = end
-  }
-  return { text, chunks }
-}
-
-function refsForPreviewTextStreamRange(stream, start, end) {
-  const refs = []
-  for (const chunk of stream.chunks) {
-    if (!chunk.runId) continue
-    const overlapStart = Math.max(start, chunk.streamStart)
-    const overlapEnd = Math.min(end, chunk.streamEnd)
-    if (overlapEnd <= overlapStart) continue
-    refs.push({
-      markId: chunk.runId,
-      start: chunk.runStart + overlapStart - chunk.streamStart,
-      end: chunk.runStart + overlapEnd - chunk.streamStart,
-    })
-  }
-  return refs
-}
-
-function sourcePreviewSelectionParts(root, range) {
-  const refs = []
-  const texts = []
-  for (const node of root.querySelectorAll('[data-run-id]')) {
-    if (!rangeIntersectsNode(range, node)) continue
-    const part = selectedNodeTextPart(range, node)
-    if (!part.text) continue
-    const runStart = Number(node.dataset.start || 0)
-    refs.push({
-      markId: node.dataset.runId,
-      start: runStart + part.start,
-      end: runStart + part.end,
-    })
-    texts.push(part.text)
-  }
-  return { text: texts.join(''), refs }
-}
-
-function rangeIntersectsNode(range, node) {
-  try {
-    return range.intersectsNode(node)
-  } catch {
-    return false
-  }
-}
-
-function selectedNodeTextPart(range, node) {
-  const nodeRange = document.createRange()
-  nodeRange.selectNodeContents(node)
-  const overlap = range.cloneRange()
-  if (overlap.compareBoundaryPoints(window.Range.START_TO_START, nodeRange) < 0) {
-    overlap.setStart(nodeRange.startContainer, nodeRange.startOffset)
-  }
-  if (overlap.compareBoundaryPoints(window.Range.END_TO_END, nodeRange) > 0) {
-    overlap.setEnd(nodeRange.endContainer, nodeRange.endOffset)
-  }
-  const text = overlap.toString()
-  if (!text) return { text: '', start: 0, end: 0 }
-  const before = document.createRange()
-  before.selectNodeContents(node)
-  before.setEnd(overlap.startContainer, overlap.startOffset)
-  const start = charLength(before.toString())
-  return { text, start, end: start + charLength(text) }
 }
 
 function onRowTypeChange(row) {
@@ -2238,239 +1219,8 @@ function templateSeedValues() {
   return values
 }
 
-function validateFieldRowsBeforeSave() {
-  // Every yellow run must remain represented by a confirmed row, including
-  // prefixes, suffixes and "保留原文" rows. Otherwise saving clears its yellow
-  // highlight but leaves its sample text in the generated template.
-  const coveredMarks = new Set()
-  for (const row of fieldRows.value) {
-    if (!row.enabled) continue
-    for (const ref of row.markRefs || []) {
-      if (ref?.markId) coveredMarks.add(ref.markId)
-    }
-    if (row.markId) coveredMarks.add(row.markId)
-  }
-  const missingMarks = marks.value.filter((mark) => !coveredMarks.has(mark.id))
-  if (missingMarks.length) {
-    const samples = missingMarks
-      .slice(0, 3)
-      .map((mark) => `"${mark.text}"`)
-      .join('、')
-    return `仍有 ${missingMarks.length} 处标黄文本未处理：${samples}。请设为字段、前缀、后缀、保留原文或删除文本后再保存`
-  }
-  for (const row of fieldRows.value) {
-    if (!row.enabled || rowUsage(row) === 'ignore') continue
-    if (rowUsage(row) === 'delete_text') continue
-    const currentName = effectiveRowName(row)
-    if (!currentName.trim()) {
-      return `"${row.text}"还没有填写字段名`
-    }
-    if (rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix') {
-      const targets = fieldRows.value.filter(
-        (target) => target.enabled && rowUsage(target) === 'field' && target.name.trim() === currentName.trim(),
-      )
-      if (!targets.length) {
-        return `"${row.text}"设为${rowUsage(row) === 'prefix' ? '前缀' : '后缀'}，但找不到同名字段`
-      }
-      if (targets.some((target) => isMarkerType(target.type))) {
-        return `"${row.text}"不能挂到勾选字段上，请改成文本、日期、下拉或当事人列表字段`
-      }
-    }
-  }
-  return ''
-}
-
-function buildFields() {
-  const rows = fieldRows.value.filter(
-    (row) =>
-      row.enabled &&
-      ((rowUsage(row) === 'field' && effectiveRowName(row).trim()) ||
-        (rowUsage(row) === 'delete_text' && row.markRefs?.length)),
-  )
-  const byKey = new Map()
-  for (const row of rows) {
-    const type = row.type
-    const currentName = effectiveRowName(row)
-    const referenceSource = row.type === 'reference' ? normalizedReferenceSource(row) : null
-    const key =
-      rowUsage(row) === 'delete_text'
-        ? `${type}:${row.rowId}`
-        : row.type === 'reference'
-          ? `${type}:${currentName.trim()}:${referenceSource?.mode || 'auto'}:${referenceSource?.sourceField || referenceSource?.sourceSemanticKey || ''}:${referenceSource?.sourceIndex ?? ''}`
-          : `${type}:${currentName.trim()}`
-    if (!byKey.has(key)) {
-      byKey.set(key, {
-        id: stableFieldId(
-          rowUsage(row) === 'delete_text'
-            ? row.rowId
-            : row.type === 'reference'
-              ? `${currentName}:${referenceSource?.mode || 'auto'}:${referenceSource?.sourceField || referenceSource?.sourceSemanticKey || ''}:${referenceSource?.sourceIndex ?? ''}`
-              : currentName,
-          type,
-        ),
-        name: rowUsage(row) === 'delete_text' ? `delete_${row.rowId}` : currentName.trim(),
-        label: manifestLabelForRow(row, currentName),
-        semanticKey: rowUsage(row) === 'delete_text' ? '' : row.semanticKey.trim() || currentName.trim(),
-        type,
-        required: row.required,
-        marks: [],
-        markRefs: [],
-        optionalRule: null,
-        options: [],
-        fillAllPositions: false,
-        reference:
-          row.type === 'reference'
-            ? {
-                sourceMode: referenceSource?.mode || 'auto',
-                sourceField: referenceSource?.sourceField || '',
-                sourceSemanticKey: referenceSource?.sourceSemanticKey || '',
-                sourceIndex: referenceSource?.sourceIndex ?? null,
-              }
-            : null,
-      })
-    } else {
-      // Several independent rows merged into one field: the value must fill
-      // every position (single-row multiple refs stay single-valued).
-      const existing = byKey.get(key)
-      if (existing && !isMarkerType(type) && rowUsage(row) !== 'delete_text') {
-        existing.fillAllPositions = true
-      }
-    }
-    const field = byKey.get(key)
-    if (row.optionalWhenEmpty && row.optionalScope === 'field' && !field.optionalRule) {
-      field.optionalRule = {
-        enabled: true,
-        removeEmptyPrefix: row.optionalPrefix || '',
-        removeEmptySuffix: row.optionalSuffix || '',
-      }
-    }
-    if (type === 'select') {
-      const src = row.selectOptions?.length ? row.selectOptions : row.options
-      if (src?.length && field.options.length === 0) {
-        field.options = src
-          .filter((opt) => (opt.label || opt.checkedText || '').trim())
-          .map((opt, i) => ({
-            id: `opt_${i + 1}`,
-            label: opt.label || opt.checkedText || '',
-            checkedText: opt.checkedText || opt.label || '',
-            uncheckedText: '',
-            markerMarkId: '',
-            markerTag: '',
-          }))
-      }
-    }
-    if (isMarkerType(type)) {
-      field.options.push({
-        id: row.optionId.trim() || `option_${field.options.length + 1}`,
-        label: row.optionLabel.trim() || row.text,
-        markerMarkId: row.markId,
-        checkedText: row.checkedText || '☑',
-        uncheckedText: row.uncheckedText || '☐',
-      })
-    } else {
-      const refs = row.markRefs?.length
-        ? row.markRefs
-        : [
-            {
-              markId: row.markId,
-              start: row.charStart,
-              end: row.charEnd,
-            },
-          ]
-      const structuralRule = structuralOptionalRuleForRow(row)
-      for (const markRef of refs) {
-        const normalizedRef = { ...markRef }
-        if (row.optionalWhenEmpty && row.optionalScope !== 'field') {
-          normalizedRef.optionalRule = {
-            enabled: true,
-            removeEmptyPrefix: row.optionalPrefix || '',
-            removeEmptySuffix: row.optionalSuffix || '',
-          }
-        } else if (structuralRule.enabled) {
-          normalizedRef.optionalRule = structuralRule
-        }
-        field.marks.push(normalizedRef.markId)
-        field.markRefs.push(normalizedRef)
-      }
-    }
-  }
-  return Array.from(byKey.values())
-}
-
-function normalizedReferenceSource(row) {
-  if (row.referenceSourceField || row.referenceSourceSemanticKey || row.referenceSourceMode) {
-    return {
-      mode:
-        row.referenceSourceMode ||
-        (row.referenceSourceSemanticKey ? 'semantic' : row.referenceSourceField ? 'field' : 'auto'),
-      sourceField: row.referenceSourceField,
-      sourceSemanticKey: row.referenceSourceSemanticKey || '',
-      sourceIndex: row.referenceSourceIndex == null ? null : row.referenceSourceIndex,
-    }
-  }
-  return parseReferenceSourceKey(row.referenceSourceKey)
-}
-
-function manifestLabelForRow(row, currentName) {
-  const name = String(currentName || '').trim()
-  if (isGeneratedFieldName(name)) return name
-  if (rowUsage(row) === 'delete_text') return safeExplicitLabel(row, name)
-  if (row.type === 'party_list') return name || row.label?.trim() || row.text
-  return safeExplicitLabel(row, name)
-}
-
-function safeExplicitLabel(row, fallbackName) {
-  const label = String(row?.label || '').trim()
-  const rawText = String(row?.text || '').trim()
-  if (!label || label === rawText) return fallbackName || ''
-  return label
-}
-
-function structuralOptionalRuleForRow(fieldRow) {
-  const prefix = []
-  const suffix = []
-  for (const row of fieldRows.value) {
-    const currentName = effectiveRowName(row)
-    if (!row.enabled || !currentName.trim() || currentName.trim() !== fieldRow.name.trim()) continue
-    if (rowUsage(row) === 'prefix' && structureRowTargetsField(row, fieldRow)) {
-      prefix.push(row.text)
-    } else if (rowUsage(row) === 'suffix' && structureRowTargetsField(row, fieldRow)) {
-      suffix.push(row.text)
-    }
-  }
-  return {
-    enabled: Boolean(prefix.length || suffix.length),
-    removeEmptyPrefix: prefix.join(''),
-    removeEmptySuffix: suffix.join(''),
-  }
-}
-
-function effectiveRowName(row) {
-  if (rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix') return structureTargetRow(row)?.name || row?.name || ''
-  if (isConnectorRow(row)) return connectorTargetName(row)
-  return row?.name || ''
-}
-
 function structureRowTargetsField(structureRow, fieldRow) {
   return structureTargetRow(structureRow) === fieldRow
-}
-
-function stableFieldId(name, type) {
-  const slug = String(name || '')
-    .trim()
-    .replace(/[^a-zA-Z0-9_]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase()
-  return `fld_${type}_${slug || hashText(name)}`
-}
-
-function hashText(text) {
-  let hash = 2166136261
-  for (const char of String(text || 'field')) {
-    hash ^= char.charCodeAt(0)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(16)
 }
 
 async function selectTemplatePackage() {
@@ -2738,286 +1488,19 @@ async function renderTemplate() {
   }
 }
 
-// ── Batch Fill ──────────────────────────────────────────────────────────────
-
-async function handleBatchCommand(command) {
-  if (command === 'export') {
-    await exportBatchTemplate()
-  } else if (command === 'import') {
-    await importAndBatchRender()
-  }
-}
-
-async function exportBatchTemplate() {
-  if (!templatePath.value || !templateManifest.value) return
-  const defaultName = `${stripExtension(fileName(templatePath.value), /\.docsytpl$/i)}-批量填写模板.xlsx`
-  const outputPath = await save({
-    defaultPath: `${parentDir(templatePath.value)}/${defaultName}`,
-    filters: [{ name: 'Excel 文件', extensions: ['xlsx'] }],
-  })
-  if (!outputPath) return
-
-  batchProcessing.value = true
-  const result = await tauriCallSafe('export_template_fields_xlsx', {
-    templatePath: templatePath.value,
-    outputPath: ensureExtension(outputPath, 'xlsx'),
-    defaultValues: normalizeValues(),
-  })
-  batchProcessing.value = false
-
-  if (!result.ok) {
-    ElMessage.error(result.error || '导出失败')
-    return
-  }
-  ElMessage.success('字段表已导出')
-  ElMessage.info('若模板有填写历史，第 3 行为最近一次填写示例（标"否"不会生成数据）；需要可复制一行后填写')
-  const openResult = await openPath(result.data)
-  if (!openResult.ok) {
-    ElMessage.warning('字段表已导出但无法自动打开，请到保存目录查看')
-  }
-}
-
-async function importAndBatchRender() {
-  if (!templatePath.value || !templateManifest.value) return
-
-  const selected = await open({
-    multiple: false,
-    filters: [{ name: 'Excel 文件', extensions: ['xlsx'] }],
-  })
-  if (!selected) return
-
-  const xlsxPath = selected
-
-  // Step 1: Validate
-  batchProcessing.value = true
-  const validation = await tauriCallSafe('validate_batch_import', {
-    templatePath: templatePath.value,
-    xlsxPath,
-  })
-
-  if (!validation.ok) {
-    batchProcessing.value = false
-    ElMessage.error(validation.error || '校验失败')
-    return
-  }
-
-  const v = validation.data
-
-  // Show validation result dialog
-  const { proceed, skipRows } = await showValidationDialog(v)
-  if (!proceed) {
-    batchProcessing.value = false
-    return
-  }
-
-  // Step 2: Choose output directory
-  const outputDir = await open({
-    directory: true,
-    multiple: false,
-    defaultPath: parentDir(templatePath.value),
-  })
-  if (!outputDir) {
-    batchProcessing.value = false
-    return
-  }
-
-  // Step 3: Batch render (pass current structureOverrides + skipRows)
-  const result = await tauriCallSafe('batch_render_from_xlsx', {
-    templatePath: templatePath.value,
-    xlsxPath,
-    outputDir,
-    namePattern: '',
-    skipRows,
-    structureOverrides: normalizeStructureOverrides(),
-    itemSeparator: itemSeparatorSetting.value || '、',
-  })
-  batchProcessing.value = false
-
-  if (!result.ok) {
-    ElMessage.error(result.error || '批量生成失败')
-    return
-  }
-
-  const r = result.data
-  const outputDirText = typeof outputDir === 'string' ? outputDir : ''
-  const lines = [`批量填写完成：成功 ${r.success} 份` + (r.failed > 0 ? `，失败 ${r.failed} 份` : '')]
-  if (outputDirText) lines.push(`输出目录：${outputDirText}`)
-  if (r.rows?.length) lines.push(`本次生成了 ${r.rows.length} 行填写数据，可保存到模板填写历史`)
-
-  let saveData = false
-  try {
-    await ElMessageBox.confirm(lines.join('\n'), '批量填写完成', {
-      confirmButtonText: outputDirText ? '打开输出目录' : '完成',
-      cancelButtonText: r.rows?.length ? '保存数据' : '',
-      type: 'success',
-      customStyle: { whiteSpace: 'pre-line' },
-    })
-    if (outputDirText) {
-      const openResult = await openPath(outputDirText)
-      if (!openResult.ok) {
-        ElMessage.warning('无法打开输出目录，请手动查看')
-      }
-    }
-  } catch {
-    saveData = true
-  }
-  if (saveData && r.rows?.length) {
-    openBatchSaveDialog(r.rows)
-  }
-}
-
-const batchSaveVisible = ref(false)
-const batchSaveRows = ref([])
-const batchSaveSelected = ref([])
-
-function openBatchSaveDialog(rows) {
-  batchSaveRows.value = (rows || []).map((row, index) => ({
-    key: `${index}`,
-    outputPath: row.outputPath || '',
-    values: row.values || {},
-    selected: true,
-  }))
-  batchSaveSelected.value = []
-  batchSaveVisible.value = true
-}
-
-function toggleBatchSaveAll(value) {
-  if (value) {
-    batchSaveSelected.value = batchSaveRows.value.map((row) => row.key)
-  } else {
-    batchSaveSelected.value = []
-  }
-}
-
-function invertBatchSaveSelection() {
-  const selected = new Set(batchSaveSelected.value)
-  batchSaveSelected.value = batchSaveRows.value
-    .map((row) => row.key)
-    .filter((key) => !selected.has(key))
-}
-
-function toggleBatchSaveRow(key) {
-  const idx = batchSaveSelected.value.indexOf(key)
-  if (idx >= 0) {
-    batchSaveSelected.value = batchSaveSelected.value.filter((k) => k !== key)
-  } else {
-    batchSaveSelected.value = [...batchSaveSelected.value, key]
-  }
-}
-
-function batchSaveRowSummary(row) {
-  const values = row.values || {}
-  const parts = Object.values(values)
-    .map((value) => {
-      if (Array.isArray(value)) return value.map((item) => (item?.text ?? item?.name ?? '')).filter(Boolean).join('、')
-      if (value && typeof value === 'object') return value.text ?? value.name ?? ''
-      return String(value ?? '')
-    })
-    .filter(Boolean)
-    .slice(0, 5)
-  return parts.length ? parts.join(' | ') : '（空）'
-}
-
-async function submitBatchSave() {
-  const rows = batchSaveRows.value.filter((row) => batchSaveSelected.value.includes(row.key))
-  if (!rows.length) {
-    ElMessage.warning('请至少选择一行')
-    return
-  }
-  const payload = rows.map((row) => ({
-    templatePath: templatePath.value,
-    outputPath: row.outputPath,
-    values: row.values,
-  }))
-  const result = await tauriCallSafe('save_batch_history_rows', { rows: payload })
-  if (result.ok) {
-    ElMessage.success(`已保存 ${result.data} 行填写记录到模板历史`)
-    batchSaveVisible.value = false
-    loadTemplateHistoryRuns()
-  } else {
-    ElMessage.error(result.error || '保存填写记录失败')
-  }
-}
-
-async function showValidationDialog(validation) {
-  const v = validation
-  const lines = []
-
-  if (!v.templateIdMatch) {
-    lines.push('⚠️ Excel 文件的模板 ID 与当前模板不一致，将按字段名称匹配导入。')
-    lines.push('')
-  }
-
-  lines.push(`共 ${v.totalRows} 行数据，${v.validRows} 行有效。`)
-
-  if (v.warnings.length) {
-    lines.push('')
-    lines.push('警告：')
-    for (const w of v.warnings) {
-      lines.push(`  · ${w.message}`)
-    }
-  }
-
-  // Collect error row indices for skip
-  const errorRowSet = new Set(v.errors.map((e) => e.row))
-
-  if (v.errors.length) {
-    lines.push('')
-    lines.push('错误：')
-    const shown = v.errors.slice(0, 10)
-    for (const e of shown) {
-      lines.push(`  · 第 ${e.row + 1} 行：${e.message}`)
-    }
-    if (v.errors.length > 10) {
-      lines.push(`  · ...还有 ${v.errors.length - 10} 个错误`)
-    }
-  }
-
-  // Block if no valid rows
-  if (v.validRows === 0 && v.totalRows > 0) {
-    lines.push('')
-    lines.push('❌ 没有有效数据行，无法生成。')
-  }
-
-  // Block if no valid rows
-  if (v.validRows === 0) {
-    try {
-      await ElMessageBox.alert(lines.join('\n'), '无有效数据', {
-        confirmButtonText: '知道了',
-        type: 'warning',
-        customStyle: { whiteSpace: 'pre-line' },
-      })
-    } catch {
-      // User dismissed
-    }
-    return { proceed: false, skipRows: [] }
-  }
-
-  const hasErrors = v.errors.length > 0
-  const title = hasErrors ? '校验结果（有错误）' : '校验结果'
-  const type = hasErrors ? 'warning' : 'info'
-
-  try {
-    if (hasErrors) {
-      await ElMessageBox.confirm(lines.join('\n'), title, {
-        confirmButtonText: '跳过错误行继续',
-        cancelButtonText: '取消',
-        type,
-        customStyle: { whiteSpace: 'pre-line' },
-      })
-    } else {
-      await ElMessageBox.confirm(lines.join('\n'), title, {
-        confirmButtonText: '开始生成',
-        cancelButtonText: '取消',
-        type,
-        customStyle: { whiteSpace: 'pre-line' },
-      })
-    }
-    return { proceed: true, skipRows: Array.from(errorRowSet) }
-  } catch {
-    return { proceed: false, skipRows: [] }
-  }
-}
+// ── Batch Fill (composable) ─────────────────────────────────────────────────
+const {
+  batchProcessing,
+  batchSaveVisible,
+  batchSaveRows,
+  batchSaveSelected,
+  handleBatchCommand,
+  toggleBatchSaveAll,
+  invertBatchSaveSelection,
+  toggleBatchSaveRow,
+  batchSaveRowSummary,
+  submitBatchSave,
+} = useBatchFill(templatePath, templateManifest, normalizeValues, normalizeStructureOverrides, itemSeparatorSetting, loadTemplateHistoryRuns)
 
 function normalizeValues() {
   const values = {}
