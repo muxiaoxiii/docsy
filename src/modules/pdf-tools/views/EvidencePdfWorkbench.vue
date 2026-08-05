@@ -477,6 +477,7 @@
         border
         class="overlay-table"
         highlight-current-row
+        :row-class-name="({ row, rowIndex }) => buildFileContentRows(row, rowIndex, currentRules).length ? '' : 'no-expand'" 
         @row-click="selectPreviewRow"
         @sort-change="sortOverlayFiles"
       >
@@ -558,12 +559,7 @@
                     </template>
                   </el-table-column>
                 </el-table>
-                <div
-                  v-if="!contentRows.length"
-                  class="content-subrow muted"
-                >
-                  <span class="content-text">该文件未配置页眉页脚页码</span>
-                </div>
+
               </template>
             </div>
           </template>
