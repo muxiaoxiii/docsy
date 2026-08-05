@@ -88,9 +88,10 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         template::seed_template_history,
         template::clear_template_history,
         template::save_batch_history_rows,
+        template::list_template_database,
+        template::delete_template_database_entry,
         template::export_template_fields_xlsx,
         template::validate_batch_import,
         template::batch_render_from_xlsx,
-        template::save_batch_history_rows,
     ]
 }

@@ -105,11 +105,15 @@
           :template-trash="templateTrash"
           :template-trash-loading="templateTrashLoading"
           :clearing-history="clearingHistory"
+          :template-database="templateDatabase"
+          :template-database-loading="templateDatabaseLoading"
           @save-separator="saveItemSeparatorSetting"
           @restore-template="restoreTemplate"
           @permanently-delete-template="permanentlyDeleteTemplate"
           @clear-all-history="clearAllHistory"
           @refresh-trash="loadTemplateTrash"
+          @refresh-template-database="loadTemplateDatabase"
+          @delete-template-database-entry="deleteTemplateDatabaseEntry"
         />
       </el-tab-pane>
     </el-tabs>
@@ -188,11 +192,15 @@ const {
   templateTrash,
   templateTrashLoading,
   clearingHistory,
+  templateDatabase,
+  templateDatabaseLoading,
   saveItemSeparatorSetting,
   loadTemplateTrash,
   restoreTemplate,
   permanentlyDeleteTemplate,
   clearAllHistory,
+  loadTemplateDatabase,
+  deleteTemplateDatabaseEntry,
 } = useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
 
 const typeHelpItems = [
@@ -343,6 +351,7 @@ onMounted(() => {
   window.addEventListener('docsy-template-library-changed', refreshLibraryAndHistory)
   void loadTemplateLibrary()
   void loadTemplateHistoryRuns()
+  void loadTemplateDatabase()
 })
 
 onUnmounted(() => {

@@ -1,5 +1,5 @@
 /**
- * Composable for template settings: separator, trash, clear history.
+ * Composable for template settings: separator, trash, clear history, template database.
  */
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -10,6 +10,8 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
   const templateTrash = ref([])
   const templateTrashLoading = ref(false)
   const clearingHistory = ref(false)
+  const templateDatabase = ref([])
+  const templateDatabaseLoading = ref(false)
 
   function saveItemSeparatorSetting() {
     window.localStorage.setItem('docsy.template.itemSeparator', itemSeparatorSetting.value || '、')
@@ -89,15 +91,51 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
     if (loadTemplateHistoryRuns) await loadTemplateHistoryRuns()
   }
 
+  async function loadTemplateDatabase() {
+    templateDatabaseLoading.value = true
+    const result = await tauriCallSafe('list_template_database')
+    templateDatabaseLoading.value = false
+    if (result.ok) {
+      templateDatabase.value = result.data || []
+    } else {
+      ElMessage.error(result.error || '读取模板数据库失败')
+    }
+  }
+
+  async function deleteTemplateDatabaseEntry(row) {
+    try {
+      await ElMessageBox.confirm(
+        `删除"${row.name}"的所有填写历史数据？删除后无法恢复。`,
+        '删除模板数据',
+        { confirmButtonText: '删除', type: 'warning' },
+      )
+    } catch {
+      return
+    }
+    const result = await tauriCallSafe('delete_template_database_entry', { templatePath: row.templateId })
+    if (!result.ok) {
+      ElMessage.error(result.error || '删除失败')
+      return
+    }
+    ElMessage.success('模板数据已删除')
+    await loadTemplateDatabase()
+    if (loadHistoryContext) await loadHistoryContext(true)
+    if (loadTemplateHistoryRuns) await loadTemplateHistoryRuns()
+  }
+
   return {
     itemSeparatorSetting,
     templateTrash,
     templateTrashLoading,
     clearingHistory,
+    templateDatabase,
+    templateDatabaseLoading,
     saveItemSeparatorSetting,
     loadTemplateTrash,
     restoreTemplate,
     permanentlyDeleteTemplate,
     clearAllHistory,
+    loadTemplateDatabase,
+    deleteTemplateDatabaseEntry,
   }
 }

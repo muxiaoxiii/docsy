@@ -94,6 +94,42 @@ pub fn clear_history() -> Result<usize> {
     Ok(deleted)
 }
 
+pub fn list_database_entries() -> Result<Vec<Value>> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    let mut stmt = conn.prepare(
+        "SELECT m.template_id, m.template_name, m.updated_at,
+                (SELECT COUNT(*) FROM field_history fh WHERE fh.template_id = m.template_id) as field_count
+         FROM template_meta m WHERE m.trashed = 0 ORDER BY m.updated_at DESC",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "templateId": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "updatedAt": row.get::<_, String>(2)?,
+                "fieldCount": row.get::<_, i64>(3)?,
+            }))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn delete_database_entry(template_path: &str) -> Result<()> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    conn.execute(
+        "DELETE FROM field_history WHERE template_id = (SELECT template_id FROM template_meta WHERE template_id = ?1)",
+        [template_path],
+    )?;
+    conn.execute(
+        "DELETE FROM generation_runs WHERE template_id = (SELECT template_id FROM template_meta WHERE template_id = ?1)",
+        [template_path],
+    )?;
+    conn.execute("DELETE FROM template_meta WHERE template_id = ?1", [template_path])?;
+    Ok(())
+}
+
 pub fn record_history_run(
     template_path: &str,
     manifest: &TemplateManifest,

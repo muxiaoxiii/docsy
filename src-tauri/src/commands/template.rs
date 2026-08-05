@@ -206,6 +206,16 @@ pub struct BatchHistoryRow {
     values: HashMap<String, serde_json::Value>,
 }
 
+#[tauri::command]
+pub async fn list_template_database() -> Result<Vec<serde_json::Value>, String> {
+    run_blocking(crate::template_history::list_database_entries).await
+}
+
+#[tauri::command]
+pub async fn delete_template_database_entry(template_path: String) -> Result<(), String> {
+    run_blocking(move || crate::template_history::delete_database_entry(&template_path)).await
+}
+
 /// Save selected batch rows into the template history database (source "batch").
 #[tauri::command]
 pub async fn save_batch_history_rows(
