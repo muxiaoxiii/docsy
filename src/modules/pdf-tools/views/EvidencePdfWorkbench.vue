@@ -1466,6 +1466,10 @@ const currentRules = computed(() => ({
   headerGroups: insertHeaderFooterEnabled.value ? headerGroups.value : [],
   footerTextGroups: insertHeaderFooterEnabled.value && footerInsertEnabled.value ? footerTextGroups.value : [],
   pageNumberGroups: insertHeaderFooterEnabled.value && footerEnabled.value ? pageNumberGroups.value : [],
+  // Global group: the selected file's group is the single source of truth for ALL files
+  _globalHeaderGroup: selectedGroupFor(selectedOverlayFile.value, 'header'),
+  _globalFooterTextGroup: selectedGroupFor(selectedOverlayFile.value, 'footerText'),
+  _globalPageNumberGroup: selectedGroupFor(selectedOverlayFile.value, 'pageNumber'),
   footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,

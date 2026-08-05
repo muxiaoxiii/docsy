@@ -441,9 +441,11 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
     const headerInsertEnabled = rules.headerInsertEnabled !== false
     const footerInsertEnabled = rules.footerInsertEnabled !== false
-    const headerGroup = selectedGroupFor(file, 'header')
-    const footerTextGroup = selectedGroupFor(file, 'footerText')
-    const pageNumberGroup = selectedGroupFor(file, 'pageNumber')
+    // Global mode: all files share the same group settings from rules.
+    // Per-file groups are only used for segmentation (page ranges), not style params.
+    const headerGroup = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
+    const footerTextGroup = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
+    const pageNumberGroup = rules._globalPageNumberGroup || selectedGroupFor(file, 'pageNumber')
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
     const header =
