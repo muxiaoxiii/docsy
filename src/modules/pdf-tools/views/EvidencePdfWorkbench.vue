@@ -2631,13 +2631,6 @@ h3 {
   justify-content: flex-end;
 }
 
-.empty-detect-hint {
-  margin: 0;
-  padding: 8px 0;
-  font-size: 12px;
-  color: var(--docsy-text-muted, #999);
-}
-
 .existing-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2855,15 +2848,6 @@ h3 {
 
 .editable-text {
   cursor: text;
-}
-
-.deleted-existing-text {
-  padding: 1px 5px;
-  border: 1px dashed #d93025;
-  border-radius: 3px;
-  background: #fff7f7;
-  color: #b42318;
-  text-decoration: line-through;
 }
 
 .overlay-table {

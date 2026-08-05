@@ -856,7 +856,7 @@
                     <h4>{{ group.templateName }}</h4>
                     <span>{{ group.runs.length }} 条记录</span>
                   </div>
-                  <el-button size="small" text @click="openTemplatePackage(group.templatePath)">打开模板</el-button>
+                  <el-button size="small" text @click="openHistoryTemplate(group.templatePath)">打开模板</el-button>
                 </div>
                 <div class="history-run-list">
                   <article
@@ -2641,7 +2641,7 @@ function fillFieldLabel(field) {
 }
 
 function buildTemplatePreview(runs, fallbackText, rows, sampleValues = {}) {
-  if (!runs?.length) return buildTextFallbackPreview(fallbackText, rows)
+  if (!runs?.length) return buildTextFallbackPreview(fallbackText)
   const original = []
   const rendered = []
   let segmentIndex = 0
@@ -2690,7 +2690,7 @@ function buildTemplatePreview(runs, fallbackText, rows, sampleValues = {}) {
   return { original, rendered }
 }
 
-function buildTextFallbackPreview(text, _rows) {
+function buildTextFallbackPreview(text) {
   const source = String(text || '')
   if (!source) return { original: [], rendered: [] }
   return { original: [previewPlainSegment(source, 0)], rendered: [previewPlainSegment(source, 1)] }
@@ -3804,6 +3804,12 @@ async function openTemplatePackage(path, knownManifest = null) {
   return true
 }
 
+// Opening a template from the history tab should land on the fill form.
+async function openHistoryTemplate(path) {
+  const ok = await openTemplatePackage(path)
+  if (ok) activeTab.value = 'render'
+}
+
 function clearStructureOverrides() {
   for (const key of Object.keys(structureOverrides)) delete structureOverrides[key]
 }
@@ -3846,9 +3852,18 @@ async function loadHistoryContext(applyLastValues = false) {
   const requestSeq = ++historyContextRequestSeq
   const requestPath = templatePath.value
   const fullRefresh = applyLastValues || cachedFieldSuggestions == null
+  // Only send non-empty values: empty fields produce no suggestions, so this
+  // shrinks the payload and the backend's per-field association queries.
+  const filledValues = {}
+  for (const [key, value] of Object.entries(normalizeValues())) {
+    const empty =
+      value === undefined || value === null || value === '' ||
+      (Array.isArray(value) && value.length === 0)
+    if (!empty) filledValues[key] = value
+  }
   const result = await tauriCallSafe('get_template_history_context', {
     templatePath: requestPath,
-    values: normalizeValues(),
+    values: filledValues,
     fullRefresh,
   })
   if (requestSeq !== historyContextRequestSeq || requestPath !== templatePath.value) return
@@ -4099,7 +4114,7 @@ async function importAndBatchRender() {
   const result = await tauriCallSafe('batch_render_from_xlsx', {
     templatePath: templatePath.value,
     xlsxPath,
-    outputDir: typeof outputDir === 'string' ? outputDir : outputDir,
+    outputDir,
     namePattern: '',
     skipRows,
     structureOverrides: normalizeStructureOverrides(),
@@ -4187,8 +4202,8 @@ function batchSaveRowSummary(row) {
       if (value && typeof value === 'object') return value.text ?? value.name ?? ''
       return String(value ?? '')
     })
-    .filter((text) => text && text.length <= 30)
-    .slice(0, 3)
+    .filter(Boolean)
+    .slice(0, 5)
   return parts.length ? parts.join(' | ') : '（空）'
 }
 

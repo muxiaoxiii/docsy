@@ -1,6 +1,37 @@
 use super::run_blocking;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Mutex;
+
+/// Small manifest cache keyed by template path + mtime. History suggestions
+/// fire on a 350ms debounce; re-parsing the docsytpl package on every keystroke
+/// is wasteful, and the manifest rarely changes while editing.
+static MANIFEST_CACHE: Mutex<
+    Option<(String, std::time::SystemTime, crate::docx_template::TemplateManifest)>,
+> = Mutex::new(None);
+
+fn cached_manifest(
+    path: &str,
+) -> anyhow::Result<crate::docx_template::TemplateManifest> {
+    if let Some((cached_path, cached_mtime, manifest)) = MANIFEST_CACHE.lock().unwrap().as_ref() {
+        if cached_path == path {
+            if let Ok(meta) = std::fs::metadata(path) {
+                if let Ok(mtime) = meta.modified() {
+                    if mtime == *cached_mtime {
+                        return Ok(manifest.clone());
+                    }
+                }
+            }
+        }
+    }
+    let manifest = crate::docx_template::inspect_template_package(path)?;
+    let mtime = std::fs::metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    *MANIFEST_CACHE.lock().unwrap() = Some((path.to_string(), mtime, manifest.clone()));
+    Ok(manifest)
+}
 
 #[tauri::command]
 pub async fn inspect_docx_template(
@@ -11,21 +42,16 @@ pub async fn inspect_docx_template(
 
 #[tauri::command]
 pub async fn save_docx_template(
-    args: serde_json::Value,
+    args: crate::docx_template::SaveTemplateArgs,
 ) -> Result<crate::docx_template::SaveTemplateResult, String> {
-    run_blocking(move || {
-        let args: crate::docx_template::SaveTemplateArgs = serde_json::from_value(args)?;
-        crate::docx_template::engine::save_docx(args)
-    })
-    .await
+    run_blocking(move || crate::docx_template::engine::save_docx(args)).await
 }
 
 #[tauri::command]
 pub async fn save_docx_template_to_library(
-    args: serde_json::Value,
+    mut args: crate::docx_template::SaveTemplateArgs,
 ) -> Result<crate::docx_template::SaveTemplateResult, String> {
     run_blocking(move || {
-        let mut args: crate::docx_template::SaveTemplateArgs = serde_json::from_value(args)?;
         let file_name = crate::docx_template::safe_template_file_name(&args.template_name);
         args.output_path = crate::docx_template::template_library_dir()
             .join(format!("{file_name}.docsytpl"))
@@ -49,30 +75,18 @@ pub async fn list_template_trash() -> Result<Vec<crate::docx_template::TemplateL
 }
 
 #[tauri::command]
-pub async fn move_template_to_trash(args: serde_json::Value) -> Result<String, String> {
-    run_blocking(move || {
-        let args: crate::docx_template::TemplateDeleteArgs = serde_json::from_value(args)?;
-        crate::docx_template::move_template_to_trash(args)
-    })
-    .await
+pub async fn move_template_to_trash(args: crate::docx_template::TemplateDeleteArgs) -> Result<String, String> {
+    run_blocking(move || crate::docx_template::move_template_to_trash(args)).await
 }
 
 #[tauri::command]
-pub async fn restore_template_from_trash(args: serde_json::Value) -> Result<String, String> {
-    run_blocking(move || {
-        let args: crate::docx_template::TemplateRestoreArgs = serde_json::from_value(args)?;
-        crate::docx_template::restore_template_from_trash(args)
-    })
-    .await
+pub async fn restore_template_from_trash(args: crate::docx_template::TemplateRestoreArgs) -> Result<String, String> {
+    run_blocking(move || crate::docx_template::restore_template_from_trash(args)).await
 }
 
 #[tauri::command]
-pub async fn permanently_delete_template(args: serde_json::Value) -> Result<(), String> {
-    run_blocking(move || {
-        let args: crate::docx_template::TemplatePermanentDeleteArgs = serde_json::from_value(args)?;
-        crate::docx_template::permanently_delete_template(args)
-    })
-    .await
+pub async fn permanently_delete_template(args: crate::docx_template::TemplatePermanentDeleteArgs) -> Result<(), String> {
+    run_blocking(move || crate::docx_template::permanently_delete_template(args)).await
 }
 
 #[tauri::command]
@@ -83,12 +97,8 @@ pub async fn inspect_docsytpl(
 }
 
 #[tauri::command]
-pub async fn render_docx_template(args: serde_json::Value) -> Result<String, String> {
-    run_blocking(move || {
-        let args: crate::docx_template::RenderTemplateArgs = serde_json::from_value(args)?;
-        crate::docx_template::engine::render_docx(args, "single")
-    })
-    .await
+pub async fn render_docx_template(args: crate::docx_template::RenderTemplateArgs) -> Result<String, String> {
+    run_blocking(move || crate::docx_template::engine::render_docx(args, "single")).await
 }
 
 #[tauri::command]
@@ -98,7 +108,7 @@ pub async fn get_template_history_context(
     full_refresh: Option<bool>,
 ) -> Result<crate::template_history::TemplateHistoryContext, String> {
     run_blocking(move || {
-        let manifest = crate::docx_template::inspect_template_package(&template_path)?;
+        let manifest = cached_manifest(&template_path)?;
         crate::template_history::history_context(
             &manifest,
             values.as_ref(),

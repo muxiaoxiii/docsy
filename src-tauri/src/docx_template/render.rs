@@ -330,6 +330,12 @@ fn rendered_base_text(
 ) -> String {
     if field.field_type == "party_list" {
         let items = party_items(value);
+        // Table-row replication injects a single {text, suffix} object (not an
+        // array); it must fill every slot of the replicated row, otherwise
+        // cells beyond the first stay empty.
+        if matches!(value, Value::Object(_)) && items.len() == 1 {
+            return items[0].rendered();
+        }
         return match (field.mark_refs.len(), slot) {
             (_, None) => items
                 .iter()
