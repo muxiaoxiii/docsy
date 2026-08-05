@@ -67,6 +67,7 @@
           @load-template-library="loadTemplateLibrary"
           @select-template-package="selectTemplatePackage"
           @open-template-from-library="openTemplateFromLibrary"
+          @edit-template="editTemplateFromLibrary"
           @delete-template="deleteTemplate"
           @collapse-all-fields="collapseAllFields"
           @expand-all-fields="expandAllFields"
@@ -273,6 +274,7 @@ const templatePath = ref('')
 const templateManifest = ref(null)
 const templateLibrary = ref([])
 const templateLibraryLoading = ref(false)
+const editingLibraryTemplatePath = ref('')
 const historyRuns = ref([])
 const historyRunsLoading = ref(false)
 const renderableTemplateFields = computed(() => (templateManifest.value?.fields || []).filter(isRenderableField))
@@ -678,6 +680,7 @@ async function selectSourceDocx() {
   }
   sourceDocx.value = selected
   templateName.value = cleanTemplateName(stripExtension(fileName(selected), /\.(docx|docm|doc)$/i))
+  editingLibraryTemplatePath.value = ''
   await inspectSourceDocx()
 }
 
@@ -1137,25 +1140,28 @@ async function saveTemplate() {
     ElMessage.warning('请至少确认一个字段')
     return
   }
+  const isEditingExisting = Boolean(editingLibraryTemplatePath.value)
   let confirmedName = templateName.value || '未命名模板'
-  try {
-    const result = await ElMessageBox.prompt('保存到 Docsy 模板库，之后可在填写页直接选择。', '确认模板名称', {
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-      inputValue: confirmedName,
-      inputPattern: /\S+/,
-      inputErrorMessage: '请输入模板名称',
-    })
-    confirmedName = result.value.trim()
-  } catch {
-    return
+  if (!isEditingExisting) {
+    try {
+      const result = await ElMessageBox.prompt('保存到 Docsy 模板库，之后可在填写页直接选择。', '确认模板名称', {
+        confirmButtonText: '保存',
+        cancelButtonText: '取消',
+        inputValue: confirmedName,
+        inputPattern: /\S+/,
+        inputErrorMessage: '请输入模板名称',
+      })
+      confirmedName = result.value.trim()
+    } catch {
+      return
+    }
   }
 
   saving.value = true
   const result = await tauriCallSafe('save_docx_template_to_library', {
     args: {
       sourceDocx: sourceDocx.value,
-      outputPath: '',
+      outputPath: isEditingExisting ? editingLibraryTemplatePath.value : '',
       templateName: confirmedName,
       fields,
     },
@@ -1167,9 +1173,12 @@ async function saveTemplate() {
   }
   const actualOutputPath = result.data?.outputPath || ''
   templateName.value = confirmedName
-  ElMessage.success('模板已保存到 Docsy 模板库')
+  editingLibraryTemplatePath.value = ''
+  ElMessage.success(isEditingExisting ? '模板已更新' : '模板已保存到 Docsy 模板库')
   templatePath.value = actualOutputPath
-  await maybeSeedTemplateHistory(actualOutputPath)
+  if (!isEditingExisting) {
+    await maybeSeedTemplateHistory(actualOutputPath)
+  }
   await loadTemplateLibrary()
   if (actualOutputPath) {
     await openTemplatePackage(actualOutputPath, result.data?.manifest || null)
@@ -1317,7 +1326,16 @@ async function deleteTemplate(item) {
 
 async function openTemplateFromLibrary(item) {
   if (!item?.path) return
+  editingLibraryTemplatePath.value = ''
   await openTemplatePackage(item.path, item.manifest)
+}
+
+async function editTemplateFromLibrary(item) {
+  if (!item?.path) return
+  const opened = await openTemplatePackage(item.path, item.manifest)
+  if (!opened) return
+  editingLibraryTemplatePath.value = item.path
+  activeTab.value = 'build'
 }
 
 async function openTemplatePackage(path, knownManifest = null) {

@@ -24,6 +24,7 @@
           <span>{{ item.fieldCount }} 个字段</span>
           <small>{{ shortDateTime(item.updated) }}</small>
           <div class="template-card-actions">
+            <el-button size="small" text @click.stop="$emit('edit-template', item)">编辑</el-button>
             <el-button size="small" text type="danger" @click.stop="$emit('delete-template', item)">删除</el-button>
           </div>
         </div>
@@ -329,6 +330,7 @@ const emit = defineEmits([
   'load-template-library',
   'select-template-package',
   'open-template-from-library',
+  'edit-template',
   'delete-template',
   'update:fieldSearch',
   'collapse-all-fields',
@@ -612,6 +614,8 @@ p {
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 6px;
   background: var(--docsy-surface-elevated);
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .fill-field-body {
@@ -776,10 +780,16 @@ p {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+  max-height: 80px;
+  overflow-y: auto;
 }
 
 .suggestion-tag {
   cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1180px) {
