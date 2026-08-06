@@ -949,9 +949,14 @@ p {
   color: #f56c6c;
 }
 
-.semantic-key-label {
-  background: #ecf5ff !important;
-  color: #409eff !important;
+.semantic-key-tag {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  color: #7a8a9e;
+  background: #edf2f8;
+  flex-shrink: 0;
 }
 
 .fill-structure-hints {
