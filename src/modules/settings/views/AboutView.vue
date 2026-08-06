@@ -36,7 +36,7 @@
 <script setup>
 import { open } from '@tauri-apps/plugin-shell'
 
-const version = '0.9.2'
+const version = import.meta.env.PACKAGE_VERSION || '0.9.6'
 
 function openGitHub() {
   open('https://github.com/muxiaoxiii/docsy')
