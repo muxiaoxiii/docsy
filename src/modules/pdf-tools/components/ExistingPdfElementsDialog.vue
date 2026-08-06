@@ -249,9 +249,9 @@ function invertSelection() {
 function handleRowClick(row, _column, event) {
   const key = row?.key
   if (!key) return
-  // Ignore clicks originating from the checkbox area to avoid double-toggle
+  // Ignore clicks originating from the checkbox area to avoid double-toggle (but not when Shift is held for range select)
   const target = event?.target
-  if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
+  if (!event.shiftKey && target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
 
   // Prevent text selection on row click
   event.preventDefault()
@@ -281,12 +281,9 @@ function handleRowClick(row, _column, event) {
 function handleMouseMove(event) {
   tooltipPos.value = { x: event.clientX, y: event.clientY }
 }
-function handleRowMouseEnter(_row, _column, event) {
-  const tr = event.target.closest('tr')
-  if (tr) {
-    const rowIndex = Array.from(tr.parentElement.children).indexOf(tr)
-    hoverRowIndex.value = rowIndex
-  }
+function handleRowMouseEnter(_row, _column, _cell, event) {
+  const rowIndex = filteredRows.value.findIndex(r => r.key === _row.key)
+  if (rowIndex >= 0) hoverRowIndex.value = rowIndex
 }
 function handleRowMouseLeave() {
   hoverRowIndex.value = -1
@@ -333,6 +330,9 @@ function decisionTagType(decision) {
 }
 :deep(.low-confidence-row:hover) {
   background: var(--docsy-surface-muted-hover, #f0f0f0);
+}
+:deep(.el-table td) {
+  user-select: none;
 }
 :deep(.shift-cursor) {
   cursor: crosshair;
