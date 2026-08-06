@@ -212,10 +212,7 @@
                   :value="item.key"
                 />
               </el-select>
-              <p v-if="(field.posIndex ?? 0) > 0 && field.fillAllPositions && !hasSlotTypeOverride(field)" class="setting-caption">
-                此位置引用第一个位置的值；如需单独填写，可在"…"菜单里修改类型。
-              </p>
-              <p v-else class="setting-caption">引用字段从已填字段取值，不能手动输入；前后缀在"…"菜单里设置。</p>
+              <p v-if="effectiveFieldType(field) === 'reference' && !hasSlotTypeOverride(field)" class="setting-caption">引用字段从已填字段取值，不能手动输入；前后缀在"…"菜单里设置。</p>
             </div>
             <el-select
               v-else-if="effectiveFieldType(field) === 'select'"
@@ -259,9 +256,7 @@
             </template>
             <template v-else>
               <div class="follow-value">{{ getEntryValue(field) || '（空）' }}</div>
-              <p class="setting-caption">
-                此位置引用第一个位置的值；如需单独填写，可在"…"菜单里修改类型。
-              </p>
+
             </template>
             <el-popover placement="bottom-end" trigger="click" width="280">
               <template #reference>
