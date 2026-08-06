@@ -89,6 +89,23 @@ Tauri 命令集中在 `src-tauri/src/commands/mod.rs` 注册（共 58 个命令�
 | 模板历史 | `~/Library/Application Support/docsy/template_history.sqlite3` | SQLite |
 | 应用日志 | `~/Library/Logs/docsy/` | 文本日志 |
 
+## 操作生命周期管理（MDG-001）
+
+`src-tauri/src/operations.rs` 提供统一的操作管理（第四通用层）：
+
+| 组件 | 位置 | 作用 |
+| --- | --- | --- |
+| `OperationManager` | `operations.rs` | 操作注册/取消/查询，CancellationToken-based |
+| `run_managed` | `commands/mod.rs` | 替代 `run_blocking`，自动注册/注销操作 |
+| `command_output_cancellable` | `external/mod.rs` | 外部子进程取消（不设固定超时） |
+| 事件 | `docsy-operation-started` / `docsy-operation-finished` | 前端 Doclet 动画接驳 |
+
+**设计原则**：
+- 不设固定超时自动 kill（大文件慢就慢）
+- 只支持用户主动取消（通过 CancellationToken）
+- 与 `run_blocking` 并存，新命令用 `run_managed`，旧命令不改
+- 取消时返回已处理的部分结果（不丢失已完成的工作）
+
 ## 测试
 
 ```bash
