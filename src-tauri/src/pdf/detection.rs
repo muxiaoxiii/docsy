@@ -365,6 +365,7 @@ fn build_artifact_candidates(
                     candidate.page_range.end >= page_start && candidate.page_range.start <= page_end
                 })
                 .max_by_key(|candidate| candidate.count);
+
             // BUGFIX: 不再 fallback 到 content-text 候选，
             // 避免正文内容被错误当成页眉/页脚。
             // 没有自身文本的 artifact 直接跳过。
@@ -372,6 +373,7 @@ fn build_artifact_candidates(
                 .text
                 .clone()
                 .filter(|value| !value.trim().is_empty())?;
+
             let normalized_text = normalize_header_footer_text(&text);
             let mut labels = labels_for(&normalized_text);
             if first.docsy_kind.as_deref() == Some("PageNumber")
@@ -1161,9 +1163,10 @@ fn build_candidates(
             let position_spread = normalized_position_spread(&lines);
             let position_stable = position_spread <= 0.025;
             let sequence_stable = !is_page_number || page_number_sequence_stable(&lines);
-            let repeating = count >= 2 && position_stable;
+            let is_page_number = labels.iter().any(|label| label == "page-number");
+            let repeating = if is_page_number { count >= 2 } else { count >= 3 } && position_stable;
             let mut confidence = if pages_analyzed <= 1 {
-                0.25
+                0.15
             } else {
                 (count as f32 / pages_analyzed as f32).min(1.0)
             };
@@ -2084,7 +2087,18 @@ mod tests {
         let candidates_2 = build_candidates(&pages_2, "header", 2);
         assert_eq!(candidates_2.len(), 1);
         assert_eq!(candidates_2[0].count, 2);
-        assert!(candidates_2[0].repeating);
+        assert!(!candidates_2[0].repeating, "count=2 should not be repeating (threshold is 3)");
+        
+        // 3 pages should be repeating
+        let pages_3 = vec![
+            PageDetection { page: 1, width: 595.0, height: 842.0, headers: vec![line(1)], footers: vec![] },
+            PageDetection { page: 2, width: 595.0, height: 842.0, headers: vec![line(2)], footers: vec![] },
+            PageDetection { page: 3, width: 595.0, height: 842.0, headers: vec![line(3)], footers: vec![] },
+        ];
+        let candidates_3 = build_candidates(&pages_3, "header", 3);
+        assert_eq!(candidates_3.len(), 1);
+        assert_eq!(candidates_3[0].count, 3);
+        assert!(candidates_3[0].repeating);
     }
 
     #[test]
