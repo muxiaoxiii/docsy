@@ -30,20 +30,20 @@
           <el-checkbox v-model="selectedKeys" :value="row.key" />
         </template>
       </el-table-column>
-      <el-table-column prop="fileName" label="文件" min-width="180" show-overflow-tooltip :tooltip-props="{ placement: 'right' }" />
-      <el-table-column label="类型" width="86">
+      <el-table-column prop="fileName" label="文件" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }" />
+      <el-table-column label="类型" width="86" :sort-method="(a, b) => a.element.kind.localeCompare(b.element.kind)" sortable>
         <template #default="{ row }">{{ elementKindText(row.element.kind) }}</template>
       </el-table-column>
-      <el-table-column label="检测文字" min-width="180" show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
+      <el-table-column label="检测文字" min-width="180" sortable :sort-method="(a, b) => (a.element.detectedText || '').localeCompare(b.element.detectedText || '')" show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
         <template #default="{ row }">{{ row.element.detectedText || '-' }}</template>
       </el-table-column>
-      <el-table-column label="页段" width="90">
+      <el-table-column label="页段" width="90" sortable :sort-method="(a, b) => (a.element.pageStart || 0) - (b.element.pageStart || 0)">
         <template #default="{ row }">{{ row.element.pageStart }}-{{ row.element.pageEnd }}</template>
       </el-table-column>
-      <el-table-column label="来源" width="105">
+      <el-table-column label="来源" width="105" sortable :sort-method="(a, b) => (a.element.source || '').localeCompare(b.element.source || '')">
         <template #default="{ row }">{{ row.element.source === 'artifact' ? '标准结构' : '页面文本' }}</template>
       </el-table-column>
-      <el-table-column label="处理" width="100">
+      <el-table-column label="处理" width="100" sortable :sort-method="(a, b) => (a.element.decision || 'zzz').localeCompare(b.element.decision || 'zzz')">
         <template #default="{ row }">
           <el-tag :type="decisionTagType(row.element.decision)" size="small">
             {{ elementDecisionText(row.element.decision) }}
@@ -241,7 +241,10 @@ function decisionTagType(decision) {
   color: var(--docsy-text-muted, #999);
 }
 :deep(.low-confidence-row) {
-  opacity: 0.6;
+  background: var(--docsy-surface-muted, #fafafa);
+}
+:deep(.low-confidence-row td:first-child) {
+  border-left: 3px solid var(--docsy-text-muted, #c0c4cc);
 }
 :deep(.low-confidence-row:hover) {
   opacity: 0.8;
