@@ -455,8 +455,12 @@ function decorateHeaderText(base, file, index, rules) {
   return `${prefix}${body}${suffix}`.trim()
 }
 
-export function expandPlaceholders(template, page, total) {
-  return String(template || '')
+export function expandPlaceholders(template, page, total, file, index, rules) {
+  let text = template || ''
+  if (file != null) {
+    text = resolveTextTemplate(text, file, index || 0, rules || {})
+  }
+  return String(text)
     .replaceAll('{page}', String(page))
     .replaceAll('{total}', String(total))
     .replaceAll('{range}', `${page}/${total}`)

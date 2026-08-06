@@ -74,7 +74,7 @@ export function useEvidencePdfPreview({
       ? selectedOverlayFile.value.pageStart + previewPage.value - 1
       : previewPage.value
     const total = footerContinuous.value ? totalOverlayPages.value : selectedOverlayFile.value.pages || 1
-    return expandPlaceholders(group.text, page, total)
+    return expandPlaceholders(group.text, page, total, selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value)
   })
 
   const previewHeaderStyle = computed(() =>
@@ -214,7 +214,7 @@ export function useEvidencePdfPreview({
         region,
         text: pageNumberOverlay
           ? renderPageNumberTemplate(overlay.text, page, total, overlay.numberStyle || pageNumberStyle.value)
-          : expandPlaceholders(overlay.text, page, total),
+          : expandPlaceholders(overlay.text, page, total, selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value),
         style: textOverlayStyle(region, previewData.value, {
           align: overlay.align,
           marginMm: overlay.marginMm,

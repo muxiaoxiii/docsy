@@ -1242,7 +1242,11 @@ fn build_candidates(
     // still be meaningful when assembling a cross-file sequence.  Artifact
     // candidates are handled separately and never enter build_candidates.
     if pages_analyzed <= 1 {
-        candidates.retain(|c| c.labels.iter().any(|l| l == "page-number"));
+        for c in &mut candidates {
+            if !c.labels.iter().any(|l| l == "page-number") {
+                c.confidence = c.confidence.min(0.15);
+            }
+        }
     }
 
     candidates.sort_by(|a, b| {
@@ -2075,9 +2079,13 @@ mod tests {
             footers: vec![],
         }];
 
-        // Single-page file: content-text non-page-number candidates are filtered out
+        // Single-page file: content-text non-page-number candidates get low confidence
         let candidates = build_candidates(&pages, "header", 1);
-        assert!(candidates.is_empty(), "single-page non-page-number candidates should be filtered");
+        assert!(!candidates.is_empty(), "single-page candidates should still be present");
+        assert!(
+            candidates.iter().all(|c| c.confidence <= 0.15),
+            "single-page non-page-number candidates should have low confidence"
+        );
 
         // Multi-page file: candidates are preserved
         let pages_2 = vec![

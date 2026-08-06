@@ -221,12 +221,12 @@ export function useEvidencePdfExistingEditing({
     return rowHeaderPreview(row, index)
   }
 
-  function rowFooterPreview(row) {
+  function rowFooterPreview(row, index) {
     const footerTemplate = row?.footer ?? footerText.value
     if (!insertHeaderFooterEnabled.value || !footerEnabled.value || !footerTemplate || !row) return ''
     const page = footerContinuous.value ? row.pageStart || 1 : 1
     const total = footerContinuous.value ? totalOverlayPages.value || row.pages || 1 : row.pages || 1
-    return expandPlaceholders(footerTemplate, page, total)
+    return expandPlaceholders(footerTemplate, page, total, row, index, currentRules.value)
   }
 
   function displayRowFooter(row, index) {
