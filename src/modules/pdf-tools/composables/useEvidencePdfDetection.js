@@ -29,11 +29,17 @@ export function useEvidencePdfDetection({
     let success = 0
     let failed = 0
     const total = overlayRows.value.length
+    const results = []
     try {
+      // Phase 1: detect all files (no UI updates, no flicker)
       for (let i = 0; i < total; i++) {
         const file = overlayRows.value[i]
         detectionProgressText.value = `正在检测 ${i + 1}/${total} 个文件...`
         const result = await detectFileHeaderFooter(file)
+        results.push({ file, result })
+      }
+      // Phase 2: apply all results at once (single re-render cycle)
+      for (const { file, result } of results) {
         if (result.ok) {
           try {
             applyDetectionResultToFile(file, result.data || {})
