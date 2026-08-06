@@ -30,25 +30,25 @@ export function useEvidencePdfDetection({
     let failed = 0
     const total = overlayRows.value.length
     const results = []
+    const startTime = Date.now()
+    // Elapsed timer — updates the progress text every second via setInterval
+    const timerId = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000)
+      const m = String(Math.floor(elapsed / 60)).padStart(2, '0')
+      const s = String(elapsed % 60).padStart(2, '0')
+      detectionProgressText.value = `正在检测 ${results.length}/${total} 个文件  ${m}:${s}`
+    }, 1000)
     try {
-      // Phase 1: detect all files — buffer status to avoid per-iteration re-renders
-      let pendingStatusText = ''
-      let lastRenderTime = 0
+      // Detect all files — NO per-file UI updates, only the timer above
       for (let i = 0; i < total; i++) {
         const file = overlayRows.value[i]
-        pendingStatusText = `正在检测 ${i + 1}/${total} 个文件...`
-        // Throttle UI updates to max once per 500ms
-        const now = Date.now()
-        if (now - lastRenderTime > 500) {
-          detectionProgressText.value = pendingStatusText
-          lastRenderTime = now
-          await new Promise(r => setTimeout(r, 0)) // yield to event loop for UI
-        }
         const result = await detectFileHeaderFooter(file)
         results.push({ file, result })
       }
       // Final progress update
-      detectionProgressText.value = pendingStatusText
+      clearInterval(timerId)
+      const elapsed = Math.floor((Date.now() - startTime) / 1000)
+      detectionProgressText.value = `检测完成 ${results.length}/${total} 个文件  ${elapsed}s`
       // Phase 2: apply all results at once (single re-render cycle)
       for (const { file, result } of results) {
         if (result.ok) {
@@ -78,6 +78,7 @@ export function useEvidencePdfDetection({
           : ElMessage.success(`已检测 ${success} 个 PDF`)
       }
     } finally {
+      clearInterval(timerId)
       detectingAllHeaderFooter.value = false
       detectionProgressText.value = ''
     }

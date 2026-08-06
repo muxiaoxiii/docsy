@@ -44,7 +44,7 @@
         <span class="processing-spinner" />
         <div>
           <strong>{{ detectionProgressText || '正在检测导入的文件...' }}</strong>
-          <p>正在读取页眉页脚信息，完成后会统一显示在下方文件列表中。</p>
+          <p>正在读取页眉页脚信息，完成后统一显示结果。</p>
         </div>
       </div>
 
