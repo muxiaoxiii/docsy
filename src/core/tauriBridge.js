@@ -89,6 +89,11 @@ export async function tauriCallSafe(command, args = {}) {
   }
 }
 
+/// 查询 Rust 侧活跃操作列表（用于取消功能）
+export async function listActiveOperations() {
+  return invoke('list_active_operations')
+}
+
 export function openPath(path) {
   return tauriCallSafe('open_path', { path })
 }

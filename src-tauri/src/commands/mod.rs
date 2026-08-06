@@ -116,6 +116,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         system::list_system_fonts,
         system::respond_conversion_timeout,
         system::cancel_operation,
+        system::list_active_operations,
         // template
         template::inspect_docx_template,
         template::save_docx_template,

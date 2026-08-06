@@ -132,14 +132,28 @@ pub fn respond_conversion_timeout(
     Ok(())
 }
 
-/// Cancel all running subprocess operations.
-/// Returns true if any processes were found and termination signals were sent.
+/// Cancel a running operation by ID.
+///
+/// MDG-001: 优先使用 OperationManager（CancellationToken），
+/// 回退到 SubprocessRegistry（PID kill）用于尚未迁移的外部子进程。
 #[tauri::command]
 pub fn cancel_operation(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     registry: tauri::State<'_, std::sync::Arc<crate::SubprocessRegistry>>,
-    _operation_id: String,
+    operation_id: String,
 ) -> Result<bool, String> {
-    // Kill all registered subprocesses (typically only one running at a time)
-    registry.cancel_all();
-    Ok(true)
+    // 优先尝试 OperationManager（异步任务取消）
+    if manager.cancel(&operation_id) {
+        return Ok(true);
+    }
+    // 回退到 SubprocessRegistry（外部子进程 kill）
+    Ok(registry.cancel(&operation_id))
+}
+
+/// List all currently active operations (for debugging and UI).
+#[tauri::command]
+pub fn list_active_operations(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+) -> Vec<String> {
+    manager.list_active()
 }

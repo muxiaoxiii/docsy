@@ -165,16 +165,18 @@ function finishOperation(event) {
 }
 
 async function cancelCurrentOperation() {
-  // Find the oldest (first) pending operation — that's the one running longest
-  const firstId = Array.from(pendingOperations.keys()).at(0)
-  if (firstId) {
-    try {
-      await tauriCallSafe('cancel_operation', { operationId: firstId })
-    } catch {
-      // Ignore errors — the operation may have already finished
+  try {
+    // 查询 Rust 侧活跃操作，按 ID 取消
+    const activeResult = await tauriCallSafe('list_active_operations')
+    if (activeResult.ok && activeResult.data?.length > 0) {
+      // 取消第一个活跃操作
+      const targetId = activeResult.data[0]
+      await tauriCallSafe('cancel_operation', { operationId: targetId })
     }
+  } catch {
+    // Ignore errors — the operation may have already finished
   }
-  // Clear all pending operations since we can't know which ones were killed
+  // 清除 UI 状态（pendingOperations 是前端动画追踪，与 Rust 操作管理独立）
   pendingOperations.clear()
   clearTimeout(operationTimer)
   window.clearInterval(elapsedTimer)
