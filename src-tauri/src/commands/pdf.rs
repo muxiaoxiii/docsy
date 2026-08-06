@@ -1,4 +1,5 @@
 use crate::commands::run_blocking;
+use crate::commands::run_managed;
 use crate::external::ExternalTool;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -193,9 +194,15 @@ pub async fn overlay_pdf_text(
 }
 
 #[tauri::command]
-pub async fn batch_overlay_pdf_text(args: BatchOverlayArgs) -> Result<serde_json::Value, String> {
+pub async fn batch_overlay_pdf_text(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+    args: BatchOverlayArgs,
+) -> Result<serde_json::Value, String> {
     let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
-    run_blocking(move || crate::pdf::overlay::batch_overlay(&args)).await
+    run_managed(&manager, "batch_overlay_pdf_text", None, move |token| {
+        crate::pdf::header_footer::batch_overlay_cancellable(&args, &token)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -260,12 +267,18 @@ pub async fn get_pdf_page_count(input: String) -> Result<u32, String> {
 }
 
 #[tauri::command]
-pub async fn detect_anti_copy(input: String) -> Result<crate::pdf::anti_ocr::AntiCopyDetection, String> {
+pub async fn detect_anti_copy(
+    input: String,
+) -> Result<crate::pdf::anti_ocr::AntiCopyDetection, String> {
     run_blocking(move || crate::pdf::anti_ocr::detect_anti_copy(std::path::Path::new(&input))).await
 }
 
 #[tauri::command]
-pub async fn apply_anti_copy(input: String, output: String, method: String) -> Result<usize, String> {
+pub async fn apply_anti_copy(
+    input: String,
+    output: String,
+    method: String,
+) -> Result<usize, String> {
     let m = match method.as_str() {
         "cmap_remove" => crate::pdf::anti_ocr::AntiCopyMethod::CmapRemove,
         "text_overlay" => crate::pdf::anti_ocr::AntiCopyMethod::TextOverlay,
@@ -294,10 +307,14 @@ pub async fn remove_anti_copy(input: String, output: String) -> Result<usize, St
 
 #[tauri::command]
 pub async fn has_pdf_bookmarks(input: String) -> Result<bool, String> {
-    run_blocking(move || crate::pdf::header_footer::has_pdf_bookmarks(std::path::Path::new(&input))).await
+    run_blocking(move || crate::pdf::header_footer::has_pdf_bookmarks(std::path::Path::new(&input)))
+        .await
 }
 
 #[tauri::command]
 pub async fn remove_pdf_bookmarks(input: String) -> Result<(), String> {
-    run_blocking(move || crate::pdf::header_footer::remove_pdf_bookmarks(std::path::Path::new(&input))).await
+    run_blocking(move || {
+        crate::pdf::header_footer::remove_pdf_bookmarks(std::path::Path::new(&input))
+    })
+    .await
 }
