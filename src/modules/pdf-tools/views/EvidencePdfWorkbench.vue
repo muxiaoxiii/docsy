@@ -586,14 +586,14 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip>
+        <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
           <template #default="{ row, $index }">
             <button class="file-link" type="button" :data-reorder-index="$index" @click.stop="openEvidenceFile(row)">
               {{ row.name }}
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="页眉/页脚文本" min-width="200" show-overflow-tooltip>
+        <el-table-column label="页眉/页脚文本" min-width="200" show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
           <template #default="{ row, $index }">
             <el-input
               v-if="editingContentRowId && editingContentRowId.startsWith(`${row.path}|`)"
@@ -616,7 +616,7 @@
             <el-tooltip
               v-if="row.statusDetail"
               :content="row.statusDetail"
-              placement="top"
+              placement="right"
               :show-after="300"
             >
               <el-tag :type="row.statusType || 'info'" size="small">
@@ -3319,6 +3319,15 @@ h3 {
 .overlay-table {
   margin-top: 0;
   width: 100%;
+}
+/* Force auto-width columns to shrink when empty */
+.overlay-table .el-table__body {
+  table-layout: auto;
+}
+/* Ensure columns with min-width can shrink when content is short */
+.overlay-table .el-table__header th .cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bookmark-rule-grid {

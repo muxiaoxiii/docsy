@@ -33,7 +33,7 @@
       <el-table-column label="类型" width="86">
         <template #default="{ row }">{{ elementKindText(row.element.kind) }}</template>
       </el-table-column>
-      <el-table-column label="检测文字" min-width="180" show-overflow-tooltip>
+      <el-table-column label="检测文字" min-width="180" show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
         <template #default="{ row }">{{ row.element.detectedText || '-' }}</template>
       </el-table-column>
       <el-table-column label="页段" width="90">
