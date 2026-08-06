@@ -365,18 +365,13 @@ fn build_artifact_candidates(
                     candidate.page_range.end >= page_start && candidate.page_range.start <= page_end
                 })
                 .max_by_key(|candidate| candidate.count);
+            // BUGFIX: 不再 fallback 到 content-text 候选，
+            // 避免正文内容被错误当成页眉/页脚。
+            // 没有自身文本的 artifact 直接跳过。
             let text = first
                 .text
                 .clone()
-                .filter(|value| !value.trim().is_empty())
-                .or_else(|| supporting.map(|candidate| candidate.text.clone()))
-                .unwrap_or_else(|| {
-                    if first.region == "header" {
-                        "标准页眉".to_string()
-                    } else {
-                        "标准页脚".to_string()
-                    }
-                });
+                .filter(|value| !value.trim().is_empty())?;
             let normalized_text = normalize_header_footer_text(&text);
             let mut labels = labels_for(&normalized_text);
             if first.docsy_kind.as_deref() == Some("PageNumber")
