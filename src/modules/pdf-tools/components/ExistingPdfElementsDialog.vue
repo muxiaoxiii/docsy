@@ -12,6 +12,7 @@
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" type="danger" @click="applyDecision('delete')">标记删除</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" type="primary" @click="applyDecision('edit')">标记编辑</el-button>
+      <span class="toolbar-hint">{{ multiSelectHint }}</span>
     </div>
     <el-table
       :data="filteredRows"
@@ -91,6 +92,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:visible', 'change', 'preview', 'jump-to-settings'])
 const selectedKeys = ref([])
+const lastClickedIndex = ref(-1)
 const visibleModel = computed({ get: () => props.visible, set: (value) => emit('update:visible', value) })
 const fileFilter = ref('')
 const sortState = ref({ prop: '', order: '' })
@@ -154,6 +156,7 @@ watch(
   () => [props.visible, props.filter],
   () => {
     selectedKeys.value = []
+    lastClickedIndex.value = -1
   },
 )
 
@@ -180,6 +183,7 @@ function selectUndecided() {
 }
 function clearSelection() {
   selectedKeys.value = []
+  lastClickedIndex.value = -1
 }
 function selectBySequence(row) {
   const { kind, detectedText } = row.element
@@ -218,18 +222,42 @@ function invertSelection() {
   const selected = new Set(selectedKeys.value)
   selectedKeys.value = filteredRows.value.filter((row) => !selected.has(row.key)).map((row) => row.key)
 }
+const isMac = computed(() => typeof navigator !== 'undefined' && /mac/i.test(navigator.platform))
+const multiSelectHint = computed(() => isMac.value ? '⌘+点击 多选 · ⇧+点击 范围选择' : 'Ctrl+点击 多选 · Shift+点击 范围选择')
+
 function handleRowClick(row, _column, event) {
   const key = row?.key
   if (!key) return
   // Ignore clicks originating from the checkbox area to avoid double-toggle
   const target = event?.target
   if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
-  const idx = selectedKeys.value.indexOf(key)
-  if (idx >= 0) {
-    selectedKeys.value = selectedKeys.value.filter(k => k !== key)
+
+  const rowIndex = filteredRows.value.indexOf(row)
+  const modifierKey = isMac.value ? event.metaKey : event.ctrlKey
+
+  if (event.shiftKey && lastClickedIndex.value >= 0) {
+    // Shift+click: range select (add to current selection)
+    const start = Math.min(lastClickedIndex.value, rowIndex)
+    const end = Math.max(lastClickedIndex.value, rowIndex)
+    const rangeKeys = filteredRows.value.slice(start, end + 1).map(r => r.key)
+    const newSet = new Set(selectedKeys.value)
+    rangeKeys.forEach(k => newSet.add(k))
+    selectedKeys.value = [...newSet]
+  } else if (modifierKey) {
+    // Cmd/Ctrl+click: toggle current row
+    const idx = selectedKeys.value.indexOf(key)
+    if (idx >= 0) {
+      selectedKeys.value = selectedKeys.value.filter(k => k !== key)
+    } else {
+      selectedKeys.value = [...selectedKeys.value, key]
+    }
   } else {
-    selectedKeys.value = [...selectedKeys.value, key]
+    // Normal click: select only this row (existing behavior)
+    const wasSelected = selectedKeys.value.includes(key)
+    selectedKeys.value = wasSelected ? [] : [key]
   }
+
+  lastClickedIndex.value = rowIndex
 }
 function applyDecision(decision) {
   const selected = new Set(selectedKeys.value)
@@ -259,6 +287,13 @@ function decisionTagType(decision) {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+}
+.toolbar-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--docsy-text-muted, #999);
+  white-space: nowrap;
+  align-self: center;
 }
 .hint-text {
   margin: 8px 0 0;
