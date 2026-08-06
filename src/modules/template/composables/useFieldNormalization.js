@@ -540,6 +540,13 @@ export function buildFields(fieldRows) {
       const existing = byKey.get(key)
       if (existing && !isMarkerType(type) && rowUsage(row) !== 'delete_text') {
         existing.fillAllPositions = true
+        existing.type = 'reference'
+        existing.reference = {
+          sourceMode: 'field',
+          sourceField: existing.name,
+          sourceSemanticKey: '',
+          sourceIndex: null,
+        }
       }
     }
     const field = byKey.get(key)

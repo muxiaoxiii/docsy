@@ -353,7 +353,7 @@ const fillPositionEntries = computed(() => {
       return ap - bp || ar - br
     })
     const isReference = field.type === 'reference'
-    if (field.fillAllPositions && refs.length > 1 && !isReference && !field._isDuplicate) {
+    if (field.fillAllPositions && refs.length > 1 && !field._isDuplicate) {
       refs.forEach((ref, i) => {
         const [p, r] = markIdPosition(ref.markId)
         entries.push({

@@ -680,11 +680,11 @@ function referenceFillOptions(field) {
       })
     } else {
       const value = props.formValues[fieldFormKey(item)]
-      if (isEmptyValue(value)) continue
       const key = `field::${item.name}::`
       if (seen.has(key)) continue
       seen.add(key)
-      options.push({ key, label: `${fillFieldLabel(item)}：${displayValue(value)}` })
+      const label = isEmptyValue(value) ? fillFieldLabel(item) : `${fillFieldLabel(item)}：${displayValue(value)}`
+      options.push({ key, label })
     }
   }
   return options
