@@ -253,6 +253,9 @@ function handleRowClick(row, _column, event) {
   const target = event?.target
   if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
 
+  // Prevent text selection on row click
+  event.preventDefault()
+
   const currentIndex = filteredRows.value.findIndex(r => r.key === key)
   if (currentIndex < 0) return
 
