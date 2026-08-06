@@ -105,9 +105,17 @@ impl SubprocessRegistry {
         };
         for pid in pids {
             #[cfg(unix)]
-            { let _ = std::process::Command::new("kill").args(["-TERM", &pid.to_string()]).output(); }
+            {
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .output();
+            }
             #[cfg(windows)]
-            { let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output(); }
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .output();
+            }
         }
     }
 }
@@ -117,7 +125,8 @@ static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::
 
 /// Global subprocess registry for cancellation support.
 /// Set once during app initialization; qpdf/ffmpeg can access it without Tauri state.
-static SUBPROCESS_REGISTRY: std::sync::OnceLock<Arc<SubprocessRegistry>> = std::sync::OnceLock::new();
+static SUBPROCESS_REGISTRY: std::sync::OnceLock<Arc<SubprocessRegistry>> =
+    std::sync::OnceLock::new();
 
 pub fn get_subprocess_registry() -> Option<&'static Arc<SubprocessRegistry>> {
     SUBPROCESS_REGISTRY.get()
@@ -177,7 +186,10 @@ impl ConversionState {
         // 阻塞等待用户响应（不再 500ms 轮询）
         let mut state = self.response.lock().unwrap_or_else(|e| e.into_inner());
         while *state == 0 {
-            state = self.response_cvar.wait(state).unwrap_or_else(|e| e.into_inner());
+            state = self
+                .response_cvar
+                .wait(state)
+                .unwrap_or_else(|e| e.into_inner());
         }
         self.timed_out.store(false, Ordering::SeqCst);
         *state == 1 // true = continue, false = cancel
@@ -197,6 +209,7 @@ pub fn run() {
     let conversion_state = Arc::new(ConversionState::new());
     let subprocess_registry = Arc::new(SubprocessRegistry::new());
     let operation_manager = Arc::new(operations::OperationManager::new());
+    let operation_manager_for_setup = operation_manager.clone();
     let _ = SUBPROCESS_REGISTRY.set(subprocess_registry.clone());
 
     tauri::Builder::default()
@@ -206,8 +219,9 @@ pub fn run() {
         .manage(conversion_state)
         .manage(subprocess_registry)
         .manage(operation_manager)
-        .setup(|app| {
+        .setup(move |app| {
             let _ = APP_HANDLE.set(app.handle().clone());
+            operation_manager_for_setup.set_app_handle(app.handle().clone());
             Ok(())
         })
         .invoke_handler(commands::build_handler())

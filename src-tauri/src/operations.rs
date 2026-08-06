@@ -7,10 +7,12 @@
 //   - 不设固定超时自动 kill（大文件慢就慢）
 //   - 只支持用户主动取消（通过 CancellationToken）
 //   - 与 run_blocking 并存，新命令用 run_managed，旧命令不改
+//   - 发射生命周期事件（docsy-operation-started/finished），供前端 Doclet 动画接驳
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
+use tauri::Emitter;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,24 +28,49 @@ struct OperationEntry {
     command: String,
 }
 
+/// 操作生命周期事件（Rust → 前端）。
+/// 前端 Doclet 动画系统后续订阅这些事件来驱动动画。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationEvent {
+    pub operation_id: String,
+    pub command: String,
+}
+
 /// 操作生命周期管理器。
 ///
 /// 替代 SubprocessRegistry，统一管理异步任务和外部子进程。
 /// 通过 CancellationToken 传递取消信号，执行层自行检查并退出。
-#[derive(Default)]
 pub struct OperationManager {
     operations: Mutex<HashMap<String, OperationEntry>>,
+    app_handle: Mutex<Option<tauri::AppHandle>>,
+}
+
+impl Default for OperationManager {
+    fn default() -> Self {
+        Self {
+            operations: Mutex::new(HashMap::new()),
+            app_handle: Mutex::new(None),
+        }
+    }
 }
 
 impl OperationManager {
     pub fn new() -> Self {
-        Self {
-            operations: Mutex::new(HashMap::new()),
+        Self::default()
+    }
+
+    /// 设置 AppHandle，用于发射生命周期事件。
+    /// 在 Tauri setup 阶段调用一次。
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        if let Ok(mut h) = self.app_handle.lock() {
+            *h = Some(handle);
         }
     }
 
     /// 注册新操作，返回 CancellationToken。
     ///
+    /// 自动发射 `docsy-operation-started` 事件到前端。
     /// 长时间任务应定期检查 token.is_cancelled()，
     /// 发现取消后尽快清理资源并返回错误。
     pub fn begin(&self, operation_id: &str, command: &str) -> CancellationToken {
@@ -57,6 +84,10 @@ impl OperationManager {
         if let Ok(mut map) = self.operations.lock() {
             map.insert(operation_id.to_string(), entry);
         }
+
+        // 发射 started 事件（供 Doclet 动画接驳）
+        self.emit_event("docsy-operation-started", operation_id, command);
+
         token
     }
 
@@ -93,9 +124,18 @@ impl OperationManager {
     }
 
     /// 标记操作完成，移除注册。
+    ///
+    /// 自动发射 `docsy-operation-finished` 事件到前端。
     pub fn finish(&self, operation_id: &str) {
-        if let Ok(mut map) = self.operations.lock() {
-            map.remove(operation_id);
+        let command = if let Ok(mut map) = self.operations.lock() {
+            map.remove(operation_id).map(|e| e.command)
+        } else {
+            None
+        };
+
+        // 发射 finished 事件（供 Doclet 动画接驳）
+        if let Some(cmd) = command {
+            self.emit_event("docsy-operation-finished", operation_id, &cmd);
         }
     }
 
@@ -105,6 +145,21 @@ impl OperationManager {
             map.keys().cloned().collect()
         } else {
             vec![]
+        }
+    }
+
+    /// 内部：发射生命周期事件到前端。
+    fn emit_event(&self, event_name: &str, operation_id: &str, command: &str) {
+        if let Ok(h) = self.app_handle.lock() {
+            if let Some(app) = h.as_ref() {
+                let _ = app.emit(
+                    event_name,
+                    OperationEvent {
+                        operation_id: operation_id.to_string(),
+                        command: command.to_string(),
+                    },
+                );
+            }
         }
     }
 }
