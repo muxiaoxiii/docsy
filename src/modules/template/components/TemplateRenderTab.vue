@@ -79,10 +79,10 @@
             <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
               同名字段，自动同步
             </el-tag>
-            <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0 && !hasSlotTypeOverride(field)" size="small" effect="plain" class="fill-all-tag">
+            <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0 && !hasSlotTypeOverride(field) && effectiveFieldType(field) === 'reference'" size="small" effect="plain" class="fill-all-tag">
               {{ followerReferenceLabel(field) }}
             </el-tag>
-            <el-tag v-else-if="field.fillAllPositions" size="small" effect="plain" class="fill-all-tag">
+            <el-tag v-else-if="field.fillAllPositions && !hasSlotTypeOverride(field) && effectiveFieldType(field) === 'reference'" size="small" effect="plain" class="fill-all-tag">
               填一次将自动填充到所有位置
             </el-tag>
           </div>
