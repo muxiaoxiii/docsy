@@ -31,13 +31,24 @@ export function useEvidencePdfDetection({
     const total = overlayRows.value.length
     const results = []
     try {
-      // Phase 1: detect all files (no UI updates, no flicker)
+      // Phase 1: detect all files — buffer status to avoid per-iteration re-renders
+      let pendingStatusText = ''
+      let lastRenderTime = 0
       for (let i = 0; i < total; i++) {
         const file = overlayRows.value[i]
-        detectionProgressText.value = `正在检测 ${i + 1}/${total} 个文件...`
+        pendingStatusText = `正在检测 ${i + 1}/${total} 个文件...`
+        // Throttle UI updates to max once per 500ms
+        const now = Date.now()
+        if (now - lastRenderTime > 500) {
+          detectionProgressText.value = pendingStatusText
+          lastRenderTime = now
+          await new Promise(r => setTimeout(r, 0)) // yield to event loop for UI
+        }
         const result = await detectFileHeaderFooter(file)
         results.push({ file, result })
       }
+      // Final progress update
+      detectionProgressText.value = pendingStatusText
       // Phase 2: apply all results at once (single re-render cycle)
       for (const { file, result } of results) {
         if (result.ok) {
