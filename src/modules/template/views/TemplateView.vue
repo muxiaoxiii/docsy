@@ -169,6 +169,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
 import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
@@ -1267,7 +1268,7 @@ function openSplitDialog(row) {
   splitDialog.partsText = row.text
 }
 
-function runDiagnostic() {
+async function runDiagnostic() {
   const validationError = validateFieldRowsBeforeSave(fieldRows.value, marks.value)
   const manifestFields = buildFields(fieldRows.value)
   const diagnostic = {
@@ -1302,13 +1303,16 @@ function runDiagnostic() {
     manifestFields,
     validationError: validationError || null,
   }
-  console.group('[Docsy 模板诊断]')
-  console.log('validationError:', diagnostic.validationError)
-  console.table(diagnostic.fieldRows.map(r => ({ text: r.text, type: r.type, name: r.name, enabled: r.enabled, markId: r.markId ? r.markId.slice(0, 8) + '...' : null })))
-  console.log('marks:', diagnostic.marks)
-  console.log('manifest.fields:', diagnostic.manifestFields)
-  console.log('完整 JSON:', JSON.stringify(diagnostic, null, 2))
-  console.groupEnd()
+  try {
+    const logFilePath = await invoke('get_log_file_path')
+    const logDir = logFilePath.replace(/[/\\][^/\\]+$/, '')
+    const outPath = `${logDir}/template-diagnostic.json`
+    const json = JSON.stringify(diagnostic, null, 2)
+    await invoke('write_text_file', { path: outPath, content: json })
+    ElMessage.success(`诊断已写入 ${outPath}`)
+  } catch (err) {
+    ElMessage.error(`诊断写入失败：${err}`)
+  }
 }
 
 function applySplitDialog() {
