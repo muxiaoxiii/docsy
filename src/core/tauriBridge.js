@@ -32,7 +32,7 @@ function nextOperationId(command) {
   return `${command}:${operationSeq}`
 }
 
-function emitOperationEvent(type, command, operationId) {
+export function emitOperationEvent(type, command, operationId) {
   if (typeof window === 'undefined') return
   window.dispatchEvent(
     new CustomEvent(`docsy-operation-${type}`, {
@@ -58,20 +58,12 @@ export async function tauriCall(command, args = {}) {
   }
 }
 
-// Raw Tauri call without Doclet animation events — for use in tight loops
-export async function tauriCallRaw(command, args = {}) {
-  try {
-    const result = await invoke(command, args)
-    return { ok: true, data: result }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: message }
-  }
-}
+let suppressDoclet = false
+export function setSuppressDoclet(value) { suppressDoclet = value }
 
 export async function tauriCallSafe(command, args = {}) {
   const operationId = nextOperationId(command)
-  emitOperationEvent('start', command, operationId)
+  if (!suppressDoclet) emitOperationEvent('start', command, operationId)
   try {
     const result = await invoke(command, args)
     return { ok: true, data: result }
@@ -85,7 +77,7 @@ export async function tauriCallSafe(command, args = {}) {
     void logError('tauri.bridge', `${command} failed`, details)
     return { ok: false, error: message, details }
   } finally {
-    emitOperationEvent('finish', command, operationId)
+    if (!suppressDoclet) emitOperationEvent('finish', command, operationId)
   }
 }
 
