@@ -6,6 +6,7 @@
       </el-select>
       <el-button size="small" @click="selectAll">全选</el-button>
       <el-button size="small" @click="invertSelection">反选</el-button>
+      <el-button size="small" @click="selectUndecided">选择未确认项</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="clearSelection">取消选择</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('keep')">保留</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
@@ -19,7 +20,6 @@
       max-height="58vh"
       row-key="key"
       :row-class-name="rowClassName"
-      @row-contextmenu="handleRowRightClick"
       @row-click="handleRowClick"
     >
       <el-table-column width="44" align="center">
@@ -71,7 +71,7 @@
         </template>
       </el-table-column>
     </el-table>
-    <p class="hint-text">左键点击行切换选中，右键点击行取消选中，点击表格外取消全部选择</p>
+    <p class="hint-text">点击行或勾选框切换选中，点击表格外取消全部选择</p>
     <template #footer>
       <el-button @click="visibleModel = false">完成</el-button>
     </template>
@@ -93,11 +93,12 @@ const visibleModel = computed({ get: () => props.visible, set: (value) => emit('
 const fileFilter = ref('')
 const fileNames = computed(() => [...new Set(props.rows.map(r => r.fileName))].sort())
 const KIND_ORDER = { header: 0, footerText: 1, pageNumber: 2 }
-// Sort priority within each file/kind group: decided > normal > lowConfidence
+// Sort priority within each file/kind group: undecided > lowConfidence > decided
 function decisionSortPriority(row) {
-  if (row.element.decision) return 0   // already decided (keep/ignore/delete/edit)
-  if (row.lowConfidence) return 2      // low confidence, undecided → bottom
-  return 1                              // normal, undecided
+  if (!row.element.decision) {
+    return row.lowConfidence ? 1 : 0   // undecided → top, low confidence just below
+  }
+  return 2                              // already decided (keep/ignore/delete/edit) → bottom
 }
 const filteredRows = computed(() => {
   let rows = props.rows
@@ -147,6 +148,11 @@ function toggleAll(value) {
 function selectAll() {
   toggleAll(true)
 }
+function selectUndecided() {
+  selectedKeys.value = filteredRows.value
+    .filter((row) => !row.element.decision)
+    .map((row) => row.key)
+}
 function clearSelection() {
   selectedKeys.value = []
 }
@@ -187,17 +193,12 @@ function invertSelection() {
   const selected = new Set(selectedKeys.value)
   selectedKeys.value = filteredRows.value.filter((row) => !selected.has(row.key)).map((row) => row.key)
 }
-function handleRowRightClick(_row, _column, event) {
-  event.preventDefault()
-  const key = _row.key
-  const idx = selectedKeys.value.indexOf(key)
-  if (idx >= 0) {
-    selectedKeys.value = selectedKeys.value.filter(k => k !== key)
-  }
-}
-function handleRowClick(row) {
+function handleRowClick(row, _column, event) {
   const key = row?.key
   if (!key) return
+  // Ignore clicks originating from the checkbox area to avoid double-toggle
+  const target = event?.target
+  if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
   const idx = selectedKeys.value.indexOf(key)
   if (idx >= 0) {
     selectedKeys.value = selectedKeys.value.filter(k => k !== key)
@@ -223,7 +224,7 @@ function emitChange(row) {
   emit('change', row)
 }
 function decisionTagType(decision) {
-  return { delete: 'danger', edit: 'warning', ignore: 'info', keep: 'success' }[decision] || 'info'
+  return { delete: 'danger', edit: 'warning', ignore: 'info', keep: 'success' }[decision] || 'warning'
 }
 </script>
 

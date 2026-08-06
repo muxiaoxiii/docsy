@@ -87,7 +87,7 @@ export function elementDecisionText(decision) {
       ignore: '忽略识别',
       delete: '待删除',
       edit: '待编辑',
-    }[decision] || '保留'
+    }[decision] || '待确认'
   )
 }
 
