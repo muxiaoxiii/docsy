@@ -355,6 +355,16 @@ pub fn scan_package_to_runs_and_marks(
                     checkbox_like: node.checkbox_like,
                     option_label: node.option_label.clone(),
                 });
+            } else if node.checkbox_like {
+                marks.push(TemplateMark {
+                    id: id.clone(),
+                    part: part_name.clone(),
+                    run_index: node.run_index,
+                    text: node.text.clone(),
+                    context: String::new(),
+                    checkbox_like: true,
+                    option_label: node.option_label.clone(),
+                });
             }
 
             // 按段落聚合：同一段落内的 run 文本直接拼接，段落间用换行分隔

@@ -502,17 +502,11 @@ export function buildFields(fieldRows) {
     const key =
       rowUsage(row) === 'delete_text'
         ? `${type}:${row.rowId}`
-        : row.type === 'reference'
-          ? `${type}:${currentName.trim()}:${referenceSource?.mode || 'auto'}:${referenceSource?.sourceField || referenceSource?.sourceSemanticKey || ''}:${referenceSource?.sourceIndex ?? ''}`
-          : `${type}:${currentName.trim()}`
+        : `${type}:${currentName.trim()}`
     if (!byKey.has(key)) {
       byKey.set(key, {
         id: stableFieldId(
-          rowUsage(row) === 'delete_text'
-            ? row.rowId
-            : row.type === 'reference'
-              ? `${currentName}:${referenceSource?.mode || 'auto'}:${referenceSource?.sourceField || referenceSource?.sourceSemanticKey || ''}:${referenceSource?.sourceIndex ?? ''}`
-              : currentName,
+          rowUsage(row) === 'delete_text' ? row.rowId : currentName,
           type,
         ),
         name: rowUsage(row) === 'delete_text' ? `delete_${row.rowId}` : currentName.trim(),
@@ -540,17 +534,15 @@ export function buildFields(fieldRows) {
       const existing = byKey.get(key)
       if (existing && !isMarkerType(type) && rowUsage(row) !== 'delete_text') {
         existing.fillAllPositions = true
-        existing.type = 'reference'
-        existing.reference = {
-          sourceMode: 'field',
-          sourceField: existing.name,
-          sourceSemanticKey: '',
-          sourceIndex: null,
+        if (existing.type !== 'reference') {
+          existing.type = 'reference'
+          existing.reference = {
+            sourceMode: 'field',
+            sourceField: existing.name,
+            sourceSemanticKey: '',
+            sourceIndex: null,
+          }
         }
-        // Update ID to match the reference key format so downstream dedup
-        // checks see a consistent id → key mapping.
-        const refKey = `reference:${existing.name.trim()}:field:${existing.name.trim()}:`
-        existing.id = stableFieldId(refKey, 'reference')
       }
     }
     const field = byKey.get(key)
@@ -670,8 +662,9 @@ function safeExplicitLabel(row, fallbackName) {
 
 export function validateFieldRowsBeforeSave(fieldRows, marks) {
   const coveredMarks = new Set()
+  // Collect mark IDs from ALL rows (including disabled ones) — a disabled row
+  // still "covers" its mark (e.g. user set it to 保留原文 / ignore).
   for (const row of fieldRows) {
-    if (!row.enabled) continue
     for (const ref of row.markRefs || []) {
       if (ref?.markId) coveredMarks.add(ref.markId)
     }
