@@ -22,6 +22,9 @@
       :row-class-name="rowClassName"
       @row-click="handleRowClick"
       @sort-change="handleSortChange"
+      @mousemove="handleMouseMove"
+      @cell-mouse-enter="handleRowMouseEnter"
+      @cell-mouse-leave="handleRowMouseLeave"
     >
       <el-table-column width="44" align="center">
         <template #header>
@@ -72,6 +75,11 @@
         </template>
       </el-table-column>
     </el-table>
+    <div
+      v-if="shiftHeld && hoverRowIndex >= 0"
+      class="shift-range-tooltip"
+      :style="{ left: tooltipPos.x + 12 + 'px', top: tooltipPos.y + 12 + 'px' }"
+    >选取到这</div>
     <p class="hint-text">点击行或勾选框切换选中，点击表格外取消全部选择</p>
     <template #footer>
       <el-button @click="visibleModel = false">完成</el-button>
@@ -80,7 +88,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { elementDecisionText, elementKindText } from '../composables/existingPdfElements.js'
 import { naturalCompare } from '../composables/useEvidencePdfSession.js'
 
@@ -94,6 +102,21 @@ const selectedKeys = ref([])
 const visibleModel = computed({ get: () => props.visible, set: (value) => emit('update:visible', value) })
 const fileFilter = ref('')
 const sortState = ref({ prop: '', order: '' })
+// Shift+click range selection state
+const lastClickedIndex = ref(-1)
+const shiftHeld = ref(false)
+const hoverRowIndex = ref(-1)
+const tooltipPos = ref({ x: 0, y: 0 })
+
+// Global shift key tracking
+function onKeyDown(e) { if (e.key === 'Shift') shiftHeld.value = true }
+function onKeyUp(e) { if (e.key === 'Shift') shiftHeld.value = false }
+window.addEventListener('keydown', onKeyDown)
+window.addEventListener('keyup', onKeyUp)
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onKeyUp)
+})
 const fileNames = computed(() => [...new Set(props.rows.map(r => r.fileName))].sort())
 const KIND_ORDER = { header: 0, footerText: 1, pageNumber: 2 }
 function handleSortChange({ prop, order }) {
@@ -154,11 +177,15 @@ watch(
   () => [props.visible, props.filter],
   () => {
     selectedKeys.value = []
+    lastClickedIndex.value = -1
   },
 )
 
-function rowClassName({ row }) {
-  return row.lowConfidence ? 'low-confidence-row' : ''
+function rowClassName({ row, rowIndex }) {
+  const classes = []
+  if (row.lowConfidence) classes.push('low-confidence-row')
+  if (shiftHeld.value && hoverRowIndex.value === rowIndex) classes.push('shift-cursor')
+  return classes.join(' ')
 }
 function toggleAll(value) {
   if (value) {
@@ -180,6 +207,7 @@ function selectUndecided() {
 }
 function clearSelection() {
   selectedKeys.value = []
+  lastClickedIndex.value = -1
 }
 function selectBySequence(row) {
   const { kind, detectedText } = row.element
@@ -224,12 +252,41 @@ function handleRowClick(row, _column, event) {
   // Ignore clicks originating from the checkbox area to avoid double-toggle
   const target = event?.target
   if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
-  const idx = selectedKeys.value.indexOf(key)
-  if (idx >= 0) {
-    selectedKeys.value = selectedKeys.value.filter(k => k !== key)
+
+  const currentIndex = filteredRows.value.findIndex(r => r.key === key)
+  if (currentIndex < 0) return
+
+  if (event.shiftKey && lastClickedIndex.value >= 0) {
+    // Shift+click: range select from lastClickedIndex to currentIndex
+    const start = Math.min(lastClickedIndex.value, currentIndex)
+    const end = Math.max(lastClickedIndex.value, currentIndex)
+    const rangeKeys = filteredRows.value.slice(start, end + 1).map(r => r.key)
+    const selectedSet = new Set(selectedKeys.value)
+    rangeKeys.forEach(k => selectedSet.add(k))
+    selectedKeys.value = [...selectedSet]
   } else {
-    selectedKeys.value = [...selectedKeys.value, key]
+    // Normal click: toggle current row
+    const idx = selectedKeys.value.indexOf(key)
+    if (idx >= 0) {
+      selectedKeys.value = selectedKeys.value.filter(k => k !== key)
+    } else {
+      selectedKeys.value = [...selectedKeys.value, key]
+    }
+    lastClickedIndex.value = currentIndex
   }
+}
+function handleMouseMove(event) {
+  tooltipPos.value = { x: event.clientX, y: event.clientY }
+}
+function handleRowMouseEnter(_row, _column, event) {
+  const tr = event.target.closest('tr')
+  if (tr) {
+    const rowIndex = Array.from(tr.parentElement.children).indexOf(tr)
+    hoverRowIndex.value = rowIndex
+  }
+}
+function handleRowMouseLeave() {
+  hoverRowIndex.value = -1
 }
 function applyDecision(decision) {
   const selected = new Set(selectedKeys.value)
@@ -273,5 +330,19 @@ function decisionTagType(decision) {
 }
 :deep(.low-confidence-row:hover) {
   background: var(--docsy-surface-muted-hover, #f0f0f0);
+}
+:deep(.shift-cursor) {
+  cursor: crosshair;
+}
+.shift-range-tooltip {
+  position: fixed;
+  z-index: 99999;
+  background: var(--docsy-primary, #409eff);
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
 }
 </style>
