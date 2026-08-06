@@ -1366,7 +1366,7 @@ async function saveTemplate(overwrite = false) {
     args: {
       // Editing a library template has no source Word file: pass the docsytpl
       // package itself so the backend rebuilds from its embedded document.
-      sourceDocx: isEditingExisting
+      sourceDocx: isEditingExisting || !sourceDocx.value
         ? editingLibraryTemplatePath.value || templatePath.value
         : sourceDocx.value,
       outputPath: isEditingExisting ? editingLibraryTemplatePath.value : '',
