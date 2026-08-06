@@ -32,19 +32,19 @@
         </template>
       </el-table-column>
       <el-table-column column-key="fileName" prop="fileName" label="文件" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }" />
-      <el-table-column column-key="kind" label="类型" width="86" sortable>
+      <el-table-column column-key="kind" prop="kind" label="类型" width="86" sortable>
         <template #default="{ row }">{{ elementKindText(row.element.kind) }}</template>
       </el-table-column>
-      <el-table-column column-key="detectedText" label="检测文字" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
+      <el-table-column column-key="detectedText" prop="detectedText" label="检测文字" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
         <template #default="{ row }">{{ row.element.detectedText || '-' }}</template>
       </el-table-column>
-      <el-table-column column-key="pageStart" label="页段" width="90" sortable>
+      <el-table-column column-key="pageStart" prop="pageStart" label="页段" width="90" sortable>
         <template #default="{ row }">{{ row.element.pageStart }}-{{ row.element.pageEnd }}</template>
       </el-table-column>
-      <el-table-column column-key="source" label="来源" width="105" sortable>
+      <el-table-column column-key="source" prop="source" label="来源" width="105" sortable>
         <template #default="{ row }">{{ row.element.source === 'artifact' ? '标准结构' : '页面文本' }}</template>
       </el-table-column>
-      <el-table-column column-key="decision" label="处理" width="100" sortable>
+      <el-table-column column-key="decision" prop="decision" label="处理" width="100" sortable>
         <template #default="{ row }">
           <el-tag :type="decisionTagType(row.element.decision)" size="small">
             {{ elementDecisionText(row.element.decision) }}
