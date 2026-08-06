@@ -76,7 +76,7 @@
               <strong class="field-name">{{ fillFieldLabel(field) }}</strong>
             </el-tooltip>
             <span v-if="field.posIndex > 0" class="position-label fill-all-tag">位置{{ field.posIndex + 1 }}</span>
-            <span v-if="field.semanticKey && field.semanticKey !== field.name && !isGeneratedFieldName(field.name)" class="semantic-key-tag">{{ field.semanticKey }}</span>
+
             <em v-if="field.required" class="fill-all-tag">必填</em>
             <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
               同名字段，自动同步
@@ -372,7 +372,6 @@ import { ArrowDown } from '@element-plus/icons-vue'
 import {
   shortDateTime,
   fillFieldLabel,
-  isGeneratedFieldName,
   FIELD_TYPE_GROUPS,
   typeGroupOf,
   typeGroupSubOptions,
@@ -949,15 +948,7 @@ p {
   color: #f56c6c;
 }
 
-.semantic-key-tag {
-  display: inline-block;
-  padding: 0 4px;
-  border-radius: 2px;
-  font-size: 10px;
-  color: #7a8a9e;
-  background: #edf2f8;
-  flex-shrink: 0;
-}
+
 
 .fill-structure-hints {
   display: flex;
