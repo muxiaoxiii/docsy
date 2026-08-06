@@ -171,6 +171,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
+import { writeTextFile } from '@tauri-apps/plugin-fs'
 import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
 import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 import {
@@ -1308,7 +1309,7 @@ async function runDiagnostic() {
     const logDir = logFilePath.replace(/[/\\][^/\\]+$/, '')
     const outPath = `${logDir}/template-diagnostic.json`
     const json = JSON.stringify(diagnostic, null, 2)
-    await invoke('write_text_file', { path: outPath, content: json })
+    await writeTextFile(outPath, json)
     ElMessage.success(`诊断已写入 ${outPath}`)
   } catch (err) {
     ElMessage.error(`诊断写入失败：${err}`)
