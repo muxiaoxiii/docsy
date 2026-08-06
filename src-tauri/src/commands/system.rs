@@ -125,10 +125,7 @@ pub fn respond_conversion_timeout(
     state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
     continue_waiting: bool,
 ) -> Result<(), String> {
-    state.response.store(
-        if continue_waiting { 1 } else { 2 },
-        std::sync::atomic::Ordering::SeqCst,
-    );
+    state.set_response(if continue_waiting { 1 } else { 2 });
     Ok(())
 }
 

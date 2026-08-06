@@ -134,7 +134,9 @@ pub struct ConversionState {
     /// Set to true when the conversion has timed out and is waiting for user response.
     pub timed_out: AtomicBool,
     /// User response: 0 = waiting, 1 = continue, 2 = cancel.
-    pub response: AtomicU8,
+    /// MDG-001: 改用 Condvar 替代忙等待轮询。
+    response: std::sync::Mutex<u8>,
+    response_cvar: std::sync::Condvar,
     /// Process ID of the running conversion (for potential kill).
     pub pid: AtomicU64,
 }
@@ -143,41 +145,42 @@ impl ConversionState {
     pub fn new() -> Self {
         Self {
             timed_out: AtomicBool::new(false),
-            response: AtomicU8::new(0),
+            response: std::sync::Mutex::new(0),
+            response_cvar: std::sync::Condvar::new(),
             pid: AtomicU64::new(0),
         }
     }
 
     pub fn reset(&self) {
         self.timed_out.store(false, Ordering::SeqCst);
-        self.response.store(0, Ordering::SeqCst);
+        *self.response.lock().unwrap_or_else(|e| e.into_inner()) = 0;
         self.pid.store(0, Ordering::SeqCst);
+    }
+
+    /// 设置用户响应并通知等待线程。
+    pub fn set_response(&self, value: u8) {
+        let mut state = self.response.lock().unwrap_or_else(|e| e.into_inner());
+        *state = value;
+        self.response_cvar.notify_all();
     }
 
     /// Called by backend: signal timeout and wait for user response.
     /// Returns true if user chose to continue, false if cancel.
+    /// MDG-001: 使用 Condvar 阻塞等待，不再忙等待轮询。
     pub fn wait_for_user_response(&self, app: &tauri::AppHandle) -> bool {
         self.timed_out.store(true, Ordering::SeqCst);
-        self.response.store(0, Ordering::SeqCst);
+        *self.response.lock().unwrap_or_else(|e| e.into_inner()) = 0;
 
         // Emit event to frontend
         let _ = app.emit("docsy-conversion-timeout", ());
 
-        // Poll for response (check every 500ms)
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            match self.response.load(Ordering::SeqCst) {
-                1 => {
-                    self.timed_out.store(false, Ordering::SeqCst);
-                    return true; // continue
-                }
-                2 => {
-                    self.timed_out.store(false, Ordering::SeqCst);
-                    return false; // cancel
-                }
-                _ => continue, // still waiting
-            }
+        // 阻塞等待用户响应（不再 500ms 轮询）
+        let mut state = self.response.lock().unwrap_or_else(|e| e.into_inner());
+        while *state == 0 {
+            state = self.response_cvar.wait(state).unwrap_or_else(|e| e.into_inner());
         }
+        self.timed_out.store(false, Ordering::SeqCst);
+        *state == 1 // true = continue, false = cancel
     }
 }
 
