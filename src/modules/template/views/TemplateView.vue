@@ -2396,8 +2396,13 @@ function completeField(field, query, callback) {
     .split(/\s+/)
     .filter(Boolean)
   const tokens = rawTokens.map(normalizeSuggestionSearchText).filter(Boolean)
+  const fullNormalized = normalizeSuggestionSearchText(query || '')
   const items = allFieldSuggestionItems(field)
-    .filter((item) => tokens.length === 0 || multiTokenMatches(item, tokens))
+    .filter((item) => {
+      if (tokens.length === 0) return true
+      if (fullNormalized.length > 0 && suggestionMatches(item, fullNormalized)) return true
+      return multiTokenMatches(item, tokens)
+    })
     .sort((a, b) => {
       if (tokens.length === 0) return (b.count || 0) - (a.count || 0)
       const aScore = matchScore(a, tokens)
@@ -2416,7 +2421,10 @@ function multiTokenMatches(item, tokens) {
 
 function suggestionMatches(item, normalizedKeyword) {
   const parts = [item.display, item.value, item.source].filter(Boolean)
-  return parts.some((part) => normalizeSuggestionSearchText(part).includes(normalizedKeyword))
+  return parts.some((part) => {
+    const normalized = normalizeSuggestionSearchText(part)
+    return normalized.includes(normalizedKeyword) || normalizedKeyword.includes(normalized)
+  })
 }
 
 function matchScore(item, tokens) {
@@ -2427,9 +2435,11 @@ function matchScore(item, tokens) {
     if (text.includes(token)) {
       score += 1
       if (text.startsWith(token)) score += 2
-      const allTokensMatch = tokens.every((t) => text.includes(t))
-      if (allTokensMatch && tokens.length > 1) score += 1
+    } else if (token.includes(text) && text.length > 0) {
+      score += 1
     }
+    const allTokensMatch = tokens.every((t) => text.includes(t) || (t.includes(text) && text.length > 0))
+    if (allTokensMatch && tokens.length > 1) score += 1
   }
   return score
 }

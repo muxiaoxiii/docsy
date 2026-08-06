@@ -231,14 +231,13 @@
                 :value="opt.value"
               />
             </el-select>
-            <el-input
+            <el-autocomplete
               v-else
               :model-value="getEntryValue(field)"
-              type="textarea"
-              :autosize="{ minRows: 1, maxRows: 6 }"
-              resize="none"
-              clearable
-              @input="setEntryValue(field, $event)"
+              size="small"
+              :fetch-suggestions="(query, cb) => $emit('complete-field', field, query, cb)"
+              @input="(val) => { setEntryValue(field, val); $emit('schedule-history-refresh') }"
+              @keyup.enter="$event.target.blur()"
             />
             <div v-if="templateStoredSuggestionItems(field).length" class="suggestion-row">
               <el-tag
