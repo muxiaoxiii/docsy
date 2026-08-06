@@ -72,18 +72,17 @@
           :class="{ 'duplicate-field': field._isDuplicate, 'follow-field': field.posIndex > 0 || (!field.editable && !field.isReference) }"
         >
           <div class="fill-field-header">
-            <strong>{{ fillFieldLabel(field) }}</strong>
-            <span v-if="field.posIndex > 0" class="position-label">位置 {{ field.posIndex + 1 }}</span>
-            <span v-if="field.semanticKey && field.semanticKey !== field.name">{{ field.semanticKey }}</span>
-            <em v-if="field.required">必填</em>
+            <el-tooltip :content="fillFieldLabel(field)" placement="top" :show-after="500" :disabled="fillFieldLabel(field).length < 12">
+              <strong class="field-name">{{ fillFieldLabel(field) }}</strong>
+            </el-tooltip>
+            <span v-if="field.posIndex > 0" class="position-label fill-all-tag">位置 {{ field.posIndex + 1 }}</span>
+            <span v-if="field.semanticKey && field.semanticKey !== field.name" class="semantic-key-label fill-all-tag">{{ field.semanticKey }}</span>
+            <em v-if="field.required" class="fill-all-tag">必填</em>
             <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
               同名字段，自动同步
             </el-tag>
-            <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0 && !hasSlotTypeOverride(field) && effectiveFieldType(field) === 'reference'" size="small" effect="plain" class="fill-all-tag">
-              {{ followerReferenceLabel(field) }}
-            </el-tag>
             <el-tag v-else-if="field.fillAllPositions && !hasSlotTypeOverride(field) && effectiveFieldType(field) === 'reference'" size="small" effect="plain" class="fill-all-tag">
-              填一次将自动填充到所有位置
+              {{ followerReferenceLabel(field) }}
             </el-tag>
           </div>
           <div class="fill-field-body">
@@ -203,7 +202,7 @@
                 filterable
                 clearable
                 class="reference-select-muted"
-                placeholder="从已填字段取值"
+                :placeholder="followerReferenceLabel(field)"
                 @update:model-value="$emit('reference-selection-change', field, $event)"
               >
                 <el-option
@@ -544,7 +543,7 @@ function followerReferenceLabel(field) {
     if (parsed.sourceField) return `引用：${parsed.sourceField}`
   }
   if (field.reference?.sourceField) return `引用：${field.reference.sourceField}`
-  return '引用首个位置'
+  return '引用'
 }
 
 function selectFieldOptions(field) {
@@ -914,20 +913,26 @@ p {
 
 .fill-field-header {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   align-items: center;
-  min-width: 0;
+  overflow: hidden;
 }
 
 .fill-field-header strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.fill-field-header .fill-all-tag {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .fill-field-header span,
 .fill-field-header em {
-  flex: 0 0 auto;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--docsy-surface-muted);
@@ -939,6 +944,11 @@ p {
 .fill-field-header em {
   background: #fef0f0;
   color: #f56c6c;
+}
+
+.semantic-key-label {
+  background: #ecf5ff !important;
+  color: #409eff !important;
 }
 
 .fill-structure-hints {

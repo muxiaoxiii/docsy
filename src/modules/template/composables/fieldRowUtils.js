@@ -902,12 +902,7 @@ export function isRenderableField(field) {
 
 export function fillFieldLabel(field) {
   if (!field) return ''
-  // Auto-generated names ("字段N") prefer the saved label (highlighted source
-  // text) so the fill page shows what was marked instead of a placeholder.
-  if (isGeneratedFieldName(field.name)) return field.label || field.name || ''
-  if (field.type === 'party_list') return field.name || field.label || ''
-  if (['前缀', '后缀', '连接符', '列表项'].includes(field.label)) return field.name || field.label || ''
-  return field.label || field.name || ''
+  return field.name || field.label || ''
 }
 
 export function previewFieldLabel(row) {
