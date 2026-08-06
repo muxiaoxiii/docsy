@@ -75,13 +75,13 @@
             <el-tooltip :content="fillFieldLabel(field)" placement="top" :show-after="500" :disabled="fillFieldLabel(field).length < 12">
               <strong class="field-name">{{ fillFieldLabel(field) }}</strong>
             </el-tooltip>
-            <span v-if="field.posIndex > 0" class="position-label fill-all-tag">位置 {{ field.posIndex + 1 }}</span>
-            <span v-if="field.semanticKey && field.semanticKey !== field.name" class="semantic-key-label fill-all-tag">{{ field.semanticKey }}</span>
+            <span v-if="field.posIndex > 0" class="position-label fill-all-tag">位置{{ field.posIndex + 1 }}</span>
+            <span v-if="field.semanticKey && field.semanticKey !== field.name && !isGeneratedFieldName(field.name)" class="semantic-key-tag">通用</span>
             <em v-if="field.required" class="fill-all-tag">必填</em>
             <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
               同名字段，自动同步
             </el-tag>
-            <el-tag v-else-if="field.fillAllPositions && !hasSlotTypeOverride(field) && effectiveFieldType(field) === 'reference'" size="small" effect="plain" class="fill-all-tag">
+            <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0 && !hasSlotTypeOverride(field) && effectiveFieldType(field) === 'reference'" size="small" effect="plain" class="fill-all-tag">
               {{ followerReferenceLabel(field) }}
             </el-tag>
           </div>
@@ -372,6 +372,7 @@ import { ArrowDown } from '@element-plus/icons-vue'
 import {
   shortDateTime,
   fillFieldLabel,
+  isGeneratedFieldName,
   FIELD_TYPE_GROUPS,
   typeGroupOf,
   typeGroupSubOptions,
@@ -543,6 +544,8 @@ function followerReferenceLabel(field) {
     if (parsed.sourceField) return `引用：${parsed.sourceField}`
   }
   if (field.reference?.sourceField) return `引用：${field.reference.sourceField}`
+  // fillAllPositions follower: reference is the primary position (same field name)
+  if (field.fillAllPositions && (field.posIndex ?? 0) > 0) return `引用：${field.name}`
   return '引用'
 }
 
