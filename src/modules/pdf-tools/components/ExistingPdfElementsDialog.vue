@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visibleModel" title="确认原有页眉、页脚和页码" width="min(1080px, 94vw)" append-to-body>
+  <el-dialog v-model="visibleModel" title="确认原有页眉、页脚和页码" width="min(1080px, 94vw)" append-to-body @click.self="clearSelection">
     <div class="decision-toolbar">
       <el-select v-model="fileFilter" size="small" placeholder="全部文件" clearable style="width: 200px">
         <el-option v-for="f in fileNames" :key="f" :label="f" :value="f" />
@@ -21,7 +21,7 @@
       @row-contextmenu="handleRowRightClick"
       @row-click="handleRowClick"
     >
-      <el-table-column width="44">
+      <el-table-column width="44" align="center">
         <template #header>
           <el-checkbox :model-value="allSelected" @change="toggleAll" />
         </template>
@@ -29,7 +29,7 @@
           <el-checkbox v-model="selectedKeys" :value="row.key" />
         </template>
       </el-table-column>
-      <el-table-column prop="fileName" label="文件" min-width="180" show-overflow-tooltip />
+      <el-table-column prop="fileName" label="文件" min-width="180" show-overflow-tooltip :tooltip-props="{ placement: 'right' }" />
       <el-table-column label="类型" width="86">
         <template #default="{ row }">{{ elementKindText(row.element.kind) }}</template>
       </el-table-column>
@@ -70,7 +70,7 @@
         </template>
       </el-table-column>
     </el-table>
-    <p class="hint-text">右键点击行可取消选择</p>
+    <p class="hint-text">左键点击行切换选中，右键点击行取消选中，点击表格外取消全部选择</p>
     <template #footer>
       <el-button @click="visibleModel = false">完成</el-button>
     </template>
