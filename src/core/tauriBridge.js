@@ -58,6 +58,17 @@ export async function tauriCall(command, args = {}) {
   }
 }
 
+// Raw Tauri call without Doclet animation events — for use in tight loops
+export async function tauriCallRaw(command, args = {}) {
+  try {
+    const result = await invoke(command, args)
+    return { ok: true, data: result }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: message }
+  }
+}
+
 export async function tauriCallSafe(command, args = {}) {
   const operationId = nextOperationId(command)
   emitOperationEvent('start', command, operationId)

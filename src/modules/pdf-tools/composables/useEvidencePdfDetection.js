@@ -1,5 +1,5 @@
 import { ElMessage } from 'element-plus'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { tauriCallSafe, tauriCallRaw } from '../../../core/tauriBridge.js'
 import { candidateTargetRange } from './useEvidencePdfSession.js'
 import { candidateIdentity, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
 
@@ -85,7 +85,7 @@ export function useEvidencePdfDetection({
   }
 
   async function detectFileHeaderFooter(file) {
-    return tauriCallSafe('detect_pdf_header_footer', {
+    return tauriCallRaw('detect_pdf_header_footer', {
       args: {
         inputPath: file.path,
         maxPages: DETECTION_SCAN_MAX_PAGES,
