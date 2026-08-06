@@ -1,5 +1,6 @@
 import { ElMessage } from 'element-plus'
-import { tauriCallSafe, setSuppressDoclet, emitOperationEvent } from '../../../core/tauriBridge.js'
+import { tauriCallSafe, tauriCallQuiet } from '../../../core/tauriBridge.js'
+import { emitOperationEvent } from '../../../core/tauriBridge.js'
 import { candidateTargetRange } from './useEvidencePdfSession.js'
 import { candidateIdentity, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
 
@@ -26,10 +27,9 @@ export function useEvidencePdfDetection({
     if (!overlayRows.value.length || detectingAllHeaderFooter.value) return
     detectingAllHeaderFooter.value = true
     detectionProgressText.value = ''
-    // Start Doclet animation — one continuous session for the entire detection
-    const batchOperationId = `detect_batch:${Date.now()}`
-    emitOperationEvent('start', 'detect_pdf_header_footer', batchOperationId)
-    setSuppressDoclet(true) // suppress per-file Doclet popups
+    // Start Doclet — continuous animation for entire detection batch
+    const docletId = `detect_batch:${Date.now()}`
+    emitOperationEvent('start', 'detect_pdf_header_footer', docletId)
     let success = 0
     let failed = 0
     const total = overlayRows.value.length
@@ -83,15 +83,15 @@ export function useEvidencePdfDetection({
       }
     } finally {
       clearInterval(timerId)
-      setSuppressDoclet(false) // re-enable Doclet for other operations
-      emitOperationEvent('finish', 'detect_pdf_header_footer', batchOperationId)
+      // Stop Doclet
+      emitOperationEvent('finish', 'detect_pdf_header_footer', docletId)
       detectingAllHeaderFooter.value = false
       detectionProgressText.value = ''
     }
   }
 
   async function detectFileHeaderFooter(file) {
-    return tauriCallSafe('detect_pdf_header_footer', {
+    return tauriCallQuiet('detect_pdf_header_footer', {
       args: {
         inputPath: file.path,
         maxPages: DETECTION_SCAN_MAX_PAGES,

@@ -58,12 +58,20 @@ export async function tauriCall(command, args = {}) {
   }
 }
 
-let suppressDoclet = false
-export function setSuppressDoclet(value) { suppressDoclet = value }
+// Call Tauri without triggering Doclet animation — for use in batch loops
+export async function tauriCallQuiet(command, args = {}) {
+  try {
+    const result = await invoke(command, args)
+    return { ok: true, data: result }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: message }
+  }
+}
 
 export async function tauriCallSafe(command, args = {}) {
   const operationId = nextOperationId(command)
-  if (!suppressDoclet) emitOperationEvent('start', command, operationId)
+  emitOperationEvent('start', command, operationId)
   try {
     const result = await invoke(command, args)
     return { ok: true, data: result }
@@ -77,7 +85,7 @@ export async function tauriCallSafe(command, args = {}) {
     void logError('tauri.bridge', `${command} failed`, details)
     return { ok: false, error: message, details }
   } finally {
-    if (!suppressDoclet) emitOperationEvent('finish', command, operationId)
+    emitOperationEvent('finish', command, operationId)
   }
 }
 
