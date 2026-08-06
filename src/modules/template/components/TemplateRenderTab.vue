@@ -70,7 +70,6 @@
           :key="`${field.id}#${field.posIndex ?? 0}`"
           class="fill-field-card"
           :class="{ 'duplicate-field': field._isDuplicate, 'follow-field': field.posIndex > 0 || (!field.editable && !field.isReference) }"
-          :style="{ borderLeftColor: GROUP_COLORS[field._colorGroupIndex % GROUP_COLORS.length] }"
         >
           <div class="fill-field-header">
             <el-tooltip :content="fillFieldLabel(field)" placement="top" :show-after="500" :disabled="fillFieldLabel(field).length < 12">
@@ -433,9 +432,6 @@ const emit = defineEmits([
   'save-field-date-format',
   'toggle-fill-preview',
 ])
-
-// ── Color groups for same-name field cards ───────────────────────────────────
-const GROUP_COLORS = ['#67c23a', '#409eff', '#e6a23c', '#f56c6c', '#909399', '#b37feb', '#36cfc9', '#ff85c0']
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

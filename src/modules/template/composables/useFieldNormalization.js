@@ -547,6 +547,10 @@ export function buildFields(fieldRows) {
           sourceSemanticKey: '',
           sourceIndex: null,
         }
+        // Update ID to match the reference key format so downstream dedup
+        // checks see a consistent id → key mapping.
+        const refKey = `reference:${existing.name.trim()}:field:${existing.name.trim()}:`
+        existing.id = stableFieldId(refKey, 'reference')
       }
     }
     const field = byKey.get(key)

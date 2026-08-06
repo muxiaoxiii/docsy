@@ -326,15 +326,6 @@ const renderableTemplateFields = computed(() => {
       field._isDuplicate = false
     }
   }
-  // Assign color group index — same name gets same color
-  const colorMap = new Map()
-  let colorIdx = 0
-  for (const field of fields) {
-    if (!colorMap.has(field.name)) {
-      colorMap.set(field.name, colorIdx++)
-    }
-    field._colorGroupIndex = colorMap.get(field.name)
-  }
   return fields
 })
 const fieldSearch = ref('')
@@ -452,6 +443,17 @@ function setFieldTypeOverride(field, type) {
     return
   }
   typeOverrides[slotKey] = type
+  persistFieldTypeToManifest(field, type)
+}
+
+function persistFieldTypeToManifest(field, type) {
+  if (!templateManifest.value?.fields) return
+  const manifestField = templateManifest.value.fields.find((f) => f.id === field.id)
+  if (!manifestField) return
+  const skip = ['reference', 'party_list', 'checkbox', 'radio_group', 'checkbox_group', 'prefix', 'suffix', 'delete_text', 'ignore']
+  if (skip.includes(type)) return
+  if (manifestField.type === type) return
+  manifestField.type = type
 }
 const rendering = ref(false)
 const historyContext = ref({
@@ -1679,6 +1681,32 @@ function manifestToFieldRows(manifest) {
   return rows
 }
 
+function autoSetReferenceForDuplicateRows(rows) {
+  const seen = new Map()
+  for (const row of rows) {
+    const name = row.name?.trim()
+    if (!name) continue
+    if (['reference', 'party_list', 'checkbox', 'radio_group', 'checkbox_group', 'prefix', 'suffix', 'delete_text', 'ignore'].includes(row.type)) {
+      if (!seen.has(name)) seen.set(name, true)
+      continue
+    }
+    if (seen.has(name)) {
+      row.type = 'reference'
+      row.required = false
+      row.optionalWhenEmpty = false
+      row.partyItems = []
+      row.referenceSourceMode = 'field'
+      row.referenceSourceField = name
+      row.referenceSourceSemanticKey = ''
+      row.referenceSourceIndex = null
+      row.referenceSourceKey = referenceSourceKey('field', name, null)
+    } else {
+      seen.set(name, true)
+    }
+  }
+  return rows
+}
+
 function createSimpleFieldRow(field, options, markRef, refIndex) {
   const markId = markRef?.markId || field.marks?.[0] || ''
   const suffix = refIndex != null && refIndex > 0 ? `:ref${refIndex}` : ''
@@ -1800,7 +1828,7 @@ async function editTemplateFromLibrary(item) {
 
   // Convert manifest fields back to editable fieldRows
   const rows = manifestToFieldRows(manifest)
-  fieldRows.value = rows
+  fieldRows.value = autoSetReferenceForDuplicateRows(rows)
 
   editingLibraryTemplatePath.value = item.path
   activeTab.value = 'build'
