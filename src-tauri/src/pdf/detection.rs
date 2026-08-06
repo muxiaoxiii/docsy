@@ -1239,6 +1239,14 @@ fn build_candidates(
     }
     candidates = merged;
 
+    // Single-page files: content-text heuristics are unreliable (no repetition
+    // across pages to confirm).  Keep only page-number candidates — they may
+    // still be meaningful when assembling a cross-file sequence.  Artifact
+    // candidates are handled separately and never enter build_candidates.
+    if pages_analyzed <= 1 {
+        candidates.retain(|c| c.labels.iter().any(|l| l == "page-number"));
+    }
+
     candidates.sort_by(|a, b| {
         b.confidence
             .total_cmp(&a.confidence)
@@ -2069,9 +2077,19 @@ mod tests {
             footers: vec![],
         }];
 
+        // Single-page file: content-text non-page-number candidates are filtered out
         let candidates = build_candidates(&pages, "header", 1);
-        assert_eq!(candidates[0].count, 1);
-        assert!(!candidates[0].repeating);
+        assert!(candidates.is_empty(), "single-page non-page-number candidates should be filtered");
+
+        // Multi-page file: candidates are preserved
+        let pages_2 = vec![
+            PageDetection { page: 1, width: 595.0, height: 842.0, headers: vec![line(1)], footers: vec![] },
+            PageDetection { page: 2, width: 595.0, height: 842.0, headers: vec![line(2)], footers: vec![] },
+        ];
+        let candidates_2 = build_candidates(&pages_2, "header", 2);
+        assert_eq!(candidates_2.len(), 1);
+        assert_eq!(candidates_2[0].count, 2);
+        assert!(candidates_2[0].repeating);
     }
 
     #[test]

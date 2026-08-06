@@ -17,6 +17,7 @@ export function candidateKey(candidate) {
 export function useEvidencePdfDetection({
   overlayRows,
   detectingAllHeaderFooter,
+  detectionProgressText,
   cleanupHeaderHeightMm,
   cleanupFooterHeightMm,
 }) {
@@ -24,12 +25,14 @@ export function useEvidencePdfDetection({
     const silent = Boolean(options.silent)
     if (!overlayRows.value.length || detectingAllHeaderFooter.value) return
     detectingAllHeaderFooter.value = true
+    detectionProgressText.value = ''
     let success = 0
     let failed = 0
+    const total = overlayRows.value.length
     try {
-      for (const file of overlayRows.value) {
-        file.statusText = '检测中'
-        file.statusType = 'warning'
+      for (let i = 0; i < total; i++) {
+        const file = overlayRows.value[i]
+        detectionProgressText.value = `正在检测 ${i + 1}/${total} 个文件...`
         const result = await detectFileHeaderFooter(file)
         if (result.ok) {
           try {
@@ -59,6 +62,7 @@ export function useEvidencePdfDetection({
       }
     } finally {
       detectingAllHeaderFooter.value = false
+      detectionProgressText.value = ''
     }
   }
 

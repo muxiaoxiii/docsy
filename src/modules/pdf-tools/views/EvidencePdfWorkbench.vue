@@ -43,8 +43,8 @@
       <div v-if="detectingAllHeaderFooter" class="local-processing">
         <span class="processing-spinner" />
         <div>
-          <strong>正在检测导入的文件</strong>
-          <p>正在读取页眉页脚信息，完成后会显示在下方文件列表中。</p>
+          <strong>{{ detectionProgressText || '正在检测导入的文件...' }}</strong>
+          <p>正在读取页眉页脚信息，完成后会统一显示在下方文件列表中。</p>
         </div>
       </div>
 
@@ -865,6 +865,37 @@ import { useHistory } from '../../../core/composables/useHistory.js'
 import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
+/** Parse a page number value from detected text (e.g. "1/10 页" → 1, "第3页" → 3). */
+function parsePageNumberValue(text) {
+  if (!text) return null
+  const trimmed = String(text).trim()
+  // Fraction: "1/10 页" or "1/10"
+  const slashMatch = trimmed.match(/^(\d+)\s*[/／∕]\s*\d+/)
+  if (slashMatch) return parseInt(slashMatch[1], 10)
+  // Chinese: "第3页"
+  const cnMatch = trimmed.match(/第\s*(\d+)\s*页/)
+  if (cnMatch) return parseInt(cnMatch[1], 10)
+  // English: "Page 5 of 20"
+  const enMatch = trimmed.match(/(?:page|p)\s*(\d+)\s*(?:of|\/)/i)
+  if (enMatch) return parseInt(enMatch[1], 10)
+  // Standalone number (1-4 digits)
+  const numMatch = trimmed.match(/^(\d{1,4})$/)
+  if (numMatch) return parseInt(numMatch[1], 10)
+  // Roman numerals
+  const upper = trimmed.toUpperCase()
+  if (/^[IVXLCDM]+$/.test(upper) && upper.length <= 8) {
+    const vals = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 }
+    let result = 0
+    for (let i = 0; i < upper.length; i++) {
+      const cur = vals[upper[i]] || 0
+      const nxt = vals[upper[i + 1]] || 0
+      result += nxt > cur ? -cur : cur
+    }
+    if (result > 0) return result
+  }
+  return null
+}
+
 const props = defineProps({
   workflow: {
     type: String,
@@ -1175,6 +1206,7 @@ const previewHeightMm = computed(() => {
 const truePreview = ref(null)
 const truePreviewLoading = ref(false)
 const detectingAllHeaderFooter = ref(false)
+const detectionProgressText = ref('')
 const editingHeaderPath = ref('')
 const editingFooterPath = ref('')
 const editingExistingHeaderPath = ref('')
@@ -1420,16 +1452,40 @@ const autoCleanupFooterEnabled = computed(() =>
   ),
 )
 const hasDetectedExistingHeaderFooter = computed(() => overlayFiles.value.some((file) => hasExistingHeaderFooter(file)))
-const existingElementRows = computed(() =>
-  overlayFiles.value.flatMap((file) =>
-    (file.existingElements || []).map((element) => ({
-      key: `${file.path}|${elementIdentity(element)}`,
-      file,
-      fileName: file.name,
-      element,
-    })),
-  ),
-)
+const existingElementRows = computed(() => {
+  // Cross-file page number sequence validation for single-page files:
+  // collect all page number values across files, then for each single-page
+  // file's page-number candidate, check if it forms a continuous sequence
+  // (±1) with another file's page number.  If not, mark as low confidence.
+  const allPnValues = new Set()
+  for (const file of overlayFiles.value) {
+    for (const el of file.existingElements || []) {
+      if (el.kind === 'pageNumber' && el.pageStart === el.pageEnd) {
+        const value = parsePageNumberValue(el.detectedText)
+        if (value != null) allPnValues.add(value)
+      }
+    }
+  }
+  return overlayFiles.value.flatMap((file) =>
+    (file.existingElements || []).map((element) => {
+      let lowConfidence = element.lowConfidence
+      if (element.kind === 'pageNumber' && element.pageStart === element.pageEnd) {
+        const value = parsePageNumberValue(element.detectedText)
+        if (value != null) {
+          const hasAdjacent = allPnValues.has(value - 1) || allPnValues.has(value + 1)
+          lowConfidence = !hasAdjacent
+        }
+      }
+      return {
+        key: `${file.path}|${elementIdentity(element)}`,
+        file,
+        fileName: file.name,
+        element,
+        lowConfidence,
+      }
+    }),
+  )
+})
 const existingHeaderCount = computed(
   () => existingElementRows.value.filter((row) => row.element.kind === 'header').length,
 )
@@ -1584,6 +1640,7 @@ const {
 } = useEvidencePdfDetection({
   overlayRows,
   detectingAllHeaderFooter,
+  detectionProgressText,
   cleanupHeaderHeightMm,
   cleanupFooterHeightMm,
 })
@@ -2394,7 +2451,7 @@ function confirmAllExistingElements() {
   let count = 0
   for (const file of overlayFiles.value) {
     for (const el of file.existingElements || []) {
-      if (!el.decision) {
+      if (!el.decision && !el.lowConfidence) {
         el.decision = 'keep'
         count++
       }

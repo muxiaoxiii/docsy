@@ -18,6 +18,7 @@
       size="small"
       max-height="58vh"
       row-key="key"
+      :row-class-name="rowClassName"
       @row-contextmenu="handleRowRightClick"
       @row-click="handleRowClick"
     >
@@ -92,6 +93,12 @@ const visibleModel = computed({ get: () => props.visible, set: (value) => emit('
 const fileFilter = ref('')
 const fileNames = computed(() => [...new Set(props.rows.map(r => r.fileName))].sort())
 const KIND_ORDER = { header: 0, footerText: 1, pageNumber: 2 }
+// Sort priority within each file/kind group: decided > normal > lowConfidence
+function decisionSortPriority(row) {
+  if (row.element.decision) return 0   // already decided (keep/ignore/delete/edit)
+  if (row.lowConfidence) return 2      // low confidence, undecided → bottom
+  return 1                              // normal, undecided
+}
 const filteredRows = computed(() => {
   let rows = props.rows
   if (props.filter !== 'all') {
@@ -102,12 +109,14 @@ const filteredRows = computed(() => {
     }
   }
   if (fileFilter.value) rows = rows.filter(row => row.fileName === fileFilter.value)
-  // Sort: by fileName → by kind (header < footer < pageNumber) → by pageStart
+  // Sort: by fileName → by kind → by decision priority → by pageStart
   return [...rows].sort((a, b) => {
     const fa = a.fileName || '', fb = b.fileName || ''
     if (fa !== fb) return fa.localeCompare(fb)
     const ka = KIND_ORDER[a.element.kind] ?? 9, kb = KIND_ORDER[b.element.kind] ?? 9
     if (ka !== kb) return ka - kb
+    const pa = decisionSortPriority(a), pb = decisionSortPriority(b)
+    if (pa !== pb) return pa - pb
     return (a.element.pageStart || 0) - (b.element.pageStart || 0)
   })
 })
@@ -122,8 +131,18 @@ watch(
   },
 )
 
+function rowClassName({ row }) {
+  return row.lowConfidence ? 'low-confidence-row' : ''
+}
 function toggleAll(value) {
-  selectedKeys.value = value ? filteredRows.value.map((row) => row.key) : []
+  if (value) {
+    // Select all except low-confidence rows (they must be explicitly chosen)
+    selectedKeys.value = filteredRows.value
+      .filter((row) => !row.lowConfidence)
+      .map((row) => row.key)
+  } else {
+    selectedKeys.value = []
+  }
 }
 function selectAll() {
   toggleAll(true)
@@ -219,5 +238,11 @@ function decisionTagType(decision) {
   margin: 8px 0 0;
   font-size: 12px;
   color: var(--docsy-text-muted, #999);
+}
+:deep(.low-confidence-row) {
+  opacity: 0.6;
+}
+:deep(.low-confidence-row:hover) {
+  opacity: 0.8;
 }
 </style>

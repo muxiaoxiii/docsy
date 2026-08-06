@@ -4,21 +4,33 @@ export const EXISTING_ELEMENT_DECISIONS = ['keep', 'ignore', 'delete', 'edit']
 export function detectedElementFromCandidate(candidate, kind, index = 0) {
   const range = candidate?.pageRange || {}
   const text = String(candidate?.text || candidate?.normalizedText || '')
+  const confidence = Number(candidate?.confidence || 0)
+  const source = candidate?.source || 'content-text'
+  const pageStart = Number(range.start || candidate?.bbox?.page || 1)
+  const pageEnd = Number(range.end || range.start || candidate?.bbox?.page || 1)
+  // Low-confidence: either the score is below threshold, or this is a
+  // single-page file where content-text heuristics have no repetition to
+  // validate (page-number candidates from single pages are still useful for
+  // cross-file sequence assembly, so they are excluded).
+  const isPageNumber = (candidate?.labels || []).includes('page-number')
+  const isSinglePageContentText = source === 'content-text' && pageStart === pageEnd && !isPageNumber
+  const lowConfidence = confidence < 0.3 || isSinglePageContentText
   return {
     id: `${kind}|${candidateIdentity(candidate)}|${index}`,
     kind,
     detectedText: text,
     editedText: text,
     normalizedText: String(candidate?.normalizedText || text),
-    source: candidate?.source || 'content-text',
+    source,
     artifactId: candidate?.artifactId || null,
     docsyKind: candidate?.docsyKind || null,
     bbox: candidate?.bbox || null,
     fontSize: Number(candidate?.fontSize || 0) || null,
-    pageStart: Number(range.start || candidate?.bbox?.page || 1),
-    pageEnd: Number(range.end || range.start || candidate?.bbox?.page || 1),
+    pageStart,
+    pageEnd,
     count: Number(candidate?.count || 0),
-    confidence: Number(candidate?.confidence || 0),
+    confidence,
+    lowConfidence,
     labels: [...(candidate?.labels || [])],
     sequenceForm: candidate?.sequenceForm || null,
     hasTotal: Boolean(candidate?.hasTotal),
