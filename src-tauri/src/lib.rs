@@ -4,6 +4,7 @@ mod docx_template;
 mod external;
 mod ffmpeg;
 mod image_paddler;
+mod operations;
 mod pdf;
 mod services;
 mod sort_utils;
@@ -192,6 +193,7 @@ pub fn run() {
 
     let conversion_state = Arc::new(ConversionState::new());
     let subprocess_registry = Arc::new(SubprocessRegistry::new());
+    let operation_manager = Arc::new(operations::OperationManager::new());
     let _ = SUBPROCESS_REGISTRY.set(subprocess_registry.clone());
 
     tauri::Builder::default()
@@ -200,6 +202,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(conversion_state)
         .manage(subprocess_registry)
+        .manage(operation_manager)
         .setup(|app| {
             let _ = APP_HANDLE.set(app.handle().clone());
             Ok(())

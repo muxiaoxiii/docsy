@@ -16,6 +16,48 @@ where
         .map_err(|e| e.to_string())
 }
 
+/// 通用操作管理封装。替代 run_blocking，自动注册/注销操作。
+///
+/// 与 run_blocking 并存：
+/// - 快速命令（inspect、get_page_count 等）继续用 run_blocking
+/// - 长时间命令（批量渲染、PDF 处理等）用 run_managed 获得取消能力
+///
+/// # 用法（示意）
+/// ```ignore
+/// run_managed(&manager, "my_long_operation", Some("op-1".into()), |token| {
+///     for item in items {
+///         if token.is_cancelled() {
+///             return Err(anyhow::anyhow!("操作已取消"));
+///         }
+///         process(item)?;
+///     }
+///     Ok(result)
+/// }).await
+/// ```
+pub async fn run_managed<T, F>(
+    manager: &crate::operations::OperationManager,
+    command: &str,
+    operation_id: Option<String>,
+    task: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(tokio_util::sync::CancellationToken) -> anyhow::Result<T> + Send + 'static,
+{
+    let op_id = operation_id.unwrap_or_else(|| {
+        format!("{}:auto", command)
+    });
+    let token = manager.begin(&op_id, command);
+
+    let result = tauri::async_runtime::spawn_blocking(move || task(token))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string());
+
+    manager.finish(&op_id);
+    result
+}
+
 pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
     tauri::generate_handler![
         // pdf
