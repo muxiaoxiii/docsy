@@ -311,6 +311,13 @@ const renderableTemplateFields = computed(() => {
       if (seenNames.has(field.name)) {
         field._isDuplicate = true
         field._primaryFieldName = field.name
+        // Auto-set reference type for duplicate follower fields (matches buildFields behavior)
+        if (field.type !== 'reference' && !['marker', 'prefix', 'suffix', 'delete_text', 'ignore'].includes(field.type)) {
+          field.type = 'reference'
+          if (!field.reference) {
+            field.reference = { sourceMode: 'field', sourceField: field.name, sourceSemanticKey: '', sourceIndex: null }
+          }
+        }
       } else {
         field._isDuplicate = false
         seenNames.add(field.name)
@@ -318,6 +325,15 @@ const renderableTemplateFields = computed(() => {
     } else {
       field._isDuplicate = false
     }
+  }
+  // Assign color group index — same name gets same color
+  const colorMap = new Map()
+  let colorIdx = 0
+  for (const field of fields) {
+    if (!colorMap.has(field.name)) {
+      colorMap.set(field.name, colorIdx++)
+    }
+    field._colorGroupIndex = colorMap.get(field.name)
   }
   return fields
 })
