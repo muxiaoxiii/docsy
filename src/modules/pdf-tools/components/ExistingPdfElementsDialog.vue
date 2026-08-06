@@ -21,6 +21,7 @@
       row-key="key"
       :row-class-name="rowClassName"
       @row-click="handleRowClick"
+      @sort-change="handleSortChange"
     >
       <el-table-column width="44" align="center">
         <template #header>
@@ -30,20 +31,20 @@
           <el-checkbox v-model="selectedKeys" :value="row.key" />
         </template>
       </el-table-column>
-      <el-table-column prop="fileName" label="文件" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }" />
-      <el-table-column label="类型" width="86" :sort-method="(a, b) => a.element.kind.localeCompare(b.element.kind)" sortable>
+      <el-table-column column-key="fileName" prop="fileName" label="文件" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }" />
+      <el-table-column column-key="kind" label="类型" width="86" sortable>
         <template #default="{ row }">{{ elementKindText(row.element.kind) }}</template>
       </el-table-column>
-      <el-table-column label="检测文字" min-width="180" sortable :sort-method="(a, b) => (a.element.detectedText || '').localeCompare(b.element.detectedText || '')" show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
+      <el-table-column column-key="detectedText" label="检测文字" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
         <template #default="{ row }">{{ row.element.detectedText || '-' }}</template>
       </el-table-column>
-      <el-table-column label="页段" width="90" sortable :sort-method="(a, b) => (a.element.pageStart || 0) - (b.element.pageStart || 0)">
+      <el-table-column column-key="pageStart" label="页段" width="90" sortable>
         <template #default="{ row }">{{ row.element.pageStart }}-{{ row.element.pageEnd }}</template>
       </el-table-column>
-      <el-table-column label="来源" width="105" sortable :sort-method="(a, b) => (a.element.source || '').localeCompare(b.element.source || '')">
+      <el-table-column column-key="source" label="来源" width="105" sortable>
         <template #default="{ row }">{{ row.element.source === 'artifact' ? '标准结构' : '页面文本' }}</template>
       </el-table-column>
-      <el-table-column label="处理" width="100" sortable :sort-method="(a, b) => (a.element.decision || 'zzz').localeCompare(b.element.decision || 'zzz')">
+      <el-table-column column-key="decision" label="处理" width="100" sortable>
         <template #default="{ row }">
           <el-tag :type="decisionTagType(row.element.decision)" size="small">
             {{ elementDecisionText(row.element.decision) }}
@@ -81,6 +82,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { elementDecisionText, elementKindText } from '../composables/existingPdfElements.js'
+import { naturalCompare } from '../composables/useEvidencePdfSession.js'
 
 const props = defineProps({
   visible: { type: Boolean, required: true },
@@ -91,8 +93,23 @@ const emit = defineEmits(['update:visible', 'change', 'preview', 'jump-to-settin
 const selectedKeys = ref([])
 const visibleModel = computed({ get: () => props.visible, set: (value) => emit('update:visible', value) })
 const fileFilter = ref('')
+const sortState = ref({ prop: '', order: '' })
 const fileNames = computed(() => [...new Set(props.rows.map(r => r.fileName))].sort())
 const KIND_ORDER = { header: 0, footerText: 1, pageNumber: 2 }
+function handleSortChange({ prop, order }) {
+  sortState.value = { prop: prop || '', order: order || '' }
+}
+function getColumnValue(row, prop) {
+  switch (prop) {
+    case 'fileName': return row.fileName || ''
+    case 'kind': return row.element.kind || ''
+    case 'detectedText': return row.element.detectedText || ''
+    case 'pageStart': return row.element.pageStart || 0
+    case 'source': return row.element.source || ''
+    case 'decision': return row.element.decision || ''
+    default: return ''
+  }
+}
 // Sort priority within each file/kind group: undecided > lowConfidence > decided
 function decisionSortPriority(row) {
   if (!row.element.decision) {
@@ -110,7 +127,15 @@ const filteredRows = computed(() => {
     }
   }
   if (fileFilter.value) rows = rows.filter(row => row.fileName === fileFilter.value)
-  // Sort: by fileName → by kind → by decision priority → by pageStart
+  const { prop, order } = sortState.value
+  if (prop && order) {
+    const direction = order === 'descending' ? -1 : 1
+    return [...rows].sort((a, b) => {
+      const result = naturalCompare(getColumnValue(a, prop), getColumnValue(b, prop))
+      return result === 0 ? 0 : result * direction
+    })
+  }
+  // Default sort: by fileName → by kind → by decision priority → by pageStart
   return [...rows].sort((a, b) => {
     const fa = a.fileName || '', fb = b.fileName || ''
     if (fa !== fb) return fa.localeCompare(fb)
@@ -247,6 +272,6 @@ function decisionTagType(decision) {
   border-left: 3px solid var(--docsy-text-muted, #c0c4cc);
 }
 :deep(.low-confidence-row:hover) {
-  opacity: 0.8;
+  background: var(--docsy-surface-muted-hover, #f0f0f0);
 }
 </style>
