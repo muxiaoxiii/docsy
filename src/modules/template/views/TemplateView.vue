@@ -195,6 +195,7 @@ import {
   parseReferenceSourceKey,
   syncReferenceSourceFromKey,
   normalizedReferenceSource,
+  partyItemsToValues,
 } from '../composables/fieldRowUtils.js'
 
 const activeTab = ref('build')
@@ -299,32 +300,36 @@ let exportResultDir = ''
 const historyRuns = ref([])
 const historyRunsLoading = ref(false)
 const renderableTemplateFields = computed(() => {
-  const fields = (templateManifest.value?.fields || []).filter(isRenderableField)
+  const rawFields = (templateManifest.value?.fields || []).filter(isRenderableField)
   // Mark duplicate fields (same name appearing more than once)
+  // Use shallow copies to avoid mutating the original manifest objects
   const nameCount = new Map()
-  for (const field of fields) {
+  for (const field of rawFields) {
     nameCount.set(field.name, (nameCount.get(field.name) || 0) + 1)
   }
   const seenNames = new Set()
-  for (const field of fields) {
+  const fields = []
+  for (const field of rawFields) {
+    const copy = { ...field }
     if ((nameCount.get(field.name) || 0) > 1) {
       if (seenNames.has(field.name)) {
-        field._isDuplicate = true
-        field._primaryFieldName = field.name
+        copy._isDuplicate = true
+        copy._primaryFieldName = field.name
         // Auto-set reference type for duplicate follower fields (matches buildFields behavior)
-        if (field.type !== 'reference' && !['marker', 'prefix', 'suffix', 'delete_text', 'ignore'].includes(field.type)) {
-          field.type = 'reference'
-          if (!field.reference) {
-            field.reference = { sourceMode: 'field', sourceField: field.name, sourceSemanticKey: '', sourceIndex: null }
+        if (copy.type !== 'reference' && !['marker', 'prefix', 'suffix', 'delete_text', 'ignore'].includes(copy.type)) {
+          copy.type = 'reference'
+          if (!copy.reference) {
+            copy.reference = { sourceMode: 'field', sourceField: field.name, sourceSemanticKey: '', sourceIndex: null }
           }
         }
       } else {
-        field._isDuplicate = false
+        copy._isDuplicate = false
         seenNames.add(field.name)
       }
     } else {
-      field._isDuplicate = false
+      copy._isDuplicate = false
     }
+    fields.push(copy)
   }
   return fields
 })
@@ -905,7 +910,7 @@ async function inspectSourceDocx() {
   sourcePreviewSelection.value = null
   sourcePreviewSelectionPayload.value = null
   clearPreviewSampleValues()
-  fieldRows.value = normalizeFieldRows(autoMergeMarks(marks.value).map((mark, index) => markToRow(mark, index)))
+  fieldRows.value = normalizeFieldRows(autoMergeMarks(marks.value).map((mark, index) => markToRow(mark, index)), documentRuns.value)
   if (!fieldRows.value.length) {
     ElMessage.warning('没有找到黄色高亮标记')
   }
@@ -1078,7 +1083,7 @@ function addPreviewSelection(type) {
     }
     pushUndoSnapshot('从预览新增标记')
     const addedRows = rowsFromPreviewSelection(selection, type)
-    fieldRows.value = normalizeFieldRows([...fieldRows.value, ...addedRows])
+    fieldRows.value = normalizeFieldRows([...fieldRows.value, ...addedRows], documentRuns.value)
     sourcePreviewSelection.value = null
     sourcePreviewSelectionPayload.value = null
     window.getSelection()?.removeAllRanges()
@@ -2382,21 +2387,7 @@ function movePartyItem(field, index, delta) {
   scheduleHistoryRefresh()
 }
 
-function partyItemsToValues(value) {
-  if (typeof value === 'string') return splitPartyInput(value)
-  if (!Array.isArray(value)) return []
-  return value
-    .map((item) => {
-      if (typeof item === 'string') return item.trim()
-      const suffix = String(item?.suffix || '').trim()
-      let text = String(item?.text || '').trim()
-      if (suffix && text.endsWith(suffix)) {
-        text = text.slice(0, -suffix.length).trim()
-      }
-      return suffix ? { name: text, suffix } : text
-    })
-    .filter((item) => (typeof item === 'string' ? Boolean(item) : Boolean(item.name)))
-}
+// partyItemsToValues is now imported from fieldRowUtils.js
 
 function requiredMissingFields() {
   return renderableTemplateFields.value

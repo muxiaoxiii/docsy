@@ -2574,10 +2574,7 @@ function reorderOverlayFiles(from, to) {
   items.splice(to, 0, item)
   overlayFiles.value = items
   selectedOverlayIndex.value = selectedPath
-    ? Math.max(
-        0,
-        items.findIndex((file) => file.path === selectedPath),
-      )
+    ? Math.max(0, items.findIndex((file) => file.path === selectedPath))
     : to
   truePreview.value = null
   refreshPreview()

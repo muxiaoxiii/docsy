@@ -377,6 +377,7 @@ import {
   isEmptyValue,
   displayValue,
   parseReferenceSourceKey,
+  partyItemsToValues,
 } from '../composables/fieldRowUtils.js'
 
 const props = defineProps({
@@ -683,21 +684,7 @@ function referenceFillOptions(field) {
   return options
 }
 
-function partyItemsToValues(value) {
-  if (typeof value === 'string') return value.split(/[、\n]/).map((item) => item.trim()).filter(Boolean)
-  if (!Array.isArray(value)) return []
-  return value
-    .map((item) => {
-      if (typeof item === 'string') return item.trim()
-      const suffix = String(item?.suffix || '').trim()
-      let text = String(item?.text || '').trim()
-      if (suffix && text.endsWith(suffix)) {
-        text = text.slice(0, -suffix.length).trim()
-      }
-      return suffix ? { name: text, suffix } : text
-    })
-    .filter((item) => (typeof item === 'string' ? Boolean(item) : Boolean(item.name)))
-}
+// partyItemsToValues is now imported from fieldRowUtils.js
 
 // ── Suggestions ─────────────────────────────────────────────────────────────
 

@@ -2,6 +2,34 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.6] - 2026-08-06
+
+### 新增
+- **检测对话框排序**：所有可排序列支持点击排序 + 自然排序（Intl.Collator）
+- **Shift+click 范围选择**：检测对话框中支持 Shift 范围选择 + 视觉反馈
+- **模板语法提示**：页眉页脚文本输入框显示模板标记语法 tooltip
+- **文本字段自动补全恢复**：编辑页文本字段重新接入 autocomplete 建议
+- **检测算法增强**：单页文件低置信度过滤、跨文件验证、全局进度显示
+
+### 修复
+- **模板模块 critical 修复**：renderableTemplateFields 不再直接修改 manifest 内部对象，改用浅拷贝避免数据污染
+- **字段行重排修复**：normalizeFieldRows 调用时传入 documentRuns 参数，字段列表顺序与文档位置一致
+- **partyItemsToValues 去重**：消除 TemplateView / TemplateRenderTab / fieldRowUtils 三处重复定义，统一从 fieldRowUtils 导入
+- **typeLabel 修复**：现在正确搜索 subTypes（checkbox、radio_group、prefix 等子类型标签不再退化为原始值）
+- **stableFieldId 标准化**：slug 生成增加 NFC 标准化，避免 CJK 字符编码不一致
+- **证据处理类型修复**：reorderOverlayFiles 移除冗余的字符串赋值
+- **检测对话框样式**：低置信度行使用 subtle 样式标记
+- **单页文件检测修复**：页眉检测在单页文件上不再错误跳过
+- **页脚 [文件名] 模板解析**：resolveTextTemplate 正确处理页脚中的文件名标记
+- **Doclet 动画连续播放**：检测期间 Doclet 不再闪烁，使用 tauriCallQuiet 避免重复触发
+- **检测进度节流**：进度更新限制为 500ms 间隔，避免频繁重渲染
+- **两阶段检测**：detect all → apply all 消除 UI 闪烁
+- **artifact 空文本跳过**：检测算法不再对空文本 artifact 回退到 content-text
+- **repeating 阈值提升**：content-text repeating 阈值从 count>=2 提升到 count>=3
+- **模板字段类型持久化**：填写页字段类型切换正确保存到 manifest
+- **重复字段自动引用**：同名后续字段自动设为 reference 类型 + 分组颜色条位置修正
+- **保存模板源文件修复**：sourceDocx 为空时使用 package 作为源
+
 ## [0.9.2] - 2026-08-04
 
 ### 新增

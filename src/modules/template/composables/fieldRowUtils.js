@@ -105,7 +105,14 @@ export function isMarkerType(type) {
 }
 
 export function typeLabel(type) {
-  return typeHelpItems.find((item) => item.value === type)?.label || type
+  for (const group of typeHelpItems) {
+    if (group.value === type) return group.label
+    if (group.subTypes) {
+      const sub = group.subTypes.find((s) => s.value === type)
+      if (sub) return sub.label
+    }
+  }
+  return type
 }
 
 export function isPartyFieldRow(row) {
@@ -199,6 +206,7 @@ export function splitPartyLabelSegments(text) {
 export function stableFieldId(name, type) {
   const slug = String(name || '')
     .trim()
+    .normalize('NFC')
     .replace(/[^a-zA-Z0-9_]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toLowerCase()
