@@ -76,7 +76,7 @@
               <strong class="field-name">{{ fillFieldLabel(field) }}</strong>
             </el-tooltip>
             <span v-if="field.posIndex > 0" class="position-label fill-all-tag">位置{{ field.posIndex + 1 }}</span>
-            <span v-if="field.semanticKey && field.semanticKey !== field.name && !isGeneratedFieldName(field.name)" class="semantic-key-tag">通用</span>
+            <span v-if="field.semanticKey && field.semanticKey !== field.name && !isGeneratedFieldName(field.name)" class="semantic-key-tag">{{ field.semanticKey }}</span>
             <em v-if="field.required" class="fill-all-tag">必填</em>
             <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
               同名字段，自动同步
