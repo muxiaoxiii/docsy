@@ -524,7 +524,7 @@
         >
           {{ editingLibraryTemplatePath ? '另存为' : '保存模板' }}
         </el-button>
-        <el-button :disabled="!fieldRows.length" @click="$emit('open-diagnostic')">诊断</el-button>
+
       </div>
 
       <div v-if="showDocumentText" class="preview-panel">
@@ -731,7 +731,7 @@ const emit = defineEmits([
   'focus-preview-row',
   'trigger-preview-selection-add',
   'set-preview-sample-value',
-  'open-diagnostic',
+
 ])
 
 // Computed properties that depend on fieldRows

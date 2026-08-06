@@ -45,7 +45,6 @@
           @focus-preview-row="focusPreviewRow"
           @trigger-preview-selection-add="triggerPreviewSelectionAdd"
           @set-preview-sample-value="setPreviewSampleValue"
-          @open-diagnostic="openDiagnostic"
         />
       </el-tab-pane>
 
@@ -137,14 +136,6 @@
       <template #footer>
         <el-button @click="splitDialog.visible = false">取消</el-button>
         <el-button type="primary" @click="applySplitDialog">应用拆分</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="diagnosticVisible" title="模板诊断" width="min(820px, 94vw)" append-to-body>
-      <el-input v-model="diagnosticText" type="textarea" :rows="20" readonly />
-      <template #footer>
-        <el-button @click="copyDiagnosticText">复制全部</el-button>
-        <el-button @click="diagnosticVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -288,8 +279,6 @@ const splitDialog = reactive({
   rowId: '',
   partsText: '',
 })
-const diagnosticVisible = ref(false)
-const diagnosticText = ref('')
 const showDocumentText = ref(false)
 const showTemplatePreview = ref(false)
 const undoStack = ref([])
@@ -1278,7 +1267,7 @@ function openSplitDialog(row) {
   splitDialog.partsText = row.text
 }
 
-function openDiagnostic() {
+function runDiagnostic() {
   const validationError = validateFieldRowsBeforeSave(fieldRows.value, marks.value)
   const manifestFields = buildFields(fieldRows.value)
   const diagnostic = {
@@ -1313,16 +1302,13 @@ function openDiagnostic() {
     manifestFields,
     validationError: validationError || null,
   }
-  diagnosticText.value = JSON.stringify(diagnostic, null, 2)
-  diagnosticVisible.value = true
-}
-
-function copyDiagnosticText() {
-  navigator.clipboard.writeText(diagnosticText.value).then(() => {
-    ElMessage.success('诊断信息已复制到剪贴板')
-  }).catch(() => {
-    ElMessage.warning('复制失败，请手动选择复制')
-  })
+  console.group('[Docsy 模板诊断]')
+  console.log('validationError:', diagnostic.validationError)
+  console.table(diagnostic.fieldRows.map(r => ({ text: r.text, type: r.type, name: r.name, enabled: r.enabled, markId: r.markId ? r.markId.slice(0, 8) + '...' : null })))
+  console.log('marks:', diagnostic.marks)
+  console.log('manifest.fields:', diagnostic.manifestFields)
+  console.log('完整 JSON:', JSON.stringify(diagnostic, null, 2))
+  console.groupEnd()
 }
 
 function applySplitDialog() {
@@ -1402,6 +1388,8 @@ async function saveTemplate(overwrite = false) {
   const validationError = validateFieldRowsBeforeSave(fieldRows.value, marks.value)
   if (validationError) {
     ElMessage.warning(validationError)
+    // Auto-dump diagnostic info to console for debugging
+    runDiagnostic()
     return
   }
   const fields = buildFields(fieldRows.value)
