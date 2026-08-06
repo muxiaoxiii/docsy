@@ -63,7 +63,24 @@
       </div>
       <div v-if="headerMode === 'custom'" class="rule-item">
         <label>页眉文本</label>
-        <el-input v-model="headerTextModel" placeholder="可用 [##]、[序号]、[文件名]、[YYYYMMDD]" />
+        <div class="text-input-with-info">
+          <el-input v-model="headerTextModel" placeholder="输入文本或模板标记" />
+          <el-tooltip placement="top" :show-after="200" class="template-info-tip">
+            <template #content>
+              <div class="template-help">
+                <p><strong>模板标记（自动替换）：</strong></p>
+                <p><code>[文件名]</code> — 去掉扩展名的文件名</p>
+                <p><code>[序号]</code> — 文件序号（1, 2, 3...）</p>
+                <p><code>[中文序号]</code> — 中文序号（一、二、三...）</p>
+                <p><code>[#]</code> / <code>[##]</code> / <code>[###]</code> — 序号，位数=#个数（01, 001...）</p>
+                <p><code>[日期]</code> — 当前日期（YYYYMMDD）</p>
+                <p><code>[YYYY-MM-DD]</code> — 自定义日期格式</p>
+                <p style="margin-top:6px;color:#aaa;">可与固定文字混合使用，如"证据[#]-[文件名]"</p>
+              </div>
+            </template>
+            <el-icon class="info-icon"><InfoFilled /></el-icon>
+          </el-tooltip>
+        </div>
       </div>
       <div class="rule-item">
         <label>页眉前缀</label><el-input v-model="headerPrefixModel" :disabled="headerMode === 'none'" />
@@ -150,7 +167,24 @@
       </div>
       <div class="rule-item">
         <label>页脚文本</label>
-        <el-input v-model="footerTextContentModel" placeholder="可用 [##]、[序号]、[文件名]、[YYYYMMDD]" />
+        <div class="text-input-with-info">
+          <el-input v-model="footerTextContentModel" placeholder="输入文本或模板标记" />
+          <el-tooltip placement="top" :show-after="200" class="template-info-tip">
+            <template #content>
+              <div class="template-help">
+                <p><strong>模板标记（自动替换）：</strong></p>
+                <p><code>[文件名]</code> — 去掉扩展名的文件名</p>
+                <p><code>[序号]</code> — 文件序号（1, 2, 3...）</p>
+                <p><code>[中文序号]</code> — 中文序号（一、二、三...）</p>
+                <p><code>[#]</code> / <code>[##]</code> / <code>[###]</code> — 序号，位数=#个数（01, 001...）</p>
+                <p><code>[日期]</code> — 当前日期（YYYYMMDD）</p>
+                <p><code>[YYYY-MM-DD]</code> — 自定义日期格式</p>
+                <p style="margin-top:6px;color:#aaa;">可与固定文字混合使用，如"证据[#]-[文件名]"</p>
+              </div>
+            </template>
+            <el-icon class="info-icon"><InfoFilled /></el-icon>
+          </el-tooltip>
+        </div>
       </div>
       <TextPlacementFields
         prefix="页脚"
@@ -304,7 +338,7 @@
 
 <script setup>
 import { computed, watch } from 'vue'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, InfoFilled } from '@element-plus/icons-vue'
 import TextPlacementFields from './TextPlacementFields.vue'
 import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
 import { useHistory } from '../../../core/composables/useHistory.js'
@@ -806,5 +840,38 @@ function removePageNumberGroup(id) {
 .range-sep {
   color: var(--docsy-text-muted);
   font-size: 13px;
+}
+.text-input-with-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.text-input-with-info .el-input {
+  flex: 1;
+}
+.text-input-with-info .info-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  color: var(--docsy-text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.text-input-with-info .info-icon:hover {
+  color: var(--docsy-text-strong);
+}
+.template-help {
+  max-width: 280px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.template-help p {
+  margin: 2px 0;
+}
+.template-help code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 11px;
 }
 </style>
