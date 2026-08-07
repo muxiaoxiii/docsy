@@ -323,6 +323,12 @@ fn wrap_paragraph_runs(
 ) -> Result<()> {
     let p_idx = cursor.0;
     let mut i = 0;
+    // Word field depth tracking: begin increments, end decrements.
+    // Runs inside the field code region (begin → separate) are skipped
+    // because they are structural (fldChar, instrText), not user content.
+    // See MDG-012 and ECMA-376 §17.16.
+    let mut field_depth: u32 = 0;
+    let mut in_field_code = false;
 
     while i < children.len() {
         let is_wr = matches!(&children[i], XmlNode::Element { name, .. } if name == "w:r");
@@ -334,6 +340,35 @@ fn wrap_paragraph_runs(
                     wrap_paragraph_runs(sub, part, cursor, coord_map)?;
                 }
             }
+            i += 1;
+            continue;
+        }
+
+        // Detect Word field boundaries (MDG-012)
+        if let Some(fld_type) = fldchar_type(&children[i]) {
+            match fld_type {
+                "begin" => {
+                    field_depth += 1;
+                    in_field_code = true;
+                }
+                "separate" => {
+                    in_field_code = false;
+                }
+                "end" => {
+                    field_depth = field_depth.saturating_sub(1);
+                    if field_depth == 0 {
+                        in_field_code = false;
+                    }
+                }
+                _ => {}
+            }
+            // fldChar runs are structural — never wrap as SDT
+            i += 1;
+            continue;
+        }
+
+        // Skip runs inside field code region (instrText etc.)
+        if field_depth > 0 && in_field_code {
             i += 1;
             continue;
         }
@@ -471,6 +506,30 @@ fn is_yellow_highlight_elem(node: &XmlNode) -> bool {
     } else {
         false
     }
+}
+
+/// Check if a w:r contains a w:fldChar and return its type ("begin"/"separate"/"end").
+/// Returns None for runs without fldChar.
+fn fldchar_type(node: &XmlNode) -> Option<&'static str> {
+    if let XmlNode::Element { children, .. } = node {
+        for child in children {
+            if let XmlNode::Element { name, attrs, .. } = child {
+                if name == "w:fldChar" {
+                    for (k, v) in attrs {
+                        if k == "w:fldCharType" {
+                            return match v.as_str() {
+                                "begin" => Some("begin"),
+                                "separate" => Some("separate"),
+                                "end" => Some("end"),
+                                _ => None,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn wrap_as_sdt(run: XmlNode, tag: &str) -> XmlNode {

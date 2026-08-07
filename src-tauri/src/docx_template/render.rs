@@ -692,11 +692,19 @@ fn render_into_existing_runs(children: &[XmlNode], text: &str) -> XmlNode {
                     }
                 }
                 if first {
-                    new_children.push(XmlNode::Element {
-                        name: "w:t".to_string(),
-                        attrs: vec![("xml:space".to_string(), "preserve".to_string())],
-                        children: vec![XmlNode::Text(text.to_string())],
+                    // MDG-012: Don't inject w:t into runs that don't have one
+                    // (e.g. fldChar, instrText). Only replace existing w:t content.
+                    let has_wt = new_children.iter().any(|c| {
+                        matches!(c, XmlNode::Element { name, .. } if name == "w:t")
                     });
+                    if has_wt {
+                        // w:t already exists but was empty — inject text
+                        new_children.push(XmlNode::Element {
+                            name: "w:t".to_string(),
+                            attrs: vec![("xml:space".to_string(), "preserve".to_string())],
+                            children: vec![XmlNode::Text(text.to_string())],
+                        });
+                    }
                     first = false;
                 }
                 new_runs.push(XmlNode::Element {

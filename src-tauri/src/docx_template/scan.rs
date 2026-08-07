@@ -61,6 +61,13 @@ fn scan_paragraph_runs(
     paragraph_idx: usize,
     run_idx: &mut usize,
 ) {
+    // Word field depth tracking: skip field code region (begin → separate).
+    // See MDG-012 and ECMA-376 §17.16. Currently scan.rs handles fields
+    // correctly by accident (collect_direct_run_text only takes w:t, and
+    // fldChar/instrText runs don't have w:t), but explicit tracking makes
+    // the intent clear and prevents future regressions.
+    let mut field_depth: u32 = 0;
+    let mut in_field_code = false;
 
     for child in children {
         if let XmlNode::Element {
@@ -77,6 +84,32 @@ fn scan_paragraph_runs(
                 if name == "w:sdt" || name == "w:sdtContent" || name == "w:hyperlink" {
                     scan_paragraph_runs(children, index, paragraph_idx, run_idx);
                 }
+                continue;
+            }
+
+            // Detect Word field boundaries (MDG-012)
+            if let Some(fld_type) = fldchar_type(child) {
+                match fld_type {
+                    "begin" => {
+                        field_depth += 1;
+                        in_field_code = true;
+                    }
+                    "separate" => {
+                        in_field_code = false;
+                    }
+                    "end" => {
+                        field_depth = field_depth.saturating_sub(1);
+                        if field_depth == 0 {
+                            in_field_code = false;
+                        }
+                    }
+                    _ => {}
+                }
+                continue; // fldChar runs are structural, not content
+            }
+
+            // Skip runs inside field code region (instrText etc.)
+            if field_depth > 0 && in_field_code {
                 continue;
             }
 
@@ -125,6 +158,29 @@ fn scan_paragraph_runs(
             }
         }
     }
+}
+
+/// Check if a w:r contains a w:fldChar and return its type.
+fn fldchar_type(node: &XmlNode) -> Option<&'static str> {
+    if let XmlNode::Element { children, .. } = node {
+        for child in children {
+            if let XmlNode::Element { name, attrs, .. } = child {
+                if name == "w:fldChar" {
+                    for (k, v) in attrs {
+                        if k == "w:fldCharType" {
+                            return match v.as_str() {
+                                "begin" => Some("begin"),
+                                "separate" => Some("separate"),
+                                "end" => Some("end"),
+                                _ => None,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn has_element_in(node: &XmlNode, name: &str) -> bool {
