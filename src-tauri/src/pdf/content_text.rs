@@ -43,6 +43,7 @@ pub(crate) struct PlainTextCleanupResult {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct DeleteDiagnostic {
     pub page: u32,
     pub target_text: String,
@@ -53,6 +54,7 @@ pub(crate) struct DeleteDiagnostic {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum DeleteSkipReason {
     TextNotMatched,
     BboxOutOfZone,
@@ -156,8 +158,19 @@ fn delete_plain_header_footer_file(
     }
 
     doc.prune_objects();
-    doc.save(output_path)
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temp = output_path.with_file_name(format!(
+        "docsy_atomic_{}_{}.pdf",
+        std::process::id(),
+        ts
+    ));
+    doc.save(&temp)
         .context("保存删除普通文本页眉页脚后的 PDF 失败")?;
+    std::fs::rename(&temp, output_path)
+        .context("原子重命名 PDF 失败")?;
     Ok(result)
 }
 
@@ -489,6 +502,7 @@ fn matches_any_target_by_bbox(state: &TextState, targets: &[&PlainTextTarget], p
         .any(|target| target_bbox_matches(state, target, page_height))
 }
 
+#[allow(dead_code)]
 fn matches_any_target(text: &str, targets: &[&PlainTextTarget], state: &TextState, page_height: f32) -> bool {
     matches_any_target_by_text(text, targets) || matches_any_target_by_bbox(state, targets, page_height)
 }
