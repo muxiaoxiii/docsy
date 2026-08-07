@@ -17,6 +17,21 @@
       </el-descriptions>
     </div>
 
+    <div v-if="fieldRows.length" class="panel filename-panel">
+      <div class="panel-header compact">
+        <div>
+          <h3>输出文件名</h3>
+          <p>拖拽排列文件名组成。字段用实际值替换，留空则使用默认规则。</p>
+        </div>
+      </div>
+      <FilenameTokenInput
+        :model-value="filenameTokens"
+        :available-fields="filenameAvailableFields"
+        :sample-values="filenameSampleValues"
+        @update:model-value="$emit('update:filenameTokens', $event)"
+      />
+    </div>
+
     <div v-if="fieldRows.length" class="panel field-panel">
       <div class="panel-header compact">
         <div>
@@ -647,6 +662,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
+import FilenameTokenInput from '../../../shared/components/FilenameTokenInput.vue'
 import {
   rowUsage,
   isMarkerType,
@@ -707,6 +723,9 @@ const props = defineProps({
   templatePreview: { type: Object, default: () => ({ original: [], rendered: [] }) },
   // Editing state
   editingLibraryTemplatePath: { type: String, default: '' },
+  // Filename template
+  filenameTokens: { type: Array, default: () => [] },
+  filenameSampleValues: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits([
@@ -734,6 +753,7 @@ const emit = defineEmits([
   'add-select-option',
   'undo-last-action',
   'save-template',
+  'update:filenameTokens',
   'remember-source-preview-selection',
   'focus-preview-row',
   'trigger-preview-selection-add',
@@ -762,6 +782,13 @@ function onTypeGroupChange(row, group) {
 }
 
 const checkboxLikeCount = computed(() => props.marks.filter((mark) => mark.checkboxLike).length)
+
+const filenameAvailableFields = computed(() => {
+  const seen = new Set()
+  return props.fieldRows
+    .filter((row) => row.name?.trim() && rowUsage(row) === 'field' && !seen.has(row.name.trim()) && seen.add(row.name.trim()))
+    .map((row) => ({ name: row.name.trim(), label: row.label || row.name.trim() }))
+})
 const fieldTableRows = computed(() => buildFieldTableRows(props.fieldRows))
 const optionalRuleSummaries = computed(() => buildOptionalRuleSummaries(props.fieldRows))
 const previewSampleFields = computed(() => buildPreviewSampleFields(props.fieldRows))

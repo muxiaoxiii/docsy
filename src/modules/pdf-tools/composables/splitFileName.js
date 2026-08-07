@@ -86,3 +86,35 @@ export function formatDateToken(pattern, value) {
 }
 
 export { toChineseNumber }
+
+/**
+ * Render a filename from a token array (FilenameTokenInput format).
+ * @param {Array} tokens - [{ type: 'field'|'preset'|'literal', value: string }]
+ * @param {Object} fieldValues - { fieldName: value }
+ * @param {number} index - row index (for sequence tokens)
+ * @returns {string}
+ */
+export function renderFilenameFromTokens(tokens, fieldValues = {}, index = 0) {
+  if (!tokens?.length) return ''
+  const parts = tokens.map((token) => {
+    if (token.type === 'field') {
+      const v = fieldValues[token.value]
+      if (v == null || v === '' || v === false) return token.value
+      if (Array.isArray(v)) return v.map((i) => (typeof i === 'object' ? i.text : i)).filter(Boolean).join('、')
+      return String(v)
+    }
+    if (token.type === 'preset') {
+      if (token.value === '日期') return todayCompact()
+      if (token.value === '序号') return String(index + 1)
+      if (token.value === '中文序号') return toChineseNumber(index + 1)
+      return `[${token.value}]`
+    }
+    return String(token.value || '')
+  }).filter(Boolean)
+  return sanitizeFilename(parts.join(''))
+}
+
+/** Replace filesystem-unsafe characters */
+export function sanitizeFilename(name) {
+  return String(name || '').replace(/[/\\:*?"<>|]/g, '_').trim()
+}

@@ -23,6 +23,7 @@
           :preview-focused-row-id="previewFocusedRowId"
           :template-preview="templatePreview"
           :editing-library-template-path="editingLibraryTemplatePath"
+          v-model:filename-tokens="filenameTokens"
           @select-source-docx="selectSourceDocx"
           @group-selected-rows="groupSelectedRows"
           @set-selected-rows-usage="setSelectedRowsUsage"
@@ -241,6 +242,7 @@ const typeHelpItems = [
 
 const sourceDocx = ref('')
 const templateName = ref('')
+const filenameTokens = ref([])
 const marks = ref([])
 const documentText = ref('')
 const documentRuns = ref([])
