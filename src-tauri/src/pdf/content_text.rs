@@ -333,9 +333,10 @@ fn filter_page_operations(
             }
             // bbox 匹配：独立于 zone check，处理 CID 字体无法解码的情况
             if remove_region.is_none() {
-                let header_by_bbox = matches_any_target_by_bbox(&state, &plan.header_targets);
+                let page_h = plan.page_box.max_y;
+                let header_by_bbox = matches_any_target_by_bbox(&state, &plan.header_targets, page_h);
                 let footer_by_bbox = !header_by_bbox
-                    && matches_any_target_by_bbox(&state, &plan.footer_targets);
+                    && matches_any_target_by_bbox(&state, &plan.footer_targets, page_h);
                 if header_by_bbox {
                     remove_region = Some(TextRegion::Header);
                     result.diagnostics.push(DeleteDiagnostic {
@@ -480,14 +481,14 @@ fn matches_any_target_by_text(text: &str, targets: &[&PlainTextTarget]) -> bool 
     targets.iter().any(|target| target_matches(text, target))
 }
 
-fn matches_any_target_by_bbox(state: &TextState, targets: &[&PlainTextTarget]) -> bool {
+fn matches_any_target_by_bbox(state: &TextState, targets: &[&PlainTextTarget], page_height: f32) -> bool {
     targets
         .iter()
-        .any(|target| target_bbox_matches(state, target))
+        .any(|target| target_bbox_matches(state, target, page_height))
 }
 
-fn matches_any_target(text: &str, targets: &[&PlainTextTarget], state: &TextState) -> bool {
-    matches_any_target_by_text(text, targets) || matches_any_target_by_bbox(state, targets)
+fn matches_any_target(text: &str, targets: &[&PlainTextTarget], state: &TextState, page_height: f32) -> bool {
+    matches_any_target_by_text(text, targets) || matches_any_target_by_bbox(state, targets, page_height)
 }
 
 fn target_matches(text: &str, target: &PlainTextTarget) -> bool {
@@ -506,7 +507,7 @@ fn target_matches(text: &str, target: &PlainTextTarget) -> bool {
     false
 }
 
-fn target_bbox_matches(state: &TextState, target: &PlainTextTarget) -> bool {
+fn target_bbox_matches(state: &TextState, target: &PlainTextTarget, page_height: f32) -> bool {
     let Some(bbox) = target.bbox else {
         return false;
     };
@@ -518,8 +519,11 @@ fn target_bbox_matches(state: &TextState, target: &PlainTextTarget) -> bool {
     }
     let x_padding = 18.0;
     let y_padding = 18.0;
-    let pdf_y0 = bbox.height - bbox.y1;
-    let pdf_y1 = bbox.height - bbox.y0;
+    // 使用 lopdf 的页面高度（page_height）而非 pdftotext 的 bbox.height
+    // 避免 CropBox/MediaBox 不一致导致的坐标偏移
+    let height = if page_height > 0.0 { page_height } else { bbox.height };
+    let pdf_y0 = height - bbox.y1;
+    let pdf_y1 = height - bbox.y0;
     state.x >= bbox.x0 - x_padding
         && state.x <= bbox.x1 + x_padding
         && state.y >= pdf_y0 - y_padding
