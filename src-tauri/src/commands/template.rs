@@ -301,6 +301,12 @@ pub async fn import_template_to_library(source_path: String) -> Result<String, S
             .file_name()
             .ok_or_else(|| anyhow::anyhow!("无效文件名"))?;
         let dest = crate::docx_template::template_library_dir().join(file_name);
+        if dest.exists() {
+            anyhow::bail!(
+                "模板库中已存在同名文件：{}，请先删除已有模板或重命名源文件",
+                dest.display()
+            );
+        }
         std::fs::copy(source, &dest)?;
         Ok(dest.display().to_string())
     })
