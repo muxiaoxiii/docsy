@@ -11,7 +11,7 @@
 
 | ID | 变更名 | 优先级 | 状态 | 分支 | 变更单 |
 |----|--------|--------|------|------|--------|
-| MDG-001 | cancel_operation 第四通用层重构 | P0 | 🟢 基础设施完成 | mdg/MDG-001-operation-manager | [changes/MDG-001](changes/MDG-001-cancel-operation.md) |
+| MDG-001 | cancel_operation 第四通用层重构 | P0 | ✅ 已合并 | codex/template-quickxml-0.8 | [changes/MDG-001](changes/MDG-001-cancel-operation.md) |
 | MDG-002 | Mutex::unwrap() 安全模式 | P0 | 🔴 未开始 | — | [changes/MDG-002](changes/MDG-002-mutex-unwrap.md) |
 | MDG-003 | 代码重复消除 | P1 | 🔴 未开始 | — | [changes/MDG-003](changes/MDG-003-dedup.md) |
 | MDG-004 | 书签页码偏移修复 | P0 | 🔴 未开始 | — | [changes/MDG-004](changes/MDG-004-bookmark-offset.md) |
@@ -21,6 +21,7 @@
 | MDG-008 | 生产代码 eprintln! 清理 | P1 | 🔴 未开始 | — | — |
 | MDG-009 | TextOverlay 方法命名修正 | P1 | 🔴 未开始 | — | — |
 | MDG-010 | 前后端默认值统一 | P1 | 🔴 未开始 | — | — |
+| MDG-011 | 全局诊断与探针系统 | P1 | 🟡 设计中 | — | [changes/MDG-011](changes/MDG-011-diagnostics.md) |
 
 ---
 
