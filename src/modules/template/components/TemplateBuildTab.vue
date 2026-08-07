@@ -20,8 +20,12 @@
     <div v-if="fieldRows.length" class="panel filename-panel">
       <div class="panel-header compact">
         <div>
-          <h3>输出文件名</h3>
-          <p>拖拽排列文件名组成。字段用实际值替换，留空则使用默认规则。</p>
+          <h3>
+            输出文件名
+            <el-tooltip content="用 [[字段名]] 引用字段值，[日期] 插入当天日期，[序号] 插入序号。拖拽气泡排列，点击气泡删除。" placement="right">
+              <el-icon class="help-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </h3>
         </div>
       </div>
       <FilenameTokenInput
@@ -35,8 +39,12 @@
     <div v-if="fieldRows.length" class="panel field-panel">
       <div class="panel-header compact">
         <div>
-          <h3>确认字段</h3>
-          <p>同名字段会共用一个值；空值处理是字段属性，可以设为全部同名共用或仅当前位置生效。</p>
+          <h3>
+            确认字段
+            <el-tooltip content="同名字段会共用一个值；空值处理是字段属性，可以设为全部同名共用或仅当前位置生效。" placement="right">
+              <el-icon class="help-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </h3>
         </div>
         <div class="panel-actions">
           <el-popover placement="bottom-end" trigger="hover" width="420" popper-class="field-rules-popper">
@@ -892,6 +900,18 @@ defineExpose({ fieldTableRef, sourcePreviewRef, documentPreviewRef })
 
 .help-button {
   color: var(--docsy-text);
+}
+
+.help-icon {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--docsy-text-muted);
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.help-icon:hover {
+  color: var(--docsy-primary);
 }
 
 h3 {

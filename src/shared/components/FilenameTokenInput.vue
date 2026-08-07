@@ -1,75 +1,153 @@
 <template>
   <div class="filename-token-input">
-    <div class="token-line">
-      <div
-        v-for="(token, idx) in modelValue"
-        :key="token.id"
-        class="token-bubble"
-        :class="[`token-${token.type}`, { dragging: dragIndex === idx }]"
-        draggable="true"
-        @dragstart="onDragStart(idx, $event)"
-        @dragover.prevent="onDragOver(idx)"
-        @drop="onDrop(idx)"
-        @dragend="dragIndex = -1"
-      >
-        <span class="token-label">{{ tokenLabel(token) }}</span>
-        <button class="token-remove" @click="removeToken(idx)">×</button>
+    <div class="fn-row">
+      <div class="fn-token-strip">
+        <span
+          v-for="(token, idx) in modelValue"
+          :key="token.id"
+          class="fn-bubble"
+          :class="`fn-${token.type}`"
+          :title="bubbleTitle(token)"
+          @click="removeToken(idx)"
+        >{{ tokenLabel(token) }}</span>
       </div>
-      <div class="token-actions">
-        <el-dropdown trigger="click" @command="addToken">
-          <button class="token-add">+</button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="field" v-for="f in availableFields" :key="f.name" :command="{ type: 'field', value: f.name }">
-                📝 {{ f.label || f.name }}
-              </el-dropdown-item>
-              <el-dropdown-item divided command="{ type: 'preset', value: '日期' }">📅 日期</el-dropdown-item>
-              <el-dropdown-item command="{ type: 'preset', value: '序号' }">🔢 序号</el-dropdown-item>
-              <el-dropdown-item command="{ type: 'preset', value: '中文序号' }">🔢 中文序号</el-dropdown-item>
-              <el-dropdown-item divided command="{ type: 'literal', value: '-' }">➖ 连字符 -</el-dropdown-item>
-              <el-dropdown-item command="{ type: 'literal', value: '_' }">➖ 下划线 _</el-dropdown-item>
-              <el-dropdown-item command="{ type: 'literal', value: ' ' }">➖ 空格</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+      <div class="fn-presets">
+        <span
+          v-for="p in presetBubbles"
+          :key="p.label"
+          class="fn-preset-btn"
+          :title="p.tip"
+          @click="addPreset(p)"
+        >{{ p.label }}</span>
       </div>
     </div>
-    <div class="token-preview" v-if="preview">
-      <span class="preview-label">预览：</span>
-      <code>{{ preview }}</code>
+    <div class="fn-row">
+      <div class="fn-input-wrap">
+        <input
+          ref="inputRef"
+          :value="textValue"
+          class="fn-input"
+          placeholder="输入文件名，如 [[案号]]-[日期]"
+          @input="onTextInput($event.target.value)"
+          @keydown.enter.prevent="commitText"
+          @focus="showAutocomplete = true"
+          @blur="hideAutocompleteDelayed"
+        />
+        <div v-if="showAutocomplete && filteredFields.length" class="fn-autocomplete">
+          <div
+            v-for="f in filteredFields"
+            :key="f.name"
+            class="fn-ac-item"
+            @mousedown.prevent="insertField(f)"
+          >{{ f.label || f.name }}</div>
+        </div>
+      </div>
+      <span v-if="previewText" class="fn-preview" :title="previewText">{{ previewText }}</span>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   availableFields: { type: Array, default: () => [] },
   sampleValues: { type: Object, default: () => ({}) },
   index: { type: Number, default: 0 },
+  defaultName: { type: String, default: '' },
 })
-
 const emit = defineEmits(['update:modelValue'])
 
-const dragIndex = ref(-1)
+const inputRef = ref(null)
+const showAutocomplete = ref(false)
+let blurTimer = null
 
-function tokenLabel(token) {
-  if (token.type === 'field') return `{${token.value}}`
-  if (token.type === 'preset') return `[${token.value}]`
-  return token.value || '·'
+// ── Token ↔ Text sync ────────────────────────────────────
+
+const textValue = ref('')
+let syncing = false
+
+// When tokens change externally, update text
+watch(() => props.modelValue, (tokens) => {
+  if (syncing) return
+  syncing = true
+  textValue.value = tokensToString(tokens)
+  syncing = false
+}, { immediate: true })
+
+function tokensToString(tokens) {
+  return tokens.map((t) => {
+    if (t.type === 'field') return `[[${t.value}]]`
+    if (t.type === 'preset') return `[${t.value}]`
+    return t.value
+  }).join('')
 }
 
-function addToken(item) {
-  // Parse string command like "{ type: 'field', value: 'x' }"
-  let parsed = item
-  if (typeof item === 'string') {
-    try { parsed = JSON.parse(item.replace(/'/g, '"')) } catch { return }
+function parseTextToTokens(text) {
+  const tokens = []
+  const re = /\[\[([^\]]+)\]\]|\[([^\]]+)\]|([^[\]]+)/g
+  let m
+  while ((m = re.exec(text))) {
+    if (m[1]) tokens.push({ id: crypto.randomUUID(), type: 'field', value: m[1] })
+    else if (m[2]) tokens.push({ id: crypto.randomUUID(), type: 'preset', value: m[2] })
+    else if (m[3]) tokens.push({ id: crypto.randomUUID(), type: 'literal', value: m[3] })
   }
-  if (!parsed?.type) return
-  const tokens = [...props.modelValue, { id: Date.now(), ...parsed }]
-  emit('update:modelValue', tokens)
+  return tokens
+}
+
+function onTextInput(val) {
+  textValue.value = val
+  // Detect [[ for autocomplete
+  const cursor = inputRef.value?.selectionStart || val.length
+  const before = val.slice(Math.max(0, cursor - 2), cursor)
+  showAutocomplete.value = before === '[['
+}
+
+function commitText() {
+  syncing = true
+  emit('update:modelValue', parseTextToTokens(textValue.value))
+  syncing = false
+  showAutocomplete.value = false
+}
+
+// ── Autocomplete ─────────────────────────────────────────
+
+const filteredFields = computed(() => {
+  if (!showAutocomplete.value) return []
+  const val = textValue.value
+  const lastBracket = val.lastIndexOf('[[')
+  if (lastBracket < 0) return []
+  const query = val.slice(lastBracket + 2).toLowerCase()
+  return props.availableFields.filter((f) =>
+    !query || (f.name.toLowerCase().includes(query) || (f.label || '').toLowerCase().includes(query))
+  ).slice(0, 8)
+})
+
+function insertField(f) {
+  const val = textValue.value
+  const lastBracket = val.lastIndexOf('[[')
+  textValue.value = val.slice(0, lastBracket) + `[[${f.name}]]`
+  showAutocomplete.value = false
+  commitText()
+}
+
+function hideAutocompleteDelayed() {
+  blurTimer = setTimeout(() => { showAutocomplete.value = false }, 150)
+}
+
+// ── Token strip interactions ─────────────────────────────
+
+function tokenLabel(token) {
+  if (token.type === 'field') return token.value
+  if (token.type === 'preset') return token.value
+  return token.value
+}
+
+function bubbleTitle(token) {
+  if (token.type === 'field') return `字段：${token.value}（点击删除）`
+  if (token.type === 'preset') return `预设：${token.value}（点击删除）`
+  return `${token.value}（点击删除）`
 }
 
 function removeToken(idx) {
@@ -77,40 +155,42 @@ function removeToken(idx) {
   emit('update:modelValue', tokens)
 }
 
-function onDragStart(idx, ev) {
-  dragIndex.value = idx
-  ev.dataTransfer.effectAllowed = 'move'
-}
+// ── Preset bubbles ───────────────────────────────────────
 
-function onDragOver(idx) {
-  // Visual feedback handled by CSS
-}
+const presetBubbles = [
+  { label: '📅', type: 'preset', value: '日期', tip: '插入日期（YYYYMMDD）' },
+  { label: '🔢', type: 'preset', value: '序号', tip: '插入序号（批量时自增）' },
+  { label: '➖', type: 'literal', value: '-', tip: '插入连字符' },
+  { label: '_', type: 'literal', value: '_', tip: '插入下划线' },
+  { label: '␣', type: 'literal', value: ' ', tip: '插入空格' },
+]
 
-function onDrop(idx) {
-  if (dragIndex.value < 0 || dragIndex.value === idx) return
-  const tokens = [...props.modelValue]
-  const [moved] = tokens.splice(dragIndex.value, 1)
-  tokens.splice(idx, 0, moved)
+function addPreset(p) {
+  const tokens = [...props.modelValue, { id: crypto.randomUUID(), type: p.type, value: p.value }]
   emit('update:modelValue', tokens)
-  dragIndex.value = -1
 }
 
-const preview = computed(() => {
-  return props.modelValue.map((token) => {
-    if (token.type === 'field') {
-      return props.sampleValues[token.value] || token.value
+// ── Preview ──────────────────────────────────────────────
+
+const previewText = computed(() => {
+  if (!props.modelValue.length) return ''
+  return props.modelValue.map((t) => {
+    if (t.type === 'field') {
+      const v = props.sampleValues[t.value]
+      if (v == null || v === '' || v === false) return t.value
+      if (Array.isArray(v)) return v.map((i) => (typeof i === 'object' ? i.text : i)).filter(Boolean).join('、')
+      return String(v)
     }
-    if (token.type === 'preset') {
-      if (token.value === '日期') {
+    if (t.type === 'preset') {
+      if (t.value === '日期') {
         const d = new Date()
         return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
       }
-      if (token.value === '序号') return String(props.index + 1)
-      if (token.value === '中文序号') return ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][props.index] || String(props.index + 1)
-      return `[${token.value}]`
+      if (t.value === '序号') return String((props.index || 0) + 1)
+      return `[${t.value}]`
     }
-    return token.value
-  }).join('')
+    return t.value
+  }).join('') + '.docx'
 })
 </script>
 
@@ -118,100 +198,118 @@ const preview = computed(() => {
 .filename-token-input {
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.fn-row {
+  display: flex;
+  align-items: center;
   gap: 6px;
 }
 
-.token-line {
+.fn-token-strip {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
-  background: var(--docsy-surface-muted);
-  min-height: 34px;
-}
-
-.token-bubble {
-  display: inline-flex;
-  align-items: center;
   gap: 2px;
-  padding: 2px 6px;
+  flex: 1;
+  min-height: 24px;
+  padding: 2px 4px;
   border-radius: 4px;
-  font-size: 12px;
-  cursor: grab;
-  user-select: none;
-  transition: opacity 0.15s;
-}
-
-.token-bubble.dragging {
-  opacity: 0.4;
-}
-
-.token-field {
-  background: var(--docsy-primary-soft);
-  color: var(--docsy-primary-hover);
-}
-
-.token-preset {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.token-literal {
   background: var(--docsy-surface-muted);
-  color: var(--docsy-text-muted);
-  border: 1px dashed var(--docsy-border-subtle);
 }
 
-.token-label {
+.fn-bubble {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.token-remove {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: inherit;
-  opacity: 0.5;
-  font-size: 14px;
-  padding: 0 2px;
-  line-height: 1;
+.fn-field { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); }
+.fn-preset { background: #fef3c7; color: #92400e; }
+.fn-literal { background: transparent; color: var(--docsy-text-muted); }
+
+.fn-bubble:hover { opacity: 0.7; }
+
+.fn-presets {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
-.token-remove:hover {
-  opacity: 1;
-}
-
-.token-add {
-  background: none;
-  border: 1px dashed var(--docsy-border-subtle);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  padding: 2px 8px;
-  color: var(--docsy-text-muted);
-}
-
-.token-add:hover {
-  border-color: var(--docsy-primary);
-  color: var(--docsy-primary);
-}
-
-.token-preview {
-  font-size: 12px;
-  color: var(--docsy-text-muted);
-}
-
-.preview-label {
-  margin-right: 4px;
-}
-
-.token-preview code {
-  background: var(--docsy-surface-muted);
-  padding: 1px 4px;
+.fn-preset-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   border-radius: 3px;
   font-size: 12px;
+  cursor: pointer;
+  background: var(--docsy-surface-muted);
+  border: 1px solid var(--docsy-border-subtle);
+  user-select: none;
+}
+
+.fn-preset-btn:hover { border-color: var(--docsy-primary); }
+
+.fn-input-wrap {
+  flex: 1;
+  position: relative;
+}
+
+.fn-input {
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--docsy-surface-base);
+  color: var(--docsy-text-strong);
+  outline: none;
+}
+
+.fn-input:focus { border-color: var(--docsy-primary); }
+
+.fn-input::placeholder { color: var(--docsy-text-muted); font-size: 11px; }
+
+.fn-autocomplete {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: var(--docsy-surface-base);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+
+.fn-ac-item {
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fn-ac-item:hover { background: var(--docsy-primary-soft); }
+
+.fn-preview {
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 </style>
