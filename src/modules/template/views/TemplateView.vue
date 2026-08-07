@@ -68,6 +68,8 @@
           :filtered-renderable-fields="filteredRenderableFields"
           :fill-preview-visible="fillPreviewVisible"
           :fill-preview-text="fillPreviewText"
+          :fill-preview-overlays="fillPreviewOverlays"
+          :fill-document-runs="fillDocumentRuns"
           :filename-tokens="filenameTokens"
           @load-template-library="loadTemplateLibrary"
           @select-template-package="selectTemplatePackage"
@@ -297,6 +299,7 @@ const templateLibraryLoading = ref(false)
 const editingLibraryTemplatePath = ref('')
 const fillDocumentRuns = ref([])
 const fillPreviewVisible = ref(false)
+const fillPreviewOverlays = ref([])
 const fillPreviewText = ref('')
 // Export dialog state
 const exportDialogVisible = ref(false)
@@ -1966,6 +1969,7 @@ function buildFillPreview() {
   const manifest = templateManifest.value
   if (!runs?.length || !manifest?.fields?.length) {
     fillPreviewText.value = ''
+    fillPreviewOverlays.value = []
     return
   }
 
@@ -1981,6 +1985,7 @@ function buildFillPreview() {
   }
 
   const parts = []
+  const overlays = []
   let lastParagraph = null
   // A field can occupy several consecutive runs in one paragraph (Word splits
   // highlighted text); only render its value once per paragraph position.
@@ -2000,20 +2005,34 @@ function buildFillPreview() {
       // accept name-keyed and legacy fill:-prefixed lookups.
       const value =
         formValues[field.id] ?? formValues[field.name] ?? formValues[`fill:${field.name}`]
+      let displayValue
+      let isFilled = false
       if (value != null && value !== '' && value !== false) {
         if (Array.isArray(value)) {
-          parts.push(value.map((v) => (typeof v === 'object' ? v.text : v)).filter(Boolean).join('、'))
+          displayValue = value.map((v) => (typeof v === 'object' ? v.text : v)).filter(Boolean).join('、')
         } else {
-          parts.push(String(value))
+          displayValue = String(value)
         }
+        isFilled = true
       } else {
-        parts.push(`[${field.label || field.name}]`)
+        displayValue = `[${field.label || field.name}]`
       }
+      parts.push(displayValue)
+      overlays.push({
+        runId: run.id,
+        start: 0,
+        end: run.text?.length || 0,
+        label: displayValue,
+        type: field.type || 'text',
+        filled: isFilled,
+        clickable: true,
+      })
     } else {
       parts.push(run.text || '')
     }
   }
   fillPreviewText.value = parts.join('')
+  fillPreviewOverlays.value = overlays
 }
 
 // Debounced watcher: update preview when formValues change and preview is visible

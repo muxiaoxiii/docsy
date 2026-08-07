@@ -358,7 +358,13 @@
           <h3>填写预览</h3>
           <p>未填入的字段用方括号标注，以最终生成效果为准。</p>
         </div>
-        <pre class="fill-preview-text">{{ fillPreviewText }}</pre>
+        <DocumentPreview
+          v-if="fillDocumentRuns.length && fillPreviewOverlays.length"
+          :runs="fillDocumentRuns"
+          :overlays="fillPreviewOverlays"
+          mode="fill"
+        />
+        <pre v-else class="fill-preview-text">{{ fillPreviewText }}</pre>
       </div>
     </div>
   </section>
@@ -366,6 +372,7 @@
 
 <script setup>
 import { ArrowDown } from '@element-plus/icons-vue'
+import DocumentPreview from '@/shared/components/DocumentPreview.vue'
 import {
   shortDateTime,
   fillFieldLabel,
@@ -407,6 +414,8 @@ const props = defineProps({
   // Fill preview
   fillPreviewVisible: { type: Boolean, default: false },
   fillPreviewText: { type: String, default: '' },
+  fillPreviewOverlays: { type: Array, default: () => [] },
+  fillDocumentRuns: { type: Array, default: () => [] },
   // Computed from parent
   renderableTemplateFields: { type: Array, default: () => [] },
   // Position entries (one card per document position; followers are read-only
