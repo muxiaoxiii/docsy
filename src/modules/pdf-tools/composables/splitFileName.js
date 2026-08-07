@@ -31,21 +31,57 @@ export function resolveSplitNameSeparator(separator, customSeparator = '') {
   return separator === 'custom' ? customSeparator : separator
 }
 
-export function expandSplitNameTokens(value, index = 0, dateValue = '') {
+export function expandSplitNameTokens(value, index = 0, dateValue = '', options = {}) {
+  const start = Number(options.sequenceStart ?? 1)
+  const step = Number(options.sequenceStep ?? 1)
+
   return String(value || '').replace(/\[([^\]]+)\]/g, (match, token) => {
-    if (/^#+$/.test(token)) return formatSequenceToken(token, index)
-    if (token === '序号') return String(index + 1)
-    if (token === '中文序号') return toChineseNumber(index + 1)
-    if (token === '日期' || /[YyMmDd]/.test(token)) {
-      return formatDateToken(token === '日期' ? 'YYYYMMDD' : token, dateValue)
+    // 解析 [#, 起点, 步长] 格式
+    const parts = token.split(/[,，]/).map((s) => s.trim())
+    const mainToken = parts[0]
+    if (/^#+$/.test(mainToken)) {
+      const tokenStart = parts.length > 1 ? Number(parts[1]) : start
+      const tokenStep = parts.length > 2 ? Number(parts[2]) : step
+      const seq = tokenStart + index * tokenStep
+      return formatSequenceToken(mainToken, 0, seq)
+    }
+    if (mainToken === '序号') {
+      const tokenStart = parts.length > 1 ? Number(parts[1]) : start
+      const tokenStep = parts.length > 2 ? Number(parts[2]) : step
+      return String(tokenStart + index * tokenStep)
+    }
+    if (mainToken === '中文序号') {
+      const tokenStart = parts.length > 1 ? Number(parts[1]) : start
+      const tokenStep = parts.length > 2 ? Number(parts[2]) : step
+      return toChineseNumber(tokenStart + index * tokenStep)
+    }
+    if (mainToken === '壹贰叁') {
+      const tokenStart = parts.length > 1 ? Number(parts[1]) : start
+      const tokenStep = parts.length > 2 ? Number(parts[2]) : step
+      return toChineseFormalNumber(tokenStart + index * tokenStep)
+    }
+    if (mainToken === '日期' || /[YyMmDd]/.test(mainToken)) {
+      return formatDateToken(mainToken === '日期' ? 'YYYYMMDD' : mainToken, dateValue)
     }
     return match
   })
 }
 
-export function formatSequenceToken(token, index = 0) {
-  const value = String(Math.max(1, Number(index || 0) + 1))
+export function formatSequenceToken(token, index = 0, overrideValue = null) {
+  const value = overrideValue != null
+    ? String(overrideValue)
+    : String(Math.max(1, Number(index || 0) + 1))
   return value.padStart(token.length, '0')
+}
+
+function toChineseFormalNumber(n) {
+  const digits = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖']
+  if (n <= 0) return String(n)
+  if (n <= 9) return digits[n]
+  if (n === 10) return '拾'
+  if (n < 20) return `拾${digits[n % 10]}`
+  if (n < 100) return `${digits[Math.floor(n / 10)]}拾${n % 10 === 0 ? '' : digits[n % 10]}`
+  return String(n)
 }
 
 export function formatDateToken(pattern, value) {
