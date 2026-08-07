@@ -15,15 +15,8 @@ use std::time::Instant;
 use tauri::Emitter;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum OperationStatus {
-    Running,
-    Done,
-}
-
 struct OperationEntry {
     token: CancellationToken,
-    status: OperationStatus,
     started_at: Instant,
     command: String,
 }
@@ -106,7 +99,6 @@ impl OperationManager {
         let token = CancellationToken::new();
         let entry = OperationEntry {
             token: token.clone(),
-            status: OperationStatus::Running,
             started_at: Instant::now(),
             command: command.to_string(),
         };

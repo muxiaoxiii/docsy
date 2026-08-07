@@ -47,12 +47,14 @@ where
     let op_id = operation_id.unwrap_or_else(|| format!("{}:auto", command));
     let token = manager.begin(&op_id, command);
 
-    let result = tauri::async_runtime::spawn_blocking(move || task(token))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string());
+    // 不在 spawn_blocking 上使用 ?，确保 finish() 一定被调用
+    let join_result = tauri::async_runtime::spawn_blocking(move || task(token)).await;
+    let result = match join_result {
+        Ok(inner) => inner.map_err(|e| e.to_string()),
+        Err(join_err) => Err(join_err.to_string()),
+    };
 
-    // MDG-011: 传递失败状态给 finish()，用于诊断事件
+    // 无论成功失败都必须 finish，否则操作永远留在 map 里
     manager.finish(&op_id, result.is_err());
     result
 }
