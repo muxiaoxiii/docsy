@@ -636,7 +636,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             pageIndex: 0,
           }]
         : [],
-      bookmarkRemoveExisting: false,
+      bookmarkRemoveExisting: rules.bookmarkRemoveExisting || false,
     }
   })
 }
