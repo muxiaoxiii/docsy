@@ -22,6 +22,9 @@
 | MDG-009 | TextOverlay 方法命名修正 | P1 | ⏸️ 无变更单 | — | — |
 | MDG-010 | 前后端默认值统一 | P1 | ✅ 部分完成 | codex/template-quickxml-0.8 | — |
 | MDG-011 | 全局诊断与探针系统 | P1 | 🟡 设计中 | — | [changes/MDG-011](changes/MDG-011-diagnostics.md) |
+| MDG-012 | Word 域启发式检测与保护 | P0 | ✅ 已合并 | codex/template-quickxml-0.8 | [changes/MDG-012](changes/MDG-012-formcheckbox-field-structure.md) |
+| MDG-013 | 模板驱动文件名生成 | P1 | 🟡 进行中 | codex/template-quickxml-0.8 | [changes/MDG-013](changes/MDG-013-template-filename.md) |
+| MDG-014 | 统一文档预览模块 + 编辑 UI 优化 | P1 | 🟡 设计中 | — | [changes/MDG-014](changes/MDG-014-template-ui-redesign.md) |
 
 ---
 
@@ -29,7 +32,7 @@
 
 | 文档 | 说明 |
 |------|------|
-| **[problem-inventory.md](problem-inventory.md)** | 全部问题分组总表（9 个 MDG，32 个问题） |
+| **[problem-inventory.md](problem-inventory.md)** | 全部问题分组总表（12 个 MDG，40 个问题） |
 | **[changes/](changes/)** | 变更单目录（含影响分析、代码方案、回退方案） |
 
 ## 变更管理协议

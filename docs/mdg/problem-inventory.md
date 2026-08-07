@@ -147,7 +147,33 @@
 
 ---
 
-## 总计
+## MDG-012：Word 域（Field）启发式检测与保护 🔴 P0
+
+**本质问题**：docx_template 模块对 Word 域零感知。scan 碰巧正确，save 把域代码区 run 也包裹 SDT，render 给无 `w:t` 的 run 注入文本。
+
+**设计方案**：启发式检测——FORMCHECKBOX 自动推断为已有 checkbox 类型（复用 `checkboxLike` 路径），不引入新字段类型。域深度跟踪保护域结构：scan 识别域边界，save 跳过域代码区，render 不注入 `w:t`。用户可在 UI 里看到并修改。四阶段实施：域边界感知 → 域结构保护 → 渲染保护 → 前端自动推断。
+
+**变更单**：[MDG-012-formcheckbox-field-structure.md](changes/MDG-012-formcheckbox-field-structure.md)
+
+---
+
+## MDG-013：模板驱动文件名生成 🟠 P1
+
+**本质问题**：批量生成文件时无法根据字段值自动拼接文件名。
+
+**设计方案**：模板 manifest 新增 `filenameTemplate` 字段，用 `{字段名}` 语法引用。含特殊变量（日期、序号、原文件名）、非法字符处理、冲突处理。
+
+**变更单**：[MDG-013-template-filename.md](changes/MDG-013-template-filename.md)
+
+---
+
+## MDG-014：统一文档预览模块 + 编辑 UI 优化 🟠 P1
+
+**本质问题**：预览逻辑分散在多处，补选提取不到文本（渲染预览的 `<button>` 没有 `data-run-id`），底部图例冗余。
+
+**设计方案**：提取通用 `DocumentPreview` 组件，接受 `runs[]` + `overlays[]`，支持三种模式（原文/字段标注/填写）。所有 overlay span 统一带 `data-run-id`，选区解析统一处理。底部图例精简为一个"添加为字段"按钮（默认文本，自动推断 checkbox/date）。其他模块（证据 PDF、文书对比）可复用。
+
+**变更单**：[MDG-014-template-ui-redesign.md](changes/MDG-014-template-ui-redesign.md)
 
 | MDG | 优先级 | 问题数 | 复杂度 |
 |-----|--------|--------|--------|
@@ -160,3 +186,6 @@
 | MDG-007 | P2 | 2 | 🟡 中（需决策） |
 | MDG-008 | P2 | 3 | 🟢 低（重命名+RAII） |
 | MDG-009 | P1 | 4 | 🟢 低（值替换） |
+| MDG-012 | P0 | 1 | 🔴 高（域机制重构） |
+| MDG-013 | P1 | 1 | 🟡 中（新增功能） |
+| MDG-014 | P1 | 3 | 🟡 中（组件提取 + 选区修复） |
