@@ -354,7 +354,7 @@ export function resolveTextTemplate(text, file, index, rules = {}) {
 }
 
 function headerBaseTextForGroup(file, index, group, _rules) {
-  if (group.mode === 'per_file') return file.header ?? stripPdf(file.name)
+  if (group.mode === 'per_file') return file.header || `证据${index + 1}`
   if (group.mode === 'custom' || group.mode === 'template') return group.text || ''
   if (group.mode === 'seq') return `证据${index + 1}`
   if (group.mode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`
