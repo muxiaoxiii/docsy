@@ -26,6 +26,7 @@
 | MDG-013 | 模板驱动文件名生成 | P1 | ✅ 已合并 | codex/template-quickxml-0.8 | [changes/MDG-013](changes/MDG-013-template-filename.md) |
 | MDG-014 | 统一文档预览模块 + 编辑 UI 优化 | P1 | ✅ 已合并 | codex/template-quickxml-0.8 | [changes/MDG-014](changes/MDG-014-template-ui-redesign.md) |
 | MDG-015 | 编译警告清零 + 诊断日志接入 | P1 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-015](changes/MDG-015-warnings-cleanup.md) |
+| MDG-016 | 证据处理模块页眉页脚全面优化 | P0 | 🔴 调研阶段 | codex/template-quickxml-0.8 | [changes/MDG-016](changes/MDG-016-evidence-header-footer.md) |
 
 ---
 
