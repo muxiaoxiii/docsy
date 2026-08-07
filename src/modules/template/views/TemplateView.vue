@@ -189,6 +189,7 @@ import TemplateSettingsTab from '../components/TemplateSettingsTab.vue'
 import { useTemplateSettings } from '../composables/useTemplateSettings.js'
 import { useBatchFill } from '../composables/useBatchFill.js'
 import { markToRow, normalizeFieldRows, autoMergeMarks, inferFieldFromText, validateFieldRowsBeforeSave, buildFields } from '../composables/useFieldNormalization.js'
+import { ensureExtension, splitPartyLabelSegments, fieldFormKey } from '../composables/fieldRowUtils.js'
 import { usePreviewSelection } from '../composables/usePreviewSelection.js'
 import {
   sliceChars,
@@ -1236,33 +1237,6 @@ function splitPartyLabelText(text) {
   return splitPartyLabelSegments(text).map((item) => item.text)
 }
 
-function splitPartyLabelSegments(text) {
-  const chars = [...String(text || '')]
-  const segments = []
-  let start = 0
-  const flush = (end) => {
-    let trimmedStart = start
-    let trimmedEnd = end
-    while (trimmedStart < trimmedEnd && /\s/.test(chars[trimmedStart])) trimmedStart += 1
-    while (trimmedEnd > trimmedStart && /\s/.test(chars[trimmedEnd - 1])) trimmedEnd -= 1
-    if (trimmedEnd > trimmedStart) {
-      segments.push({
-        text: chars.slice(trimmedStart, trimmedEnd).join(''),
-        start: trimmedStart,
-        end: trimmedEnd,
-      })
-    }
-  }
-  for (let index = 0; index < chars.length; index += 1) {
-    if (/[、，,；;\n]/.test(chars[index])) {
-      flush(index)
-      start = index + 1
-    }
-  }
-  flush(chars.length)
-  return segments
-}
-
 function openSplitDialog(row) {
   splitDialog.visible = true
   splitDialog.rowId = row.rowId
@@ -1935,11 +1909,6 @@ function clearReferenceSelections() {
   for (const key of Object.keys(referenceSelections)) delete referenceSelections[key]
 }
 
-function fieldFormKey(field) {
-  if (!field) return ''
-  return field.id || field.name
-}
-
 function resetFormValues(fields) {
   for (const key of Object.keys(formValues)) delete formValues[key]
   clearReferenceSelections()
@@ -2448,14 +2417,6 @@ function requiredMissingFields() {
 
 function isRenderableField(field) {
   return !['delete_text', 'prefix', 'suffix', 'ignore'].includes(field?.type)
-}
-
-function ensureExtension(path, extension) {
-  return String(path || '')
-    .toLowerCase()
-    .endsWith(`.${extension}`)
-    ? path
-    : `${path}.${extension}`
 }
 
 function allFieldSuggestionItems(field) {
