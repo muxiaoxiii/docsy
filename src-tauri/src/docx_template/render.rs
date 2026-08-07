@@ -1055,6 +1055,7 @@ mod tests {
                 updated: String::new(),
             },
             fields,
+            filename_template: None,
         }
     }
 

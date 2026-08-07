@@ -903,6 +903,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            filename_template: None,
         };
         let values = [
             ("第三人".to_string(), json!(["真实第三人1", "真实第三人2"])),
@@ -934,6 +935,7 @@ mod tests {
                 updated: String::new(),
             },
             fields: vec![],
+            filename_template: None,
         };
         let context = TemplateHistoryContext {
             last_values: HashMap::new(),

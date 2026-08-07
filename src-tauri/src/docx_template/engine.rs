@@ -76,6 +76,7 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
             updated: chrono::Utc::now().to_rfc3339(),
         },
         fields: args.fields,
+        filename_template: args.filename_template,
     };
 
     ensure_template_package_safe(&pkg)?;
@@ -519,6 +520,7 @@ mod tests {
             output_path: tpl_path.display().to_string(),
             template_name: "E2E Test".to_string(),
             fields: fields.clone(),
+            filename_template: None,
         };
         let saved = save_docx(save_args).unwrap();
         assert_eq!(saved.manifest.format_version, 2);
@@ -705,6 +707,7 @@ mod tests {
             output_path: tpl_path.display().to_string(),
             template_name: "Table E2E".to_string(),
             fields,
+            filename_template: None,
         })
         .unwrap();
         assert_eq!(saved.manifest.format_version, 2);

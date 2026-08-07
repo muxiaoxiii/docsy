@@ -1422,6 +1422,7 @@ async function saveTemplate(overwrite = false) {
       outputPath: isEditingExisting ? editingLibraryTemplatePath.value : '',
       templateName: confirmedName,
       fields,
+      filenameTemplate: filenameTokens.value.length ? { tokens: filenameTokens.value, separator: '-' } : null,
     },
   })
   saving.value = false

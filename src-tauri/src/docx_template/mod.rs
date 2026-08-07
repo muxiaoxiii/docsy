@@ -84,6 +84,26 @@ pub struct TemplateManifest {
     pub format_version: u32,
     pub template: TemplateMeta,
     pub fields: Vec<TemplateField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename_template: Option<FilenameTemplate>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FilenameTemplate {
+    pub tokens: Vec<FilenameToken>,
+    #[serde(default)]
+    pub separator: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FilenameToken {
+    #[serde(default)]
+    pub id: String,
+    #[serde(rename = "type")]
+    pub token_type: String,
+    pub value: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -190,6 +210,8 @@ pub struct SaveTemplateArgs {
     pub output_path: String,
     pub template_name: String,
     pub fields: Vec<TemplateField>,
+    #[serde(default)]
+    pub filename_template: Option<FilenameTemplate>,
 }
 
 #[derive(Debug, Serialize)]
