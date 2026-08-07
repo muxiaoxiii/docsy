@@ -346,7 +346,7 @@ pub fn scan_package_to_runs_and_marks(
                 underline: node.underline,
             });
 
-            if node.highlighted {
+            if node.highlighted && !node.text.trim().is_empty() {
                 marks.push(TemplateMark {
                     id: id.clone(),
                     part: part_name.clone(),
