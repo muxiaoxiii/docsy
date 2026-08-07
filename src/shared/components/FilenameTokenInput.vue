@@ -16,10 +16,10 @@
       <span class="fn-preset-btn" title="序号（批量自增）" @click="addPreset('preset', '序号')">🔢</span>
       <span class="fn-preset-btn" title="连字符" @click="addPreset('literal', '-')">-</span>
       <span class="fn-preset-btn" title="下划线" @click="addPreset('literal', '_')">_</span>
-      <el-dropdown trigger="click" @command="addField">
+      <el-dropdown trigger="click" @command="addField" :teleported="false">
         <span class="fn-preset-btn fn-field-btn" title="插入字段">字段▾</span>
         <template #dropdown>
-          <el-dropdown-menu>
+          <el-dropdown-menu class="fn-field-menu">
             <el-dropdown-item v-for="f in availableFields" :key="f.name" :command="f.name">
               {{ f.label || f.name }}
             </el-dropdown-item>
@@ -29,13 +29,12 @@
       <span class="fn-sep">│</span>
       <input
         ref="inputRef"
-        :value="textValue"
+        v-model="textValue"
         class="fn-input"
         placeholder="或直接输入 [[字段名]]-[日期]"
-        @input="onTextInput($event.target.value)"
         @keydown.enter.prevent="commitText"
-        @focus="showAc = true"
-        @blur="hideAcDelayed"
+        @blur="commitText"
+        @focus="onFocus"
       />
       <div v-if="showAc && acFields.length" class="fn-autocomplete">
         <div v-for="f in acFields" :key="f.name" class="fn-ac-item" @mousedown.prevent="insertField(f)">
@@ -55,31 +54,34 @@ const props = defineProps({
   availableFields: { type: Array, default: () => [] },
   sampleValues: { type: Object, default: () => ({}) },
   index: { type: Number, default: 0 },
+  defaultName: { type: String, default: '' },
 })
 const emit = defineEmits(['update:modelValue'])
 
 const inputRef = ref(null)
 const showAc = ref(false)
-let blurTimer = null
+const inputFocused = ref(false)
 
-// ── Token ↔ Text sync ────────────────────────────────────
+// ── Text value (two-way with input) ──────────────────────
 
 const textValue = ref('')
-let syncing = false
 
+// Sync tokens → text only when input is NOT focused
+// (so user typing is never interrupted)
 watch(() => props.modelValue, (tokens) => {
-  if (syncing) return
-  syncing = true
-  textValue.value = tokens.map((t) => {
+  if (inputFocused.value) return
+  textValue.value = tokensToString(tokens)
+}, { immediate: true })
+
+function tokensToString(tokens) {
+  return tokens.map((t) => {
     if (t.type === 'field') return `[[${t.value}]]`
     if (t.type === 'preset') return `[${t.value}]`
     return t.value
   }).join('')
-  syncing = false
-}, { immediate: true })
+}
 
 function commitText() {
-  syncing = true
   const tokens = []
   const re = /\[\[([^\]]+)\]\]|\[([^\]]+)\]|([^[\]]+)/g
   let m
@@ -89,15 +91,22 @@ function commitText() {
     else if (m[3]) tokens.push({ id: crypto.randomUUID(), type: 'literal', value: m[3] })
   }
   emit('update:modelValue', tokens)
-  syncing = false
   showAc.value = false
 }
 
-function onTextInput(val) {
-  textValue.value = val
-  const cursor = inputRef.value?.selectionStart || val.length
-  showAc.value = val.slice(Math.max(0, cursor - 2), cursor) === '[['
+function onFocus() {
+  inputFocused.value = true
+  // When focusing, if tokens exist, show their text representation
+  // so user can edit it directly
+  if (props.modelValue.length && !textValue.value) {
+    textValue.value = tokensToString(props.modelValue)
+  }
 }
+
+// On blur: commit text → tokens, then mark unfocused
+watch(inputFocused, (focused) => {
+  if (!focused) commitText()
+})
 
 // ── Autocomplete ─────────────────────────────────────────
 
@@ -112,16 +121,18 @@ const acFields = computed(() => {
   ).slice(0, 8)
 })
 
+// Watch for [[ input to trigger autocomplete
+watch(textValue, (val) => {
+  if (!inputFocused.value) { showAc.value = false; return }
+  const cursor = inputRef.value?.selectionStart || val.length
+  showAc.value = val.slice(Math.max(0, cursor - 2), cursor) === '[['
+})
+
 function insertField(f) {
   const val = textValue.value
   const lastBracket = val.lastIndexOf('[[')
   textValue.value = val.slice(0, lastBracket) + `[[${f.name}]]`
   showAc.value = false
-  commitText()
-}
-
-function hideAcDelayed() {
-  blurTimer = setTimeout(() => { showAc.value = false }, 150)
 }
 
 // ── Token strip ──────────────────────────────────────────
@@ -137,18 +148,22 @@ function removeToken(idx) {
 }
 
 function addPreset(type, value) {
+  // Commit current input text first, then append
+  commitText()
   emit('update:modelValue', [...props.modelValue, { id: crypto.randomUUID(), type, value }])
 }
 
 function addField(name) {
+  commitText()
   emit('update:modelValue', [...props.modelValue, { id: crypto.randomUUID(), type: 'field', value: name }])
 }
 
 // ── Preview ──────────────────────────────────────────────
 
 const previewText = computed(() => {
-  if (!props.modelValue.length) return ''
-  return props.modelValue.map((t) => {
+  const tokens = props.modelValue
+  if (!tokens.length) return ''
+  const name = tokens.map((t) => {
     if (t.type === 'field') {
       const v = props.sampleValues[t.value]
       if (v == null || v === '' || v === false) return t.value
@@ -164,7 +179,8 @@ const previewText = computed(() => {
       return `[${t.value}]`
     }
     return t.value
-  }).join('') + '.docx'
+  }).join('')
+  return name + '.docx'
 })
 </script>
 
@@ -175,6 +191,7 @@ const previewText = computed(() => {
   gap: 4px;
   padding: 6px 8px;
   min-height: 30px;
+  position: relative;
 }
 
 .fn-token-strip {
@@ -230,6 +247,12 @@ const previewText = computed(() => {
   color: var(--docsy-text-muted);
 }
 
+/* Field dropdown: max 10 items (~280px), scroll the rest */
+:deep(.fn-field-menu) {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
 .fn-input {
   flex: 1;
   min-width: 120px;
@@ -258,13 +281,13 @@ const previewText = computed(() => {
 
 .fn-autocomplete {
   position: absolute;
-  top: 100%;
-  left: 0;
+  bottom: 100%;
+  left: 50%;
   z-index: 10;
   background: var(--docsy-surface-base);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 4px;
-  max-height: 160px;
+  max-height: 200px;
   overflow-y: auto;
   min-width: 140px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
@@ -277,7 +300,4 @@ const previewText = computed(() => {
 }
 
 .fn-ac-item:hover { background: var(--docsy-primary-soft); }
-
-/* Make input-wrap relative for autocomplete positioning */
-.filename-token-input { position: relative; }
 </style>
