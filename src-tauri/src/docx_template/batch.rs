@@ -695,6 +695,47 @@ fn generate_filename(
     manifest: &TemplateManifest,
     index: usize,
 ) -> String {
+    // If manifest has filenameTemplate, use it
+    if let Some(ref ft) = manifest.filename_template {
+        if !ft.tokens.is_empty() {
+            let sep = if ft.separator.is_empty() { "-".to_string() } else { ft.separator.clone() };
+            let parts: Vec<String> = ft.tokens.iter().map(|token| {
+                match token.token_type.as_str() {
+                    "literal" => token.value.clone(),
+                    "field" => {
+                        let field = manifest.fields.iter().find(|f| f.name == token.value);
+                        if let Some(f) = field {
+                            values.get(&f.id).map(value_to_display).unwrap_or_default()
+                        } else {
+                            values.get(&token.value).map(value_to_display).unwrap_or_default()
+                        }
+                    }
+                    "preset" => {
+                        match token.value.as_str() {
+                            "日期" => chrono::Local::now().format("%Y%m%d").to_string(),
+                            "日期-" => chrono::Local::now().format("%Y-%m-%d").to_string(),
+                            "日期短" => chrono::Local::now().format("%m%d").to_string(),
+                            "模板名" => manifest.template.name.clone(),
+                            "序号" => index.to_string(),
+                            "序号01" => format!("{:02}", index),
+                            "序号001" => format!("{:03}", index),
+                            "中文序号" => to_chinese_number(index),
+                            _ => token.value.clone(),
+                        }
+                    }
+                    _ => token.value.clone(),
+                }
+            }).collect();
+            let raw = parts.join(&sep);
+            let clean = sanitize_filename(&raw);
+            if clean.trim().is_empty() || clean == ".docx" {
+                return format!("{}-{}.docx", manifest.template.name, index);
+            }
+            return if clean.ends_with(".docx") { clean } else { format!("{clean}.docx") };
+        }
+    }
+
+    // Fallback: existing pattern logic
     if pattern.is_empty() {
         return format!("{}-{}.docx", manifest.template.name, index);
     }
@@ -773,4 +814,48 @@ fn unique_output_path(dir: &Path, filename: &str) -> PathBuf {
         .map(|d| d.as_millis())
         .unwrap_or(0);
     dir.join(format!("{stem}-{stamp}.docx"))
+}
+
+fn sanitize_filename(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| {
+            if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
+fn to_chinese_number(n: usize) -> String {
+    const DIGITS: &[char] = &['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+    const UNITS: &[&str] = &["", "十", "百", "千", "万"];
+    if n == 0 { return "零".to_string(); }
+    if n >= 10000 { return n.to_string(); } // fallback for large numbers
+    let s = n.to_string();
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    let mut result = String::new();
+    for (i, ch) in chars.iter().enumerate() {
+        let digit = ch.to_digit(10).unwrap() as usize;
+        let unit_idx = len - i - 1;
+        if digit == 0 {
+            if !result.is_empty() && !result.ends_with('零') {
+                result.push('零');
+            }
+        } else {
+            result.push(DIGITS[digit]);
+            result.push_str(UNITS[unit_idx]);
+        }
+    }
+    // Remove trailing zero
+    if result.ends_with('零') {
+        result.pop();
+    }
+    // Special case: 一十 → 十
+    if result.starts_with('一') && result.len() > 1 && result.chars().nth(1).map(|c| c == '十').unwrap_or(false) {
+        result = result[3..].to_string(); // skip '一' (3 bytes in UTF-8)
+    }
+    result
 }
