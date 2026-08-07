@@ -193,6 +193,7 @@ import { useBatchFill } from '../composables/useBatchFill.js'
 import { markToRow, normalizeFieldRows, autoMergeMarks, inferFieldFromText, validateFieldRowsBeforeSave, buildFields } from '../composables/useFieldNormalization.js'
 import { ensureExtension, splitPartyLabelSegments, fieldFormKey } from '../composables/fieldRowUtils.js'
 import { usePreviewSelection } from '../composables/usePreviewSelection.js'
+import { registerSnapshotProvider } from '@/shared/diagnostics.js'
 import {
   sliceChars,
   referenceSourceKey,
@@ -491,6 +492,16 @@ onMounted(() => {
   void loadTemplateLibrary()
   void loadTemplateHistoryRuns()
   void loadTemplateDatabase()
+
+  // 注册诊断快照提供者
+  registerSnapshotProvider('template', () => ({
+    templatePath: templatePath.value,
+    templateName: templateName.value,
+    fieldRowCount: fieldRows.value.length,
+    markCount: marks.value.length,
+    activeTab: activeTab.value,
+    filenameTokens: filenameTokens.value.length,
+  }))
 })
 
 onUnmounted(() => {
