@@ -125,7 +125,9 @@ std::fs::rename(&temp, output_path)?;  // 原子操作
 
 ### 7. normalize 函数统一 — P2
 
-detection.rs 有 `normalize_for_content_match`（模糊包含，用于检测时补 font_size），content_text.rs 有 `normalize_for_match`（精确去空格，用于删除匹配）。**两者逻辑不同**，导致"检测能匹配但删除不能匹配"。
+detection.rs 有 `normalize_for_content_match`（模糊包含，用于 lopdf 路径补 font_size），content_text.rs 有 `normalize_for_match`（精确去空格，用于删除匹配）。**两者逻辑不同**。
+
+> **交叉审计澄清**：这两个函数各自在自己的路径上工作，不交叉——pdftotext 检测路径不使用 `normalize_for_content_match`（后者只在 `inspect_content_font_samples` 中用），因此**不是检测-删除不匹配的根因**。但两套归一化逻辑并存确实影响可维护性，统一仍有价值。
 
 **建议**：抽取到公共模块 `text_normalize.rs`，统一为：
 
@@ -237,15 +239,12 @@ let output = tool.run(&[
 
 ## 五、额外发现的 bug
 
-### 15. dingbat 页码 Unicode 错误
+### 15. ~~dingbat 页码 Unicode 错误~~（已排除，非 bug）
 
-`header_footer.rs` 中（约 line 1758）：
-
-```rust
-char::from_u32(0x2775 + value)  // 0x2775 = ❵，不是 ❶
-```
-
-`❶` 的 Unicode 是 `U+2776`。应该是 `0x2776 + value - 1`。前端的 `pdfPageNumberRules.js:4` 用硬编码数组是对的，但后端这个计算是错的。**虽然当前后端可能没用这个路径生成 dingbat，但留着是定时炸弹**。
+> **交叉审计更正**：经 Claude 审计复核，原判断有误。代码 `char::from_u32(0x2775 + value)` 是正确的——
+> value=1 时 `0x2775 + 1 = 0x2776 = ❶` ✓，value=10 时 `0x277F = ❿` ✓。
+> 且有测试 `assert_eq!(format_page_number(11, "dingbat"), "⓫")` 验证第二分支 `0x24E0 + value`。
+> 原报告误将基数 `0x2775`（❵）当作目标字符，实际上加完 value 后结果完全正确。**无需修复**。
 
 ### 16. overlayConfigForFile 的 region 判断问题
 
@@ -272,7 +271,7 @@ export function updatePageRanges(files) { return files.map(f => { f.pageStart = 
 
 | 阶段 | 时间 | 内容 |
 |------|------|------|
-| **急救** | 1 周 | bbox 独立于 zone check（P0）+ headerEdited 判断修正（P0）+ dingbat 修正 |
+| **急救** | 1 周 | bbox 独立于 zone check（P0）+ headerEdited 判断修正（P0）|
 | **稳固** | 2-3 周 | ToUnicode CMap 查找（P0 长期）+ 新旧 API 收敛（P1）+ 删除诊断报告（P1）+ 检测并行化（P1）|
 | **重构** | 1-2 月 | file 对象拆分 + header_footer.rs 拆分 + normalize 统一 + TextState 补全 + 测试补全 |
 | **打磨** | 持续 | UI 重构 + 缓存 + 批量 overlay + 进度细化 |

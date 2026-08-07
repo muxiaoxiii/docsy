@@ -297,14 +297,23 @@ fn filter_page_operations(
         let shown_text = shown_text(operation);
         let mut remove_region = None;
         if let Some(text) = shown_text.as_deref() {
+            // 文本匹配：必须在 zone 内 + 文本内容匹配
             if is_in_header_zone(state.y, plan)
-                && matches_any_target(text, &plan.header_targets, &state)
+                && matches_any_target_by_text(text, &plan.header_targets)
             {
                 remove_region = Some(TextRegion::Header);
             } else if is_in_footer_zone(state.y, plan)
-                && matches_any_target(text, &plan.footer_targets, &state)
+                && matches_any_target_by_text(text, &plan.footer_targets)
             {
                 remove_region = Some(TextRegion::Footer);
+            }
+            // bbox 匹配：独立于 zone check，处理 CID 字体无法解码的情况
+            if remove_region.is_none() {
+                if matches_any_target_by_bbox(&state, &plan.header_targets) {
+                    remove_region = Some(TextRegion::Header);
+                } else if matches_any_target_by_bbox(&state, &plan.footer_targets) {
+                    remove_region = Some(TextRegion::Footer);
+                }
             }
         }
         match remove_region {
@@ -424,10 +433,18 @@ fn is_in_footer_zone(y: f32, plan: &PagePlainTextPlan) -> bool {
         && plan.page_box.width > 0.0
 }
 
-fn matches_any_target(text: &str, targets: &[&PlainTextTarget], state: &TextState) -> bool {
+fn matches_any_target_by_text(text: &str, targets: &[&PlainTextTarget]) -> bool {
+    targets.iter().any(|target| target_matches(text, target))
+}
+
+fn matches_any_target_by_bbox(state: &TextState, targets: &[&PlainTextTarget]) -> bool {
     targets
         .iter()
-        .any(|target| target_matches(text, target) || target_bbox_matches(state, target))
+        .any(|target| target_bbox_matches(state, target))
+}
+
+fn matches_any_target(text: &str, targets: &[&PlainTextTarget], state: &TextState) -> bool {
+    matches_any_target_by_text(text, targets) || matches_any_target_by_bbox(state, targets)
 }
 
 fn target_matches(text: &str, target: &PlainTextTarget) -> bool {
