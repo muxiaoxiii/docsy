@@ -291,7 +291,7 @@ function toChinese(n) {
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 3px;
   font-size: 11px;
-  background: var(--docsy-surface-base);
+  background: var(--docsy-surface-elevated);
   color: var(--docsy-text-strong);
   outline: none;
   box-sizing: border-box;
@@ -306,7 +306,7 @@ function toChinese(n) {
   left: 0;
   right: 0;
   z-index: 10;
-  background: var(--docsy-surface-base);
+  background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 4px;
   max-height: 200px;
@@ -373,7 +373,7 @@ function toChinese(n) {
   top: 100%;
   left: 0;
   z-index: 20;
-  background: var(--docsy-surface-base);
+  background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
@@ -386,7 +386,7 @@ function toChinese(n) {
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
-  background: var(--docsy-surface-base);
+  background: var(--docsy-surface-elevated);
 }
 
 .fn-pop-item:hover { background: var(--docsy-primary-soft); }
