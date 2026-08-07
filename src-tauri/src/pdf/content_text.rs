@@ -215,7 +215,9 @@ fn filter_referenced_form_text(
         let Ok(content) = Content::decode(&stream_content) else {
             continue;
         };
-        let (filtered, form_result) = filter_page_operations(&content.operations, plan, page_number);
+        // 读取 Form XObject 的 BBox 和 Matrix，构建表单本地坐标的 plan
+        let form_plan = read_form_plan(&stream_dict, plan);
+        let (filtered, form_result) = filter_page_operations(&content.operations, &form_plan, page_number);
         let direct_changed = form_result.removed() > 0;
         let resources =
             super::artifacts::resource_dictionary(doc, stream_dict.get(b"Resources").ok());
@@ -612,6 +614,56 @@ fn object_number(object: &Object) -> Option<f32> {
         Object::Integer(value) => Some(*value as f32),
         Object::Real(value) => Some(*value),
         _ => None,
+    }
+}
+
+/// 从 Form XObject 的 BBox 构建表单本地坐标的 plan
+/// 表单内容使用 form-local 坐标，zone check 也需要在 form-local 坐标中进行
+/// 所以 page_box 直接使用表单 BBox（不转换为页面坐标）
+fn read_form_plan<'a>(
+    stream_dict: &lopdf::Dictionary,
+    page_plan: &'a PagePlainTextPlan<'a>,
+) -> PagePlainTextPlan<'a> {
+    let form_bbox = stream_dict
+        .get(b"BBox")
+        .ok()
+        .and_then(|v| v.as_array().ok())
+        .and_then(|arr| {
+            if arr.len() >= 4 {
+                Some((
+                    object_number(&arr[0]).unwrap_or(0.0),
+                    object_number(&arr[1]).unwrap_or(0.0),
+                    object_number(&arr[2]).unwrap_or(0.0),
+                    object_number(&arr[3]).unwrap_or(0.0),
+                ))
+            } else {
+                None
+            }
+        });
+
+    let Some((fx0, fy0, fx1, fy1)) = form_bbox else {
+        // 没有 BBox，回退到页面级 plan
+        return PagePlainTextPlan {
+            header_targets: page_plan.header_targets.clone(),
+            footer_targets: page_plan.footer_targets.clone(),
+            header_zone_pt: page_plan.header_zone_pt,
+            footer_zone_pt: page_plan.footer_zone_pt,
+            page_box: page_plan.page_box,
+        };
+    };
+
+    // 直接使用表单 BBox 作为 page_box
+    // 表单内容的 state.y 是 form-local 坐标，zone check 也需要在同坐标系中
+    PagePlainTextPlan {
+        header_targets: page_plan.header_targets.clone(),
+        footer_targets: page_plan.footer_targets.clone(),
+        header_zone_pt: page_plan.header_zone_pt,
+        footer_zone_pt: page_plan.footer_zone_pt,
+        page_box: PageBox {
+            width: fx1 - fx0,
+            min_y: fy0,
+            max_y: fy1,
+        },
     }
 }
 
