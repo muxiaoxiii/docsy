@@ -19,8 +19,8 @@
 | MDG-006 | 输出路径碰撞检查 | P0 | ✅ 已有保护 | — | — |
 | MDG-007 | same_path 统一为公共函数 | P1 | ✅ 已合并到 MDG-003 | — | — |
 | MDG-008 | 生产代码 eprintln! 清理 | P1 | ✅ 已完成 | codex/template-quickxml-0.8 | — |
-| MDG-009 | TextOverlay 方法命名修正 | P1 | 🔴 未开始 | — | — |
-| MDG-010 | 前后端默认值统一 | P1 | 🔴 未开始 | — | — |
+| MDG-009 | TextOverlay 方法命名修正 | P1 | ⏸️ 无变更单 | — | — |
+| MDG-010 | 前后端默认值统一 | P1 | ✅ 部分完成 | codex/template-quickxml-0.8 | — |
 | MDG-011 | 全局诊断与探针系统 | P1 | 🟡 设计中 | — | [changes/MDG-011](changes/MDG-011-diagnostics.md) |
 
 ---
