@@ -69,15 +69,13 @@ import { tauriCallSafe } from './core/tauriBridge.js'
 import { listen } from '@tauri-apps/api/event'
 import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
+import { useAppStore } from './stores/app.js'
 
 const router = useRouter()
 const route = useRoute()
+const appStore = useAppStore()
 
-const settings = ref({
-  menu_visibility: {},
-  menu_order: [],
-})
-const menuItems = computed(() => getMenuItems(settings.value))
+const menuItems = computed(() => getMenuItems(appStore.settings))
 
 const activeMenu = computed(() => route.name || 'home')
 const operationVisible = ref(false)
@@ -98,15 +96,8 @@ function onMenuSelect(index) {
   router.push({ name: index })
 }
 
-async function loadSettings() {
-  const result = await tauriCallSafe('get_app_settings')
-  if (result.ok) {
-    settings.value = { ...settings.value, ...result.data }
-  }
-}
-
 function applySettingsEvent(event) {
-  settings.value = { ...settings.value, ...(event.detail || {}) }
+  appStore.settings = { ...appStore.settings, ...(event.detail || {}) }
 }
 
 function formatElapsed(ms) {
@@ -189,7 +180,7 @@ async function cancelCurrentOperation() {
 let unlistenConversionTimeout = null
 
 onMounted(() => {
-  loadSettings()
+  appStore.loadSettings()
   window.addEventListener('docsy-settings-updated', applySettingsEvent)
   window.addEventListener('docsy-operation-start', startOperation)
   window.addEventListener('docsy-operation-finish', finishOperation)
