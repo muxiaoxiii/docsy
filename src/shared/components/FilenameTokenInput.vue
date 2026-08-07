@@ -7,17 +7,28 @@
           :key="token.id"
           class="fn-bubble"
           :class="`fn-${token.type}`"
-          :title="`点击删除`"
+          title="点击删除"
           @click="removeToken(idx)"
         >{{ tokenLabel(token) }}</span>
       </div>
       <span class="fn-sep">│</span>
-      <span class="fn-preset-btn" title="日期（YYYYMMDD）" @click="addPreset('preset', '日期')">📅</span>
-      <span class="fn-preset-btn" title="序号（批量自增）" @click="addPreset('preset', '序号')">🔢</span>
-      <span class="fn-preset-btn" title="连字符" @click="addPreset('literal', '-')">-</span>
-      <span class="fn-preset-btn" title="下划线" @click="addPreset('literal', '_')">_</span>
+      <span class="fn-btn" title="模板名称" @click="addPreset('preset', '模板名')">模板</span>
+      <span class="fn-btn" title="日期 YYYYMMDD" @click="addPreset('preset', '日期')">📅</span>
+      <el-popover trigger="click" :width="140" popper-class="fn-seq-popover">
+        <template #reference>
+          <span class="fn-btn" title="序号">🔢</span>
+        </template>
+        <div class="fn-seq-options">
+          <div class="fn-seq-item" @click="addSeq('序号')">1, 2, 3…</div>
+          <div class="fn-seq-item" @click="addSeq('序号01')">01, 02, 03…</div>
+          <div class="fn-seq-item" @click="addSeq('序号001')">001, 002, 003…</div>
+          <div class="fn-seq-item" @click="addSeq('中文序号')">一, 二, 三…</div>
+        </div>
+      </el-popover>
+      <span class="fn-btn" title="连字符" @click="addPreset('literal', '-')">-</span>
+      <span class="fn-btn" title="下划线" @click="addPreset('literal', '_')">_</span>
       <el-dropdown trigger="click" @command="addField" :teleported="false">
-        <span class="fn-preset-btn fn-field-btn" title="插入字段">字段▾</span>
+        <span class="fn-btn fn-field-btn" title="插入字段">字段▾</span>
         <template #dropdown>
           <el-dropdown-menu class="fn-field-menu">
             <el-dropdown-item v-for="f in availableFields" :key="f.name" :command="f.name">
@@ -34,14 +45,19 @@
         placeholder="或直接输入 [[字段名]]-[日期]"
         @keydown.enter.prevent="commitText"
         @blur="commitText"
-        @focus="onFocus"
+        @focus="inputFocused = true"
       />
       <div v-if="showAc && acFields.length" class="fn-autocomplete">
         <div v-for="f in acFields" :key="f.name" class="fn-ac-item" @mousedown.prevent="insertField(f)">
           {{ f.label || f.name }}
         </div>
       </div>
-      <span v-if="previewText" class="fn-preview" :title="previewText">{{ previewText }}</span>
+      <span
+        v-if="previewText"
+        class="fn-preview"
+        :class="{ 'fn-preview-over': previewTooLong }"
+        :title="previewTooLong ? `文件名过长（${previewLen}/255）` : previewText"
+      >{{ previewText }}</span>
     </div>
   </div>
 </template>
@@ -54,7 +70,7 @@ const props = defineProps({
   availableFields: { type: Array, default: () => [] },
   sampleValues: { type: Object, default: () => ({}) },
   index: { type: Number, default: 0 },
-  defaultName: { type: String, default: '' },
+  templateName: { type: String, default: '' },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -62,24 +78,18 @@ const inputRef = ref(null)
 const showAc = ref(false)
 const inputFocused = ref(false)
 
-// ── Text value (two-way with input) ──────────────────────
+// ── Text ↔ Tokens sync ──────────────────────────────────
 
 const textValue = ref('')
 
-// Sync tokens → text only when input is NOT focused
-// (so user typing is never interrupted)
 watch(() => props.modelValue, (tokens) => {
   if (inputFocused.value) return
-  textValue.value = tokensToString(tokens)
-}, { immediate: true })
-
-function tokensToString(tokens) {
-  return tokens.map((t) => {
+  textValue.value = tokens.map((t) => {
     if (t.type === 'field') return `[[${t.value}]]`
     if (t.type === 'preset') return `[${t.value}]`
     return t.value
   }).join('')
-}
+}, { immediate: true })
 
 function commitText() {
   const tokens = []
@@ -92,21 +102,8 @@ function commitText() {
   }
   emit('update:modelValue', tokens)
   showAc.value = false
+  inputFocused.value = false
 }
-
-function onFocus() {
-  inputFocused.value = true
-  // When focusing, if tokens exist, show their text representation
-  // so user can edit it directly
-  if (props.modelValue.length && !textValue.value) {
-    textValue.value = tokensToString(props.modelValue)
-  }
-}
-
-// On blur: commit text → tokens, then mark unfocused
-watch(inputFocused, (focused) => {
-  if (!focused) commitText()
-})
 
 // ── Autocomplete ─────────────────────────────────────────
 
@@ -121,7 +118,6 @@ const acFields = computed(() => {
   ).slice(0, 8)
 })
 
-// Watch for [[ input to trigger autocomplete
 watch(textValue, (val) => {
   if (!inputFocused.value) { showAc.value = false; return }
   const cursor = inputRef.value?.selectionStart || val.length
@@ -148,9 +144,13 @@ function removeToken(idx) {
 }
 
 function addPreset(type, value) {
-  // Commit current input text first, then append
   commitText()
   emit('update:modelValue', [...props.modelValue, { id: crypto.randomUUID(), type, value }])
+}
+
+function addSeq(format) {
+  commitText()
+  emit('update:modelValue', [...props.modelValue, { id: crypto.randomUUID(), type: 'preset', value: format }])
 }
 
 function addField(name) {
@@ -171,17 +171,38 @@ const previewText = computed(() => {
       return String(v)
     }
     if (t.type === 'preset') {
-      if (t.value === '日期') {
-        const d = new Date()
-        return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
-      }
+      if (t.value === '模板名') return props.templateName || '模板'
+      if (t.value === '日期') return todayStr()
       if (t.value === '序号') return String((props.index || 0) + 1)
+      if (t.value === '序号01') return String((props.index || 0) + 1).padStart(2, '0')
+      if (t.value === '序号001') return String((props.index || 0) + 1).padStart(3, '0')
+      if (t.value === '中文序号') return toChinese((props.index || 0) + 1)
       return `[${t.value}]`
     }
     return t.value
   }).join('')
-  return name + '.docx'
+  return sanitize(name) + '.docx'
 })
+
+const previewLen = computed(() => (previewText.value || '').length)
+const previewTooLong = computed(() => previewLen.value > 255)
+
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+}
+
+function toChinese(n) {
+  const chars = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+  if (n <= 10) return chars[n]
+  if (n < 20) return '十' + chars[n - 10]
+  if (n < 100) return chars[Math.floor(n / 10)] + '十' + (n % 10 ? chars[n % 10] : '')
+  return String(n)
+}
+
+function sanitize(name) {
+  return String(name || '').replace(/[/\\:*?"<>|]/g, '_').trim()
+}
 </script>
 
 <style scoped>
@@ -192,14 +213,14 @@ const previewText = computed(() => {
   padding: 6px 8px;
   min-height: 30px;
   position: relative;
+  flex-wrap: wrap;
 }
 
 .fn-token-strip {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 2px;
-  overflow-x: auto;
-  flex-shrink: 1;
+  flex: 1;
   min-width: 0;
 }
 
@@ -210,7 +231,9 @@ const previewText = computed(() => {
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
-  flex-shrink: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fn-field { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); }
@@ -225,7 +248,7 @@ const previewText = computed(() => {
   flex-shrink: 0;
 }
 
-.fn-preset-btn {
+.fn-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -240,14 +263,9 @@ const previewText = computed(() => {
   padding: 0 4px;
 }
 
-.fn-preset-btn:hover { border-color: var(--docsy-primary); }
+.fn-btn:hover { border-color: var(--docsy-primary); }
+.fn-field-btn { color: var(--docsy-text-muted); }
 
-.fn-field-btn {
-  font-size: 11px;
-  color: var(--docsy-text-muted);
-}
-
-/* Field dropdown: max 10 items (~280px), scroll the rest */
 :deep(.fn-field-menu) {
   max-height: 280px;
   overflow-y: auto;
@@ -255,7 +273,7 @@ const previewText = computed(() => {
 
 .fn-input {
   flex: 1;
-  min-width: 120px;
+  min-width: 100px;
   height: 22px;
   padding: 0 5px;
   border: 1px solid var(--docsy-border-subtle);
@@ -272,11 +290,16 @@ const previewText = computed(() => {
 .fn-preview {
   font-size: 10px;
   color: var(--docsy-text-muted);
-  max-width: 160px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.fn-preview-over {
+  color: #dc2626;
+  font-weight: 600;
 }
 
 .fn-autocomplete {
@@ -300,4 +323,19 @@ const previewText = computed(() => {
 }
 
 .fn-ac-item:hover { background: var(--docsy-primary-soft); }
+
+.fn-seq-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fn-seq-item {
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: strip;
+  border-radius: 3px;
+}
+
+.fn-seq-item:hover { background: var(--docsy-primary-soft); cursor: pointer; }
 </style>

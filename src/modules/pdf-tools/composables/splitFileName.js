@@ -94,7 +94,7 @@ export { toChineseNumber }
  * @param {number} index - row index (for sequence tokens)
  * @returns {string}
  */
-export function renderFilenameFromTokens(tokens, fieldValues = {}, index = 0) {
+export function renderFilenameFromTokens(tokens, fieldValues = {}, index = 0, templateName = '') {
   if (!tokens?.length) return ''
   const parts = tokens.map((token) => {
     if (token.type === 'field') {
@@ -104,8 +104,11 @@ export function renderFilenameFromTokens(tokens, fieldValues = {}, index = 0) {
       return String(v)
     }
     if (token.type === 'preset') {
+      if (token.value === '模板名') return templateName || '模板'
       if (token.value === '日期') return todayCompact()
       if (token.value === '序号') return String(index + 1)
+      if (token.value === '序号01') return String(index + 1).padStart(2, '0')
+      if (token.value === '序号001') return String(index + 1).padStart(3, '0')
       if (token.value === '中文序号') return toChineseNumber(index + 1)
       return `[${token.value}]`
     }

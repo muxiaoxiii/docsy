@@ -1845,6 +1845,17 @@ async function editTemplateFromLibrary(item) {
   templateManifest.value = manifest
   templateName.value = manifest.name || item.name || ''
 
+  // Set default filename tokens if not configured
+  if (!manifest.filenameTemplate?.tokens?.length) {
+    filenameTokens.value = [
+      { id: crypto.randomUUID(), type: 'preset', value: '模板名' },
+      { id: crypto.randomUUID(), type: 'literal', value: '-' },
+      { id: crypto.randomUUID(), type: 'preset', value: '日期' },
+    ]
+  } else {
+    filenameTokens.value = manifest.filenameTemplate.tokens
+  }
+
   // Load document content so full-text and preview buttons work
   const contentResult = await tauriCallSafe('inspect_docsytpl_content', { path: item.path })
   if (contentResult.ok) {
