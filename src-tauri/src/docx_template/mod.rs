@@ -607,15 +607,6 @@ pub(super) fn is_word_xml_part(name: &str) -> bool {
         || (name.starts_with("word/footer") && name.ends_with(".xml"))
 }
 
-pub(super) fn fnv1a_hash(value: &str) -> u64 {
-    value
-        .as_bytes()
-        .iter()
-        .fold(0xcbf29ce484222325, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
-        })
-}
-
 pub(super) fn unique_docx_output_path(path: &Path) -> Result<PathBuf> {
     if !path.exists() {
         return Ok(path.to_path_buf());

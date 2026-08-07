@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{annotations, header_footer, qpdf};
+use super::{annotations, header_footer, qpdf, same_path};
 
 pub fn apply_rules(args: &Value) -> Result<Value> {
     let items = extract_job_items(args)?;
@@ -335,13 +335,6 @@ fn remove_intermediate_outputs(results: &[Value], merge_output_path: &str) -> us
         }
     }
     removed
-}
-
-fn same_path(left: &Path, right: &Path) -> bool {
-    match (left.canonicalize(), right.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left == right,
-    }
 }
 
 fn cleanup_temp_paths(paths: Vec<PathBuf>) {

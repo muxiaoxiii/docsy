@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 
 use crate::docx_template::package;
+use crate::pdf::fnv1a_hash;
 
 use super::{
-    fnv1a_hash, is_word_xml_part, unique_docx_output_path, RenderTemplateArgs, SaveTemplateArgs,
+    is_word_xml_part, unique_docx_output_path, RenderTemplateArgs, SaveTemplateArgs,
     SaveTemplateResult, TemplateInspection, TemplateManifest, TemplateMark, TemplateMeta,
     TemplateTextRun,
 };

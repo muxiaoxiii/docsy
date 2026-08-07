@@ -5,6 +5,8 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use super::temp_named_path;
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PlainTextCleanupPlan {
     pub header_targets: Vec<PlainTextTarget>,
@@ -551,15 +553,6 @@ fn object_number(object: &Object) -> Option<f32> {
 
 fn mm_to_pt(mm: f32) -> f32 {
     mm * 72.0 / 25.4
-}
-
-fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
 }
 
 #[cfg(test)]
