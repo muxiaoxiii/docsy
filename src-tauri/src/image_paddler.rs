@@ -522,7 +522,7 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
     let per_page = grid.rows * grid.cols;
     let margin_mm = args.margin_mm.unwrap_or(12.0);
     let show_filename = args.show_filename.unwrap_or(true);
-    let filename_without_ext = args.filename_without_ext.unwrap_or(false);
+    let filename_without_ext = args.filename_without_ext.unwrap_or(true);
     let filename_remove_text = args.filename_remove_text.clone().unwrap_or_default();
     let filename_rules = args.filename_rules.clone().unwrap_or_default();
     let order_mode = args.order_mode.as_deref().unwrap_or("z");
