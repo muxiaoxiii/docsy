@@ -6,10 +6,11 @@
         v-for="(token, idx) in modelValue"
         :key="token.id"
         class="fn-block"
-        :class="`fn-${token.type}`"
+        :class="blockClass(token)"
         title="点击删除"
         @click="removeToken(idx)"
       >{{ previewToken(token) }}</span>
+      <span v-if="modelValue.length" class="fn-ext">.docx</span>
       <span v-if="!modelValue.length" class="fn-hint">点击右侧按钮或在中间输入文件名规则</span>
     </div>
 
@@ -31,21 +32,21 @@
       </div>
     </div>
 
-    <!-- Right: Buttons (fixed width) -->
+    <!-- Right: Buttons (fixed) -->
     <div class="fn-btn-col">
-      <span class="fn-btn" :title="templateName || '模板名'" @click="addPreset('preset', '模板名')">模板名</span>
+      <span class="fn-btn fn-btn-template" title="模板名称" @click="addPreset('preset', '模板名')">模板名</span>
 
-      <span class="fn-btn fn-btn-split" @click="addPreset('preset', '日期')">
+      <span class="fn-btn fn-btn-date fn-btn-split" @click="addPreset('preset', '日期')">
         <span class="fn-btn-main">📅</span>
         <span class="fn-btn-arrow" @click.stop.prevent="toggleDatePopover">▾</span>
       </span>
       <div v-if="datePopover" class="fn-popover fn-pop-right" @mousedown.prevent>
-        <div class="fn-pop-item" @click="addAndClose('preset', '日期', 'date')">20260806</div>
-        <div class="fn-pop-item" @click="addAndClose('preset', '日期-', 'date')">2026-08-06</div>
-        <div class="fn-pop-item" @click="addAndClose('preset', '日期短', 'date')">0806</div>
+        <div class="fn-pop-item" @click="addAndClose('preset', '日期', 'date')">YYYYMMDD</div>
+        <div class="fn-pop-item" @click="addAndClose('preset', '日期-', 'date')">YYYY-MM-DD</div>
+        <div class="fn-pop-item" @click="addAndClose('preset', '日期短', 'date')">MMDD</div>
       </div>
 
-      <span class="fn-btn fn-btn-split" @click="addPreset('preset', '序号')">
+      <span class="fn-btn fn-btn-seq fn-btn-split" @click="addPreset('preset', '序号')">
         <span class="fn-btn-main">🔢</span>
         <span class="fn-btn-arrow" @click.stop.prevent="toggleSeqPopover">▾</span>
       </span>
@@ -56,12 +57,14 @@
         <div class="fn-pop-item" @click="addAndClose('preset', '中文序号', 'seq')">一, 二, 三…</div>
       </div>
 
-      <span class="fn-btn" title="连字符" @click="addPreset('literal', '-')">-</span>
-      <span class="fn-btn" title="下划线" @click="addPreset('literal', '_')">_</span>
-      <span class="fn-btn" title="竖线" @click="addPreset('literal', '丨')">丨</span>
+      <span class="fn-btn fn-btn-lit" title="连字符" @click="addPreset('literal', '-')">-</span>
+      <span class="fn-btn fn-btn-lit" title="下划线" @click="addPreset('literal', '_')">_</span>
+      <span class="fn-btn fn-btn-lit" title="竖线" @click="addPreset('literal', '丨')">丨</span>
 
       <el-dropdown trigger="click" @command="addField" :teleported="false">
-        <span class="fn-btn fn-field-btn">字段▾</span>
+        <span class="fn-btn fn-btn-field" style="min-width: 56px; justify-content: space-between;">
+          <span>字段</span><span style="font-size: 9px;">▾</span>
+        </span>
         <template #dropdown>
           <el-dropdown-menu class="fn-field-menu">
             <el-dropdown-item v-for="f in availableFields" :key="f.name" :command="f.name">
@@ -91,6 +94,21 @@ const showAc = ref(false)
 const inputFocused = ref(false)
 const seqPopover = ref(false)
 const datePopover = ref(false)
+
+// ── Color class for preview blocks ───────────────────────
+// Preset sub-types get distinct colors; field and literal get their own.
+
+function blockClass(token) {
+  if (token.type === 'field') return 'fn-block-field'
+  if (token.type === 'literal') return 'fn-block-literal'
+  if (token.type === 'preset') {
+    if (token.value === '模板名') return 'fn-block-template'
+    if (token.value.startsWith('日期')) return 'fn-block-date'
+    if (token.value.startsWith('序号') || token.value === '中文序号') return 'fn-block-seq'
+    return 'fn-block-preset'
+  }
+  return ''
+}
 
 // ── Text ↔ Tokens ───────────────────────────────────────
 
@@ -226,21 +244,22 @@ function toChinese(n) {
   position: relative;
 }
 
-/* ── Left: preview blocks ──────────────────────────────── */
+/* ── Color tokens (shared between blocks and buttons) ──── */
+/* 模板名 = green  日期 = amber  序号 = purple  字段 = blue  literal = gray */
 
 .fn-preview-strip {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 1px;
+  gap: 2px;
   align-items: center;
   min-height: 22px;
 }
 
 .fn-block {
   display: inline-block;
-  padding: 1px 4px;
+  padding: 1px 5px;
   border-radius: 3px;
   font-size: 11px;
   cursor: pointer;
@@ -252,16 +271,25 @@ function toChinese(n) {
 
 .fn-block:hover { opacity: 0.7; }
 
-.fn-field { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); }
-.fn-preset { background: #fef3c7; color: #92400e; }
-.fn-literal { color: var(--docsy-text-muted); }
+.fn-block-template { background: #d1fae5; color: #065f46; }
+.fn-block-date     { background: #fef3c7; color: #92400e; }
+.fn-block-seq      { background: #ede9fe; color: #5b21b6; }
+.fn-block-field    { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); }
+.fn-block-literal  { color: var(--docsy-text-muted); }
+.fn-block-preset   { background: #fef3c7; color: #92400e; }
+
+.fn-ext {
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+  flex-shrink: 0;
+}
 
 .fn-hint {
   font-size: 11px;
   color: var(--docsy-text-muted);
 }
 
-/* ── Middle: input ─────────────────────────────────────── */
+/* ── Input ─────────────────────────────────────────────── */
 
 .fn-input-col {
   flex: 1;
@@ -302,15 +330,16 @@ function toChinese(n) {
 .fn-ac-item { padding: 3px 8px; font-size: 12px; cursor: pointer; }
 .fn-ac-item:hover { background: var(--docsy-primary-soft); }
 
-/* ── Right: buttons (fixed) ────────────────────────────── */
+/* ── Buttons (right, fixed) ────────────────────────────── */
 
 .fn-btn-col {
   display: flex;
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   position: relative;
+  overflow: visible;
 }
 
 .fn-btn {
@@ -321,15 +350,21 @@ function toChinese(n) {
   border-radius: 3px;
   font-size: 11px;
   cursor: pointer;
-  background: var(--docsy-surface-muted);
-  border: 1px solid var(--docsy-border-subtle);
+  border: 1px solid transparent;
   flex-shrink: 0;
   padding: 0 5px;
   user-select: none;
   white-space: nowrap;
 }
 
-.fn-btn:hover { border-color: var(--docsy-primary); }
+.fn-btn:hover { opacity: 0.85; }
+
+/* Button colors match preview blocks */
+.fn-btn-template { background: #d1fae5; color: #065f46; border-color: #a7f3d0; }
+.fn-btn-date     { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.fn-btn-seq      { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+.fn-btn-field    { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); border-color: var(--docsy-border-subtle); }
+.fn-btn-lit      { background: var(--docsy-surface-muted); color: var(--docsy-text-muted); border-color: var(--docsy-border-subtle); }
 
 .fn-btn-split { padding: 0; display: inline-flex; gap: 0; }
 .fn-btn-main { padding: 0 4px; display: inline-flex; align-items: center; }
@@ -338,12 +373,9 @@ function toChinese(n) {
   padding: 0 2px;
   display: inline-flex;
   align-items: center;
-  border-left: 1px solid var(--docsy-border-subtle);
-  color: var(--docsy-text-muted);
+  border-left: 1px solid rgba(0,0,0,0.1);
   line-height: 1;
 }
-.fn-btn-arrow:hover { color: var(--docsy-primary); }
-.fn-field-btn { color: var(--docsy-text-muted); }
 
 /* ── Popover ───────────────────────────────────────────── */
 
@@ -355,8 +387,9 @@ function toChinese(n) {
   background: var(--docsy-surface-base);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
   min-width: 100px;
+  padding: 2px 0;
 }
 
 .fn-pop-item {
@@ -364,11 +397,16 @@ function toChinese(n) {
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
+  background: var(--docsy-surface-base);
 }
 
 .fn-pop-item:hover { background: var(--docsy-primary-soft); }
 
 /* ── Field dropdown ────────────────────────────────────── */
 
-:deep(.fn-field-menu) { max-height: 280px; overflow-y: auto; }
+:deep(.fn-field-menu) {
+  max-height: 280px;
+  overflow-y: auto;
+  min-width: 120px;
+}
 </style>
