@@ -7,39 +7,39 @@
           :key="token.id"
           class="fn-bubble"
           :class="`fn-${token.type}`"
-          :title="bubbleTitle(token)"
+          :title="`点击删除`"
           @click="removeToken(idx)"
         >{{ tokenLabel(token) }}</span>
       </div>
-      <div class="fn-presets">
-        <span
-          v-for="p in presetBubbles"
-          :key="p.label"
-          class="fn-preset-btn"
-          :title="p.tip"
-          @click="addPreset(p)"
-        >{{ p.label }}</span>
-      </div>
-    </div>
-    <div class="fn-row">
-      <div class="fn-input-wrap">
-        <input
-          ref="inputRef"
-          :value="textValue"
-          class="fn-input"
-          placeholder="输入文件名，如 [[案号]]-[日期]"
-          @input="onTextInput($event.target.value)"
-          @keydown.enter.prevent="commitText"
-          @focus="showAutocomplete = true"
-          @blur="hideAutocompleteDelayed"
-        />
-        <div v-if="showAutocomplete && filteredFields.length" class="fn-autocomplete">
-          <div
-            v-for="f in filteredFields"
-            :key="f.name"
-            class="fn-ac-item"
-            @mousedown.prevent="insertField(f)"
-          >{{ f.label || f.name }}</div>
+      <span class="fn-sep">│</span>
+      <span class="fn-preset-btn" title="日期（YYYYMMDD）" @click="addPreset('preset', '日期')">📅</span>
+      <span class="fn-preset-btn" title="序号（批量自增）" @click="addPreset('preset', '序号')">🔢</span>
+      <span class="fn-preset-btn" title="连字符" @click="addPreset('literal', '-')">-</span>
+      <span class="fn-preset-btn" title="下划线" @click="addPreset('literal', '_')">_</span>
+      <el-dropdown trigger="click" @command="addField">
+        <span class="fn-preset-btn fn-field-btn" title="插入字段">字段▾</span>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="f in availableFields" :key="f.name" :command="f.name">
+              {{ f.label || f.name }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <span class="fn-sep">│</span>
+      <input
+        ref="inputRef"
+        :value="textValue"
+        class="fn-input"
+        placeholder="或直接输入 [[字段名]]-[日期]"
+        @input="onTextInput($event.target.value)"
+        @keydown.enter.prevent="commitText"
+        @focus="showAc = true"
+        @blur="hideAcDelayed"
+      />
+      <div v-if="showAc && acFields.length" class="fn-autocomplete">
+        <div v-for="f in acFields" :key="f.name" class="fn-ac-item" @mousedown.prevent="insertField(f)">
+          {{ f.label || f.name }}
         </div>
       </div>
       <span v-if="previewText" class="fn-preview" :title="previewText">{{ previewText }}</span>
@@ -55,12 +55,11 @@ const props = defineProps({
   availableFields: { type: Array, default: () => [] },
   sampleValues: { type: Object, default: () => ({}) },
   index: { type: Number, default: 0 },
-  defaultName: { type: String, default: '' },
 })
 const emit = defineEmits(['update:modelValue'])
 
 const inputRef = ref(null)
-const showAutocomplete = ref(false)
+const showAc = ref(false)
 let blurTimer = null
 
 // ── Token ↔ Text sync ────────────────────────────────────
@@ -68,59 +67,48 @@ let blurTimer = null
 const textValue = ref('')
 let syncing = false
 
-// When tokens change externally, update text
 watch(() => props.modelValue, (tokens) => {
   if (syncing) return
   syncing = true
-  textValue.value = tokensToString(tokens)
-  syncing = false
-}, { immediate: true })
-
-function tokensToString(tokens) {
-  return tokens.map((t) => {
+  textValue.value = tokens.map((t) => {
     if (t.type === 'field') return `[[${t.value}]]`
     if (t.type === 'preset') return `[${t.value}]`
     return t.value
   }).join('')
-}
+  syncing = false
+}, { immediate: true })
 
-function parseTextToTokens(text) {
+function commitText() {
+  syncing = true
   const tokens = []
   const re = /\[\[([^\]]+)\]\]|\[([^\]]+)\]|([^[\]]+)/g
   let m
-  while ((m = re.exec(text))) {
+  while ((m = re.exec(textValue.value))) {
     if (m[1]) tokens.push({ id: crypto.randomUUID(), type: 'field', value: m[1] })
     else if (m[2]) tokens.push({ id: crypto.randomUUID(), type: 'preset', value: m[2] })
     else if (m[3]) tokens.push({ id: crypto.randomUUID(), type: 'literal', value: m[3] })
   }
-  return tokens
+  emit('update:modelValue', tokens)
+  syncing = false
+  showAc.value = false
 }
 
 function onTextInput(val) {
   textValue.value = val
-  // Detect [[ for autocomplete
   const cursor = inputRef.value?.selectionStart || val.length
-  const before = val.slice(Math.max(0, cursor - 2), cursor)
-  showAutocomplete.value = before === '[['
-}
-
-function commitText() {
-  syncing = true
-  emit('update:modelValue', parseTextToTokens(textValue.value))
-  syncing = false
-  showAutocomplete.value = false
+  showAc.value = val.slice(Math.max(0, cursor - 2), cursor) === '[['
 }
 
 // ── Autocomplete ─────────────────────────────────────────
 
-const filteredFields = computed(() => {
-  if (!showAutocomplete.value) return []
+const acFields = computed(() => {
+  if (!showAc.value) return []
   const val = textValue.value
   const lastBracket = val.lastIndexOf('[[')
   if (lastBracket < 0) return []
   const query = val.slice(lastBracket + 2).toLowerCase()
   return props.availableFields.filter((f) =>
-    !query || (f.name.toLowerCase().includes(query) || (f.label || '').toLowerCase().includes(query))
+    !query || f.name.toLowerCase().includes(query) || (f.label || '').toLowerCase().includes(query)
   ).slice(0, 8)
 })
 
@@ -128,15 +116,15 @@ function insertField(f) {
   const val = textValue.value
   const lastBracket = val.lastIndexOf('[[')
   textValue.value = val.slice(0, lastBracket) + `[[${f.name}]]`
-  showAutocomplete.value = false
+  showAc.value = false
   commitText()
 }
 
-function hideAutocompleteDelayed() {
-  blurTimer = setTimeout(() => { showAutocomplete.value = false }, 150)
+function hideAcDelayed() {
+  blurTimer = setTimeout(() => { showAc.value = false }, 150)
 }
 
-// ── Token strip interactions ─────────────────────────────
+// ── Token strip ──────────────────────────────────────────
 
 function tokenLabel(token) {
   if (token.type === 'field') return token.value
@@ -144,30 +132,16 @@ function tokenLabel(token) {
   return token.value
 }
 
-function bubbleTitle(token) {
-  if (token.type === 'field') return `字段：${token.value}（点击删除）`
-  if (token.type === 'preset') return `预设：${token.value}（点击删除）`
-  return `${token.value}（点击删除）`
-}
-
 function removeToken(idx) {
-  const tokens = props.modelValue.filter((_, i) => i !== idx)
-  emit('update:modelValue', tokens)
+  emit('update:modelValue', props.modelValue.filter((_, i) => i !== idx))
 }
 
-// ── Preset bubbles ───────────────────────────────────────
+function addPreset(type, value) {
+  emit('update:modelValue', [...props.modelValue, { id: crypto.randomUUID(), type, value }])
+}
 
-const presetBubbles = [
-  { label: '📅', type: 'preset', value: '日期', tip: '插入日期（YYYYMMDD）' },
-  { label: '🔢', type: 'preset', value: '序号', tip: '插入序号（批量时自增）' },
-  { label: '➖', type: 'literal', value: '-', tip: '插入连字符' },
-  { label: '_', type: 'literal', value: '_', tip: '插入下划线' },
-  { label: '␣', type: 'literal', value: ' ', tip: '插入空格' },
-]
-
-function addPreset(p) {
-  const tokens = [...props.modelValue, { id: crypto.randomUUID(), type: p.type, value: p.value }]
-  emit('update:modelValue', tokens)
+function addField(name) {
+  emit('update:modelValue', [...props.modelValue, { id: crypto.randomUUID(), type: 'field', value: name }])
 }
 
 // ── Preview ──────────────────────────────────────────────
@@ -195,28 +169,21 @@ const previewText = computed(() => {
 </script>
 
 <style scoped>
-.filename-token-input {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-}
-
 .fn-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 6px 8px;
+  min-height: 30px;
 }
 
 .fn-token-strip {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 2px;
-  flex: 1;
-  min-height: 24px;
-  padding: 2px 4px;
-  border-radius: 4px;
-  background: var(--docsy-surface-muted);
+  overflow-x: auto;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .fn-bubble {
@@ -225,22 +192,19 @@ const previewText = computed(() => {
   border-radius: 3px;
   font-size: 11px;
   cursor: pointer;
-  user-select: none;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .fn-field { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); }
 .fn-preset { background: #fef3c7; color: #92400e; }
-.fn-literal { background: transparent; color: var(--docsy-text-muted); }
+.fn-literal { color: var(--docsy-text-muted); }
 
 .fn-bubble:hover { opacity: 0.7; }
 
-.fn-presets {
-  display: flex;
-  gap: 2px;
+.fn-sep {
+  color: var(--docsy-border-subtle);
+  font-size: 12px;
   flex-shrink: 0;
 }
 
@@ -248,68 +212,72 @@ const previewText = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  min-width: 20px;
+  height: 20px;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   background: var(--docsy-surface-muted);
   border: 1px solid var(--docsy-border-subtle);
-  user-select: none;
+  flex-shrink: 0;
+  padding: 0 4px;
 }
 
 .fn-preset-btn:hover { border-color: var(--docsy-primary); }
 
-.fn-input-wrap {
-  flex: 1;
-  position: relative;
+.fn-field-btn {
+  font-size: 11px;
+  color: var(--docsy-text-muted);
 }
 
 .fn-input {
-  width: 100%;
-  height: 24px;
-  padding: 0 6px;
+  flex: 1;
+  min-width: 120px;
+  height: 22px;
+  padding: 0 5px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 3px;
+  font-size: 11px;
   background: var(--docsy-surface-base);
   color: var(--docsy-text-strong);
   outline: none;
 }
 
 .fn-input:focus { border-color: var(--docsy-primary); }
-
 .fn-input::placeholder { color: var(--docsy-text-muted); font-size: 11px; }
+
+.fn-preview {
+  font-size: 10px;
+  color: var(--docsy-text-muted);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
 .fn-autocomplete {
   position: absolute;
   top: 100%;
   left: 0;
-  right: 0;
   z-index: 10;
   background: var(--docsy-surface-base);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: 4px;
   max-height: 160px;
   overflow-y: auto;
+  min-width: 140px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
 }
 
 .fn-ac-item {
-  padding: 4px 8px;
+  padding: 3px 8px;
   font-size: 12px;
   cursor: pointer;
 }
 
 .fn-ac-item:hover { background: var(--docsy-primary-soft); }
 
-.fn-preview {
-  font-size: 11px;
-  color: var(--docsy-text-muted);
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
+/* Make input-wrap relative for autocomplete positioning */
+.filename-token-input { position: relative; }
 </style>
