@@ -324,7 +324,8 @@ function contentRowText(file, index, kind, group, rules) {
 }
 
 export function buildHeaderText(file, index, rules) {
-  if (file?.headerEdited) {
+  // 只有 per_file 模式才尊重 file.headerEdited 和 file.header
+  if (rules.headerMode === 'per_file' && file?.headerEdited) {
     return decorateHeaderText(file.header ?? '', file, index, rules)
   }
   if (rules.headerMode === 'none') return ''
