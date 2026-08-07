@@ -953,6 +953,18 @@ fn plain_text_processing_warnings(
     {
         warnings.push("普通文本型页脚已转换为 Docsy 页脚，原字体格式无法无损保留".to_string());
     }
+    // 诊断信息：当 bbox 匹配被使用时，告知用户
+    let bbox_used = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.reason == content_text::DeleteSkipReason::FontUndecodable)
+        .count();
+    if bbox_used > 0 {
+        warnings.push(format!(
+            "有 {} 处页眉页脚因字体编码问题无法直接删除，已通过位置匹配（bbox）自动处理",
+            bbox_used
+        ));
+    }
     warnings
 }
 

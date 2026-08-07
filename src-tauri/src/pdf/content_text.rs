@@ -39,6 +39,24 @@ pub(crate) struct PlainTextTargetBBox {
 pub(crate) struct PlainTextCleanupResult {
     pub removed_header: usize,
     pub removed_footer: usize,
+    pub diagnostics: Vec<DeleteDiagnostic>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DeleteDiagnostic {
+    pub page: u32,
+    pub target_text: String,
+    pub reason: DeleteSkipReason,
+    pub extracted_text: Option<String>,
+    pub state_y: f32,
+    pub in_zone: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DeleteSkipReason {
+    TextNotMatched,
+    BboxOutOfZone,
+    FontUndecodable,
 }
 
 impl PlainTextCleanupResult {
@@ -106,7 +124,7 @@ fn delete_plain_header_footer_file(
         if page_plan.header_targets.is_empty() && page_plan.footer_targets.is_empty() {
             continue;
         }
-        let (operations, page_result) = filter_page_operations(&content.operations, &page_plan);
+        let (operations, page_result) = filter_page_operations(&content.operations, &page_plan, page_number);
         let direct_changed = page_result.removed() > 0;
         let mut combined_result = page_result;
         let xobjects = super::artifacts::page_xobjects(&doc, page_id);
@@ -117,9 +135,11 @@ fn delete_plain_header_footer_file(
                 &xobjects,
                 &page_plan,
                 &mut HashSet::new(),
+                page_number,
             )?;
             combined_result.removed_header += nested_result.removed_header;
             combined_result.removed_footer += nested_result.removed_footer;
+            combined_result.diagnostics.extend(nested_result.diagnostics);
         }
         if combined_result.removed() == 0 {
             continue;
@@ -147,6 +167,7 @@ fn filter_referenced_form_text(
     xobjects: &Dictionary,
     plan: &PagePlainTextPlan,
     visited: &mut HashSet<ObjectId>,
+    page_number: u32,
 ) -> Result<PlainTextCleanupResult> {
     let mut result = PlainTextCleanupResult::default();
     for operation in operations
@@ -194,7 +215,7 @@ fn filter_referenced_form_text(
         let Ok(content) = Content::decode(&stream_content) else {
             continue;
         };
-        let (filtered, form_result) = filter_page_operations(&content.operations, plan);
+        let (filtered, form_result) = filter_page_operations(&content.operations, plan, page_number);
         let direct_changed = form_result.removed() > 0;
         let resources =
             super::artifacts::resource_dictionary(doc, stream_dict.get(b"Resources").ok());
@@ -207,9 +228,11 @@ fn filter_referenced_form_text(
                 &nested_xobjects,
                 plan,
                 visited,
+                page_number,
             )?;
             combined_result.removed_header += nested_result.removed_header;
             combined_result.removed_footer += nested_result.removed_footer;
+            combined_result.diagnostics.extend(nested_result.diagnostics);
         }
         if direct_changed {
             let encoded = Content {
@@ -287,6 +310,7 @@ fn active_targets(targets: &[PlainTextTarget], page_number: u32) -> Vec<&PlainTe
 fn filter_page_operations(
     operations: &[Operation],
     plan: &PagePlainTextPlan,
+    page_number: u32,
 ) -> (Vec<Operation>, PlainTextCleanupResult) {
     let mut output = Vec::with_capacity(operations.len());
     let mut result = PlainTextCleanupResult::default();
@@ -309,10 +333,29 @@ fn filter_page_operations(
             }
             // bbox 匹配：独立于 zone check，处理 CID 字体无法解码的情况
             if remove_region.is_none() {
-                if matches_any_target_by_bbox(&state, &plan.header_targets) {
+                let header_by_bbox = matches_any_target_by_bbox(&state, &plan.header_targets);
+                let footer_by_bbox = !header_by_bbox
+                    && matches_any_target_by_bbox(&state, &plan.footer_targets);
+                if header_by_bbox {
                     remove_region = Some(TextRegion::Header);
-                } else if matches_any_target_by_bbox(&state, &plan.footer_targets) {
+                    result.diagnostics.push(DeleteDiagnostic {
+                        page: page_number,
+                        target_text: text.to_string(),
+                        reason: DeleteSkipReason::FontUndecodable,
+                        extracted_text: Some(text.to_string()),
+                        state_y: state.y,
+                        in_zone: is_in_header_zone(state.y, plan),
+                    });
+                } else if footer_by_bbox {
                     remove_region = Some(TextRegion::Footer);
+                    result.diagnostics.push(DeleteDiagnostic {
+                        page: page_number,
+                        target_text: text.to_string(),
+                        reason: DeleteSkipReason::FontUndecodable,
+                        extracted_text: Some(text.to_string()),
+                        state_y: state.y,
+                        in_zone: is_in_footer_zone(state.y, plan),
+                    });
                 }
             }
         }
@@ -629,7 +672,7 @@ mod tests {
                 max_y: 842.0,
             },
         };
-        let (filtered, result) = filter_page_operations(&operations, &plan);
+        let (filtered, result) = filter_page_operations(&operations, &plan, 1);
         assert_eq!(result.removed_header, 1);
         assert_eq!(
             filtered.iter().filter_map(shown_text).collect::<Vec<_>>(),
@@ -708,7 +751,7 @@ mod tests {
                 max_y: 842.0,
             },
         };
-        let (filtered, result) = filter_page_operations(&operations, &plan);
+        let (filtered, result) = filter_page_operations(&operations, &plan, 1);
         assert_eq!(result.removed_header, 1);
         let text = filtered.iter().filter_map(shown_text).collect::<Vec<_>>();
         assert!(!text.iter().any(|value| value == "encoded-glyphs"));
