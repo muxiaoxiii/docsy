@@ -698,6 +698,11 @@ fn generate_filename(
     // If manifest has filenameTemplate, use it
     if let Some(ref ft) = manifest.filename_template {
         if !ft.tokens.is_empty() {
+            crate::app_log::debug(
+                "batch",
+                "使用 filenameTemplate 生成文件名",
+                serde_json::json!({ "index": index, "token_count": ft.tokens.len() }),
+            );
             let sep = if ft.separator.is_empty() { "-".to_string() } else { ft.separator.clone() };
             let parts: Vec<String> = ft.tokens.iter().map(|token| {
                 match token.token_type.as_str() {

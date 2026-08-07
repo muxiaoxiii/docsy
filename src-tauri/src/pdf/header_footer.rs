@@ -375,6 +375,7 @@ fn preview_annotation_rule(args: &serde_json::Value) -> PreviewAnnotationRule {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn apply_bookmark(output: &Path, config: &BookmarkConfig) -> Result<()> {
     if !config.enabled || config.label.is_empty() {
         return Ok(());

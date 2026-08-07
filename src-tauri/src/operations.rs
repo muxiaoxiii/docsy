@@ -133,25 +133,6 @@ impl OperationManager {
         false
     }
 
-    /// 取消所有操作。仅用于 app shutdown 清理。
-    pub fn cancel_all(&self) {
-        if let Ok(map) = self.operations.lock() {
-            for entry in map.values() {
-                entry.token.cancel();
-            }
-        }
-    }
-
-    /// 检查操作是否已取消。
-    pub fn is_cancelled(&self, operation_id: &str) -> bool {
-        if let Ok(map) = self.operations.lock() {
-            if let Some(entry) = map.get(operation_id) {
-                return entry.token.is_cancelled();
-            }
-        }
-        false
-    }
-
     /// 标记操作完成，移除注册。
     ///
     /// 自动发射 `docsy-operation-finished` 事件到前端。
@@ -178,14 +159,15 @@ impl OperationManager {
                 OperationOutcome::Completed
             };
 
-            // 诊断日志
-            let outcome_str = if was_cancelled { "取消" } else if failed { "失败" } else { "完成" };
-            crate::app_log::info_with_op(
-                "operations",
-                &format!("操作{outcome_str}"),
-                serde_json::json!({ "command": &cmd, "elapsed_ms": elapsed_ms }),
-                operation_id,
-            );
+            // 诊断日志：按结果分级
+            let ctx = serde_json::json!({ "command": &cmd, "elapsed_ms": elapsed_ms });
+            if was_cancelled {
+                crate::app_log::warn("operations", &format!("操作取消"), ctx);
+            } else if failed {
+                crate::app_log::error_with_op("operations", "操作失败", ctx, operation_id);
+            } else {
+                crate::app_log::info_with_op("operations", "操作完成", ctx, operation_id);
+            }
 
             // 发射 enriched finished 事件（Doclet 动画 + 诊断系统）
             if let Ok(h) = self.app_handle.lock() {
@@ -245,10 +227,8 @@ mod tests {
         let token = manager.begin("op-1", "test_command");
 
         assert!(!token.is_cancelled());
-        assert!(!manager.is_cancelled("op-1"));
         assert!(manager.cancel("op-1"));
         assert!(token.is_cancelled());
-        assert!(manager.is_cancelled("op-1"));
     }
 
     #[test]
@@ -265,7 +245,6 @@ mod tests {
 
         manager.finish("op-1", false);
         assert_eq!(manager.list_active().len(), 0);
-        assert!(!manager.is_cancelled("op-1")); // 已移除，返回 false
     }
 
     #[test]
@@ -274,7 +253,8 @@ mod tests {
         let token1 = manager.begin("op-1", "cmd1");
         let token2 = manager.begin("op-2", "cmd2");
 
-        manager.cancel_all();
+        manager.cancel("op-1");
+        manager.cancel("op-2");
         assert!(token1.is_cancelled());
         assert!(token2.is_cancelled());
     }
