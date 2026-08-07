@@ -1,6 +1,6 @@
 <template>
   <div class="fn-layout">
-    <!-- Left: Preview blocks (can wrap) -->
+    <!-- Left: Preview blocks -->
     <div class="fn-preview-strip">
       <span
         v-for="(token, idx) in modelValue"
@@ -14,7 +14,7 @@
       <span v-if="!modelValue.length" class="fn-hint">点击右侧按钮或在中间输入文件名规则</span>
     </div>
 
-    <!-- Middle: Text input -->
+    <!-- Middle: Input -->
     <div class="fn-input-col">
       <input
         ref="inputRef"
@@ -32,34 +32,38 @@
       </div>
     </div>
 
-    <!-- Right: Buttons (fixed) -->
+    <!-- Right: Buttons -->
     <div class="fn-btn-col">
-      <span class="fn-btn fn-btn-template" title="模板名称" @click="addPreset('preset', '模板名')">模板名</span>
+      <span class="fn-btn fn-btn-template" @click="addPreset('preset', '模板名')">模板名</span>
 
-      <span class="fn-btn fn-btn-date fn-btn-split" @click="addPreset('preset', '日期')">
-        <span class="fn-btn-main">📅</span>
-        <span class="fn-btn-arrow" @click.stop.prevent="toggleDatePopover">▾</span>
-      </span>
-      <div v-if="datePopover" class="fn-popover fn-pop-right" @mousedown.prevent>
-        <div class="fn-pop-item" @click="addAndClose('preset', '日期', 'date')">YYYYMMDD</div>
-        <div class="fn-pop-item" @click="addAndClose('preset', '日期-', 'date')">YYYY-MM-DD</div>
-        <div class="fn-pop-item" @click="addAndClose('preset', '日期短', 'date')">MMDD</div>
+      <div class="fn-btn-group">
+        <span class="fn-btn fn-btn-date fn-btn-split" @click="addPreset('preset', '日期')">
+          <span class="fn-btn-main">📅</span>
+          <span class="fn-btn-arrow" @click.stop.prevent="toggleDatePopover">▾</span>
+        </span>
+        <div v-if="datePopover" class="fn-popover">
+          <div class="fn-pop-item" @click="addAndClose('preset', '日期', 'date')">YYYYMMDD</div>
+          <div class="fn-pop-item" @click="addAndClose('preset', '日期-', 'date')">YYYY-MM-DD</div>
+          <div class="fn-pop-item" @click="addAndClose('preset', '日期短', 'date')">MMDD</div>
+        </div>
       </div>
 
-      <span class="fn-btn fn-btn-seq fn-btn-split" @click="addPreset('preset', '序号')">
-        <span class="fn-btn-main">🔢</span>
-        <span class="fn-btn-arrow" @click.stop.prevent="toggleSeqPopover">▾</span>
-      </span>
-      <div v-if="seqPopover" class="fn-popover fn-pop-right" @mousedown.prevent>
-        <div class="fn-pop-item" @click="addAndClose('preset', '序号', 'seq')">1, 2, 3…</div>
-        <div class="fn-pop-item" @click="addAndClose('preset', '序号01', 'seq')">01, 02, 03…</div>
-        <div class="fn-pop-item" @click="addAndClose('preset', '序号001', 'seq')">001, 002, 003…</div>
-        <div class="fn-pop-item" @click="addAndClose('preset', '中文序号', 'seq')">一, 二, 三…</div>
+      <div class="fn-btn-group">
+        <span class="fn-btn fn-btn-seq fn-btn-split" @click="addPreset('preset', '序号')">
+          <span class="fn-btn-main">🔢</span>
+          <span class="fn-btn-arrow" @click.stop.prevent="toggleSeqPopover">▾</span>
+        </span>
+        <div v-if="seqPopover" class="fn-popover">
+          <div class="fn-pop-item" @click="addAndClose('preset', '序号', 'seq')">1, 2, 3…</div>
+          <div class="fn-pop-item" @click="addAndClose('preset', '序号01', 'seq')">01, 02, 03…</div>
+          <div class="fn-pop-item" @click="addAndClose('preset', '序号001', 'seq')">001, 002, 003…</div>
+          <div class="fn-pop-item" @click="addAndClose('preset', '中文序号', 'seq')">一, 二, 三…</div>
+        </div>
       </div>
 
-      <span class="fn-btn fn-btn-lit" title="连字符" @click="addPreset('literal', '-')">-</span>
-      <span class="fn-btn fn-btn-lit" title="下划线" @click="addPreset('literal', '_')">_</span>
-      <span class="fn-btn fn-btn-lit" title="竖线" @click="addPreset('literal', '丨')">丨</span>
+      <span class="fn-btn fn-btn-lit" @click="addPreset('literal', '-')">-</span>
+      <span class="fn-btn fn-btn-lit" @click="addPreset('literal', '_')">_</span>
+      <span class="fn-btn fn-btn-lit" @click="addPreset('literal', '丨')">丨</span>
 
       <el-dropdown trigger="click" @command="addField" :teleported="false">
         <span class="fn-btn fn-btn-field" style="min-width: 56px; justify-content: space-between;">
@@ -94,9 +98,6 @@ const showAc = ref(false)
 const inputFocused = ref(false)
 const seqPopover = ref(false)
 const datePopover = ref(false)
-
-// ── Color class for preview blocks ───────────────────────
-// Preset sub-types get distinct colors; field and literal get their own.
 
 function blockClass(token) {
   if (token.type === 'field') return 'fn-block-field'
@@ -188,7 +189,7 @@ function addAndClose(type, value, which) {
   if (which === 'date') datePopover.value = false
 }
 
-// ── Preview token rendering ──────────────────────────────
+// ── Preview ──────────────────────────────────────────────
 
 function previewToken(token) {
   if (token.type === 'field') {
@@ -241,11 +242,9 @@ function toChinese(n) {
   gap: 6px;
   padding: 6px 8px;
   min-height: 30px;
-  position: relative;
 }
 
-/* ── Color tokens (shared between blocks and buttons) ──── */
-/* 模板名 = green  日期 = amber  序号 = purple  字段 = blue  literal = gray */
+/* ── Preview blocks ────────────────────────────────────── */
 
 .fn-preview-strip {
   flex: 1;
@@ -278,24 +277,12 @@ function toChinese(n) {
 .fn-block-literal  { color: var(--docsy-text-muted); }
 .fn-block-preset   { background: #fef3c7; color: #92400e; }
 
-.fn-ext {
-  font-size: 11px;
-  color: var(--docsy-text-muted);
-  flex-shrink: 0;
-}
-
-.fn-hint {
-  font-size: 11px;
-  color: var(--docsy-text-muted);
-}
+.fn-ext { font-size: 11px; color: var(--docsy-text-muted); flex-shrink: 0; }
+.fn-hint { font-size: 11px; color: var(--docsy-text-muted); }
 
 /* ── Input ─────────────────────────────────────────────── */
 
-.fn-input-col {
-  flex: 1;
-  min-width: 80px;
-  position: relative;
-}
+.fn-input-col { flex: 1; min-width: 80px; position: relative; }
 
 .fn-input {
   width: 100%;
@@ -330,7 +317,7 @@ function toChinese(n) {
 .fn-ac-item { padding: 3px 8px; font-size: 12px; cursor: pointer; }
 .fn-ac-item:hover { background: var(--docsy-primary-soft); }
 
-/* ── Buttons (right, fixed) ────────────────────────────── */
+/* ── Buttons ───────────────────────────────────────────── */
 
 .fn-btn-col {
   display: flex;
@@ -338,8 +325,6 @@ function toChinese(n) {
   gap: 3px;
   flex-shrink: 0;
   flex-wrap: nowrap;
-  position: relative;
-  overflow: visible;
 }
 
 .fn-btn {
@@ -359,7 +344,6 @@ function toChinese(n) {
 
 .fn-btn:hover { opacity: 0.85; }
 
-/* Button colors match preview blocks */
 .fn-btn-template { background: #d1fae5; color: #065f46; border-color: #a7f3d0; }
 .fn-btn-date     { background: #fef3c7; color: #92400e; border-color: #fde68a; }
 .fn-btn-seq      { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
@@ -377,12 +361,17 @@ function toChinese(n) {
   line-height: 1;
 }
 
-/* ── Popover ───────────────────────────────────────────── */
+/* ── Button group (relative anchor for popover) ────────── */
+
+.fn-btn-group {
+  position: relative;
+  display: inline-flex;
+}
 
 .fn-popover {
   position: absolute;
   top: 100%;
-  right: 0;
+  left: 0;
   z-index: 20;
   background: var(--docsy-surface-base);
   border: 1px solid var(--docsy-border-subtle);
