@@ -78,5 +78,5 @@ manifest.json 新增 `filenameTemplate` 字段：
 | 3 | TemplateView 状态管理 + 默认 token | ✅ |
 | 4 | 序号/日期格式选项、布局调整、长度校验 | ✅ |
 | 4b | 3栏布局、预览色块、模板名按钮 | ✅ |
-| 5 | 模板填写页集成 + manifest 持久化 | 待做 |
+| 5 | 模板填写页集成 + manifest 持久化 | ✅ |
 | 6 | batch.rs 使用 filenameTemplate 生成文件名 | 待做 |
