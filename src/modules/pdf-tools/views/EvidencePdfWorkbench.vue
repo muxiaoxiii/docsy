@@ -826,7 +826,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Delete, Bottom, Plus, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -2202,7 +2202,8 @@ async function applyHeaderFooter() {
       const cleanupText =
         merge.outputMode === 'merge_only' ? `，已清理 ${merge.removedIntermediates || 0} 个中间副本` : ''
       const warningText = warningCount ? `，其中 ${warningCount} 个有处理提示` : ''
-      ElMessage.success(`已完成 ${successCount} 个 PDF，并已合并${cleanupText}${warningText}`)
+      const msg = `已完成 ${successCount} 个 PDF，并已合并${cleanupText}${warningText}`
+      ElNotification({ title: '处理完成', message: msg, type: 'success', duration: 0 })
     } else if (failedCount) {
       ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个`)
     } else if (warningCount) {

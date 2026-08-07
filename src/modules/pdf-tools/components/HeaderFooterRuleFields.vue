@@ -101,7 +101,7 @@
         margin-label="距顶"
       />
       <div class="rule-item page-range-row">
-        <label>分段</label>
+        <label>显示范围</label>
         <div class="page-range-inputs">
           <el-input-number
             v-model="headerPageStartModel"
@@ -198,7 +198,7 @@
         margin-label="距底"
       />
       <div class="rule-item page-range-row">
-        <label>分段</label>
+        <label>显示范围</label>
         <div class="page-range-inputs">
           <el-input-number
             v-model="footerTextPageStartModel"
