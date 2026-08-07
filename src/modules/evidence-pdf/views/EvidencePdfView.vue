@@ -65,7 +65,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
-import EvidencePdfWorkbench from '../../pdf-tools/views/EvidencePdfWorkbench.vue'
+import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
