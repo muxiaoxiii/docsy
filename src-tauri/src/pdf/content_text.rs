@@ -156,7 +156,7 @@ fn delete_plain_header_footer_file(
     }
 
     doc.prune_objects();
-    let temp = crate::pdf::temp_named_path("docsy_atomic", "pdf");
+    let temp = output_path.with_extension("pdf.tmp");
     doc.save(&temp)
         .context("保存删除普通文本页眉页脚后的 PDF 失败")?;
     std::fs::rename(&temp, output_path)
