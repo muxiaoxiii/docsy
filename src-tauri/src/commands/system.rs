@@ -147,10 +147,10 @@ pub fn cancel_operation(
     Ok(registry.cancel(&operation_id))
 }
 
-/// List all currently active operations (for debugging and UI).
+/// List all currently active operations with metadata (for debugging and UI).
 #[tauri::command]
 pub fn list_active_operations(
     manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
-) -> Vec<String> {
+) -> Vec<crate::operations::ActiveOperation> {
     manager.list_active()
 }

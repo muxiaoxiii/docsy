@@ -169,9 +169,9 @@ async function cancelCurrentOperation() {
     // 查询 Rust 侧活跃操作，按 ID 取消
     const activeResult = await tauriCallSafe('list_active_operations')
     if (activeResult.ok && activeResult.data?.length > 0) {
-      // 取消第一个活跃操作
-      const targetId = activeResult.data[0]
-      await tauriCallSafe('cancel_operation', { operationId: targetId })
+      // 取消第一个活跃操作（已运行最久的）
+      const target = activeResult.data[0]
+      await tauriCallSafe('cancel_operation', { operationId: target.operationId })
     }
   } catch {
     // Ignore errors — the operation may have already finished

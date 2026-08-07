@@ -30,11 +30,40 @@ struct OperationEntry {
 
 /// 操作生命周期事件（Rust → 前端）。
 /// 前端 Doclet 动画系统后续订阅这些事件来驱动动画。
+/// MDG-011: 增加结束原因，供诊断系统使用。
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationEvent {
     pub operation_id: String,
     pub command: String,
+}
+
+/// 操作结束事件（带结束原因）。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationFinishedEvent {
+    pub operation_id: String,
+    pub command: String,
+    pub outcome: OperationOutcome,
+    pub elapsed_ms: u64,
+}
+
+/// 操作结束原因。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationOutcome {
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+/// 活跃操作摘要（供前端查询和崩溃报告）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveOperation {
+    pub operation_id: String,
+    pub command: String,
+    pub elapsed_ms: u64,
 }
 
 /// 操作生命周期管理器。
@@ -126,23 +155,56 @@ impl OperationManager {
     /// 标记操作完成，移除注册。
     ///
     /// 自动发射 `docsy-operation-finished` 事件到前端。
-    pub fn finish(&self, operation_id: &str) {
-        let command = if let Ok(mut map) = self.operations.lock() {
-            map.remove(operation_id).map(|e| e.command)
+    /// 通过检查 token 是否已取消来判断结束原因。
+    pub fn finish(&self, operation_id: &str, failed: bool) {
+        let (command, started_at, was_cancelled) = if let Ok(mut map) = self.operations.lock() {
+            if let Some(entry) = map.remove(operation_id) {
+                let cancelled = entry.token.is_cancelled();
+                (Some(entry.command), Some(entry.started_at), cancelled)
+            } else {
+                (None, None, false)
+            }
         } else {
-            None
+            (None, None, false)
         };
 
-        // 发射 finished 事件（供 Doclet 动画接驳）
-        if let Some(cmd) = command {
-            self.emit_event("docsy-operation-finished", operation_id, &cmd);
+        if let (Some(cmd), Some(start)) = (command, started_at) {
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            let outcome = if was_cancelled {
+                OperationOutcome::Cancelled
+            } else if failed {
+                OperationOutcome::Failed
+            } else {
+                OperationOutcome::Completed
+            };
+
+            // 发射 enriched finished 事件（Doclet 动画 + 诊断系统）
+            if let Ok(h) = self.app_handle.lock() {
+                if let Some(app) = h.as_ref() {
+                    let _ = app.emit(
+                        "docsy-operation-finished",
+                        OperationFinishedEvent {
+                            operation_id: operation_id.to_string(),
+                            command: cmd,
+                            outcome,
+                            elapsed_ms,
+                        },
+                    );
+                }
+            }
         }
     }
 
-    /// 获取活跃操作列表（用于前端查询和调试）。
-    pub fn list_active(&self) -> Vec<String> {
+    /// 获取活跃操作摘要（用于前端查询、取消确认、崩溃报告）。
+    pub fn list_active(&self) -> Vec<ActiveOperation> {
         if let Ok(map) = self.operations.lock() {
-            map.keys().cloned().collect()
+            map.iter()
+                .map(|(id, entry)| ActiveOperation {
+                    operation_id: id.clone(),
+                    command: entry.command.clone(),
+                    elapsed_ms: entry.started_at.elapsed().as_millis() as u64,
+                })
+                .collect()
         } else {
             vec![]
         }
@@ -192,7 +254,7 @@ mod tests {
         manager.begin("op-1", "test_command");
         assert_eq!(manager.list_active().len(), 1);
 
-        manager.finish("op-1");
+        manager.finish("op-1", false);
         assert_eq!(manager.list_active().len(), 0);
         assert!(!manager.is_cancelled("op-1")); // 已移除，返回 false
     }
@@ -228,8 +290,9 @@ mod tests {
         manager.begin("op-2", "cmd2");
         let active = manager.list_active();
         assert_eq!(active.len(), 2);
-        assert!(active.contains(&"op-1".to_string()));
-        assert!(active.contains(&"op-2".to_string()));
+        let ids: Vec<&str> = active.iter().map(|a| a.operation_id.as_str()).collect();
+        assert!(ids.contains(&"op-1"));
+        assert!(ids.contains(&"op-2"));
     }
 
     #[test]

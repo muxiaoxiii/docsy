@@ -44,9 +44,7 @@ where
     T: Send + 'static,
     F: FnOnce(tokio_util::sync::CancellationToken) -> anyhow::Result<T> + Send + 'static,
 {
-    let op_id = operation_id.unwrap_or_else(|| {
-        format!("{}:auto", command)
-    });
+    let op_id = operation_id.unwrap_or_else(|| format!("{}:auto", command));
     let token = manager.begin(&op_id, command);
 
     let result = tauri::async_runtime::spawn_blocking(move || task(token))
@@ -54,7 +52,8 @@ where
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string());
 
-    manager.finish(&op_id);
+    // MDG-011: 传递失败状态给 finish()，用于诊断事件
+    manager.finish(&op_id, result.is_err());
     result
 }
 
