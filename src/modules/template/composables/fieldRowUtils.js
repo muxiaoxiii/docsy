@@ -230,6 +230,11 @@ export function ensureExtension(path, extension) {
     : `${path}.${extension}`
 }
 
+export function fieldFormKey(field) {
+  if (!field) return ''
+  return field.id || field.name
+}
+
 export function displayValue(value) {
   if (value == null) return ''
   if (typeof value === 'string') return value

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use crate::external::ExternalTool;
 
+use super::temp_named_path;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitMergedArgs {
@@ -226,15 +228,6 @@ fn unique_output_path(output_dir: &str, stem: &str) -> PathBuf {
         index += 1;
     }
     path
-}
-
-fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
 }
 
 #[cfg(test)]

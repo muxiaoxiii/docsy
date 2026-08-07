@@ -23,6 +23,7 @@ use super::normalize::normalize_pdf_to_a4;
 use super::page_info::{get_page_infos, PageSize};
 use super::preview::{render_preview, PreviewResult};
 use super::qpdf;
+use super::{fnv1a_hash, same_path, temp_named_path};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1619,15 +1620,6 @@ fn utf16be_pdf_text(text: &str) -> Vec<u8> {
     bytes
 }
 
-fn fnv1a_hash(value: &str) -> u64 {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
 fn encode_subset_glyph_text(text: &str, char_to_gid: &BTreeMap<char, u16>) -> Vec<u8> {
     text.chars()
         .flat_map(|ch| {
@@ -1923,47 +1915,6 @@ fn estimate_char_width(c: char, is_builtin: bool) -> f32 {
 
 fn mm_to_pt(mm: f32) -> f32 {
     mm * 72.0 / 25.4
-}
-
-fn same_path(left: &Path, right: &Path) -> bool {
-    comparable_path(left) == comparable_path(right)
-}
-
-fn comparable_path(path: &Path) -> PathBuf {
-    if let Ok(path) = path.canonicalize() {
-        return path;
-    }
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    };
-    normalize_path_components(&absolute)
-}
-
-fn normalize_path_components(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
-    }
-    normalized
-}
-
-fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
 }
 
 struct TempPathGuard {

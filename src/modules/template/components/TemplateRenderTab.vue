@@ -378,6 +378,7 @@ import {
   displayValue,
   parseReferenceSourceKey,
   partyItemsToValues,
+  fieldFormKey,
 } from '../composables/fieldRowUtils.js'
 
 const props = defineProps({
@@ -435,11 +436,6 @@ const emit = defineEmits([
 ])
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function fieldFormKey(field) {
-  if (!field) return ''
-  return field.id || field.name
-}
 
 function effectiveFieldType(field) {
   const slotKey = slotKeyFor(field)

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::external::ExternalTool;
 
 use super::page_info::get_page_infos;
+use super::temp_named_path;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,7 +75,7 @@ pub(crate) fn render_pdf_page_to_png(input: &Path, page: u32, dpi: u32) -> Resul
     match run_pdftoppm(&pdftoppm, input, page, dpi) {
         Ok(output) => Ok(output),
         Err(first_error) => {
-            let repaired = temp_named_path("docsy_pdf_preview_repaired").with_extension("pdf");
+            let repaired = temp_named_path("docsy_pdf_preview_repaired", "pdf");
             let repair_result = repair_pdf_for_preview(input, &repaired);
             if repair_result.is_err() {
                 let _ = fs::remove_file(&repaired);
@@ -88,7 +89,7 @@ pub(crate) fn render_pdf_page_to_png(input: &Path, page: u32, dpi: u32) -> Resul
 }
 
 fn run_pdftoppm(pdftoppm: &Path, input: &Path, page: u32, dpi: u32) -> Result<PathBuf> {
-    let prefix = temp_named_path("docsy_pdf_preview");
+    let prefix = temp_named_path("docsy_pdf_preview", "");
     let output = PathBuf::from(format!("{}.png", prefix.display()));
 
     let command_output = crate::external::hidden_command(pdftoppm)
@@ -139,13 +140,4 @@ fn repair_pdf_for_preview(input: &Path, output: &Path) -> Result<()> {
 
 fn find_pdftoppm() -> Option<PathBuf> {
     crate::external::PopplerTool::binary_path_for("pdftoppm").ok()
-}
-
-fn temp_named_path(prefix: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}"))
 }
