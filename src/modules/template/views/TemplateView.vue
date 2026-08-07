@@ -173,7 +173,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile } from '@tauri-apps/plugin-fs'
 import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
@@ -1296,8 +1295,9 @@ async function runDiagnostic() {
     validationError: validationError || null,
   }
   try {
-    const logFilePath = await invoke('get_log_file_path')
-    const logDir = logFilePath.replace(/[/\\][^/\\]+$/, '')
+    const logResult = await tauriCallSafe('get_log_file_path')
+    if (!logResult.ok) throw new Error(logResult.error || '获取日志路径失败')
+    const logDir = logResult.data.replace(/[/\\][^/\\]+$/, '')
     const outPath = `${logDir}/template-diagnostic.json`
     const json = JSON.stringify(diagnostic, null, 2)
     await writeTextFile(outPath, json)

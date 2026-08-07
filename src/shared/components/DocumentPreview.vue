@@ -85,8 +85,8 @@ function onOverlayClick(overlay) {
   white-space: pre-wrap;
   word-break: break-all;
   padding: 12px;
-  background: var(--docsy-surface-base, #fff);
-  border: 1px solid var(--docsy-border-light, #e4e7ed);
+  background: var(--docsy-surface, #fff);
+  border: 1px solid var(--docsy-border-subtle, #e4e7ed);
   border-radius: 6px;
   max-height: 500px;
   overflow-y: auto;

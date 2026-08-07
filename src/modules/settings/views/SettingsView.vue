@@ -280,6 +280,8 @@ async function loadSettings() {
     settings.value.menu_order = Array.isArray(settings.value.menu_order) ? settings.value.menu_order : []
     settings.value.libreoffice_path = settings.value.libreoffice_path || ''
     settings.value.tool_manifest_url = settings.value.tool_manifest_url || ''
+  } else {
+    ElMessage.warning('设置加载失败')
   }
 }
 
