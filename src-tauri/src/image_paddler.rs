@@ -520,7 +520,7 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
 
     let grid = parse_layout(&args.layout, args.custom_rows, args.custom_cols);
     let per_page = grid.rows * grid.cols;
-    let margin_mm = args.margin_mm.unwrap_or(15.0);
+    let margin_mm = args.margin_mm.unwrap_or(12.0);
     let show_filename = args.show_filename.unwrap_or(true);
     let filename_without_ext = args.filename_without_ext.unwrap_or(false);
     let filename_remove_text = args.filename_remove_text.clone().unwrap_or_default();
