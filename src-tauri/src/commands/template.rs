@@ -13,7 +13,9 @@ static MANIFEST_CACHE: Mutex<
 fn cached_manifest(
     path: &str,
 ) -> anyhow::Result<crate::docx_template::TemplateManifest> {
-    if let Some((cached_path, cached_mtime, manifest)) = MANIFEST_CACHE.lock().unwrap().as_ref() {
+    if let Some((cached_path, cached_mtime, manifest)) =
+        MANIFEST_CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+    {
         if cached_path == path {
             if let Ok(meta) = std::fs::metadata(path) {
                 if let Ok(mtime) = meta.modified() {
@@ -29,7 +31,7 @@ fn cached_manifest(
         .ok()
         .and_then(|meta| meta.modified().ok())
         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-    *MANIFEST_CACHE.lock().unwrap() = Some((path.to_string(), mtime, manifest.clone()));
+    *MANIFEST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((path.to_string(), mtime, manifest.clone()));
     Ok(manifest)
 }
 
