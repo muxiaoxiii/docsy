@@ -43,12 +43,21 @@ export function useEvidencePdfDetection({
       detectionProgressText.value = `正在检测 ${results.length}/${total} 个文件  ${m}:${s}`
     }, 1000)
     try {
-      // Detect all files — NO per-file UI updates, only the timer above
-      for (let i = 0; i < total; i++) {
-        const file = overlayRows.value[i]
-        const result = await detectFileHeaderFooter(file)
-        results.push({ file, result })
+      // Detect all files — parallel with concurrency limit
+      const CONCURRENCY = 4
+      const queue = [...overlayRows.value.entries()]
+      const runNext = async () => {
+        while (queue.length) {
+          const [i, file] = queue.shift()
+          const result = await detectFileHeaderFooter(file)
+          results.push({ file, result })
+          const elapsed = Math.floor((Date.now() - startTime) / 1000)
+          const m = String(Math.floor(elapsed / 60)).padStart(2, '0')
+          const s = String(elapsed % 60).padStart(2, '0')
+          detectionProgressText.value = `正在检测 ${results.length}/${total} 个文件  ${m}:${s}`
+        }
       }
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, () => runNext()))
       // Final progress update
       clearInterval(timerId)
       const elapsed = Math.floor((Date.now() - startTime) / 1000)
