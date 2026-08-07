@@ -87,9 +87,6 @@ export const previewLegendItems = [
   { className: 'preview-checkbox', label: '单个勾选', type: 'checkbox' },
   { className: 'preview-radio', label: '互斥勾选组', type: 'radio_group' },
   { className: 'preview-checkbox-group', label: '多选勾选组', type: 'checkbox_group' },
-  { className: 'preview-prefix', label: '前缀', type: 'prefix' },
-  { className: 'preview-suffix', label: '后缀', type: 'suffix' },
-  { className: 'preview-ignore', label: '保留原文', type: 'ignore' },
 ]
 
 export const checkedSymbolOptions = ['☑', '☒', '✓', '√', '✔', '●', '(√)']
