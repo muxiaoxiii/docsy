@@ -35,6 +35,7 @@ open = "5"
 log = "0.4"
 allsorts = { version = "0.16.1", default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 office_oxide = "0.1"
 quick-xml = { version = "0.37", features = ["serialize", "encoding"] }
 calamine = { version = "0.26", features = ["dates"] }

@@ -227,6 +227,63 @@ pub fn overlay_text(args: &serde_json::Value) -> Result<serde_json::Value> {
     Ok(serde_json::to_value(result)?)
 }
 
+/// MDG-001: 带取消支持的 batch_overlay 包装。
+///
+/// 在每个 item 处理前检查 CancellationToken，
+/// 用户取消时返回已处理的部分结果（不会丢失已完成的工作）。
+pub fn batch_overlay_cancellable(
+    args: &serde_json::Value,
+    token: &tokio_util::sync::CancellationToken,
+) -> Result<serde_json::Value> {
+    let items = args
+        .get("items")
+        .or_else(|| args.get("inputs"))
+        .and_then(|v| v.as_array())
+        .context("缺少 items 数组")?;
+
+    let mut results = Vec::new();
+    let mut failed = Vec::new();
+
+    for item in items {
+        // MDG-001: 每个 item 处理前检查取消信号
+        if token.is_cancelled() {
+            // 返回已处理的部分结果，不丢失已完成的工作
+            return Ok(serde_json::json!({
+                "results": results,
+                "failed": failed,
+                "cancelled": true,
+                "processed": results.len(),
+                "total": items.len(),
+            }));
+        }
+
+        match serde_json::from_value::<HeaderFooterJob>(item.clone()) {
+            Ok(job) => match process_job(&job) {
+                Ok(result) => results.push(result),
+                Err(err) => failed.push(HeaderFooterFailure {
+                    path: job.input_path,
+                    message: err.to_string(),
+                }),
+            },
+            Err(err) => failed.push(HeaderFooterFailure {
+                path: item
+                    .get("inputPath")
+                    .or_else(|| item.get("input"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                message: format!("解析页眉页脚处理参数失败: {err}"),
+            }),
+        }
+    }
+
+    Ok(serde_json::json!({
+        "results": results,
+        "failed": failed,
+        "cancelled": false,
+    }))
+}
+
 pub fn batch_overlay(args: &serde_json::Value) -> Result<serde_json::Value> {
     let items = args
         .get("items")
@@ -372,7 +429,11 @@ fn apply_bookmark(output: &Path, config: &BookmarkConfig) -> Result<()> {
 }
 
 /// 写入多个书签，创建 /First /Last /Next /Prev 链
-pub fn apply_bookmarks(output: &Path, bookmarks: &[BookmarkConfig], remove_existing: bool) -> Result<()> {
+pub fn apply_bookmarks(
+    output: &Path,
+    bookmarks: &[BookmarkConfig],
+    remove_existing: bool,
+) -> Result<()> {
     if remove_existing {
         remove_pdf_bookmarks(output)?;
     }
@@ -457,8 +518,7 @@ pub fn apply_bookmarks(output: &Path, bookmarks: &[BookmarkConfig], remove_exist
 
 /// 检查 PDF 的 Catalog 是否包含 /Outlines（即已有书签）
 pub fn has_pdf_bookmarks(path: &Path) -> Result<bool> {
-    let doc = Document::load(path)
-        .with_context(|| format!("加载 PDF 失败: {}", path.display()))?;
+    let doc = Document::load(path).with_context(|| format!("加载 PDF 失败: {}", path.display()))?;
     let catalog_id = doc
         .trailer
         .get(b"Root")
@@ -476,8 +536,8 @@ pub fn has_pdf_bookmarks(path: &Path) -> Result<bool> {
 /// 删除 PDF 的 /Outlines 对象并从 Catalog 移除引用
 pub fn remove_pdf_bookmarks(path: &Path) -> Result<()> {
     let temp = temp_named_path("docsy_rm_bookmarks", "pdf");
-    let mut doc = Document::load(path)
-        .with_context(|| format!("加载 PDF 失败: {}", path.display()))?;
+    let mut doc =
+        Document::load(path).with_context(|| format!("加载 PDF 失败: {}", path.display()))?;
     let catalog_id = doc
         .trailer
         .get(b"Root")
@@ -575,9 +635,14 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
             .into_iter()
             .flatten()
             .any(overlay_uses_page_placeholders)
-            || args.extra_overlays.iter().any(overlay_uses_page_placeholders);
+            || args
+                .extra_overlays
+                .iter()
+                .any(overlay_uses_page_placeholders);
         if uses_page_placeholders {
-            anyhow::bail!("全局总页数 {total_pages} 小于当前 PDF 的结束页码 {end_page}，页码占位符将越界");
+            anyhow::bail!(
+                "全局总页数 {total_pages} 小于当前 PDF 的结束页码 {end_page}，页码占位符将越界"
+            );
         }
         warnings.push(format!(
             "全局总页数 {total_pages} 小于当前 PDF 的结束页码 {end_page}，页码按 {total_pages} 截断显示"
@@ -1094,15 +1159,24 @@ fn overlay_applies_to_page(config: &OverlayTextConfig, local_page: u32) -> bool 
 }
 
 fn overlay_uses_page_placeholders(config: &OverlayTextConfig) -> bool {
-    config.text.contains("{page}") || config.text.contains("{total}") || config.text.contains("{range}")
+    config.text.contains("{page}")
+        || config.text.contains("{total}")
+        || config.text.contains("{range}")
 }
 
 /// Approximate vertical extent (mm from page top) of an overlay for collision checks.
-fn overlay_y_range_mm(config: &OverlayTextConfig, region: OverlayRegion, page_h_mm: f32) -> (f32, f32) {
+fn overlay_y_range_mm(
+    config: &OverlayTextConfig,
+    region: OverlayRegion,
+    page_h_mm: f32,
+) -> (f32, f32) {
     let height = config.font_size * 0.4;
     match region {
         OverlayRegion::Header => (config.margin_mm, config.margin_mm + height),
-        OverlayRegion::Footer => (page_h_mm - config.margin_mm - height, page_h_mm - config.margin_mm),
+        OverlayRegion::Footer => (
+            page_h_mm - config.margin_mm - height,
+            page_h_mm - config.margin_mm,
+        ),
     }
 }
 
@@ -2319,7 +2393,10 @@ mod tests {
         // Catalog must reference Outlines
         let outlines_ref = catalog.get(b"Outlines").unwrap().as_reference().unwrap();
         let outlines = doc.objects.get(&outlines_ref).unwrap().as_dict().unwrap();
-        assert_eq!(outlines.get(b"Type").unwrap().as_name().unwrap(), b"Outlines");
+        assert_eq!(
+            outlines.get(b"Type").unwrap().as_name().unwrap(),
+            b"Outlines"
+        );
         assert_eq!(outlines.get(b"Count").unwrap().as_i64().unwrap(), 1);
 
         // First outline item
@@ -2331,7 +2408,10 @@ mod tests {
         let title = super::artifacts::decode_pdf_string(item.get(b"Title").unwrap()).unwrap();
         assert_eq!(title, "测试书签");
         assert!(item.get(b"Dest").is_ok());
-        assert_eq!(item.get(b"Parent").unwrap().as_reference().unwrap(), outlines_ref);
+        assert_eq!(
+            item.get(b"Parent").unwrap().as_reference().unwrap(),
+            outlines_ref
+        );
 
         let _ = fs::remove_file(&path);
     }
