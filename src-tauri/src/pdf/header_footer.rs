@@ -292,7 +292,7 @@ pub fn batch_overlay(args: &serde_json::Value) -> Result<serde_json::Value> {
     if let Some(first) = items.first() {
         let bm = first.get("bookmarks");
         let bm_rm = first.get("bookmarkRemoveExisting");
-        eprintln!(
+        log::debug!(
             "[batch_overlay] first item bookmarks={:?}, bookmarkRemoveExisting={:?}",
             bm, bm_rm
         );

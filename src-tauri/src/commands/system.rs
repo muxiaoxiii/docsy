@@ -64,12 +64,8 @@ fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
         .and_then(|v| v.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let mime = match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "png" => "image/png",
-        "webp" => "image/webp",
-        "bmp" => "image/bmp",
-        "tif" | "tiff" => "image/tiff",
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "webp" | "bmp" | "tif" | "tiff" => {}
         _ => anyhow::bail!("不支持的图片格式"),
     };
     let (width, height) = image::image_dimensions(&path)
@@ -84,7 +80,6 @@ fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
         .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
         .map_err(|error| anyhow::anyhow!("生成图片缩略图失败: {error}"))?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    let _ = mime;
     Ok(format!("data:image/jpeg;base64,{encoded}"))
 }
 
