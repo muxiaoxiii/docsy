@@ -22,7 +22,7 @@
         <div>
           <h3>
             输出文件名
-            <el-tooltip content="用 [[字段名]] 引用字段值，[日期] 插入当天日期，[序号] 插入序号。拖拽气泡排列，点击气泡删除。" placement="right">
+            <el-tooltip content="左侧预览最终文件名（点击色块删除），中间输入规则，右侧按钮添加成分。字段用 [[名称]]，预设用 [日期] 等。" placement="right">
               <el-icon class="help-icon"><QuestionFilled /></el-icon>
             </el-tooltip>
           </h3>
@@ -32,6 +32,7 @@
         :model-value="filenameTokens"
         :available-fields="filenameAvailableFields"
         :sample-values="filenameSampleValues"
+        :template-name="templateName"
         @update:model-value="$emit('update:filenameTokens', $event)"
       />
     </div>
