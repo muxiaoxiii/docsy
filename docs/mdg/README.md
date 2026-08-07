@@ -15,7 +15,7 @@
 | MDG-002 | Mutex::unwrap() 安全模式 | P0 | ✅ 已合并 | codex/template-quickxml-0.8 | [changes/MDG-002](changes/MDG-002-mutex-unwrap.md) |
 | MDG-003 | 代码重复消除 | P1 | ✅ 已合并 | codex/template-quickxml-0.8 | [changes/MDG-003](changes/MDG-003-dedup.md) |
 | MDG-004 | 书签 + 路径安全 | P0 | ✅ 已合并 | codex/template-quickxml-0.8 | [changes/MDG-004](changes/MDG-004-bookmark-path-safety.md) |
-| MDG-005 | 书签写入原子操作 | P0 | ⏸️ 推迟 | — | — |
+| MDG-005 | 生产代码清理 | P1 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-005](changes/MDG-005-prod-cleanup.md) |
 | MDG-006 | 输出路径碰撞检查 | P0 | ✅ 已有保护 | — | — |
 | MDG-007 | same_path 统一为公共函数 | P1 | ✅ 已合并到 MDG-003 | — | — |
 | MDG-008 | 生产代码 eprintln! 清理 | P1 | ✅ 已完成 | codex/template-quickxml-0.8 | — |
