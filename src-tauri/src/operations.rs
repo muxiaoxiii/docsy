@@ -109,6 +109,14 @@ impl OperationManager {
         // 发射 started 事件（供 Doclet 动画接驳）
         self.emit_event("docsy-operation-started", operation_id, command);
 
+        // 诊断日志
+        crate::app_log::info_with_op(
+            "operations",
+            "操作开始",
+            serde_json::json!({ "command": command }),
+            operation_id,
+        );
+
         token
     }
 
@@ -169,6 +177,15 @@ impl OperationManager {
             } else {
                 OperationOutcome::Completed
             };
+
+            // 诊断日志
+            let outcome_str = if was_cancelled { "取消" } else if failed { "失败" } else { "完成" };
+            crate::app_log::info_with_op(
+                "operations",
+                &format!("操作{outcome_str}"),
+                serde_json::json!({ "command": &cmd, "elapsed_ms": elapsed_ms }),
+                operation_id,
+            );
 
             // 发射 enriched finished 事件（Doclet 动画 + 诊断系统）
             if let Ok(h) = self.app_handle.lock() {
