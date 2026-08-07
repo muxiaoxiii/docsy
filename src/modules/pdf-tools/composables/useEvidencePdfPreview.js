@@ -4,7 +4,7 @@ import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { logWarn } from '../../../services/appLogger.js'
 import { bboxOverlayStyle, textOverlayStyle } from './pdfPreviewCoordinates.js'
 import { candidateKey } from './useEvidencePdfDetection.js'
-import { buildHeaderFooterItems, expandPlaceholders, buildHeaderText } from './useEvidencePdfSession.js'
+import { buildHeaderFooterItems, expandPlaceholders, buildHeaderTextForGroup, selectedGroupFor } from './useEvidencePdfSession.js'
 import { renderPageNumberTemplate } from './pdfPageNumberRules.js'
 
 const TRUE_PREVIEW_DPI = 120
@@ -61,7 +61,8 @@ export function useEvidencePdfPreview({
   const previewHeaderText = computed(() => {
     if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
     if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
-    return buildHeaderText(selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value)
+    const group = selectedGroupFor(selectedOverlayFile.value, 'header')
+    return group ? buildHeaderTextForGroup(selectedOverlayFile.value, selectedOverlayIndex.value, group, currentRules.value) : ''
   })
 
   const previewFooterText = computed(() => {

@@ -1,6 +1,6 @@
 import { ElMessage } from 'element-plus'
 import { stripPdf } from '../../../core/filePath.js'
-import { buildHeaderText, expandPlaceholders } from './useEvidencePdfSession.js'
+import { buildHeaderTextForGroup, selectedGroupFor, expandPlaceholders } from './useEvidencePdfSession.js'
 
 export function useEvidencePdfExistingEditing({
   _selectedOverlayFile,
@@ -40,7 +40,6 @@ export function useEvidencePdfExistingEditing({
   function finishHeaderEdit(row) {
     if (row) {
       row.header = String(row.header ?? '').trim()
-      row.headerEdited = true
     }
     editingHeaderPath.value = ''
   }
@@ -62,7 +61,6 @@ export function useEvidencePdfExistingEditing({
   function finishFooterEdit(row) {
     if (row) {
       row.footer = String(row.footer ?? '').trim()
-      row.footerEdited = true
     }
     editingFooterPath.value = ''
   }
@@ -210,14 +208,13 @@ export function useEvidencePdfExistingEditing({
   }
 
   function rowHeaderPreview(row, index) {
-    return buildHeaderText(row, index, currentRules.value)
+    const group = selectedGroupFor(row, 'header')
+    if (!group) return ''
+    return buildHeaderTextForGroup(row, index, group, currentRules.value)
   }
 
   function displayRowHeader(row, index) {
     if (!insertHeaderFooterEnabled.value) return ''
-    if (workflowMode.value === 'split' && headerMode.value === 'per_file') {
-      return row?.header ?? rowHeaderPreview(row, index)
-    }
     return rowHeaderPreview(row, index)
   }
 

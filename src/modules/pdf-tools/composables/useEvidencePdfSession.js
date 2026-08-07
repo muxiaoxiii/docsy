@@ -129,8 +129,7 @@ export function createEvidenceFile(path) {
     name,
     header: stripPdf(name),
     footer: null,
-    headerEdited: false,
-    footerEdited: false,
+    // headerEdited / footerEdited — removed, no longer needed with group-based API
     pages: 0,
     pageStart: 1,
     pageEnd: 0,
@@ -323,14 +322,15 @@ function contentRowText(file, index, kind, group, rules) {
   return pageNumberTemplateWithShowTotal(group.template || '{page}/{total}', rules.pageNumberShowTotal)
 }
 
+/**
+ * @deprecated Use buildHeaderTextForGroup with selectedGroupFor instead.
+ * Kept for backward compatibility only.
+ */
 export function buildHeaderText(file, index, rules) {
-  // 只有 per_file 模式才尊重 file.headerEdited 和 file.header
-  if (rules.headerMode === 'per_file' && file?.headerEdited) {
-    return decorateHeaderText(file.header ?? '', file, index, rules)
-  }
-  if (rules.headerMode === 'none') return ''
-  const base = headerBaseText(file, index, rules)
-  return decorateHeaderText(base, file, index, rules)
+  const group = selectedGroupFor(file, 'header')
+  if (!group) return ''
+  const mode = rules.headerMode !== undefined ? rules.headerMode : group.mode
+  return buildHeaderTextForGroup(file, index, { ...group, mode }, rules)
 }
 
 export function buildHeaderTextForGroup(file, index, group, rules) {
@@ -393,6 +393,7 @@ export function overlayConfigForGroup(file, region, text, group) {
   return config
 }
 
+/** @deprecated Use headerBaseTextForGroup instead. */
 function headerBaseText(file, index, rules) {
   if (rules.headerMode === 'per_file') return file.header ?? stripPdf(file.name)
   if (rules.headerMode === 'custom' || rules.headerMode === 'template') return rules.headerText || ''
@@ -445,6 +446,7 @@ export function sortByNatural(items, valueGetter, order = 'ascending') {
     .map(({ item }) => item)
 }
 
+/** @deprecated Use decorateHeaderTextForGroup instead. */
 function decorateHeaderText(base, file, index, rules) {
   const name = stripPdf(file?.name || '')
   const contextText = String(base || '')
@@ -633,7 +635,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             enabled: true,
             label: rules.bookmarkLabelSource === 'filename'
               ? stripPdf(file.name)
-              : buildHeaderText(file, index, rules) || stripPdf(file.name),
+              : header || stripPdf(file.name),
             pageIndex: 0,
           }]
         : [],
@@ -936,7 +938,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         id: file.id || file.path,
         sourcePath: file.path,
         displayName: file.name,
-        evidenceLabel: buildHeaderText(file, index, rules),
+        evidenceLabel: buildHeaderTextForGroup(file, index, selectedGroupFor(file, 'header'), rules),
         order: index + 1,
         pageCount: file.pages || 0,
         pageStart: file.pageStart,
