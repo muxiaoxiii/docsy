@@ -375,57 +375,6 @@ fn preview_annotation_rule(args: &serde_json::Value) -> PreviewAnnotationRule {
         .unwrap_or_default()
 }
 
-#[cfg(test)]
-fn apply_bookmark(output: &Path, config: &BookmarkConfig) -> Result<()> {
-    if !config.enabled || config.label.is_empty() {
-        return Ok(());
-    }
-    let temp = temp_named_path("docsy_bookmark", "pdf");
-    let mut doc = Document::load(output).context("加载 PDF 以写入书签失败")?;
-    let pages = doc.get_pages();
-    let page_id = pages
-        .into_iter()
-        .nth(config.page_index as usize)
-        .map(|(_, id)| id)
-        .context("书签页码超出文档范围")?;
-
-    let outline_item_id = doc.add_object(dictionary! {
-        "Title" => Object::String(utf16be_pdf_text(&config.label), StringFormat::Hexadecimal),
-        "Dest" => vec![
-            Object::Reference(page_id),
-            Object::Name(b"XYZ".to_vec()),
-            Object::Null,
-            Object::Null,
-            Object::Null,
-        ],
-    });
-
-    let outlines_id = doc.add_object(dictionary! {
-        "Type" => "Outlines",
-        "Count" => 1,
-        "First" => outline_item_id,
-        "Last" => outline_item_id,
-    });
-
-    if let Some(Object::Dictionary(item)) = doc.objects.get_mut(&outline_item_id) {
-        item.set("Parent", outlines_id);
-    }
-
-    let catalog_id = doc
-        .trailer
-        .get(b"Root")
-        .and_then(|obj| obj.as_reference())
-        .context("找不到 PDF Catalog")?;
-    if let Some(Object::Dictionary(catalog)) = doc.objects.get_mut(&catalog_id) {
-        catalog.set("Outlines", outlines_id);
-    }
-
-    doc.save(&temp).context("保存书签 PDF 失败")?;
-    fs::copy(&temp, output).context("复制书签 PDF 失败")?;
-    let _ = fs::remove_file(&temp);
-    Ok(())
-}
-
 /// 写入多个书签，创建 /First /Last /Next /Prev 链
 pub fn apply_bookmarks(
     output: &Path,
@@ -2325,7 +2274,7 @@ mod tests {
             label: "测试书签".to_string(),
             page_index: 0,
         };
-        apply_bookmark(&path, &config).unwrap();
+        apply_bookmarks(&path, &[config], false).unwrap();
 
         // Reload and verify
         let doc = Document::load(&path).unwrap();

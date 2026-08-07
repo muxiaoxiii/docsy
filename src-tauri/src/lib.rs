@@ -210,6 +210,7 @@ pub fn run() {
     let subprocess_registry = Arc::new(SubprocessRegistry::new());
     let operation_manager = Arc::new(operations::OperationManager::new());
     let operation_manager_for_setup = operation_manager.clone();
+    let operation_manager_for_close = operation_manager.clone();
     let _ = SUBPROCESS_REGISTRY.set(subprocess_registry.clone());
 
     tauri::Builder::default()
@@ -219,6 +220,11 @@ pub fn run() {
         .manage(conversion_state)
         .manage(subprocess_registry)
         .manage(operation_manager)
+        .on_window_event(move |_window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                operation_manager_for_close.cancel_all();
+            }
+        })
         .setup(move |app| {
             let _ = APP_HANDLE.set(app.handle().clone());
             operation_manager_for_setup.set_app_handle(app.handle().clone());

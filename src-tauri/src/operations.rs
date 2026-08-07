@@ -133,20 +133,40 @@ impl OperationManager {
         false
     }
 
+    /// 取消所有操作。用于窗口关闭时清理。
+    pub fn cancel_all(&self) {
+        if let Ok(map) = self.operations.lock() {
+            for entry in map.values() {
+                entry.token.cancel();
+            }
+        }
+    }
+
+    /// 检查操作是否已取消。
+    pub fn is_cancelled(&self, operation_id: &str) -> bool {
+        if let Ok(map) = self.operations.lock() {
+            if let Some(entry) = map.get(operation_id) {
+                return entry.token.is_cancelled();
+            }
+        }
+        false
+    }
+
     /// 标记操作完成，移除注册。
     ///
     /// 自动发射 `docsy-operation-finished` 事件到前端。
     /// 通过检查 token 是否已取消来判断结束原因。
     pub fn finish(&self, operation_id: &str, failed: bool) {
-        let (command, started_at, was_cancelled) = if let Ok(mut map) = self.operations.lock() {
+        // 先查询取消状态（使用 is_cancelled 方法），再移除条目
+        let was_cancelled = self.is_cancelled(operation_id);
+        let (command, started_at) = if let Ok(mut map) = self.operations.lock() {
             if let Some(entry) = map.remove(operation_id) {
-                let cancelled = entry.token.is_cancelled();
-                (Some(entry.command), Some(entry.started_at), cancelled)
+                (Some(entry.command), Some(entry.started_at))
             } else {
-                (None, None, false)
+                (None, None)
             }
         } else {
-            (None, None, false)
+            (None, None)
         };
 
         if let (Some(cmd), Some(start)) = (command, started_at) {
@@ -227,8 +247,10 @@ mod tests {
         let token = manager.begin("op-1", "test_command");
 
         assert!(!token.is_cancelled());
+        assert!(!manager.is_cancelled("op-1"));
         assert!(manager.cancel("op-1"));
         assert!(token.is_cancelled());
+        assert!(manager.is_cancelled("op-1"));
     }
 
     #[test]
@@ -245,6 +267,7 @@ mod tests {
 
         manager.finish("op-1", false);
         assert_eq!(manager.list_active().len(), 0);
+        assert!(!manager.is_cancelled("op-1")); // 已移除，返回 false
     }
 
     #[test]
@@ -253,8 +276,7 @@ mod tests {
         let token1 = manager.begin("op-1", "cmd1");
         let token2 = manager.begin("op-2", "cmd2");
 
-        manager.cancel("op-1");
-        manager.cancel("op-2");
+        manager.cancel_all();
         assert!(token1.is_cancelled());
         assert!(token2.is_cancelled());
     }
