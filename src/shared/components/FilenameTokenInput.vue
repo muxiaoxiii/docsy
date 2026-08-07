@@ -1,11 +1,11 @@
 <template>
   <div class="fn-row">
-    <!-- 1. Text input (leftmost) -->
+    <!-- Col 1: Input -->
     <input
       ref="inputRef"
       v-model="textValue"
       class="fn-input"
-      placeholder="输入文件名，如 [[字段名]]-[日期]"
+      placeholder="[[字段名]]-[日期]"
       @keydown.enter.prevent="commitText"
       @blur="commitText"
       @focus="inputFocused = true"
@@ -18,8 +18,8 @@
 
     <span class="fn-sep">│</span>
 
-    <!-- 2. Preset buttons (middle) -->
-    <span class="fn-btn" title="模板名称" @click="addPreset('preset', '模板名')">模板</span>
+    <!-- Col 2: Preset buttons -->
+    <span class="fn-btn" :title="templateName || '模板名称'" @click="addPreset('preset', '模板名')">{{ templateBtnLabel }}</span>
 
     <span class="fn-btn fn-btn-split" @click="addPreset('preset', '日期')">
       <span class="fn-btn-main">📅</span>
@@ -49,7 +49,7 @@
     <span class="fn-sep">│</span>
 
     <el-dropdown trigger="click" @command="addField" :teleported="false">
-      <span class="fn-btn fn-field-btn" title="插入字段">字段▾</span>
+      <span class="fn-btn fn-field-btn">字段▾</span>
       <template #dropdown>
         <el-dropdown-menu class="fn-field-menu">
           <el-dropdown-item v-for="f in availableFields" :key="f.name" :command="f.name">
@@ -61,7 +61,7 @@
 
     <span class="fn-sep">│</span>
 
-    <!-- 3. Token strip (rightmost, click to delete) -->
+    <!-- Col 3: Token strip + preview -->
     <div class="fn-token-strip">
       <span
         v-for="(token, idx) in modelValue"
@@ -72,13 +72,12 @@
         @click="removeToken(idx)"
       >{{ tokenLabel(token) }}</span>
     </div>
-
     <span
       v-if="previewText"
       class="fn-preview"
       :class="{ 'fn-preview-over': previewTooLong }"
       :title="previewTooLong ? `文件名过长（${previewLen}/255）` : previewText"
-    >{{ previewText }}</span>
+    >~{{ previewText }}</span>
   </div>
 </template>
 
@@ -99,6 +98,12 @@ const showAc = ref(false)
 const inputFocused = ref(false)
 const seqPopover = ref(false)
 const datePopover = ref(false)
+
+const templateBtnLabel = computed(() => {
+  if (props.templateName && props.templateName.length <= 4) return props.templateName
+  if (props.templateName) return props.templateName.slice(0, 4) + '…'
+  return '模板名'
+})
 
 // ── Text ↔ Tokens sync ──────────────────────────────────
 
@@ -175,15 +180,8 @@ function addField(name) {
   emit('update:modelValue', [...props.modelValue, { id: crypto.randomUUID(), type: 'field', value: name }])
 }
 
-function toggleSeqPopover() {
-  seqPopover.value = !seqPopover.value
-  datePopover.value = false
-}
-
-function toggleDatePopover() {
-  datePopover.value = !datePopover.value
-  seqPopover.value = false
-}
+function toggleSeqPopover() { seqPopover.value = !seqPopover.value; datePopover.value = false }
+function toggleDatePopover() { datePopover.value = !datePopover.value; seqPopover.value = false }
 
 function addAndClose(type, value, which) {
   addPreset(type, value)
@@ -199,9 +197,12 @@ const previewText = computed(() => {
   const name = tokens.map((t) => {
     if (t.type === 'field') {
       const v = props.sampleValues[t.value]
-      if (v == null || v === '' || v === false) return t.value
-      if (Array.isArray(v)) return v.map((i) => (typeof i === 'object' ? i.text : i)).filter(Boolean).join('、')
-      return String(v)
+      // Show actual value if filled, otherwise show placeholder
+      if (v != null && v !== '' && v !== false) {
+        if (Array.isArray(v)) return v.map((i) => (typeof i === 'object' ? i.text : i)).filter(Boolean).join('、')
+        return String(v)
+      }
+      return '___'  // placeholder for unfilled fields
     }
     if (t.type === 'preset') {
       if (t.value === '模板名') return props.templateName || '模板'
@@ -226,25 +227,21 @@ function todayStr() {
   const d = new Date()
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
 }
-
 function todayDash() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-
 function todayShort() {
   const d = new Date()
   return `${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
 }
-
 function toChinese(n) {
-  const chars = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-  if (n <= 10) return chars[n]
-  if (n < 20) return '十' + chars[n - 10]
-  if (n < 100) return chars[Math.floor(n / 10)] + '十' + (n % 10 ? chars[n % 10] : '')
+  const c = ['零','一','二','三','四','五','六','七','八','九','十']
+  if (n <= 10) return c[n]
+  if (n < 20) return '十' + c[n - 10]
+  if (n < 100) return c[Math.floor(n / 10)] + '十' + (n % 10 ? c[n % 10] : '')
   return String(n)
 }
-
 function sanitize(name) {
   return String(name || '').replace(/[/\\:*?"<>|]/g, '_').trim()
 }
@@ -262,8 +259,8 @@ function sanitize(name) {
 }
 
 .fn-input {
-  flex: 1;
-  min-width: 100px;
+  width: 140px;
+  flex-shrink: 0;
   height: 22px;
   padding: 0 5px;
   border: 1px solid var(--docsy-border-subtle);
@@ -277,11 +274,7 @@ function sanitize(name) {
 .fn-input:focus { border-color: var(--docsy-primary); }
 .fn-input::placeholder { color: var(--docsy-text-muted); font-size: 11px; }
 
-.fn-sep {
-  color: var(--docsy-border-subtle);
-  font-size: 12px;
-  flex-shrink: 0;
-}
+.fn-sep { color: var(--docsy-border-subtle); font-size: 12px; flex-shrink: 0; }
 
 /* ── Preset buttons ──────────────────────────────────────── */
 
@@ -298,22 +291,13 @@ function sanitize(name) {
   flex-shrink: 0;
   padding: 0 5px;
   user-select: none;
+  white-space: nowrap;
 }
 
 .fn-btn:hover { border-color: var(--docsy-primary); }
 
-.fn-btn-split {
-  padding: 0;
-  display: inline-flex;
-  gap: 0;
-}
-
-.fn-btn-main {
-  padding: 0 4px;
-  display: inline-flex;
-  align-items: center;
-}
-
+.fn-btn-split { padding: 0; display: inline-flex; gap: 0; }
+.fn-btn-main { padding: 0 4px; display: inline-flex; align-items: center; }
 .fn-btn-arrow {
   font-size: 9px;
   padding: 0 2px;
@@ -323,14 +307,10 @@ function sanitize(name) {
   color: var(--docsy-text-muted);
   line-height: 1;
 }
-
 .fn-btn-arrow:hover { color: var(--docsy-primary); }
+.fn-field-btn { color: var(--docsy-text-muted); }
 
-.fn-field-btn {
-  color: var(--docsy-text-muted);
-}
-
-/* ── Popover (seq/date format picker) ───────────────────── */
+/* ── Popover ─────────────────────────────────────────────── */
 
 .fn-popover {
   position: absolute;
@@ -358,7 +338,7 @@ function sanitize(name) {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  flex-shrink: 1;
+  flex: 1;
   min-width: 0;
 }
 
@@ -369,7 +349,7 @@ function sanitize(name) {
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
-  max-width: 180px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -377,15 +357,11 @@ function sanitize(name) {
 .fn-field { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); }
 .fn-preset { background: #fef3c7; color: #92400e; }
 .fn-literal { color: var(--docsy-text-muted); }
-
 .fn-bubble:hover { opacity: 0.7; }
 
 /* ── Field dropdown ──────────────────────────────────────── */
 
-:deep(.fn-field-menu) {
-  max-height: 280px;
-  overflow-y: auto;
-}
+:deep(.fn-field-menu) { max-height: 280px; overflow-y: auto; }
 
 /* ── Preview ─────────────────────────────────────────────── */
 
@@ -399,10 +375,7 @@ function sanitize(name) {
   flex-shrink: 0;
 }
 
-.fn-preview-over {
-  color: #dc2626;
-  font-weight: 600;
-}
+.fn-preview-over { color: #dc2626; font-weight: 600; }
 
 /* ── Autocomplete ────────────────────────────────────────── */
 
@@ -420,11 +393,6 @@ function sanitize(name) {
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
 }
 
-.fn-ac-item {
-  padding: 3px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
+.fn-ac-item { padding: 3px 8px; font-size: 12px; cursor: pointer; }
 .fn-ac-item:hover { background: var(--docsy-primary-soft); }
 </style>
