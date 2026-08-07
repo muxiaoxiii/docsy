@@ -106,6 +106,14 @@ export function renderFilenameFromTokens(tokens, fieldValues = {}, index = 0, te
     if (token.type === 'preset') {
       if (token.value === '模板名') return templateName || '模板'
       if (token.value === '日期') return todayCompact()
+      if (token.value === '日期-') {
+        const d = new Date()
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      }
+      if (token.value === '日期短') {
+        const d = new Date()
+        return `${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+      }
       if (token.value === '序号') return String(index + 1)
       if (token.value === '序号01') return String(index + 1).padStart(2, '0')
       if (token.value === '序号001') return String(index + 1).padStart(3, '0')
