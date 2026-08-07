@@ -113,6 +113,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         system::read_image_data_url,
         system::open_log_file,
         system::open_log_dir,
+        system::export_diagnostic_report,
         system::get_diagnostic_info,
         system::list_system_fonts,
         system::respond_conversion_timeout,

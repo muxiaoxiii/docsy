@@ -72,15 +72,31 @@ pub fn install_panic_hook() {
 }
 
 pub fn write_frontend(entry: FrontendLogEntry) -> Result<(), String> {
-    write_result(&entry.level, &entry.target, &entry.message, entry.context)
+    write_result(&entry.level, &entry.target, &entry.message, entry.context, None)
 }
 
 pub fn info(target: &str, message: &str, context: Value) {
-    write("info", target, message, Some(context));
+    write("info", target, message, Some(context), None);
+}
+
+pub fn warn(target: &str, message: &str, context: Value) {
+    write("warn", target, message, Some(context), None);
 }
 
 pub fn error(target: &str, message: &str, context: Value) {
-    write("error", target, message, Some(context));
+    write("error", target, message, Some(context), None);
+}
+
+pub fn debug(target: &str, message: &str, context: Value) {
+    write("debug", target, message, Some(context), None);
+}
+
+pub fn info_with_op(target: &str, message: &str, context: Value, operation_id: &str) {
+    write("info", target, message, Some(context), Some(operation_id));
+}
+
+pub fn error_with_op(target: &str, message: &str, context: Value, operation_id: &str) {
+    write("error", target, message, Some(context), Some(operation_id));
 }
 
 pub fn list_log_files() -> Vec<PathBuf> {
@@ -117,8 +133,8 @@ fn cleanup_old_logs(retain_days: i64) {
     }
 }
 
-fn write(level: &str, target: &str, message: &str, context: Option<Value>) {
-    if let Err(err) = write_result(level, target, message, context) {
+fn write(level: &str, target: &str, message: &str, context: Option<Value>, operation_id: Option<&str>) {
+    if let Err(err) = write_result(level, target, message, context, operation_id) {
         eprintln!("Docsy log write failed: {err}");
     }
 }
@@ -128,19 +144,23 @@ fn write_result(
     target: &str,
     message: &str,
     context: Option<Value>,
+    operation_id: Option<&str>,
 ) -> Result<(), String> {
     let path = log_file_path()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建日志目录失败：{e}"))?;
     }
 
-    let line = json!({
+    let mut line = json!({
         "ts": Local::now().to_rfc3339(),
         "level": level,
         "target": target,
         "message": message,
         "context": context.unwrap_or(Value::Null),
     });
+    if let Some(op_id) = operation_id {
+        line["op"] = Value::String(op_id.to_string());
+    }
 
     let mut file = OpenOptions::new()
         .create(true)

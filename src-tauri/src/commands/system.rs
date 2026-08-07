@@ -47,6 +47,46 @@ pub fn open_log_dir() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn export_diagnostic_report(frontend_snapshots: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let log_dir = crate::app_log::log_dir()?;
+    let report_name = format!("diagnostic-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S"));
+    let report_path = log_dir.join(&report_name);
+
+    let system_info = get_diagnostic_info_internal();
+    let recent_logs = collect_recent_logs(1000);
+
+    let report = serde_json::json!({
+        "generated": chrono::Local::now().to_rfc3339(),
+        "system": system_info,
+        "recentLogs": recent_logs,
+        "frontendSnapshots": frontend_snapshots.unwrap_or(serde_json::Value::Null),
+    });
+
+    let content = serde_json::to_string_pretty(&report)
+        .map_err(|e| format!("序列化诊断报告失败: {e}"))?;
+    std::fs::write(&report_path, content)
+        .map_err(|e| format!("写入诊断报告失败: {e}"))?;
+
+    Ok(serde_json::json!({ "path": report_path.display().to_string() }))
+}
+
+fn get_diagnostic_info_internal() -> serde_json::Value {
+    serde_json::json!({
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "debug": cfg!(debug_assertions),
+    })
+}
+
+fn collect_recent_logs(max_lines: usize) -> Vec<String> {
+    let Ok(path) = crate::app_log::log_file_path() else { return vec![] };
+    let Ok(content) = std::fs::read_to_string(&path) else { return vec![] };
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].iter().map(|s| s.to_string()).collect()
+}
+
+#[tauri::command]
 pub async fn read_image_data_url(path: String) -> Result<String, String> {
     crate::commands::run_blocking(move || preview_image_data_url(&path)).await
 }
