@@ -43,7 +43,6 @@ pub(crate) struct PlainTextCleanupResult {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct DeleteDiagnostic {
     pub page: u32,
     pub target_text: String,
@@ -54,7 +53,6 @@ pub(crate) struct DeleteDiagnostic {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum DeleteSkipReason {
     TextNotMatched,
     BboxOutOfZone,
@@ -500,11 +498,6 @@ fn matches_any_target_by_bbox(state: &TextState, targets: &[&PlainTextTarget], p
     targets
         .iter()
         .any(|target| target_bbox_matches(state, target, page_height))
-}
-
-#[allow(dead_code)]
-fn matches_any_target(text: &str, targets: &[&PlainTextTarget], state: &TextState, page_height: f32) -> bool {
-    matches_any_target_by_text(text, targets) || matches_any_target_by_bbox(state, targets, page_height)
 }
 
 fn target_matches(text: &str, target: &PlainTextTarget) -> bool {
