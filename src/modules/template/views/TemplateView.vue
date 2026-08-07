@@ -68,6 +68,7 @@
           :filtered-renderable-fields="filteredRenderableFields"
           :fill-preview-visible="fillPreviewVisible"
           :fill-preview-text="fillPreviewText"
+          :filename-tokens="filenameTokens"
           @load-template-library="loadTemplateLibrary"
           @select-template-package="selectTemplatePackage"
           @open-template-from-library="openTemplateFromLibrary"

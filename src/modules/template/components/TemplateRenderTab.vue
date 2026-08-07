@@ -47,7 +47,10 @@
             @update:model-value="$emit('update:fieldSearch', $event)"
           />
         </div>
-        <el-button type="success" :loading="rendering" @click="$emit('render-template')">生成 Word</el-button>
+        <el-button type="success" :loading="rendering" @click="$emit('render-template')">
+          生成 Word
+        </el-button>
+        <span v-if="filenamePreview" class="filename-preview" :title="filenamePreview">{{ filenamePreview }}</span>
         <el-button :disabled="!templateManifest" @click="$emit('toggle-fill-preview')">
           {{ fillPreviewVisible ? '收起预览' : '预览' }}
         </el-button>
@@ -387,6 +390,7 @@ const props = defineProps({
   templateManifest: { type: Object, default: null },
   templateLibrary: { type: Array, default: () => [] },
   templateLibraryLoading: { type: Boolean, default: false },
+  filenameTokens: { type: Array, default: () => [] },
   // Form state (parent owns these, child reads via getters)
   formValues: { type: Object, default: () => ({}) },
   referenceSelections: { type: Object, default: () => ({}) },
@@ -458,6 +462,29 @@ function slotKeyFor(field) {
 function hasSlotTypeOverride(field) {
   return Boolean(props.typeOverrides[slotKeyFor(field)])
 }
+
+// Filename preview
+const filenamePreview = computed(() => {
+  if (!props.filenameTokens.length) return ''
+  const parts = props.filenameTokens.map((t) => {
+    if (t.type === 'literal') return t.value
+    if (t.type === 'field') {
+      const val = props.formValues[t.value]
+      return val || `[${t.value}]`
+    }
+    if (t.type === 'preset') {
+      if (t.value === '日期') {
+        const d = new Date()
+        return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+      }
+      if (t.value === '模板名') return props.templateManifest?.name || '模板'
+      if (t.value === '序号') return '1'
+      return t.value
+    }
+    return t.value || ''
+  })
+  return parts.join('') + '.docx'
+})
 
 // Types offered in the fill-page "…" menu (fillable types only; the structural
 // link/action types belong to the build page).
@@ -738,6 +765,16 @@ function structureEditorTitle(field) {
 </script>
 
 <style scoped>
+.filename-preview {
+  font-size: 12px;
+  color: var(--docsy-text-muted, #909399);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  margin-left: 4px;
+}
 .date-fill-row {
   display: flex;
   align-items: center;
