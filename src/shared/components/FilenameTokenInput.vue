@@ -333,9 +333,9 @@ function sanitize(name) {
 .fn-seq-item {
   padding: 4px 8px;
   font-size: 12px;
-  cursor: strip;
+  cursor: pointer;
   border-radius: 3px;
 }
 
-.fn-seq-item:hover { background: var(--docsy-primary-soft); cursor: pointer; }
+.fn-seq-item:hover { background: var(--docsy-primary-soft); }
 </style>
