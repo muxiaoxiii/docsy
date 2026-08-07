@@ -50,8 +50,6 @@ pub struct HeaderFooterJob {
     #[serde(default)]
     extra_overlays: Vec<OverlayTextConfig>,
     #[serde(default)]
-    bookmark: Option<BookmarkConfig>,
-    #[serde(default)]
     bookmarks: Vec<BookmarkConfig>,
     #[serde(default)]
     bookmark_remove_existing: bool,
@@ -117,8 +115,6 @@ pub struct BookmarkConfig {
     pub label: String,
     #[serde(default)]
     pub page_index: u32,
-    #[serde(default)]
-    pub remove_existing: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -2300,7 +2296,6 @@ mod tests {
             }),
             footer: None,
             extra_overlays: Vec::new(),
-            bookmark: None,
             bookmarks: Vec::new(),
             bookmark_remove_existing: false,
         })
@@ -2377,7 +2372,6 @@ mod tests {
             enabled: true,
             label: "测试书签".to_string(),
             page_index: 0,
-            remove_existing: false,
         };
         apply_bookmark(&path, &config).unwrap();
 
