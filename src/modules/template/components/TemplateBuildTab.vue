@@ -245,13 +245,6 @@
             <el-tag v-else-if="isGroupedField(row)" size="small" type="success">{{
               groupedFieldSummary(row)
             }}</el-tag>
-            <el-button
-              v-else-if="referenceSuggestion(row)"
-              size="small"
-              type="primary"
-              link
-              @click="$emit('apply-reference-suggestion', row)"
-            >改成引用</el-button>
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
