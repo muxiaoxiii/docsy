@@ -396,6 +396,14 @@ function toChinese(n) {
 :deep(.fn-field-menu) {
   max-height: 280px;
   overflow-y: auto;
+  overflow-x: hidden;
   min-width: 120px;
+  max-width: 200px;
+}
+
+:deep(.fn-field-menu .el-dropdown-menu__item) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
