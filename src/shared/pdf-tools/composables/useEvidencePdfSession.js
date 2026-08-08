@@ -23,6 +23,8 @@ export function createDefaultHeaderGroup() {
     color: '#000000',
     pageStart: 1,
     pageEnd: 0,
+    perFilePrefix: '证据',
+    perFileSeqType: 'numeric',
   }
 }
 
@@ -253,7 +255,13 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
 
     // 1. New selected group (only when insert toggle is on)
     if (newEnabled && enabled && selectedGroup) {
-      const text = contentRowText(file, index, kind, selectedGroup, rules)
+      let effectiveGroup = selectedGroup
+      if (kind === 'header' && rules.headerMode !== undefined) {
+        effectiveGroup = { ...selectedGroup, mode: rules.headerMode }
+      } else if (kind === 'pageNumber' && rules.pageNumberSequence) {
+        effectiveGroup = { ...selectedGroup, sequence: rules.pageNumberSequence }
+      }
+      const text = contentRowText(file, index, kind, effectiveGroup, rules)
       // header with mode==='none' → skip; footerText with empty text → skip
       if (kind === 'header' && selectedGroup.mode === 'none') {
         // skip
@@ -277,7 +285,13 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
     if (newEnabled && enabled) for (const g of allGroups) {
       if (g.id === selectedId || g.enabled === false) continue
       if (kind === 'header' && g.mode === 'none') continue
-      const text = contentRowText(file, index, kind, g, rules)
+      let effectiveExtraGroup = g
+      if (kind === 'header' && rules.headerMode !== undefined) {
+        effectiveExtraGroup = { ...g, mode: rules.headerMode }
+      } else if (kind === 'pageNumber' && rules.pageNumberSequence) {
+        effectiveExtraGroup = { ...g, sequence: rules.pageNumberSequence }
+      }
+      const text = contentRowText(file, index, kind, effectiveExtraGroup, rules)
       if (kind === 'footerText' && !text) continue
       rows.push({
         kind,
@@ -361,7 +375,12 @@ export function resolveTextTemplate(text, file, index, rules = {}) {
 }
 
 function headerBaseTextForGroup(file, index, group, _rules) {
-  if (group.mode === 'per_file') return file.header ?? `证据${index + 1}`
+  if (group.mode === 'per_file') {
+    if (file.header !== undefined && file.header !== null) return file.header
+    const prefix = group.perFilePrefix || '证据'
+    const seq = group.perFileSeqType === 'chinese' ? toChineseNumber(index + 1) : String(index + 1)
+    return `${prefix}${seq}`
+  }
   if (group.mode === 'custom' || group.mode === 'template') return (group.text || _rules.headerText) ?? ''
   if (group.mode === 'seq') return `证据${index + 1}`
   if (group.mode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`

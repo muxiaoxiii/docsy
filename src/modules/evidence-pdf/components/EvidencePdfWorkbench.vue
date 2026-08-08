@@ -186,6 +186,11 @@
           v-model:header-margin-mm="headerMarginMm"
           v-model:header-offset-x-mm="headerOffsetXMm"
           v-model:header-color="headerColor"
+          v-model:header-per-file-prefix="headerPerFilePrefix"
+          v-model:header-per-file-seq-type="headerPerFileSeqType"
+          v-model:header-page-start="headerPageStart"
+          v-model:header-page-end="headerPageEnd"
+          :file-pages="selectedOverlayFile?.pages || 0"
           v-model:footer-text-groups="footerTextGroupsModel"
           v-model:selected-footer-text-group-id="selectedFooterTextGroupId"
           v-model:footer-insert-enabled="footerInsertEnabled"
@@ -196,6 +201,8 @@
           v-model:footer-text-margin-mm="footerTextMarginMm"
           v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
           v-model:footer-text-color="footerTextColor"
+          v-model:footer-text-page-start="footerTextPageStart"
+          v-model:footer-text-page-end="footerTextPageEnd"
           v-model:page-number-groups="pageNumberGroupsModel"
           v-model:selected-page-number-group-id="selectedPageNumberGroupId"
           v-model:page-number-enabled="footerEnabled"
@@ -669,6 +676,11 @@
         v-model:header-margin-mm="headerMarginMm"
         v-model:header-offset-x-mm="headerOffsetXMm"
         v-model:header-color="headerColor"
+        v-model:header-per-file-prefix="headerPerFilePrefix"
+        v-model:header-per-file-seq-type="headerPerFileSeqType"
+        v-model:header-page-start="headerPageStart"
+        v-model:header-page-end="headerPageEnd"
+        :file-pages="selectedOverlayFile?.pages || 0"
         v-model:footer-text-groups="footerTextGroupsModel"
         v-model:selected-footer-text-group-id="selectedFooterTextGroupId"
         v-model:footer-insert-enabled="footerInsertEnabled"
@@ -679,6 +691,8 @@
         v-model:footer-text-margin-mm="footerTextMarginMm"
         v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
         v-model:footer-text-color="footerTextColor"
+        v-model:footer-text-page-start="footerTextPageStart"
+        v-model:footer-text-page-end="footerTextPageEnd"
         v-model:page-number-groups="pageNumberGroupsModel"
         v-model:selected-page-number-group-id="selectedPageNumberGroupId"
         v-model:page-number-enabled="footerEnabled"
@@ -1074,6 +1088,22 @@ const headerColor = computed({
   get: () => selectedHeaderGroup.value.color,
   set: (v) => { selectedHeaderGroup.value.color = v },
 })
+const headerPerFilePrefix = computed({
+  get: () => selectedHeaderGroup.value.perFilePrefix ?? '证据',
+  set: (v) => { selectedHeaderGroup.value.perFilePrefix = v },
+})
+const headerPerFileSeqType = computed({
+  get: () => selectedHeaderGroup.value.perFileSeqType || 'numeric',
+  set: (v) => { selectedHeaderGroup.value.perFileSeqType = v },
+})
+const headerPageStart = computed({
+  get: () => selectedHeaderGroup.value.pageStart || 1,
+  set: (v) => { selectedHeaderGroup.value.pageStart = v },
+})
+const headerPageEnd = computed({
+  get: () => selectedHeaderGroup.value.pageEnd || 0,
+  set: (v) => { selectedHeaderGroup.value.pageEnd = v },
+})
 const footerTextContent = computed({
   get: () => selectedFooterTextGroup.value.text,
   set: (v) => { selectedFooterTextGroup.value.text = v },
@@ -1101,6 +1131,14 @@ const footerTextOffsetXMm = computed({
 const footerTextColor = computed({
   get: () => selectedFooterTextGroup.value.color,
   set: (v) => { selectedFooterTextGroup.value.color = v },
+})
+const footerTextPageStart = computed({
+  get: () => selectedFooterTextGroup.value.pageStart || 1,
+  set: (v) => { selectedFooterTextGroup.value.pageStart = v },
+})
+const footerTextPageEnd = computed({
+  get: () => selectedFooterTextGroup.value.pageEnd || 0,
+  set: (v) => { selectedFooterTextGroup.value.pageEnd = v },
 })
 const pageNumberSequence = computed({
   get: () => selectedPageNumberGroup.value.sequence,
@@ -1416,14 +1454,10 @@ const splitReplacementOutputDirValue = computed(
 )
 const processButtonText = computed(() => (workflowMode.value === 'merge' ? '执行分项证据处理' : '执行合并证据处理'))
 const autoCleanupHeaderEnabled = computed(() =>
-  overlayFiles.value.some(
-    (file) => file.existingHeaderArtifact && file.existingHeaderEdited && !file.removeExistingHeader,
-  ),
+  overlayFiles.value.some((file) => file.removeExistingHeader),
 )
 const autoCleanupFooterEnabled = computed(() =>
-  overlayFiles.value.some(
-    (file) => file.existingFooterArtifact && file.existingFooterEdited && !file.removeExistingFooter,
-  ),
+  overlayFiles.value.some((file) => file.removeExistingFooter || file.removeExistingPageNumber),
 )
 const hasDetectedExistingHeaderFooter = computed(() => overlayFiles.value.some((file) => hasExistingHeaderFooter(file)))
 const existingElementRows = computed(() => {

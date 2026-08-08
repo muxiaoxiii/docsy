@@ -61,6 +61,17 @@
           <el-option label="固定文本" value="custom" />
         </el-select>
       </div>
+      <div v-if="headerMode === 'per_file'" class="rule-item">
+        <label>名称前缀</label>
+        <el-input v-model="headerPerFilePrefixModel" placeholder="证据" />
+      </div>
+      <div v-if="headerMode === 'per_file'" class="rule-item">
+        <label>序号类型</label>
+        <el-select v-model="headerPerFileSeqTypeModel">
+          <el-option label="数字（1, 2, 3）" value="numeric" />
+          <el-option label="中文（一, 二, 三）" value="chinese" />
+        </el-select>
+      </div>
       <div v-if="headerMode === 'custom'" class="rule-item">
         <label>页眉文本</label>
         <div class="text-input-with-info">
@@ -103,23 +114,25 @@
       <div class="rule-item page-range-row">
         <label>显示范围</label>
         <div class="page-range-inputs">
-          <el-input-number
-            v-model="headerPageStartModel"
-            :min="1"
-            :max="9999"
-            size="small"
-            controls-position="right"
-            placeholder="起始页"
-          />
-          <span class="range-sep">–</span>
-          <el-input-number
-            v-model="headerPageEndModel"
-            :min="0"
-            :max="9999"
-            size="small"
-            controls-position="right"
-            placeholder="0=全部"
-          />
+          <el-checkbox v-model="headerAllPages" size="small">全部页面</el-checkbox>
+          <template v-if="!headerAllPages">
+            <el-input-number
+              v-model="headerPageStartModel"
+              :min="1"
+              :max="9999"
+              size="small"
+              controls-position="right"
+            />
+            <span class="range-sep">–</span>
+            <el-input-number
+              v-model="headerPageEndModel"
+              :min="0"
+              :max="filePages || 9999"
+              size="small"
+              controls-position="right"
+            />
+            <span class="field-hint">结束页 0 = 全部</span>
+          </template>
         </div>
       </div>
     </template>
@@ -200,23 +213,25 @@
       <div class="rule-item page-range-row">
         <label>显示范围</label>
         <div class="page-range-inputs">
-          <el-input-number
-            v-model="footerTextPageStartModel"
-            :min="1"
-            :max="9999"
-            size="small"
-            controls-position="right"
-            placeholder="起始页"
-          />
-          <span class="range-sep">–</span>
-          <el-input-number
-            v-model="footerTextPageEndModel"
-            :min="0"
-            :max="9999"
-            size="small"
-            controls-position="right"
-            placeholder="0=全部"
-          />
+          <el-checkbox v-model="footerTextAllPages" size="small">全部页面</el-checkbox>
+          <template v-if="!footerTextAllPages">
+            <el-input-number
+              v-model="footerTextPageStartModel"
+              :min="1"
+              :max="9999"
+              size="small"
+              controls-position="right"
+            />
+            <span class="range-sep">–</span>
+            <el-input-number
+              v-model="footerTextPageEndModel"
+              :min="0"
+              :max="filePages || 9999"
+              size="small"
+              controls-position="right"
+            />
+            <span class="field-hint">结束页 0 = 全部</span>
+          </template>
         </div>
       </div>
     </template>
@@ -387,8 +402,11 @@ const props = defineProps({
   headerMarginMm: { type: Number, required: true },
   headerOffsetXMm: { type: Number, required: true },
   headerColor: { type: String, required: true },
+  headerPerFilePrefix: { type: String, default: '证据' },
+  headerPerFileSeqType: { type: String, default: 'numeric' },
   headerPageStart: { type: Number, default: 1 },
   headerPageEnd: { type: Number, default: 0 },
+  filePages: { type: Number, default: 0 },
   footerTextGroups: { type: Array, default: () => [] },
   selectedFooterTextGroupId: { type: String, default: '' },
   footerInsertEnabled: { type: Boolean, default: true },
@@ -443,6 +461,8 @@ const emit = defineEmits([
     'headerMarginMm',
     'headerOffsetXMm',
     'headerColor',
+    'headerPerFilePrefix',
+    'headerPerFileSeqType',
     'headerPageStart',
     'headerPageEnd',
     'footerInsertEnabled',
@@ -576,8 +596,20 @@ const headerAlignModel = model('headerAlign'),
   headerMarginMmModel = model('headerMarginMm'),
   headerOffsetXMmModel = model('headerOffsetXMm'),
   headerColorModel = model('headerColor')
+const headerPerFilePrefixModel = model('headerPerFilePrefix')
+const headerPerFileSeqTypeModel = model('headerPerFileSeqType')
 const headerPageStartModel = model('headerPageStart')
 const headerPageEndModel = model('headerPageEnd')
+const headerAllPages = computed({
+  get: () => props.headerPageEnd === 0,
+  set: (v) => {
+    if (v) {
+      emit('update:headerPageEnd', 0)
+    } else {
+      emit('update:headerPageEnd', 1)
+    }
+  },
+})
 const footerInsertEnabledModel = model('footerInsertEnabled'),
   footerTextContentModel = model('footerTextContent'),
   footerTextAlignModel = model('footerTextAlign'),
@@ -588,6 +620,16 @@ const footerInsertEnabledModel = model('footerInsertEnabled'),
   footerTextColorModel = model('footerTextColor')
 const footerTextPageStartModel = model('footerTextPageStart')
 const footerTextPageEndModel = model('footerTextPageEnd')
+const footerTextAllPages = computed({
+  get: () => props.footerTextPageEnd === 0,
+  set: (v) => {
+    if (v) {
+      emit('update:footerTextPageEnd', 0)
+    } else {
+      emit('update:footerTextPageEnd', 1)
+    }
+  },
+})
 const pageNumberEnabledModel = model('pageNumberEnabled'),
   pageNumberSequenceModel = model('pageNumberSequence'),
   pageNumberStyleModel = model('pageNumberStyle'),
