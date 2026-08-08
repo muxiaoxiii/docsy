@@ -604,10 +604,12 @@ const pageNumberEnabledModel = model('pageNumberEnabled'),
   pageNumberColorModel = model('pageNumberColor')
 const pageNumberShowTotalModel = model('pageNumberShowTotal')
 // Sync template when showTotal changes
+let lastTemplateWithTotal = ''
 watch(() => props.pageNumberShowTotal, (showTotal) => {
   const tpl = props.pageNumberTemplate || '{page}/{total}'
   if (!showTotal && tpl.includes('{total}')) {
-    // Strip {total} from template
+    // Save template before stripping
+    lastTemplateWithTotal = tpl
     const cleaned = tpl
       .replaceAll('{total}', '')
       .replaceAll('//', '/')
@@ -615,9 +617,8 @@ watch(() => props.pageNumberShowTotal, (showTotal) => {
       .replace(/^\//, '')
     pageNumberTemplateModel.value = cleaned || '{page}'
   } else if (showTotal && !tpl.includes('{total}')) {
-    // Add {total} back
-    const preset = PRESETS_WITH_TOTAL[0]?.value || '{page}/{total}'
-    pageNumberTemplateModel.value = preset
+    // Restore saved template or use default
+    pageNumberTemplateModel.value = lastTemplateWithTotal || PRESETS_WITH_TOTAL[0]?.value || '{page}/{total}'
   }
 })
 const pageNumberPresetModel = computed({

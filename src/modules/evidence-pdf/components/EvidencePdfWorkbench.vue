@@ -2266,34 +2266,6 @@ function openExistingElements(filter = 'all') {
   existingElementsVisible.value = true
 }
 
-async function quickCleanupExistingHeaderFooter() {
-  if (!overlayFiles.value.length) {
-    ElMessage.info('请先导入 PDF 文件')
-    return
-  }
-  quickCleanupRunning.value = true
-  try {
-    // Step 1: Ensure detection is done
-    if (!hasDetectedExistingHeaderFooter.value) {
-      await detectAllHeaderFooter({ silent: true })
-    }
-    if (!hasDetectedExistingHeaderFooter.value) {
-      ElMessage.info('未检测到现有页眉页脚或页码')
-      return
-    }
-    // Step 2: Open dialog for user to select what to delete
-    quickCleanupPipeline = true
-    existingElementsFilter.value = 'all'
-    existingElementsVisible.value = true
-    // The watcher will call finishQuickCleanupPipeline when dialog closes
-  } catch (err) {
-    quickCleanupPipeline = false
-    ElMessage.error(userFacingError(err?.message || err, '检测失败'))
-  } finally {
-    quickCleanupRunning.value = false
-  }
-}
-
 async function finishQuickCleanupPipeline() {
   // Check if anything was marked for deletion
   const deleteCount = overlayFiles.value.reduce(
@@ -2495,8 +2467,7 @@ function ignoreAllExistingElements() {
   }
 }
 
-function redetectAllHeaderFooter() {
-  // Reset all detection state before re-detecting
+function resetDetectionState() {
   for (const file of overlayFiles.value) {
     file.existingElements = []
     file.existingHeaderText = ''
@@ -2505,19 +2476,15 @@ function redetectAllHeaderFooter() {
     file.statusText = ''
     file.statusType = ''
   }
+}
+
+function redetectAllHeaderFooter() {
+  resetDetectionState()
   detectAllHeaderFooter({})
 }
 
 function deepDetectAllHeaderFooter() {
-  // Same as re-detect but with more pages scanned
-  for (const file of overlayFiles.value) {
-    file.existingElements = []
-    file.existingHeaderText = ''
-    file.existingFooterText = ''
-    file.existingPageNumberText = ''
-    file.statusText = ''
-    file.statusType = ''
-  }
+  resetDetectionState()
   detectAllHeaderFooter({ deep: true })
 }
 
