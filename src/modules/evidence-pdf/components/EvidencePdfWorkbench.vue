@@ -76,22 +76,31 @@
         <div class="block-title-row">
           <div class="block-title">原页眉页脚</div>
           <div class="block-actions">
-            <el-button size="small" @click="confirmAllExistingElements"
-              >一键确认</el-button
+            <el-button size="small" @click="keepAllExistingElements"
+              >一键保留</el-button
+            >
+            <el-button size="small" @click="ignoreAllExistingElements"
+              >一键忽略</el-button
             >
             <el-button
               size="small"
               type="warning"
               :loading="quickCleanupRunning"
-              @click="quickCleanupExistingHeaderFooter"
+              @click="immediateDeleteExistingHeaderFooter"
             >
-              一键清除页眉页脚
+              立即删除
             </el-button>
             <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter"
-              >删除现有</el-button
+              >标记删除</el-button
             >
             <el-button size="small" :disabled="!hasExistingRemovalRule" @click="restoreExistingHeaderFooterMarks"
-              >恢复删除标记</el-button
+              >恢复标记</el-button
+            >
+            <el-button size="small" @click="redetectAllHeaderFooter"
+              >重新检测</el-button
+            >
+            <el-button size="small" @click="deepDetectAllHeaderFooter"
+              >深度检测</el-button
             >
           </div>
         </div>
@@ -2446,11 +2455,11 @@ function previewExistingElement(row) {
   refreshPreview()
 }
 
-function confirmAllExistingElements() {
+function keepAllExistingElements() {
   let count = 0
   for (const file of overlayFiles.value) {
     for (const el of file.existingElements || []) {
-      if (!el.decision && !el.lowConfidence) {
+      if (!el.decision) {
         el.decision = 'keep'
         count++
       }
@@ -2460,9 +2469,81 @@ function confirmAllExistingElements() {
     file.statusType = status.type
   }
   if (count > 0) {
-    ElMessage.success(`已确认 ${count} 个检测项`)
+    ElMessage.success(`已保留 ${count} 个检测项`)
   } else {
-    ElMessage.info('没有待确认的检测项')
+    ElMessage.info('没有待处理的检测项')
+  }
+}
+
+function ignoreAllExistingElements() {
+  let count = 0
+  for (const file of overlayFiles.value) {
+    for (const el of file.existingElements || []) {
+      if (!el.decision) {
+        el.decision = 'ignore'
+        count++
+      }
+    }
+    const status = fileExistingStatus(file)
+    file.statusText = status.text
+    file.statusType = status.type
+  }
+  if (count > 0) {
+    ElMessage.success(`已忽略 ${count} 个检测项`)
+  } else {
+    ElMessage.info('没有待处理的检测项')
+  }
+}
+
+function redetectAllHeaderFooter() {
+  // Reset all detection state before re-detecting
+  for (const file of overlayFiles.value) {
+    file.existingElements = []
+    file.existingHeaderText = ''
+    file.existingFooterText = ''
+    file.existingPageNumberText = ''
+    file.statusText = ''
+    file.statusType = ''
+  }
+  detectAllHeaderFooter({})
+}
+
+function deepDetectAllHeaderFooter() {
+  // Same as re-detect but with more pages scanned
+  for (const file of overlayFiles.value) {
+    file.existingElements = []
+    file.existingHeaderText = ''
+    file.existingFooterText = ''
+    file.existingPageNumberText = ''
+    file.statusText = ''
+    file.statusType = ''
+  }
+  detectAllHeaderFooter({ deep: true })
+}
+
+async function immediateDeleteExistingHeaderFooter() {
+  if (!overlayFiles.value.length) {
+    ElMessage.info('请先导入 PDF 文件')
+    return
+  }
+  quickCleanupRunning.value = true
+  try {
+    if (!hasDetectedExistingHeaderFooter.value) {
+      await detectAllHeaderFooter({ silent: true })
+    }
+    if (!hasDetectedExistingHeaderFooter.value) {
+      ElMessage.info('未检测到现有页眉页脚或页码')
+      return
+    }
+    // Open dialog for user to select what to delete
+    quickCleanupPipeline = true
+    existingElementsFilter.value = 'all'
+    existingElementsVisible.value = true
+  } catch (err) {
+    quickCleanupPipeline = false
+    ElMessage.error('检测失败: ' + (err?.message || err))
+  } finally {
+    quickCleanupRunning.value = false
   }
 }
 
