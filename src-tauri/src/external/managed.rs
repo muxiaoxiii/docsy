@@ -551,14 +551,14 @@ fn binary_name(name: &str) -> String {
     }
 }
 
-fn make_executable(path: &Path) -> Result<()> {
+fn make_executable(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let metadata = fs::metadata(path).context("读取工具权限失败")?;
+        let metadata = fs::metadata(_path).context("读取工具权限失败")?;
         let mut permissions = metadata.permissions();
         permissions.set_mode(permissions.mode() | 0o755);
-        fs::set_permissions(path, permissions).context("设置工具可执行权限失败")?;
+        fs::set_permissions(_path, permissions).context("设置工具可执行权限失败")?;
     }
     Ok(())
 }
