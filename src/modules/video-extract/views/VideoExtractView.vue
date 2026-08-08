@@ -6,10 +6,7 @@
         <!-- FFmpeg Status -->
         <div class="section-block">
           <div class="section-title">FFmpeg 状态</div>
-          <div v-if="ffmpegLoading" class="status-row">
-            <el-icon class="is-loading"><Loading /></el-icon>
-            <span>检测中...</span>
-          </div>
+          <div v-if="ffmpegLoading" v-loading="true" element-loading-text="检测中..." class="status-row status-loading"></div>
           <div v-else-if="ffmpegStatus.available" class="status-row status-ok">
             <el-icon><CircleCheckFilled /></el-icon>
             <span>可用</span>
