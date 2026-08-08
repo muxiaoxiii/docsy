@@ -15,3 +15,6 @@ test-pdf/
 *.db-journal
 *.db-wal
 .workbuddy/
+
+docs/
+Archived/
