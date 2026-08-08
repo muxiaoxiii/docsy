@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 
 use crate::docx_template::package;
+use crate::pdf::fnv1a_hash;
 
 use super::{
-    fnv1a_hash, is_word_xml_part, unique_docx_output_path, RenderTemplateArgs, SaveTemplateArgs,
+    is_word_xml_part, unique_docx_output_path, RenderTemplateArgs, SaveTemplateArgs,
     SaveTemplateResult, TemplateInspection, TemplateManifest, TemplateMark, TemplateMeta,
     TemplateTextRun,
 };
@@ -55,6 +56,15 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
     };
     let output = unique_docx_output_path(std::path::Path::new(&args.output_path))?;
 
+    // Editing a library template re-saves from the docsytpl package itself
+    // (its embedded word/document.xml) instead of an external Word file.
+    let pkg = if args.source_docx.to_lowercase().ends_with(".docsytpl") {
+        let (_manifest, pkg) = package::read_docsytpl_package(std::path::Path::new(&args.source_docx))?;
+        pkg
+    } else {
+        package::read_docx_package(&source)?
+    };
+
     let mut manifest = TemplateManifest {
         // The application version is 0.8.x; the package schema remains v2.
         // It is still the same manifest shape, with stable per-mark tags.
@@ -66,9 +76,9 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
             updated: chrono::Utc::now().to_rfc3339(),
         },
         fields: args.fields,
+        filename_template: args.filename_template,
     };
 
-    let pkg = package::read_docx_package(&source)?;
     ensure_template_package_safe(&pkg)?;
     let (runs, marks, _) = scan_package_to_runs_and_marks(&pkg)?;
     prune_stray_punctuation_refs(&mut manifest.fields, &runs);
@@ -188,7 +198,7 @@ fn is_punctuation_only(text: &str) -> bool {
 }
 
 /// Render a docx template using the quick-xml engine
-pub fn render_docx(args: RenderTemplateArgs) -> Result<String> {
+pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
     let template_path = std::path::Path::new(&args.template_path);
     let output_path = unique_docx_output_path(std::path::Path::new(&args.output_path))?;
     let (manifest, pkg) = package::read_docsytpl_package(template_path)?;
@@ -205,6 +215,7 @@ pub fn render_docx(args: RenderTemplateArgs) -> Result<String> {
         &manifest,
         &args.values,
         &args.structure_overrides,
+        &args.item_separator,
     )?;
 
     let mut out_pkg = HashMap::new();
@@ -223,13 +234,17 @@ pub fn render_docx(args: RenderTemplateArgs) -> Result<String> {
     package::write_docx_package(&output_path, &out_pkg)?;
 
     let output_path_str = output_path.display().to_string();
-    // History recording is best-effort; file is already written
-    let _ = crate::template_history::record_generation(
-        &args.template_path,
-        &manifest,
-        &output_path_str,
-        &args.values,
-    );
+    // History recording is best-effort; file is already written. An empty
+    // source skips recording entirely (batch renders wait for explicit save).
+    if !source.is_empty() {
+        let _ = crate::template_history::record_history_run(
+            &args.template_path,
+            &manifest,
+            &output_path_str,
+            &args.values,
+            source,
+        );
+    }
     Ok(output_path_str)
 }
 
@@ -291,8 +306,9 @@ impl Drop for TempPathGuard {
     }
 }
 
-/// Scan all XML parts and produce runs + marks for the Tauri inspect response
-fn scan_package_to_runs_and_marks(
+/// Scan all XML parts and produce runs + marks for the Tauri inspect response.
+/// Also used by `inspect_docsytpl_content` to extract documentRuns from a package.
+pub fn scan_package_to_runs_and_marks(
     pkg: &HashMap<String, Vec<u8>>,
 ) -> Result<(Vec<TemplateTextRun>, Vec<TemplateMark>, String)> {
     use crate::docx_template::scan;
@@ -331,7 +347,7 @@ fn scan_package_to_runs_and_marks(
                 underline: node.underline,
             });
 
-            if node.highlighted {
+            if node.highlighted && !node.text.trim().is_empty() {
                 marks.push(TemplateMark {
                     id: id.clone(),
                     part: part_name.clone(),
@@ -339,6 +355,16 @@ fn scan_package_to_runs_and_marks(
                     text: node.text.clone(),
                     context: String::new(),
                     checkbox_like: node.checkbox_like,
+                    option_label: node.option_label.clone(),
+                });
+            } else if node.checkbox_like {
+                marks.push(TemplateMark {
+                    id: id.clone(),
+                    part: part_name.clone(),
+                    run_index: node.run_index,
+                    text: node.text.clone(),
+                    context: String::new(),
+                    checkbox_like: true,
                     option_label: node.option_label.clone(),
                 });
             }
@@ -494,6 +520,7 @@ mod tests {
             output_path: tpl_path.display().to_string(),
             template_name: "E2E Test".to_string(),
             fields: fields.clone(),
+            filename_template: None,
         };
         let saved = save_docx(save_args).unwrap();
         assert_eq!(saved.manifest.format_version, 2);
@@ -522,12 +549,13 @@ mod tests {
         );
 
         let render_args = RenderTemplateArgs {
+            item_separator: "、".to_string(),
             template_path: saved.output_path.clone(),
             output_path: output_dir.join("output.docx").display().to_string(),
             values,
             structure_overrides: HashMap::new(),
         };
-        let output_path = render_docx(render_args).unwrap();
+        let output_path = render_docx(render_args, "single").unwrap();
 
         // 5. Verify rendered output
         let rendered_pkg = package::read_docx_package(std::path::Path::new(&output_path)).unwrap();
@@ -679,6 +707,7 @@ mod tests {
             output_path: tpl_path.display().to_string(),
             template_name: "Table E2E".to_string(),
             fields,
+            filename_template: None,
         })
         .unwrap();
         assert_eq!(saved.manifest.format_version, 2);
@@ -698,12 +727,16 @@ mod tests {
             serde_json::Value::String("2026年7月20日".to_string()),
         );
 
-        let output_path = render_docx(RenderTemplateArgs {
-            template_path: saved.output_path.clone(),
-            output_path: output_dir.join("rendered.docx").display().to_string(),
-            values,
-            structure_overrides: HashMap::new(),
-        })
+        let output_path = render_docx(
+            RenderTemplateArgs {
+                template_path: saved.output_path.clone(),
+                output_path: output_dir.join("rendered.docx").display().to_string(),
+                values,
+                structure_overrides: HashMap::new(),
+                item_separator: "、".to_string(),
+            },
+            "single",
+        )
         .unwrap();
 
         let rendered_pkg = package::read_docx_package(std::path::Path::new(&output_path)).unwrap();
@@ -781,4 +814,5 @@ mod tests {
 
         Ok(docx_path)
     }
+
 }

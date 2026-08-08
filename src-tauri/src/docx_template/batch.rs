@@ -1,7 +1,7 @@
 //! Batch fill: export template fields to xlsx, validate import, batch render.
 
 use anyhow::{Context, Result};
-use calamine::{Reader, Xlsx, open_workbook};
+use calamine::{open_workbook, Reader, Xlsx};
 use rust_xlsxwriter::Workbook;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,13 +12,19 @@ use super::{RenderTemplateArgs, TemplateField, TemplateManifest};
 
 // ── Export ──────────────────────────────────────────────────────────────────
 
+/// Column label appended to the header row; "否" marks a sample row that must
+/// not be rendered (filled from the last recorded values).
+const GENERATE_COL_LABEL: &str = "是否生成";
+const SAMPLE_ROW_FLAG: &str = "否";
+
 /// Export template fields as an xlsx fill sheet.
 /// Row 1 (hidden): metadata — template_id | field_id | field_type per column
-/// Row 2: field labels (user-visible headers)
-/// Row 3: current default values (reference row, deletable)
+/// Row 2: field labels (user-visible headers) + "是否生成" column
+/// Row 3: sample row filled from the most recent recorded values (flag "否")
+/// Row 4+: empty data rows
 pub fn export_fields_xlsx(
     manifest: &TemplateManifest,
-    _default_values: &HashMap<String, serde_json::Value>,
+    default_values: &HashMap<String, serde_json::Value>,
     output_path: &str,
 ) -> Result<String> {
     let renderable: Vec<&TemplateField> = manifest
@@ -27,6 +33,15 @@ pub fn export_fields_xlsx(
         .filter(|f| is_renderable(&f.field_type))
         .collect();
 
+    // Prefer the last recorded run values as the sample row, fall back to the
+    // caller-provided defaults.
+    let mut sample_values: HashMap<String, serde_json::Value> =
+        crate::template_history::last_field_values_for_template(&manifest.template.id)
+            .unwrap_or_default();
+    for (field, value) in default_values {
+        sample_values.entry(field.clone()).or_insert_with(|| value.clone());
+    }
+
     let mut wb = Workbook::new();
     let ws = wb.add_worksheet();
 
@@ -34,11 +49,14 @@ pub fn export_fields_xlsx(
     ws.set_row_hidden(0)?;
     for (col, field) in renderable.iter().enumerate() {
         let col = col as u16;
-        let meta = format!("{}\t{}\t{}", manifest.template.id, field.id, field.field_type);
+        let meta = format!(
+            "{}\t{}\t{}",
+            manifest.template.id, field.id, field.field_type
+        );
         ws.write_string(0, col, &meta)?;
     }
 
-    // Row 1: field labels
+    // Row 1: field labels + generate flag column
     for (col, field) in renderable.iter().enumerate() {
         let col = col as u16;
         let label = if field.label.is_empty() {
@@ -48,9 +66,17 @@ pub fn export_fields_xlsx(
         };
         ws.write_string(1, col, label)?;
     }
+    ws.write_string(1, renderable.len() as u16, GENERATE_COL_LABEL)?;
 
-    // Row 2: empty data start row (no default values to avoid being treated as a task)
-    // Users fill data starting from this row.
+    // Row 2: sample row from the last recorded values (flag "否", not rendered)
+    if !sample_values.is_empty() {
+        for (col, field) in renderable.iter().enumerate() {
+            if let Some(value) = sample_values.get(&field.id) {
+                ws.write_string(2, col as u16, &value_to_display(value))?;
+            }
+        }
+        ws.write_string(2, renderable.len() as u16, SAMPLE_ROW_FLAG)?;
+    }
 
     // Auto-fit column widths (approximate)
     for (col, field) in renderable.iter().enumerate() {
@@ -67,10 +93,7 @@ pub fn export_fields_xlsx(
 }
 
 fn is_renderable(field_type: &str) -> bool {
-    !matches!(
-        field_type,
-        "delete_text" | "prefix" | "suffix" | "ignore"
-    )
+    !matches!(field_type, "delete_text" | "prefix" | "suffix" | "ignore")
 }
 
 fn value_to_display(value: &serde_json::Value) -> String {
@@ -89,10 +112,7 @@ fn value_to_display(value: &serde_json::Value) -> String {
                             .or_else(|| obj.get("text"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
-                        let suffix = obj
-                            .get("suffix")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
+                        let suffix = obj.get("suffix").and_then(|v| v.as_str()).unwrap_or("");
                         format!("{text}{suffix}")
                     }
                     _ => String::new(),
@@ -175,6 +195,8 @@ pub fn validate_imported_xlsx(
     let meta_row = &rows[0];
     let mut column_mapping = Vec::new();
     let mut template_id_match = true;
+    let mut id_mismatch_warning: Option<String> = None;
+    let mut generate_col_idx: Option<usize> = None;
     let renderable: Vec<&TemplateField> = manifest
         .fields
         .iter()
@@ -191,6 +213,9 @@ pub fn validate_imported_xlsx(
 
             if tpl_id != manifest.template.id {
                 template_id_match = false;
+                id_mismatch_warning.get_or_insert_with(|| {
+                    "模板 ID 与当前模板不一致，已按字段名称/ID 匹配导入".to_string()
+                });
             }
 
             let matched_field = renderable.iter().find(|f| f.id == field_id);
@@ -205,10 +230,19 @@ pub fn validate_imported_xlsx(
             });
         } else {
             // No metadata — try matching by label from row 1
-            let label = cell_to_string(&rows[1].get(col_idx).cloned().unwrap_or(calamine::Data::Empty));
-            let matched_field = renderable.iter().find(|f| {
-                f.label == label || f.name == label
-            });
+            let label = cell_to_string(
+                &rows[1]
+                    .get(col_idx)
+                    .cloned()
+                    .unwrap_or(calamine::Data::Empty),
+            );
+            if label == GENERATE_COL_LABEL {
+                generate_col_idx = Some(col_idx);
+                continue;
+            }
+            let matched_field = renderable
+                .iter()
+                .find(|f| f.label == label || f.name == label);
             column_mapping.push(ColumnMapping {
                 col: col_idx,
                 field_id: matched_field.map(|f| f.id.clone()).unwrap_or_default(),
@@ -228,6 +262,13 @@ pub fn validate_imported_xlsx(
         .map(|m| m.field_id.as_str())
         .collect();
     let mut warnings = Vec::new();
+    if let Some(message) = id_mismatch_warning {
+        warnings.push(BatchValidationWarning {
+            col: 0,
+            field_name: "模板".to_string(),
+            message,
+        });
+    }
 
     // Unmatched columns warning
     for mapping in &column_mapping {
@@ -261,12 +302,25 @@ pub fn validate_imported_xlsx(
         renderable.iter().map(|f| (f.id.as_str(), *f)).collect();
 
     for (row_idx, row) in rows.iter().enumerate().skip(2) {
+        // Skip sample rows (the "是否生成" flag is "否")
+        if let Some(generate_col) = generate_col_idx {
+            let flag = row
+                .get(generate_col)
+                .cloned()
+                .unwrap_or(calamine::Data::Empty);
+            if cell_to_string(&flag).trim() == SAMPLE_ROW_FLAG {
+                continue;
+            }
+        }
         let mut row_valid = true;
         for mapping in &column_mapping {
             if !mapping.matched {
                 continue;
             }
-            let cell_value = row.get(mapping.col).cloned().unwrap_or(calamine::Data::Empty);
+            let cell_value = row
+                .get(mapping.col)
+                .cloned()
+                .unwrap_or(calamine::Data::Empty);
             let text = cell_to_string(&cell_value);
 
             // Check required fields
@@ -313,7 +367,8 @@ pub fn validate_imported_xlsx(
 
     let total_data_rows = rows.len().saturating_sub(2);
     Ok(BatchValidationResult {
-        valid: template_id_match && errors.is_empty(),
+        // ID mismatch is a warning (matched by name); only errors block import
+        valid: errors.is_empty(),
         template_id_match,
         total_rows: total_data_rows,
         valid_rows,
@@ -328,17 +383,13 @@ fn is_valid_date_text(text: &str) -> bool {
     if t.is_empty() {
         return true;
     }
-    // Common date patterns
-    if regex::Regex::new(r"^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?$")
-        .unwrap()
-        .is_match(t)
-    {
-        return true;
-    }
-    if regex::Regex::new(r"^\d{4}年\d{1,2}月\d{1,2}日$")
-        .unwrap()
-        .is_match(t)
-    {
+    static DATE_RE1: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?$").unwrap()
+    });
+    static DATE_RE2: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^\d{4}年\d{1,2}月\d{1,2}日$").unwrap()
+    });
+    if DATE_RE1.is_match(t) || DATE_RE2.is_match(t) {
         return true;
     }
     // Chinese date with blanks
@@ -391,6 +442,16 @@ pub struct BatchRenderResult {
     pub failed: usize,
     pub outputs: Vec<String>,
     pub errors: Vec<BatchRenderError>,
+    /// Structured values per successfully rendered row (for history saving).
+    #[serde(default)]
+    pub rows: Vec<BatchRenderRow>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchRenderRow {
+    pub output_path: String,
+    pub values: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -411,6 +472,7 @@ pub fn batch_render(
     name_pattern: &str,
     skip_rows: &[usize],
     structure_overrides: &HashMap<String, super::StructureOverride>,
+    item_separator: &str,
 ) -> Result<BatchRenderResult> {
     let mut workbook: Xlsx<_> =
         open_workbook(xlsx_path).with_context(|| format!("打开 Excel 失败: {xlsx_path}"))?;
@@ -439,6 +501,7 @@ pub fn batch_render(
         .collect();
 
     let mut col_map: Vec<(usize, &TemplateField)> = Vec::new();
+    let mut generate_col_idx: Option<usize> = None;
     for (col_idx, meta_cell) in meta_row.iter().enumerate() {
         let meta_str = cell_to_string(meta_cell);
         let parts: Vec<&str> = meta_str.split('\t').collect();
@@ -446,6 +509,16 @@ pub fn batch_render(
             let field_id = parts[1];
             if let Some(field) = renderable.iter().find(|f| f.id == field_id) {
                 col_map.push((col_idx, field));
+            }
+        } else {
+            let label = cell_to_string(
+                &rows[1]
+                    .get(col_idx)
+                    .cloned()
+                    .unwrap_or(calamine::Data::Empty),
+            );
+            if label == GENERATE_COL_LABEL {
+                generate_col_idx = Some(col_idx);
             }
         }
     }
@@ -463,10 +536,20 @@ pub fn batch_render(
         failed: 0,
         outputs: Vec::new(),
         errors: Vec::new(),
+        rows: Vec::new(),
     };
 
     for (row_idx, row) in rows.iter().enumerate().skip(2) {
-        // Skip metadata + header
+        // Skip sample rows (the "是否生成" flag is "否")
+        if let Some(generate_col) = generate_col_idx {
+            let flag = row
+                .get(generate_col)
+                .cloned()
+                .unwrap_or(calamine::Data::Empty);
+            if cell_to_string(&flag).trim() == SAMPLE_ROW_FLAG {
+                continue;
+            }
+        }
         // Check if row has any data
         let has_data = col_map.iter().any(|(col, _)| {
             let cell = row.get(*col).cloned().unwrap_or(calamine::Data::Empty);
@@ -491,15 +574,20 @@ pub fn batch_render(
         let output_path = unique_output_path(output_dir_path, &filename);
 
         let args = RenderTemplateArgs {
+            item_separator: item_separator.to_string(),
             template_path: template_path.to_string(),
             output_path: output_path.display().to_string(),
             values,
             structure_overrides: structure_overrides.clone(),
         };
 
-        match engine::render_docx(args) {
+        match engine::render_docx(args, "") {
             Ok(path) => {
-                result.outputs.push(path);
+                result.outputs.push(path.clone());
+                result.rows.push(BatchRenderRow {
+                    output_path: path,
+                    values: build_row_values(row, &col_map, manifest),
+                });
                 result.success += 1;
             }
             Err(e) => {
@@ -536,7 +624,41 @@ fn build_row_values(
                     .collect();
                 serde_json::Value::Array(items)
             }
-            "date" => serde_json::Value::String(text.trim().to_string()),
+            "checkbox" => {
+                let trimmed = text.trim().to_lowercase();
+                serde_json::Value::Bool(
+                    matches!(trimmed.as_str(), "true" | "1" | "是" | "yes" | "☑" | "✓" | "✔"),
+                )
+            }
+            "radio_group" | "select" => {
+                // Match against field options by label or id
+                let trimmed = text.trim();
+                let matched_option = field.options.iter().find(|opt| {
+                    opt.label == trimmed || opt.id == trimmed
+                });
+                match matched_option {
+                    Some(opt) => serde_json::Value::String(opt.id.clone()),
+                    None => serde_json::Value::String(trimmed.to_string()),
+                }
+            }
+            "checkbox_group" => {
+                // Parse multiple selections separated by 、 or ,
+                let items: Vec<serde_json::Value> = text
+                    .split(|c| c == '、' || c == ',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| {
+                        // Match against options by label
+                        let matched = field.options.iter().find(|opt| opt.label == s);
+                        match matched {
+                            Some(opt) => serde_json::Value::String(opt.id.clone()),
+                            None => serde_json::Value::String(s.to_string()),
+                        }
+                    })
+                    .collect();
+                serde_json::Value::Array(items)
+            }
+            // reference, marker, prefix, suffix, text, date, and others: store as string
             _ => serde_json::Value::String(text.trim().to_string()),
         };
 
@@ -573,6 +695,52 @@ fn generate_filename(
     manifest: &TemplateManifest,
     index: usize,
 ) -> String {
+    // If manifest has filenameTemplate, use it
+    if let Some(ref ft) = manifest.filename_template {
+        if !ft.tokens.is_empty() {
+            crate::app_log::debug(
+                "batch",
+                "使用 filenameTemplate 生成文件名",
+                serde_json::json!({ "index": index, "token_count": ft.tokens.len() }),
+            );
+            let sep = if ft.separator.is_empty() { "-".to_string() } else { ft.separator.clone() };
+            let parts: Vec<String> = ft.tokens.iter().map(|token| {
+                match token.token_type.as_str() {
+                    "literal" => token.value.clone(),
+                    "field" => {
+                        let field = manifest.fields.iter().find(|f| f.name == token.value);
+                        if let Some(f) = field {
+                            values.get(&f.id).map(value_to_display).unwrap_or_default()
+                        } else {
+                            values.get(&token.value).map(value_to_display).unwrap_or_default()
+                        }
+                    }
+                    "preset" => {
+                        match token.value.as_str() {
+                            "日期" => chrono::Local::now().format("%Y%m%d").to_string(),
+                            "日期-" => chrono::Local::now().format("%Y-%m-%d").to_string(),
+                            "日期短" => chrono::Local::now().format("%m%d").to_string(),
+                            "模板名" => manifest.template.name.clone(),
+                            "序号" => index.to_string(),
+                            "序号01" => format!("{:02}", index),
+                            "序号001" => format!("{:03}", index),
+                            "中文序号" => to_chinese_number(index),
+                            _ => token.value.clone(),
+                        }
+                    }
+                    _ => token.value.clone(),
+                }
+            }).collect();
+            let raw = parts.join(&sep);
+            let clean = sanitize_filename(&raw);
+            if clean.trim().is_empty() || clean == ".docx" {
+                return format!("{}-{}.docx", manifest.template.name, index);
+            }
+            return if clean.ends_with(".docx") { clean } else { format!("{clean}.docx") };
+        }
+    }
+
+    // Fallback: existing pattern logic
     if pattern.is_empty() {
         return format!("{}-{}.docx", manifest.template.name, index);
     }
@@ -645,5 +813,54 @@ fn unique_output_path(dir: &Path, filename: &str) -> PathBuf {
             return candidate;
         }
     }
-    path
+    // Never overwrite: fall back to a timestamped name.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    dir.join(format!("{stem}-{stamp}.docx"))
+}
+
+fn sanitize_filename(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| {
+            if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
+fn to_chinese_number(n: usize) -> String {
+    const DIGITS: &[char] = &['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+    const UNITS: &[&str] = &["", "十", "百", "千", "万"];
+    if n == 0 { return "零".to_string(); }
+    if n >= 10000 { return n.to_string(); } // fallback for large numbers
+    let s = n.to_string();
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    let mut result = String::new();
+    for (i, ch) in chars.iter().enumerate() {
+        let digit = ch.to_digit(10).unwrap() as usize;
+        let unit_idx = len - i - 1;
+        if digit == 0 {
+            if !result.is_empty() && !result.ends_with('零') {
+                result.push('零');
+            }
+        } else {
+            result.push(DIGITS[digit]);
+            result.push_str(UNITS[unit_idx]);
+        }
+    }
+    // Remove trailing zero
+    if result.ends_with('零') {
+        result.pop();
+    }
+    // Special case: 一十 → 十
+    if result.starts_with('一') && result.len() > 1 && result.chars().nth(1).map(|c| c == '十').unwrap_or(false) {
+        result = result[3..].to_string(); // skip '一' (3 bytes in UTF-8)
+    }
+    result
 }

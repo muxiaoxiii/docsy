@@ -961,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "docsy"
-version = "0.8.2"
+version = "0.9.7-beta"
 dependencies = [
  "allsorts",
  "anyhow",
@@ -989,6 +989,8 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-shell",
+ "thiserror 2.0.19",
+ "tokio-util",
  "zip 0.6.6",
 ]
 
@@ -5147,6 +5149,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

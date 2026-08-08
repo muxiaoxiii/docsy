@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{annotations, header_footer, qpdf};
+use super::{annotations, header_footer, qpdf, same_path};
 
 pub fn apply_rules(args: &Value) -> Result<Value> {
     let items = extract_job_items(args)?;
@@ -45,7 +45,7 @@ pub fn apply_rules(args: &Value) -> Result<Value> {
         .cloned()
         .unwrap_or_default();
     failed.extend(annotation_failed);
-    let merge_result = match apply_merge_if_requested(&merge, &results, &failed) {
+    let merge_result = match apply_merge_if_requested(&merge, &prepared_items, &results, &failed) {
         Ok(value) => value,
         Err(err) => {
             cleanup_temp_paths(temp_paths);
@@ -216,6 +216,7 @@ fn restore_original_inputs(
 
 fn apply_merge_if_requested(
     merge: &MergeSpec,
+    items: &[Value],
     results: &[Value],
     failed: &[Value],
 ) -> Result<Value> {
@@ -256,6 +257,24 @@ fn apply_merge_if_requested(
         }
     }
     let output = qpdf::merge(&inputs, &merge.output_path)?;
+
+    // Apply bookmarks to the merged PDF: collect all bookmarks from items,
+    // adjusting page_index to be global in the merged PDF.
+    let merge_bookmarks = collect_merge_bookmarks(items, results);
+    let remove_existing = items
+        .first()
+        .and_then(|item| item.get("bookmarkRemoveExisting"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !merge_bookmarks.is_empty() || remove_existing {
+        header_footer::apply_bookmarks(
+            Path::new(&output),
+            &merge_bookmarks,
+            remove_existing,
+        )
+        .context("合并 PDF 写入书签失败")?;
+    }
+
     let removed_intermediates = if merge.output_mode == "merge_only" {
         remove_intermediate_outputs(results, &merge.output_path)
     } else {
@@ -268,6 +287,38 @@ fn apply_merge_if_requested(
         "outputMode": merge.output_mode,
         "removedIntermediates": removed_intermediates
     }))
+}
+
+/// Collect all bookmarks from items, adjusting page_index to global position
+/// in the merged PDF. Each file's bookmarks get an offset equal to the sum of
+/// page counts of all preceding files.
+fn collect_merge_bookmarks(items: &[Value], results: &[Value]) -> Vec<header_footer::BookmarkConfig> {
+    let mut bookmarks = Vec::new();
+    let mut page_offset: u32 = 0;
+
+    for (item, result) in items.iter().zip(results.iter()) {
+        let pages = result
+            .get("pages")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+
+        // Collect bookmarks from the bookmarks array
+        if let Some(bms) = item.get("bookmarks").and_then(Value::as_array) {
+            for bm_value in bms {
+                if let Ok(bm) = serde_json::from_value::<header_footer::BookmarkConfig>(bm_value.clone()) {
+                    if bm.enabled && !bm.label.is_empty() {
+                        let mut adjusted = bm;
+                        adjusted.page_index += page_offset;
+                        bookmarks.push(adjusted);
+                    }
+                }
+            }
+        }
+
+        page_offset += pages;
+    }
+
+    bookmarks
 }
 
 fn remove_intermediate_outputs(results: &[Value], merge_output_path: &str) -> usize {
@@ -284,13 +335,6 @@ fn remove_intermediate_outputs(results: &[Value], merge_output_path: &str) -> us
         }
     }
     removed
-}
-
-fn same_path(left: &Path, right: &Path) -> bool {
-    match (left.canonicalize(), right.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left == right,
-    }
 }
 
 fn cleanup_temp_paths(paths: Vec<PathBuf>) {
@@ -329,7 +373,7 @@ mod tests {
             output_mode: "files_and_merge".to_string(),
         };
         let value =
-            apply_merge_if_requested(&merge, &[], &[json!({ "path": "/tmp/a.pdf" })]).unwrap();
+            apply_merge_if_requested(&merge, &[], &[], &[json!({ "path": "/tmp/a.pdf" })]).unwrap();
         assert_eq!(value["status"], "skipped");
     }
 

@@ -84,6 +84,26 @@ pub struct TemplateManifest {
     pub format_version: u32,
     pub template: TemplateMeta,
     pub fields: Vec<TemplateField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename_template: Option<FilenameTemplate>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FilenameTemplate {
+    pub tokens: Vec<FilenameToken>,
+    #[serde(default)]
+    pub separator: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FilenameToken {
+    #[serde(default)]
+    pub id: String,
+    #[serde(rename = "type")]
+    pub token_type: String,
+    pub value: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -117,6 +137,17 @@ pub struct TemplateField {
     pub optional_rule: Option<OptionalFieldRule>,
     #[serde(default)]
     pub reference: Option<TemplateFieldReference>,
+    /// When true, every document position of this field gets the same value
+    /// (a field marked in multiple separate places); when false, only the
+    /// first position is filled and later ones stay empty (a single position
+    /// split across multiple runs with different formatting).
+    #[serde(default)]
+    pub fill_all_positions: bool,
+    /// Date rendering format for date fields: iso (2026-08-05), cn (2026年8月5日),
+    /// cn_full (二零二六年八月五日), en_long (August 5, 2026), en_short (Aug. 5, 2026),
+    /// en_dmy (5 August 2026), en_ordinal (2026 August 5th), blank (留空: 年 月 日).
+    #[serde(default)]
+    pub date_format: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -179,6 +210,8 @@ pub struct SaveTemplateArgs {
     pub output_path: String,
     pub template_name: String,
     pub fields: Vec<TemplateField>,
+    #[serde(default)]
+    pub filename_template: Option<FilenameTemplate>,
 }
 
 #[derive(Debug, Serialize)]
@@ -186,6 +219,15 @@ pub struct SaveTemplateArgs {
 pub struct SaveTemplateResult {
     pub output_path: String,
     pub manifest: TemplateManifest,
+}
+
+/// Document content extracted from a `.docsytpl` package for field-row
+/// reconstruction when editing a library template.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocsytplContent {
+    pub document_text: String,
+    pub document_runs: Vec<TemplateTextRun>,
 }
 
 #[derive(Debug, Serialize)]
@@ -228,6 +270,13 @@ pub struct RenderTemplateArgs {
     pub values: HashMap<String, Value>,
     #[serde(default)]
     pub structure_overrides: HashMap<String, StructureOverride>,
+    /// Separator between items of multi-value (party_list) fields.
+    #[serde(default = "default_item_separator")]
+    pub item_separator: String,
+}
+
+fn default_item_separator() -> String {
+    "、".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -387,6 +436,12 @@ pub fn restore_template_from_trash(args: TemplateRestoreArgs) -> Result<String> 
     let manifest = read_template_manifest(&source)?;
     let target = move_template_file(&source, &template_library_dir())?;
     crate::template_history::mark_template_trashed(&manifest.template.id, false)?;
+    // The restored path may differ (unique suffix); keep history records pointing
+    // at the live file so they aren't re-trashed on the next refresh.
+    crate::template_history::update_template_path(
+        &manifest.template.id,
+        &target.display().to_string(),
+    )?;
     Ok(target.display().to_string())
 }
 
@@ -428,6 +483,32 @@ pub fn permanently_delete_template(args: TemplatePermanentDeleteArgs) -> Result<
 
 pub fn inspect_template_package(path: &str) -> Result<TemplateManifest> {
     read_template_manifest(Path::new(path))
+}
+
+/// Update a field's reference (data source) and/or date format in the template
+/// manifest and rewrite the docsytpl package (word content untouched). Used to
+/// persist reference-source / date-format changes made on the fill page.
+pub fn update_template_field_settings(
+    template_path: &str,
+    field_id: &str,
+    reference: Option<TemplateFieldReference>,
+    date_format: Option<String>,
+) -> Result<()> {
+    let path = Path::new(template_path);
+    let (mut manifest, pkg) = package::read_docsytpl_package(path)?;
+    let field = manifest
+        .fields
+        .iter_mut()
+        .find(|f| f.id == field_id)
+        .ok_or_else(|| anyhow::anyhow!("模板中不存在字段: {}", field_id))?;
+    if let Some(reference) = reference {
+        field.reference = Some(reference);
+    }
+    if let Some(date_format) = date_format {
+        field.date_format = date_format;
+    }
+    package::write_docsytpl_package(path, &manifest, &pkg)?;
+    Ok(())
 }
 
 fn read_template_manifest(path: &Path) -> Result<TemplateManifest> {
@@ -478,7 +559,10 @@ pub(super) fn validate_manifest(manifest: &TemplateManifest) -> Result<()> {
         }
         for option in &field.options {
             // select 类型的 options 不需要 marker_mark_id，只有勾选类型才需要
-            if matches!(field.field_type.as_str(), "checkbox" | "radio_group" | "checkbox_group") {
+            if matches!(
+                field.field_type.as_str(),
+                "checkbox" | "radio_group" | "checkbox_group"
+            ) {
                 if option.id.trim().is_empty() || option.marker_mark_id.trim().is_empty() {
                     anyhow::bail!("勾选字段“{}”包含不完整选项", field.label);
                 }
@@ -504,7 +588,18 @@ pub(super) fn read_file_with_limit(path: &Path, limit: u64, label: &str) -> Resu
             limit / 1024 / 1024
         );
     }
-    std::fs::read(path).with_context(|| format!("读取{label}失败: {}", path.display()))
+    // Bounded read (TOCTOU-safe): never read more than limit+1 bytes even if
+    // the file grows between metadata and read.
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("读取{label}失败: {}", path.display()))?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut reader = std::io::BufReader::new(file).take(limit + 1);
+    std::io::Read::read_to_end(&mut reader, &mut bytes)
+        .with_context(|| format!("读取{label}失败: {}", path.display()))?;
+    if bytes.len() as u64 > limit {
+        anyhow::bail!("{}过大，无法安全读取", label);
+    }
+    Ok(bytes)
 }
 
 pub(super) fn read_vec_with_limit<R: Read>(
@@ -532,15 +627,6 @@ pub(super) fn is_word_xml_part(name: &str) -> bool {
     name == "word/document.xml"
         || (name.starts_with("word/header") && name.ends_with(".xml"))
         || (name.starts_with("word/footer") && name.ends_with(".xml"))
-}
-
-pub(super) fn fnv1a_hash(value: &str) -> u64 {
-    value
-        .as_bytes()
-        .iter()
-        .fold(0xcbf29ce484222325, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
-        })
 }
 
 pub(super) fn unique_docx_output_path(path: &Path) -> Result<PathBuf> {

@@ -2,7 +2,7 @@ use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::sort_utils::natural_cmp;
@@ -68,6 +68,8 @@ pub struct RunArgs {
     pub folder: String,
     #[serde(default)]
     pub folders: Option<Vec<String>>,
+    #[serde(default)]
+    pub image_paths: Option<Vec<String>>,
     pub output_format: String,
     pub layout: String,
     pub orientation: String,
@@ -132,6 +134,25 @@ pub struct RunResult {
 struct LayoutGrid {
     rows: usize,
     cols: usize,
+}
+
+/// 布局配置，聚合 generate_pdf / generate_docx 的所有排版参数。
+struct LayoutConfig {
+    page_w_mm: f64,
+    page_h_mm: f64,
+    margin_mm: f64,
+    grid: LayoutGrid,
+    cell_w_mm: f64,
+    image_cell_h_mm: f64,
+    filename_reserve_mm: f64,
+    show_filename: bool,
+    filename_without_ext: bool,
+    filename_remove_text: String,
+    filename_rules: Vec<FilenameRule>,
+    border_enabled: bool,
+    border_color: String,
+    scale_mode: String,
+    dpi: u32,
 }
 
 fn parse_layout(
@@ -388,6 +409,20 @@ pub fn analyze(args: &AnalyzeArgs) -> Result<AnalyzeResult> {
 }
 
 pub fn run(args: &RunArgs) -> Result<RunResult> {
+    if let Some(paths) = explicit_image_paths(args) {
+        if args.output_mode.as_deref() == Some("per_folder") {
+            return run_explicit_images_per_folder(args, paths);
+        }
+        let first = paths
+            .first()
+            .cloned()
+            .unwrap_or_else(|| args.folder.clone());
+        let images = paths
+            .iter()
+            .filter_map(|path| image_info_from_path(Path::new(path)).ok().flatten())
+            .collect::<Vec<_>>();
+        return run_images(args, images, &image_output_dir(&first));
+    }
     let sources = folders_from_args(&args.folder, &args.folders);
     if args.output_mode.as_deref() == Some("per_folder") && sources.len() > 1 {
         let mut outputs = Vec::new();
@@ -426,6 +461,57 @@ pub fn run(args: &RunArgs) -> Result<RunResult> {
     run_images(args, images, &image_output_dir(&first_source))
 }
 
+fn explicit_image_paths(args: &RunArgs) -> Option<Vec<String>> {
+    let paths = args
+        .image_paths
+        .as_ref()?
+        .iter()
+        .filter(|path| !path.trim().is_empty() && Path::new(path).is_file())
+        .cloned()
+        .collect::<Vec<_>>();
+    (!paths.is_empty()).then_some(paths)
+}
+
+fn run_explicit_images_per_folder(args: &RunArgs, paths: Vec<String>) -> Result<RunResult> {
+    let mut groups: Vec<(PathBuf, Vec<ImageInfo>)> = Vec::new();
+    for path in paths {
+        let source = Path::new(&path);
+        let parent = source
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let Some(info) = image_info_from_path(source)? else {
+            continue;
+        };
+        if let Some((_, images)) = groups.iter_mut().find(|(folder, _)| *folder == parent) {
+            images.push(info);
+        } else {
+            groups.push((parent, vec![info]));
+        }
+    }
+    let mut outputs = Vec::new();
+    let mut pages = 0_u32;
+    let mut image_count = 0_u32;
+    let mut warnings = Vec::new();
+    for (folder, images) in groups {
+        let result = run_images(args, images, &folder.join("_docsy_image_out"))?;
+        pages = pages.saturating_add(result.pages);
+        image_count = image_count.saturating_add(result.images);
+        warnings.extend(result.warnings);
+        outputs.push(result.output_path);
+    }
+    let Some(output_path) = outputs.first().cloned() else {
+        anyhow::bail!("显式图片列表中没有可排版的图片");
+    };
+    Ok(RunResult {
+        output_path,
+        output_paths: outputs,
+        pages,
+        images: image_count,
+        warnings,
+    })
+}
+
 fn scan_image_source(source: &str) -> Result<Vec<ImageInfo>> {
     let path = Path::new(source);
     if path.is_dir() {
@@ -453,9 +539,9 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
 
     let grid = parse_layout(&args.layout, args.custom_rows, args.custom_cols);
     let per_page = grid.rows * grid.cols;
-    let margin_mm = args.margin_mm.unwrap_or(15.0);
+    let margin_mm = args.margin_mm.unwrap_or(12.0);
     let show_filename = args.show_filename.unwrap_or(true);
-    let filename_without_ext = args.filename_without_ext.unwrap_or(false);
+    let filename_without_ext = args.filename_without_ext.unwrap_or(true);
     let filename_remove_text = args.filename_remove_text.clone().unwrap_or_default();
     let filename_rules = args.filename_rules.clone().unwrap_or_default();
     let order_mode = args.order_mode.as_deref().unwrap_or("z");
@@ -492,6 +578,24 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
     let total_pages = images.len().div_ceil(per_page);
     reorder_images(&mut images, &grid, order_mode);
 
+    let config = LayoutConfig {
+        page_w_mm: page_w,
+        page_h_mm: page_h,
+        margin_mm,
+        grid,
+        cell_w_mm: cell_w,
+        image_cell_h_mm: image_cell_h,
+        filename_reserve_mm: filename_reserve,
+        show_filename,
+        filename_without_ext,
+        filename_remove_text,
+        filename_rules,
+        border_enabled,
+        border_color: border_color.to_string(),
+        scale_mode: args.scale_mode.clone(),
+        dpi: args.dpi,
+    };
+
     std::fs::create_dir_all(output_dir)?;
     let ext = if args.output_format == "pdf" {
         "pdf"
@@ -502,45 +606,9 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
     let output_path = unique_output_path(output_dir, &format!("{output_stem}_docsy_paddler"), ext);
 
     let warnings = match args.output_format.as_str() {
-        "pdf" => generate_pdf(
-            &images,
-            &output_path,
-            page_w,
-            page_h,
-            margin_mm,
-            &grid,
-            cell_w,
-            image_cell_h,
-            filename_reserve,
-            show_filename,
-            filename_without_ext,
-            &filename_remove_text,
-            &filename_rules,
-            border_enabled,
-            border_color,
-            &args.scale_mode,
-            args.dpi,
-        )?,
+        "pdf" => generate_pdf(&images, &output_path, &config)?,
         _ => {
-            generate_docx(
-                &images,
-                &output_path,
-                page_w,
-                page_h,
-                margin_mm,
-                &grid,
-                cell_w,
-                image_cell_h,
-                filename_reserve,
-                show_filename,
-                filename_without_ext,
-                &filename_remove_text,
-                &filename_rules,
-                border_enabled,
-                border_color,
-                &args.scale_mode,
-                args.dpi,
-            )?;
+            generate_docx(&images, &output_path, &config)?;
             Vec::new()
         }
     };
@@ -843,38 +911,23 @@ fn compute_placement(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn generate_pdf(
     images: &[ImageInfo],
     output_path: &Path,
-    page_w_mm: f64,
-    page_h_mm: f64,
-    margin_mm: f64,
-    grid: &LayoutGrid,
-    cell_w_mm: f64,
-    image_cell_h_mm: f64,
-    filename_reserve_mm: f64,
-    show_filename: bool,
-    filename_without_ext: bool,
-    filename_remove_text: &str,
-    filename_rules: &[FilenameRule],
-    border_enabled: bool,
-    border_color: &str,
-    scale_mode: &str,
-    dpi: u32,
+    config: &LayoutConfig,
 ) -> Result<Vec<String>> {
     use printpdf::*;
 
     let mut doc = PdfDocument::new("image_paddler");
     let mut result_warnings = Vec::new();
-    let per_page = grid.rows * grid.cols;
-    let needs_external_filename_font = show_filename
+    let per_page = config.grid.rows * config.grid.cols;
+    let needs_external_filename_font = config.show_filename
         && images.iter().any(|image| {
             !display_filename(
                 &image.path,
-                filename_without_ext,
-                filename_remove_text,
-                filename_rules,
+                config.filename_without_ext,
+                &config.filename_remove_text,
+                &config.filename_rules,
             )
             .is_ascii()
         });
@@ -883,7 +936,7 @@ fn generate_pdf(
     } else {
         Some(PdfFontHandle::Builtin(BuiltinFont::Helvetica))
     };
-    let omit_filenames = show_filename && filename_font.is_none();
+    let omit_filenames = config.show_filename && filename_font.is_none();
     if omit_filenames {
         result_warnings.push(
             "PDF 中的图片文件名包含中文或其他非 ASCII 字符，但未找到可嵌入的 CJK 字体，已省略 PDF 中的文件名。请安装 PingFang、微软雅黑或思源黑体后重新生成。"
@@ -895,21 +948,21 @@ fn generate_pdf(
         let mut ops: Vec<Op> = Vec::new();
 
         for (i, img_info) in chunk.iter().enumerate() {
-            let row = i / grid.cols;
-            let col = i % grid.cols;
+            let row = i / config.grid.cols;
+            let col = i % config.grid.cols;
 
-            let cell_x_mm = margin_mm + col as f64 * cell_w_mm;
-            let cell_y_mm = page_h_mm
-                - margin_mm
-                - (row as f64 + 1.0) * (image_cell_h_mm + filename_reserve_mm);
-            let image_area_y_mm = cell_y_mm + filename_reserve_mm;
-            if border_enabled {
+            let cell_x_mm = config.margin_mm + col as f64 * config.cell_w_mm;
+            let cell_y_mm = config.page_h_mm
+                - config.margin_mm
+                - (row as f64 + 1.0) * (config.image_cell_h_mm + config.filename_reserve_mm);
+            let image_area_y_mm = cell_y_mm + config.filename_reserve_mm;
+            if config.border_enabled {
                 let rect_x_pt = cell_x_mm * 72.0 / 25.4;
                 let rect_y_pt = cell_y_mm * 72.0 / 25.4;
-                let rect_w_pt = cell_w_mm * 72.0 / 25.4;
-                let rect_h_pt = (image_cell_h_mm + filename_reserve_mm) * 72.0 / 25.4;
+                let rect_w_pt = config.cell_w_mm * 72.0 / 25.4;
+                let rect_h_pt = (config.image_cell_h_mm + config.filename_reserve_mm) * 72.0 / 25.4;
                 ops.push(Op::SetOutlineColor {
-                    col: pdf_border_color(border_color),
+                    col: pdf_border_color(&config.border_color),
                 });
                 ops.push(Op::SetOutlineThickness { pt: Pt(0.75) });
                 ops.push(Op::DrawRectangle {
@@ -927,16 +980,16 @@ fn generate_pdf(
                 RawImage::from_dynamic_image(img).map_err(|e| anyhow::anyhow!("{}", e))?;
             let xobj_id = doc.add_image(&raw_image);
 
-            let cell_w_pt = cell_w_mm * 72.0 / 25.4;
-            let cell_h_pt = image_cell_h_mm * 72.0 / 25.4;
+            let cell_w_pt = config.cell_w_mm * 72.0 / 25.4;
+            let cell_h_pt = config.image_cell_h_mm * 72.0 / 25.4;
 
             let (draw_w_pt, draw_h_pt, _nw, _nh) = compute_placement(
                 img_info.width,
                 img_info.height,
                 cell_w_pt,
                 cell_h_pt,
-                scale_mode,
-                dpi,
+                &config.scale_mode,
+                config.dpi,
             );
 
             let offset_x_pt = (cell_w_pt - draw_w_pt) / 2.0;
@@ -945,7 +998,7 @@ fn generate_pdf(
             let base_x_pt = cell_x_mm * 72.0 / 25.4 + offset_x_pt;
             let base_y_pt = image_area_y_mm * 72.0 / 25.4 + offset_y_pt;
 
-            let scale_factor = draw_w_pt / (img_info.width as f64 * 72.0 / dpi as f64);
+            let scale_factor = draw_w_pt / (img_info.width as f64 * 72.0 / config.dpi as f64);
 
             ops.push(Op::SaveGraphicsState);
             ops.push(Op::UseXobject {
@@ -955,19 +1008,19 @@ fn generate_pdf(
                     translate_y: Some(Pt(base_y_pt as f32)),
                     scale_x: Some(scale_factor as f32),
                     scale_y: Some(scale_factor as f32),
-                    dpi: Some(dpi as f32),
+                    dpi: Some(config.dpi as f32),
                     ..Default::default()
                 },
             });
             ops.push(Op::RestoreGraphicsState);
 
-            if show_filename && !omit_filenames {
+            if config.show_filename && !omit_filenames {
                 let lines = display_filename_lines(
                     &img_info.path,
-                    filename_without_ext,
-                    filename_remove_text,
-                    filename_rules,
-                    cell_w_mm,
+                    config.filename_without_ext,
+                    &config.filename_remove_text,
+                    &config.filename_rules,
+                    config.cell_w_mm,
                 );
                 ops.push(Op::StartTextSection);
                 ops.push(Op::SetFont {
@@ -1000,7 +1053,7 @@ fn generate_pdf(
             }
         }
 
-        let page = PdfPage::new(Mm(page_w_mm as f32), Mm(page_h_mm as f32), ops);
+        let page = PdfPage::new(Mm(config.page_w_mm as f32), Mm(config.page_h_mm as f32), ops);
 
         if page_idx == 0 {
             doc.with_pages(vec![page]);
@@ -1056,25 +1109,10 @@ fn pdf_border_color(color: &str) -> printpdf::Color {
     printpdf::Color::Rgb(printpdf::Rgb::new(r, g, b, None))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn generate_docx(
     images: &[ImageInfo],
     output_path: &Path,
-    page_w_mm: f64,
-    page_h_mm: f64,
-    margin_mm: f64,
-    grid: &LayoutGrid,
-    cell_w_mm: f64,
-    image_cell_h_mm: f64,
-    _filename_reserve_mm: f64,
-    show_filename: bool,
-    filename_without_ext: bool,
-    filename_remove_text: &str,
-    filename_rules: &[FilenameRule],
-    border_enabled: bool,
-    border_color: &str,
-    scale_mode: &str,
-    dpi: u32,
+    config: &LayoutConfig,
 ) -> Result<()> {
     use docx_rs::{
         AlignmentType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph, Pic, Run,
@@ -1082,10 +1120,10 @@ fn generate_docx(
         TableCellBorders, TableCellMargins, TableLayoutType, TableRow, VAlignType, WidthType,
     };
 
-    let per_page = grid.rows * grid.cols;
-    let page_w_twips = mm_to_twips(page_w_mm) as u32;
-    let page_h_twips = mm_to_twips(page_h_mm) as u32;
-    let margin_l_twips = mm_to_twips(margin_mm);
+    let per_page = config.grid.rows * config.grid.cols;
+    let page_w_twips = mm_to_twips(config.page_w_mm) as u32;
+    let page_h_twips = mm_to_twips(config.page_h_mm) as u32;
+    let margin_l_twips = mm_to_twips(config.margin_mm);
     let margin_r_twips = margin_l_twips;
     let margin_t_twips = margin_l_twips;
     let margin_b_twips = margin_l_twips;
@@ -1095,9 +1133,9 @@ fn generate_docx(
         (page_h_twips as i32).saturating_sub(margin_t_twips + margin_b_twips) as usize;
     let docx_usable_h_twips =
         usable_h_twips.saturating_sub(mm_to_twips(DOCX_TRAILING_GAP_MM).max(0) as usize);
-    let cell_w_twips = (usable_w_twips / grid.cols).max(1);
-    let cell_h_twips = (docx_usable_h_twips / grid.rows).max(1);
-    let page_orientation = if page_w_mm > page_h_mm {
+    let cell_w_twips = (usable_w_twips / config.grid.cols).max(1);
+    let cell_h_twips = (docx_usable_h_twips / config.grid.rows).max(1);
+    let page_orientation = if config.page_w_mm > config.page_h_mm {
         PageOrientationType::Landscape
     } else {
         PageOrientationType::Portrait
@@ -1112,7 +1150,7 @@ fn generate_docx(
         gutter: 0,
     };
     let table_margins = TableCellMargins::new().margin(0, 0, 0, 0);
-    let border_hex = docx_border_color(border_color);
+    let border_hex = docx_border_color(&config.border_color);
     let cell_borders = || {
         TableCellBorders::with_empty()
             .set(
@@ -1142,18 +1180,18 @@ fn generate_docx(
         .page_orient(page_orientation)
         .page_margin(page_margin);
 
-    let cell_w_pt = cell_w_mm * 72.0 / 25.4;
-    let cell_h_pt = image_cell_h_mm * 72.0 / 25.4;
+    let cell_w_pt = config.cell_w_mm * 72.0 / 25.4;
+    let cell_h_pt = config.image_cell_h_mm * 72.0 / 25.4;
     for chunk in images.chunks(per_page) {
-        let mut rows = Vec::with_capacity(grid.rows);
-        for row_idx in 0..grid.rows {
-            let mut cells = Vec::with_capacity(grid.cols);
-            for col_idx in 0..grid.cols {
-                let idx = row_idx * grid.cols + col_idx;
+        let mut rows = Vec::with_capacity(config.grid.rows);
+        for row_idx in 0..config.grid.rows {
+            let mut cells = Vec::with_capacity(config.grid.cols);
+            for col_idx in 0..config.grid.cols {
+                let idx = row_idx * config.grid.cols + col_idx;
                 let mut cell = TableCell::new()
                     .width(cell_w_twips, WidthType::Dxa)
                     .vertical_align(VAlignType::Center);
-                cell = if border_enabled {
+                cell = if config.border_enabled {
                     cell.set_borders(cell_borders())
                 } else {
                     cell.clear_all_border()
@@ -1165,8 +1203,8 @@ fn generate_docx(
                         img_info.height,
                         cell_w_pt,
                         cell_h_pt,
-                        scale_mode,
-                        dpi,
+                        &config.scale_mode,
+                        config.dpi,
                     );
                     let (png_data, width_px, height_px) = image_as_png(&img_info.path)?;
                     let pic = Pic::new_with_dimensions(png_data, width_px, height_px)
@@ -1178,12 +1216,12 @@ fn generate_docx(
                     );
                     let filename_lines = display_filename_lines(
                         &img_info.path,
-                        filename_without_ext,
-                        filename_remove_text,
-                        filename_rules,
-                        cell_w_mm,
+                        config.filename_without_ext,
+                        &config.filename_remove_text,
+                        &config.filename_rules,
+                        config.cell_w_mm,
                     );
-                    if show_filename {
+                    if config.show_filename {
                         for line in filename_lines {
                             cell = cell.add_paragraph(
                                 Paragraph::new()
@@ -1206,7 +1244,7 @@ fn generate_docx(
         }
 
         let table = Table::without_borders(rows)
-            .set_grid(vec![cell_w_twips; grid.cols])
+            .set_grid(vec![cell_w_twips; config.grid.cols])
             .width(usable_w_twips, WidthType::Dxa)
             .layout(TableLayoutType::Fixed)
             .align(TableAlignmentType::Center)
@@ -1364,6 +1402,49 @@ mod tests {
     }
 
     #[test]
+    fn explicit_image_paths_preserve_user_order() {
+        let root = std::env::temp_dir().join(format!(
+            "docsy_image_order_test_{}_{}",
+            std::process::id(),
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let first = root.join("img_10.png");
+        let second = root.join("img_2.png");
+        std::fs::write(&first, b"x").unwrap();
+        std::fs::write(&second, b"x").unwrap();
+        let args = RunArgs {
+            folder: root.display().to_string(),
+            folders: None,
+            image_paths: Some(vec![
+                first.display().to_string(),
+                second.display().to_string(),
+            ]),
+            output_format: "pdf".into(),
+            layout: "1".into(),
+            orientation: "portrait".into(),
+            dpi: 300,
+            scale_mode: "fit".into(),
+            custom_rows: None,
+            custom_cols: None,
+            margin_mm: None,
+            show_filename: None,
+            filename_without_ext: None,
+            filename_remove_text: None,
+            filename_rules: None,
+            order_mode: None,
+            border_enabled: None,
+            border_color: None,
+            output_mode: None,
+        };
+        assert_eq!(
+            explicit_image_paths(&args).unwrap(),
+            vec![first.display().to_string(), second.display().to_string()]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn generated_docx_has_valid_package_parts_and_unique_name() {
         let root = std::env::temp_dir().join(format!(
             "docsy_image_paddler_test_{}_{}",
@@ -1380,6 +1461,7 @@ mod tests {
         let args = RunArgs {
             folder: root.display().to_string(),
             folders: None,
+            image_paths: None,
             output_format: "docx".into(),
             layout: "1".into(),
             orientation: "portrait".into(),

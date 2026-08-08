@@ -1,5 +1,5 @@
 <template>
-  <section class="file-queue-panel" :style="{ '--queue-max-height': maxHeight }">
+  <section class="file-queue-panel">
     <div class="queue-summary">
       <span>{{ items.length }} 个文件</span>
       <el-button v-if="items.length && clearable" link size="small" type="danger" @click="$emit('clear')">
@@ -7,9 +7,28 @@
       </el-button>
     </div>
 
-    <el-scrollbar v-if="items.length" class="queue-scrollbar">
+    <el-scrollbar v-if="items.length" class="queue-scrollbar" :max-height="maxHeight">
       <div class="queue-list">
-        <article v-for="(item, index) in items" :key="itemKey(item, index)" class="queue-item">
+        <article
+          v-for="(item, index) in items"
+          :key="itemKey(item, index)"
+          class="queue-item"
+          :data-reorder-index="index"
+          :class="itemClasses(index)"
+        >
+          <button
+            v-if="sortable"
+            type="button"
+            class="queue-drag-handle"
+            title="拖动调整顺序"
+            aria-label="拖动调整顺序"
+            @pointerdown.stop="start(index, $event)"
+            @pointermove.stop="move"
+            @pointerup.stop="finish"
+            @pointercancel.stop="reset"
+          >
+            <el-icon><Rank /></el-icon>
+          </button>
           <slot name="leading" :item="item" :index="index" />
           <div class="queue-item-main">
             <div class="queue-item-name" :title="itemLabel(item)">{{ itemLabel(item) }}</div>
@@ -35,7 +54,10 @@
 </template>
 
 <script setup>
-defineProps({
+import { Rank } from '@element-plus/icons-vue'
+import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
+
+const props = defineProps({
   items: {
     type: Array,
     default: () => [],
@@ -56,9 +78,17 @@ defineProps({
     type: Boolean,
     default: true,
   },
+  sortable: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-defineEmits(['clear', 'remove'])
+const emit = defineEmits(['clear', 'remove', 'reorder'])
+const { start, move, finish, reset, itemClasses } = usePointerReorder({
+  itemCount: () => props.items.length,
+  onReorder: (payload) => emit('reorder', payload),
+})
 
 function itemLabel(item) {
   return String(item?.name || item?.path || item || '')
@@ -89,10 +119,6 @@ function itemKey(item, index) {
   background: var(--docsy-surface-elevated);
 }
 
-.queue-scrollbar {
-  max-height: var(--queue-max-height);
-}
-
 .queue-list {
   display: grid;
   gap: 1px;
@@ -106,6 +132,37 @@ function itemKey(item, index) {
   min-width: 0;
   padding: 10px 12px;
   background: var(--docsy-surface-elevated);
+}
+
+.queue-item.is-reorder-dragging {
+  opacity: 0.55;
+}
+
+.queue-item.is-reorder-before {
+  box-shadow: inset 0 2px 0 var(--docsy-primary);
+}
+
+.queue-item.is-reorder-after {
+  box-shadow: inset 0 -2px 0 var(--docsy-primary);
+}
+
+.queue-drag-handle {
+  display: inline-grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--docsy-text-muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  border: 0;
+  background: transparent;
+  place-items: center;
+}
+
+.queue-drag-handle:active {
+  cursor: grabbing;
 }
 
 .queue-item-main {

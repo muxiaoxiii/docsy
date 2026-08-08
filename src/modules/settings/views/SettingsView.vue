@@ -7,12 +7,15 @@
       <template #header>
         <div class="card-header">
           <span>外部工具状态</span>
-          <el-button size="small" @click="openManagedToolsDir">打开 Docsy 工具目录</el-button>
+          <div class="card-header-actions">
+            <el-button size="small" :loading="checkingTools" @click="checkTools">重新检测</el-button>
+            <el-button size="small" @click="openManagedToolsDir">打开 Docsy 工具目录</el-button>
+          </div>
         </div>
       </template>
       <p class="section-desc">
         qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；Word 文件转 PDF 会优先使用 Microsoft
-        Word，失败后使用 LibreOffice。
+        Word，失败后使用 LibreOffice。如果某个工具出现问题（如 qpdf 处理失败），可以清除托管版本后重新下载安装，或手动下载新版本放到 Docsy 工具目录。
       </p>
       <div v-if="managedToolsDir" class="managed-dir">{{ managedToolsDir }}</div>
       <div class="tool-list">
@@ -20,7 +23,9 @@
           <div class="tool-info">
             <span class="tool-name">{{ tool.label }}</span>
             <el-tag v-if="tool.checking" type="info" size="small">检测中</el-tag>
+            <el-tag v-else-if="tool.probeState === 'pending'" type="info" size="small">尚未检测</el-tag>
             <el-tag v-else-if="tool.status.available" type="success" size="small">可用</el-tag>
+            <el-tag v-else-if="tool.probeState === 'error'" type="danger" size="small">检测失败</el-tag>
             <el-tag v-else type="danger" size="small">未安装</el-tag>
             <el-tag v-if="tool.status.available" size="small" :type="tool.status.managed ? 'primary' : 'info'">
               {{ tool.status.managed ? 'Docsy 托管' : '系统工具' }}
@@ -31,6 +36,19 @@
             <span class="tool-version" v-if="tool.status.version">{{ tool.status.version }}</span>
           </div>
           <div class="tool-desc">{{ tool.description }}</div>
+          <div v-if="tool.probeState === 'error'" class="install-hint">{{ tool.probeError }}</div>
+          <div class="tool-actions">
+            <el-button size="small" :loading="tool.checking" @click="checkTool(tool)">检测此工具</el-button>
+            <el-button
+              v-if="tool.status.available && tool.status.managed && tool.autoInstall"
+              size="small"
+              type="danger"
+              :loading="tool.removing"
+              @click="removeManagedTool(tool)"
+            >
+              清除此工具
+            </el-button>
+          </div>
           <div class="tool-actions" v-if="!tool.status.available">
             <span class="install-hint">{{ tool.status.install_hint }}</span>
             <el-button
@@ -51,6 +69,9 @@
               本地 zip 安装
             </el-button>
             <el-button size="small" @click="openToolDownload(tool)"> 下载页 </el-button>
+            <el-button v-if="tool.runtimeUrl" size="small" @click="openExternalUrl(tool.runtimeUrl)">
+              VC++ 运行库
+            </el-button>
           </div>
         </div>
       </div>
@@ -76,32 +97,6 @@
           </div>
         </div>
       </div>
-    </el-card>
-
-    <el-card class="settings-section" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>模板回收站</span>
-          <el-button size="small" :loading="templateTrashLoading" @click="loadTemplateTrash">刷新</el-button>
-        </div>
-      </template>
-      <p class="section-desc">删除的模板先进入回收站；彻底删除会同时删除该模板的内部填写数据。</p>
-      <el-table v-if="templateTrash.length" :data="templateTrash" size="small" border>
-        <el-table-column prop="name" label="模板" min-width="180" />
-        <el-table-column label="字段" width="80">
-          <template #default="{ row }">{{ row.fieldCount }}</template>
-        </el-table-column>
-        <el-table-column prop="updated" label="更新时间" min-width="140">
-          <template #default="{ row }">{{ shortDate(row.updated) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="restoreTemplate(row)">恢复</el-button>
-            <el-button size="small" link type="danger" @click="permanentlyDeleteTemplate(row)">彻底删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-else description="回收站为空" />
     </el-card>
 
     <!-- App Settings -->
@@ -161,6 +156,7 @@ const settings = ref({
   tool_manifest_url: '',
 })
 const managedToolsDir = ref('')
+const checkingTools = ref(false)
 const menuModules = getMenuModules()
 const menuSettingsItems = computed(() =>
   normalizedMenuOrder()
@@ -174,9 +170,12 @@ const tools = reactive([
     label: 'qpdf',
     description: 'PDF 合并、拆分、叠加和结构处理',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: true,
     downloadUrl: 'https://github.com/qpdf/qpdf/releases',
   },
@@ -185,20 +184,27 @@ const tools = reactive([
     label: 'Poppler',
     description: 'PDF 预览渲染和页眉页脚文本检测',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: true,
     downloadUrl: 'https://github.com/oschwartz10612/poppler-windows/releases',
+    runtimeUrl: 'https://aka.ms/vc14/vc_redist.x64.exe',
   },
   {
     name: 'ffmpeg',
     label: 'FFmpeg',
     description: '视频信息读取、抽帧和时间戳水印',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: true,
     downloadUrl: 'https://www.gyan.dev/ffmpeg/builds/',
   },
@@ -207,9 +213,12 @@ const tools = reactive([
     label: 'Microsoft Word',
     description: 'Word 文件转 PDF 的首选引擎；Windows 使用 COM，macOS 使用 AppleScript',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: false,
     downloadUrl: 'https://www.microsoft.com/microsoft-365/word',
   },
@@ -218,9 +227,12 @@ const tools = reactive([
     label: 'WPS Writer',
     description: 'Windows 下 Word 不可用时的第二转换引擎，使用 WPS COM 导出 PDF',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: false,
     downloadUrl: 'https://www.wps.cn/',
   },
@@ -229,9 +241,12 @@ const tools = reactive([
     label: 'LibreOffice',
     description: 'Word 文件转 PDF 的备用引擎；没有 Word 或 Word 转换失败时使用',
     status: defaultToolStatus(),
+    probeState: 'pending',
+    probeError: '',
     checking: false,
     installing: false,
     installingLocal: false,
+    removing: false,
     autoInstall: false,
     downloadUrl: 'https://www.libreoffice.org/download/',
   },
@@ -245,8 +260,6 @@ const diagnostic = ref({
   poppler: null,
   ffmpeg: null,
 })
-const templateTrash = ref([])
-const templateTrashLoading = ref(false)
 
 function defaultToolStatus() {
   return {
@@ -267,10 +280,24 @@ async function loadSettings() {
     settings.value.menu_order = Array.isArray(settings.value.menu_order) ? settings.value.menu_order : []
     settings.value.libreoffice_path = settings.value.libreoffice_path || ''
     settings.value.tool_manifest_url = settings.value.tool_manifest_url || ''
+  } else {
+    ElMessage.warning('设置加载失败')
   }
 }
 
 async function saveSettings() {
+  // 简单验证
+  const manifestUrl = (settings.value.tool_manifest_url || '').trim()
+  if (manifestUrl && !manifestUrl.startsWith('http://') && !manifestUrl.startsWith('https://')) {
+    ElMessage.warning('工具清单地址必须以 http:// 或 https:// 开头')
+    return
+  }
+  const loPath = (settings.value.libreoffice_path || '').trim()
+  if (loPath && !loPath.startsWith('/') && !/^[A-Za-z]:\\/.test(loPath)) {
+    ElMessage.warning('LibreOffice 路径格式不正确，应以 / 或盘符（如 C:\\）开头')
+    return
+  }
+
   const payload = {
     ...settings.value,
     menu_order: normalizedMenuOrder(),
@@ -285,64 +312,6 @@ async function saveSettings() {
   } else {
     ElMessage.error(result.error || '保存设置失败')
   }
-}
-
-async function loadTemplateTrash() {
-  templateTrashLoading.value = true
-  const result = await tauriCallSafe('list_template_trash')
-  templateTrashLoading.value = false
-  if (result.ok) {
-    templateTrash.value = result.data || []
-  } else {
-    ElMessage.error(result.error || '读取模板回收站失败')
-  }
-}
-
-async function restoreTemplate(row) {
-  const result = await tauriCallSafe('restore_template_from_trash', { args: { path: row.path } })
-  if (!result.ok) {
-    ElMessage.error(result.error || '恢复失败')
-    return
-  }
-  ElMessage.success('模板已恢复')
-  await loadTemplateTrash()
-  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
-}
-
-async function permanentlyDeleteTemplate(row) {
-  let migrateToCommon = false
-  try {
-    await ElMessageBox.confirm(
-      `彻底删除“${row.name}”？可以先把该模板的内部填写数据迁移为模板通用数据，供其他模板按通用字段名继续检索。`,
-      '彻底删除模板',
-      {
-        confirmButtonText: '迁移数据并删除',
-        cancelButtonText: '直接删除数据',
-        distinguishCancelAndClose: true,
-        type: 'warning',
-      },
-    )
-    migrateToCommon = true
-  } catch (action) {
-    if (action !== 'cancel') return
-  }
-  const result = await tauriCallSafe('permanently_delete_template', {
-    args: { path: row.path, migrateToCommon },
-  })
-  if (!result.ok) {
-    ElMessage.error(result.error || '彻底删除失败')
-    return
-  }
-  ElMessage.success(migrateToCommon ? '模板已删除，数据已迁移为模板通用数据' : '模板和内部数据已删除')
-  await loadTemplateTrash()
-  window.dispatchEvent(new CustomEvent('docsy-template-library-changed'))
-}
-
-function shortDate(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 function normalizedMenuOrder() {
@@ -380,17 +349,34 @@ function setMenuVisible(id, value) {
 }
 
 async function checkTools() {
-  await Promise.all(
-    tools.map(async (tool) => {
-      tool.checking = true
-      const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
-      if (result.ok) {
-        tool.status = result.data
-      }
-      tool.checking = false
-    }),
-  )
-  syncDiagnosticToolStatus()
+  if (checkingTools.value) return
+  checkingTools.value = true
+  try {
+    await Promise.all(tools.map(checkTool))
+    syncDiagnosticToolStatus()
+  } finally {
+    checkingTools.value = false
+  }
+}
+
+async function checkTool(tool) {
+  if (!tool || tool.checking) return
+  tool.checking = true
+  tool.probeState = 'checking'
+  tool.probeError = ''
+  try {
+    const result = await tauriCallSafe('check_external_tool', { toolName: tool.name })
+    if (result.ok) {
+      tool.status = result.data
+      tool.probeState = result.data?.available ? 'available' : 'unavailable'
+    } else {
+      tool.status = defaultToolStatus()
+      tool.probeState = 'error'
+      tool.probeError = result.error || '工具检测调用失败'
+    }
+  } finally {
+    tool.checking = false
+  }
 }
 
 async function loadManagedToolsDir() {
@@ -477,6 +463,30 @@ async function openManagedToolsDir() {
   }
 }
 
+async function removeManagedTool(tool) {
+  try {
+    await ElMessageBox.confirm(
+      `清除 Docsy 托管的 ${tool.label}？清除后将使用系统已安装的版本（如有）。`,
+      '清除托管工具',
+      { confirmButtonText: '清除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  tool.removing = true
+  try {
+    const result = await tauriCallSafe('remove_managed_tool', { toolName: tool.name })
+    if (result.ok) {
+      ElMessage.success(result.data || '已清除')
+      await checkTool(tool)
+    } else {
+      ElMessage.error(result.error || '清除失败')
+    }
+  } finally {
+    tool.removing = false
+  }
+}
+
 async function openToolDownload(tool) {
   const result = await openExternalUrl(tool.downloadUrl)
   if (!result.ok) {
@@ -488,16 +498,15 @@ onMounted(() => {
   loadSettings()
   loadManagedToolsDir()
   loadDiagnostic()
-  loadTemplateTrash()
   checkTools()
 })
 </script>
 
 <style scoped>
 .settings-view {
-  max-width: 980px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 24px 28px 40px;
+  padding: 20px 24px 32px;
 }
 
 .settings-view h2 {
@@ -516,6 +525,14 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .managed-dir {
@@ -619,18 +636,6 @@ onMounted(() => {
   margin: 0 0 12px;
 }
 
-.bundle-actions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.export-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 @media (max-width: 760px) {
   .settings-view {
     padding: 16px;
@@ -655,7 +660,6 @@ onMounted(() => {
     flex: 1;
   }
 
-  .bundle-actions,
   .diag-actions {
     flex-wrap: wrap;
   }

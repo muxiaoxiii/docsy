@@ -57,6 +57,16 @@ pub fn open_tools_root() -> Result<()> {
     open::that(&root).map_err(|e| anyhow::anyhow!(e))
 }
 
+pub fn remove_managed_tool(tool: &str) -> Result<()> {
+    let dir = tools_root().join(tool);
+    if !dir.exists() {
+        anyhow::bail!("未找到 {} 的托管安装目录", tool);
+    }
+    fs::remove_dir_all(&dir)
+        .with_context(|| format!("清除 {} 失败，请手动删除目录：{}", tool, dir.display()))?;
+    Ok(())
+}
+
 pub fn managed_binary_path(tool: &str, binary: &str) -> Option<PathBuf> {
     let root = tools_root().join(tool);
     find_binary_in_dir(&root, binary)
@@ -567,7 +577,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 
 pub fn find_on_path(binary: &str) -> Option<PathBuf> {
     let command = if cfg!(windows) { "where" } else { "which" };
-    let mut command = std::process::Command::new(command);
+    let mut command = super::hidden_command(command);
     command.arg(binary);
     let output = super::command_output_with_timeout(&mut command, Duration::from_secs(2)).ok()?;
     if !output.status.success() {

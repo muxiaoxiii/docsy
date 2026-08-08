@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::external::ExternalTool;
 
-#[derive(Debug, Clone, Deserialize)]
+use super::{safe_file_stem, temp_named_path, unique_output_path};
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitMergedArgs {
     #[serde(alias = "input")]
@@ -15,7 +17,7 @@ pub struct SplitMergedArgs {
     cleanup: SplitCleanup,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitCleanup {
     #[serde(default)]
@@ -156,14 +158,14 @@ fn extract_range(
 ) -> Result<String> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let output_path = unique_output_path(output_dir, &safe_file_stem(&item.name));
+    let output_path = unique_output_path(Path::new(output_dir), &safe_file_stem(&item.name), "pdf");
     let qpdf_output_path = if cleanup.header_enabled || cleanup.footer_enabled {
         temp_named_path("docsy_split_range", "pdf")
     } else {
         output_path.clone()
     };
     let range = format!("{}-{}", item.page_start, item.page_end);
-    let status = std::process::Command::new(&bin)
+    let status = crate::external::hidden_command(&bin)
         .arg("--empty")
         .arg("--pages")
         .arg(input_path)
@@ -173,7 +175,7 @@ fn extract_range(
         .status()
         .context("执行 qpdf 页段拆分失败")?;
 
-    if !status.success() {
+    if !super::qpdf::status_is_success(&status) {
         anyhow::bail!("qpdf 页段拆分失败");
     }
     if cleanup.header_enabled || cleanup.footer_enabled {
@@ -201,41 +203,6 @@ fn default_footer_height_mm() -> f32 {
     18.0
 }
 
-fn safe_file_stem(name: &str) -> String {
-    let mut value = name
-        .trim()
-        .trim_end_matches(".pdf")
-        .chars()
-        .map(|ch| match ch {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            _ => ch,
-        })
-        .collect::<String>();
-    if value.is_empty() {
-        value = "split".to_string();
-    }
-    value
-}
-
-fn unique_output_path(output_dir: &str, stem: &str) -> PathBuf {
-    let dir = Path::new(output_dir);
-    let mut path = dir.join(format!("{stem}.pdf"));
-    let mut index = 1;
-    while path.exists() {
-        path = dir.join(format!("{stem}-{index}.pdf"));
-        index += 1;
-    }
-    path
-}
-
-fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
-}
 
 #[cfg(test)]
 mod tests {
@@ -266,7 +233,7 @@ mod tests {
     #[test]
     fn sanitizes_split_file_names() {
         assert_eq!(safe_file_stem("证据/1:合同.pdf"), "证据_1_合同");
-        assert_eq!(safe_file_stem(""), "split");
+        assert_eq!(safe_file_stem(""), "output");
     }
 
     #[test]
@@ -306,7 +273,7 @@ mod tests {
 
     #[test]
     fn builds_unique_output_path_candidate() {
-        let path = unique_output_path("/tmp", "evidence");
+        let path = unique_output_path(Path::new("/tmp"), "evidence", "pdf");
         assert_eq!(path, Path::new("/tmp").join("evidence.pdf"));
     }
 }

@@ -45,6 +45,8 @@ function sanitize(value, depth = 0, key = '') {
 }
 
 async function send(level, target, message, context) {
+  // Guard: Tauri runtime may not be ready (SSR, web preview, early startup)
+  if (typeof window === 'undefined' || !window.__TAURI_INTERNALS__) return
   try {
     await invoke('write_frontend_log', {
       level,

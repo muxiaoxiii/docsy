@@ -50,6 +50,9 @@ pub struct TemplateHistoryRun {
     pub generated_at: String,
     pub field_values: HashMap<String, Value>,
     pub field_summaries: Vec<TemplateHistoryFieldSummary>,
+    /// "single" | "batch" | "seed" — where the run came from
+    #[serde(default)]
+    pub source: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -60,15 +63,6 @@ pub struct TemplateHistoryFieldSummary {
     pub display: String,
 }
 
-pub fn record_generation(
-    template_path: &str,
-    manifest: &TemplateManifest,
-    output_path: &str,
-    values: &HashMap<String, Value>,
-) -> Result<()> {
-    record_history_run(template_path, manifest, output_path, values)
-}
-
 pub fn record_template_seed(
     template_path: &str,
     manifest: &TemplateManifest,
@@ -77,14 +71,91 @@ pub fn record_template_seed(
     if values.is_empty() {
         return Ok(());
     }
-    record_history_run(template_path, manifest, "[template-seed]", values)
+    record_history_run(template_path, manifest, "[template-seed]", values, "seed")
 }
 
-fn record_history_run(
+/// Delete every recorded fill run and its field values (history database only;
+/// templates and their files are untouched). Returns the number of deleted runs.
+pub fn clear_history() -> Result<usize> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    let deleted = conn.execute("DELETE FROM generation_runs", [])?;
+    conn.execute("DELETE FROM field_history", [])?;
+    Ok(deleted)
+}
+
+/// Copy field-history rows of `source_template_id` whose field name also
+/// exists in `target_template_id` into the target (skipping rows the target
+/// already has for the same field+value). Rows only present in the source
+/// stay there — the cross-template field-name lookup surfaces them anyway.
+/// Returns the number of copied rows.
+pub fn merge_template_field_history(
+    source_template_id: &str,
+    target_template_id: &str,
+) -> Result<usize> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    let mut stmt = conn.prepare(
+        "INSERT INTO field_history
+            (run_id, template_id, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at)
+         SELECT run_id, ?2, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at
+         FROM field_history AS src
+         WHERE src.template_id = ?1
+           AND src.field_name IN (SELECT DISTINCT field_name FROM field_history WHERE template_id = ?2)
+           AND NOT EXISTS (
+             SELECT 1 FROM field_history AS tgt
+             WHERE tgt.template_id = ?2
+               AND tgt.field_name = src.field_name
+               AND tgt.value_json = src.value_json
+               AND tgt.display_value = src.display_value
+           )",
+    )?;
+    let copied = stmt.execute(params![source_template_id, target_template_id])?;
+    Ok(copied)
+}
+
+pub fn list_database_entries() -> Result<Vec<Value>> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    let mut stmt = conn.prepare(
+        "SELECT m.template_id, m.template_name, m.updated_at,
+                (SELECT COUNT(*) FROM field_history fh WHERE fh.template_id = m.template_id) as field_count
+         FROM template_meta m WHERE m.trashed = 0 ORDER BY m.updated_at DESC",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "templateId": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "updatedAt": row.get::<_, String>(2)?,
+                "fieldCount": row.get::<_, i64>(3)?,
+            }))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn delete_database_entry(template_path: &str) -> Result<()> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    conn.execute(
+        "DELETE FROM field_history WHERE template_id = (SELECT template_id FROM template_meta WHERE template_id = ?1)",
+        [template_path],
+    )?;
+    conn.execute(
+        "DELETE FROM generation_runs WHERE template_id = (SELECT template_id FROM template_meta WHERE template_id = ?1)",
+        [template_path],
+    )?;
+    conn.execute("DELETE FROM template_meta WHERE template_id = ?1", [template_path])?;
+    Ok(())
+}
+
+pub fn record_history_run(
     template_path: &str,
     manifest: &TemplateManifest,
     output_path: &str,
     values: &HashMap<String, Value>,
+    source: &str,
 ) -> Result<()> {
     let mut conn = open_db()?;
     init_db(&conn)?;
@@ -95,15 +166,16 @@ fn record_history_run(
     let values_json = serde_json::to_string(&stored_values)?;
     let tx = conn.transaction()?;
     tx.execute(
-        "INSERT INTO generation_runs (template_id, template_name, template_path, output_path, generated_at, field_values)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO generation_runs (template_id, template_name, template_path, output_path, generated_at, field_values, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             manifest.template.id,
             manifest.template.name,
             template_path,
             output_path,
             now,
-            values_json
+            values_json,
+            source
         ],
     )?;
     let run_id = tx.last_insert_rowid();
@@ -215,7 +287,8 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
                 runs.template_path,
                 runs.output_path,
                 runs.generated_at,
-                runs.field_values
+                runs.field_values,
+                runs.source
          FROM generation_runs AS runs
          JOIN template_meta AS meta ON meta.template_id = runs.template_id
          WHERE runs.output_path != '[template-seed]'
@@ -234,6 +307,7 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
             generated_at: row.get(5)?,
             field_values: serde_json::from_str(&values_json).unwrap_or_default(),
             field_summaries: Vec::new(),
+            source: row.get(7).unwrap_or_else(|_| "single".to_string()),
         })
     })?;
 
@@ -259,10 +333,68 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
     }
 
     let mut runs = valid_runs;
+    // Batch-load summaries for all runs with a single query (avoids N+1).
+    let run_ids: Vec<i64> = runs.iter().map(|run| run.id).collect();
+    let summaries_by_run = query_run_field_summaries_for_runs(&conn, &run_ids)?;
     for run in &mut runs {
-        run.field_summaries = query_run_field_summaries(&conn, run.id)?;
+        run.field_summaries = summaries_by_run.get(&run.id).cloned().unwrap_or_default();
     }
     Ok(runs)
+}
+
+fn query_run_field_summaries_for_runs(
+    conn: &Connection,
+    run_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, Vec<TemplateHistoryFieldSummary>>> {
+    let mut result = std::collections::HashMap::new();
+    if run_ids.is_empty() {
+        return Ok(result);
+    }
+    let placeholders = run_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT run_id, field_name, field_label, display_value
+         FROM field_history
+         WHERE run_id IN ({placeholders})
+         ORDER BY run_id ASC, id ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params = rusqlite::params_from_iter(run_ids.iter());
+    let rows = stmt.query_map(params, |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            TemplateHistoryFieldSummary {
+                name: row.get(1)?,
+                label: row.get(2)?,
+                display: row.get(3)?,
+            },
+        ))
+    })?;
+    for item in rows {
+        let (run_id, summary) = item?;
+        result.entry(run_id).or_insert_with(Vec::new).push(summary);
+    }
+    Ok(result)
+}
+
+/// Point all history records of a template at its current library path
+/// (used after restoring a template from trash, where the path may change).
+pub fn update_template_path(template_id: &str, new_path: &str) -> Result<()> {
+    let conn = open_db()?;
+    init_db(&conn)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE generation_runs SET template_path = ?2 WHERE template_id = ?1",
+        params![template_id, new_path],
+    )?;
+    conn.execute(
+        "UPDATE template_meta SET template_path = ?2, updated_at = ?3 WHERE template_id = ?1",
+        params![template_id, new_path, now],
+    )?;
+    Ok(())
 }
 
 pub fn mark_template_trashed(template_id: &str, trashed: bool) -> Result<()> {
@@ -328,6 +460,9 @@ fn open_db() -> Result<Connection> {
     }
     let conn = Connection::open(path)?;
     conn.busy_timeout(Duration::from_secs(5))?;
+    // WAL allows concurrent readers (multiple windows) without write blocking;
+    // synchronous=NORMAL keeps durability with far fewer fsyncs.
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
     Ok(conn)
 }
 
@@ -349,7 +484,8 @@ fn init_db(conn: &Connection) -> Result<()> {
             template_path TEXT NOT NULL,
             output_path TEXT NOT NULL,
             generated_at TEXT NOT NULL,
-            field_values TEXT NOT NULL
+            field_values TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'single'
         );
         CREATE TABLE IF NOT EXISTS field_history (
             id INTEGER PRIMARY KEY,
@@ -377,6 +513,7 @@ fn init_db(conn: &Connection) -> Result<()> {
         ",
     )?;
     ensure_field_history_id_column(conn)?;
+    ensure_generation_source_column(conn)?;
     Ok(())
 }
 
@@ -402,28 +539,17 @@ fn ensure_field_history_id_column(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn upsert_template_meta(
-    conn: &Connection,
-    manifest: &TemplateManifest,
-    template_path: &str,
-    trashed: bool,
-) -> Result<()> {
-    conn.execute(
-        "INSERT INTO template_meta (template_id, template_name, template_path, trashed, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(template_id) DO UPDATE SET
-           template_name = excluded.template_name,
-           template_path = excluded.template_path,
-           trashed = excluded.trashed,
-           updated_at = excluded.updated_at",
-        params![
-            manifest.template.id,
-            manifest.template.name,
-            template_path,
-            if trashed { 1 } else { 0 },
-            chrono::Utc::now().to_rfc3339()
-        ],
-    )?;
+fn ensure_generation_source_column(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(generation_runs)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|column| column == "source") {
+        conn.execute(
+            "ALTER TABLE generation_runs ADD COLUMN source TEXT NOT NULL DEFAULT 'single'",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -435,25 +561,21 @@ fn ensure_template_meta(
     template_path: &str,
 ) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    // Update name/path only if the record already exists
-    let updated = conn.execute(
-        "UPDATE template_meta
-         SET template_name = ?2, template_path = ?3, updated_at = ?4
-         WHERE template_id = ?1",
+    // Single atomic upsert — the former UPDATE-then-INSERT raced under
+    // concurrent writers and could hit the PRIMARY KEY conflict.
+    conn.execute(
+        "INSERT INTO template_meta (template_id, template_name, template_path, trashed, updated_at)
+         VALUES (?1, ?2, ?3, 0, ?4)
+         ON CONFLICT(template_id) DO UPDATE SET
+            template_name = excluded.template_name,
+            template_path = excluded.template_path,
+            updated_at = excluded.updated_at",
         params![manifest.template.id, manifest.template.name, template_path, now],
     )?;
-    if updated == 0 {
-        // Record doesn't exist yet; insert with trashed = 0
-        conn.execute(
-            "INSERT INTO template_meta (template_id, template_name, template_path, trashed, updated_at)
-             VALUES (?1, ?2, ?3, 0, ?4)",
-            params![manifest.template.id, manifest.template.name, template_path, now],
-        )?;
-    }
     Ok(())
 }
 
-fn query_last_values(conn: &Connection, template_id: &str) -> Result<HashMap<String, Value>> {
+pub fn query_last_values(conn: &Connection, template_id: &str) -> Result<HashMap<String, Value>> {
     let mut stmt = conn.prepare(
         "SELECT field_values FROM generation_runs
          WHERE template_id = ?1
@@ -468,25 +590,10 @@ fn query_last_values(conn: &Connection, template_id: &str) -> Result<HashMap<Str
     }
 }
 
-fn query_run_field_summaries(
-    conn: &Connection,
-    run_id: i64,
-) -> Result<Vec<TemplateHistoryFieldSummary>> {
-    let mut stmt = conn.prepare(
-        "SELECT field_name, field_label, display_value
-         FROM field_history
-         WHERE run_id = ?1
-         ORDER BY id ASC
-         LIMIT 8",
-    )?;
-    let rows = stmt.query_map(params![run_id], |row| {
-        Ok(TemplateHistoryFieldSummary {
-            name: row.get(0)?,
-            label: row.get(1)?,
-            display: row.get(2)?,
-        })
-    })?;
-    collect_rows(rows)
+/// Last recorded field values for a template (empty map when none exist yet).
+pub fn last_field_values_for_template(template_id: &str) -> Result<HashMap<String, Value>> {
+    let conn = open_db()?;
+    query_last_values(&conn, template_id)
 }
 
 fn query_field_suggestions(
@@ -494,15 +601,28 @@ fn query_field_suggestions(
     template_id: &str,
     field: &TemplateField,
 ) -> Result<Vec<ValueSuggestion>> {
+    // Field-name-keyed suggestions span templates: the current template first,
+    // then the shared common bucket, then any non-trashed template with the
+    // same field name. This lets two templates with similar terms share fill
+    // history without any manual merge step.
     let mut stmt = conn.prepare(
         "SELECT value_json, display_value, COUNT(*) AS freq, MAX(generated_at) AS last_used
          FROM field_history
-         WHERE template_id = ?1 AND field_id = ?2
+         WHERE field_name = ?2
+           AND (
+             template_id = ?1
+             OR template_id = ?3
+             OR NOT EXISTS (
+               SELECT 1 FROM template_meta
+               WHERE template_meta.template_id = field_history.template_id
+                 AND template_meta.trashed = 1
+             )
+           )
          GROUP BY value_json, display_value
          ORDER BY freq DESC, last_used DESC
          LIMIT 8",
     )?;
-    let rows = stmt.query_map(params![template_id, field.id], |row| {
+    let rows = stmt.query_map(params![template_id, field.name, TEMPLATE_COMMON_ID], |row| {
         suggestion_from_row(row, "field")
     })?;
     collect_rows(rows)
@@ -544,12 +664,18 @@ fn query_association_suggestions(
     values: &HashMap<String, Value>,
 ) -> Result<Vec<AssociationSuggestion>> {
     let mut suggestions = Vec::new();
+    // The frontend injects the same value under id/name/semantic keys; dedupe
+    // by display value so one trigger is only queried once.
+    let mut seen_triggers = std::collections::HashSet::new();
     for (trigger_field, trigger_value) in values {
         if trigger_field == &target.id {
             continue;
         }
         let trigger_display = value_display(trigger_value);
         if trigger_display.trim().is_empty() {
+            continue;
+        }
+        if !seen_triggers.insert(trigger_display.clone()) {
             continue;
         }
         let mut stmt = conn.prepare(
@@ -719,6 +845,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            filename_template: None,
         };
         let values = [
             ("第三人".to_string(), json!(["真实第三人1", "真实第三人2"])),
@@ -750,6 +877,7 @@ mod tests {
                 updated: String::new(),
             },
             fields: vec![],
+            filename_template: None,
         };
         let context = TemplateHistoryContext {
             last_values: HashMap::new(),

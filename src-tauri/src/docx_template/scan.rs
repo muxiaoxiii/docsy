@@ -13,7 +13,8 @@ pub fn scan_document_index(part_name: &str, tree: &XmlTree) -> Result<TextIndex>
         // Handle both document fragments (root = w:p) and full documents (root = w:document > w:body)
         if name == "w:p" {
             index.add_paragraph();
-            scan_paragraph_runs(children, &mut index, 0);
+            let mut run_idx = 0;
+            scan_paragraph_runs(children, &mut index, 0, &mut run_idx);
         } else {
             scan_element_children_recursive(children, &mut index, &mut Vec::new());
         }
@@ -45,7 +46,8 @@ fn scan_element_children_recursive(
             if name == "w:p" {
                 index.add_paragraph();
                 let p_idx = index.paragraph_count - 1;
-                scan_paragraph_runs(children, index, p_idx);
+                let mut run_idx = 0;
+                scan_paragraph_runs(children, index, p_idx, &mut run_idx);
             }
             // Always recurse into all children — w:p inside txbxContent are descendants
             scan_element_children_recursive(children, index, _path);
@@ -53,8 +55,19 @@ fn scan_element_children_recursive(
     }
 }
 
-fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_idx: usize) {
-    let mut run_idx = 0;
+fn scan_paragraph_runs(
+    children: &[XmlNode],
+    index: &mut TextIndex,
+    paragraph_idx: usize,
+    run_idx: &mut usize,
+) {
+    // Word field depth tracking: skip field code region (begin → separate).
+    // See MDG-012 and ECMA-376 §17.16. Currently scan.rs handles fields
+    // correctly by accident (collect_direct_run_text only takes w:t, and
+    // fldChar/instrText runs don't have w:t), but explicit tracking makes
+    // the intent clear and prevents future regressions.
+    let mut field_depth: u32 = 0;
+    let mut in_field_code = false;
 
     for child in children {
         if let XmlNode::Element {
@@ -64,10 +77,39 @@ fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_id
         } = child
         {
             if name != "w:r" {
-                // Recursively scan nested elements (e.g., w:sdt > w:sdtContent > w:r)
-                if name == "w:sdt" {
-                    scan_paragraph_runs(children, index, paragraph_idx);
+                // Recursively scan nested elements so coordinate counting stays
+                // identical to save (w:sdt > w:sdtContent > w:r and
+                // w:hyperlink > w:r). Skipping w:sdtContent shifts every
+                // run index after the sdt, breaking markId matching on reload.
+                if name == "w:sdt" || name == "w:sdtContent" || name == "w:hyperlink" {
+                    scan_paragraph_runs(children, index, paragraph_idx, run_idx);
                 }
+                continue;
+            }
+
+            // Detect Word field boundaries (MDG-012)
+            if let Some(fld_type) = fldchar_type(child) {
+                match fld_type {
+                    "begin" => {
+                        field_depth += 1;
+                        in_field_code = true;
+                    }
+                    "separate" => {
+                        in_field_code = false;
+                    }
+                    "end" => {
+                        field_depth = field_depth.saturating_sub(1);
+                        if field_depth == 0 {
+                            in_field_code = false;
+                        }
+                    }
+                    _ => {}
+                }
+                continue; // fldChar runs are structural, not content
+            }
+
+            // Skip runs inside field code region (instrText etc.)
+            if field_depth > 0 && in_field_code {
                 continue;
             }
 
@@ -102,7 +144,7 @@ fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_id
                 };
                 index.add_text_node(TextNodeRef {
                     paragraph_index: paragraph_idx,
-                    run_index: run_idx,
+                    run_index: *run_idx,
                     text_index: 0,
                     text,
                     highlighted,
@@ -112,10 +154,33 @@ fn scan_paragraph_runs(children: &[XmlNode], index: &mut TextIndex, paragraph_id
                     checkbox_like,
                     option_label,
                 });
-                run_idx += 1;
+                *run_idx += 1;
             }
         }
     }
+}
+
+/// Check if a w:r contains a w:fldChar and return its type.
+fn fldchar_type(node: &XmlNode) -> Option<&'static str> {
+    if let XmlNode::Element { children, .. } = node {
+        for child in children {
+            if let XmlNode::Element { name, attrs, .. } = child {
+                if name == "w:fldChar" {
+                    for (k, v) in attrs {
+                        if k == "w:fldCharType" {
+                            return match v.as_str() {
+                                "begin" => Some("begin"),
+                                "separate" => Some("separate"),
+                                "end" => Some("end"),
+                                _ => None,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn has_element_in(node: &XmlNode, name: &str) -> bool {
@@ -216,8 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_multiple_paragraphs() {
-        let tree = parse_xml(
+    fn scan_multiple_paragraphs() {        let tree = parse_xml(
             r#"<w:document><w:body>
             <w:p><w:r><w:t>A</w:t></w:r></w:p>
             <w:p><w:r><w:t>B</w:t></w:r></w:p>
@@ -229,6 +293,19 @@ mod tests {
         assert_eq!(index.paragraph_count, 2);
         assert_eq!(index.nodes[0].paragraph_index, 0);
         assert_eq!(index.nodes[1].paragraph_index, 1);
+    }
+
+    #[test]
+    fn scan_hyperlink_nested_yellow_run() {
+        // Highlighted text inside w:hyperlink must be discovered too.
+        let tree = parse_xml(
+            r#"<w:document><w:body><w:p>
+            <w:hyperlink r:id="rId1"><w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>链接标黄</w:t></w:r></w:hyperlink>
+        </w:p></w:body></w:document>"#,
+        );
+        let index = scan_document_index("word/document.xml", &tree).unwrap();
+        assert_eq!(index.total_text_nodes(), 1);
+        assert!(index.nodes[0].highlighted, "hyperlink run should be highlighted");
     }
 
     #[test]

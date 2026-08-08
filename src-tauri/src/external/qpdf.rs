@@ -9,12 +9,15 @@ impl ExternalTool for QpdfTool {
     fn check(&self) -> ToolStatus {
         match self.binary_path() {
             Ok(path) => {
-                let mut command = std::process::Command::new(&path);
+                let mut command = super::hidden_command(&path);
                 command.arg("--version");
+                // A freshly downloaded executable may be held briefly by Windows
+                // Defender on its first launch. This is only a version probe, so
+                // waiting a little longer is safe and avoids marking it missing.
                 let output =
-                    super::command_output_with_timeout(&mut command, Duration::from_secs(2));
+                    super::command_output_with_timeout(&mut command, Duration::from_secs(8));
                 match output {
-                    Ok(out) => {
+                    Ok(out) if out.status.success() => {
                         let version_output = if out.stdout.is_empty() {
                             &out.stderr
                         } else {
@@ -32,11 +35,22 @@ impl ExternalTool for QpdfTool {
                             source: if managed { "docsy" } else { "system" }.into(),
                         }
                     }
-                    Err(_) => ToolStatus {
+                    Ok(out) => ToolStatus {
                         available: false,
                         path: Some(path.display().to_string()),
                         version: None,
-                        install_hint: "qpdf 存在但无法执行".into(),
+                        install_hint: format!(
+                            "qpdf 存在但启动失败：{}",
+                            super::command_failure_detail(&out)
+                        ),
+                        managed: is_managed_path(&path),
+                        source: "broken".into(),
+                    },
+                    Err(error) => ToolStatus {
+                        available: false,
+                        path: Some(path.display().to_string()),
+                        version: None,
+                        install_hint: format!("qpdf 存在但无法执行：{error}"),
                         managed: is_managed_path(&path),
                         source: "broken".into(),
                     },

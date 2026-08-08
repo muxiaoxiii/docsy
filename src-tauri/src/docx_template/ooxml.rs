@@ -187,7 +187,8 @@ fn write_node(writer: &mut Writer<Cursor<Vec<u8>>>, node: &XmlNode) -> Result<()
             }
         }
         XmlNode::Text(text) => {
-            writer.write_event(Event::Text(BytesText::new(text)))?;
+            let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+            writer.write_event(Event::Text(BytesText::from_escaped(escaped)))?;
         }
     }
     Ok(())
@@ -224,6 +225,21 @@ mod tests {
         let out = tree.to_xml().expect("write");
         assert!(out.contains("AAA"));
         assert!(out.contains("BBB"));
+    }
+
+    #[test]
+    fn xml_special_chars_are_escaped() {
+        let mut buf = Vec::new();
+        let mut writer = Writer::new(Cursor::new(&mut buf));
+        let text = "Tom & Jerry <script>alert('xss')</script>";
+        let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        writer
+            .write_event(Event::Text(BytesText::from_escaped(escaped)))
+            .unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("&amp;"));
+        assert!(output.contains("&lt;"));
+        assert!(!output.contains("<script>"));
     }
 
     #[test]

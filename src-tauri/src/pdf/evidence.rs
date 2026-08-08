@@ -8,6 +8,9 @@ use std::sync::Arc;
 
 use crate::external::ExternalTool;
 use crate::sort_utils::natural_cmp;
+
+use super::fnv1a_hash;
+use super::safe_file_stem;
 use crate::ConversionState;
 
 const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm"];
@@ -30,10 +33,12 @@ fn run_process_with_interactive_timeout(
         .spawn()
         .context("启动转换进程失败")?;
 
-    conversion_state.pid.store(child.id() as u64, Ordering::SeqCst);
+    conversion_state
+        .pid
+        .store(child.id() as u64, Ordering::SeqCst);
 
     let timeout = initial_timeout;
-    let start = std::time::Instant::now();
+    let mut wait_started = std::time::Instant::now();
     let poll_interval = std::time::Duration::from_secs(1);
 
     loop {
@@ -66,15 +71,14 @@ fn run_process_with_interactive_timeout(
         }
 
         // Check timeout
-        if start.elapsed() >= timeout {
+        if wait_started.elapsed() >= timeout {
             // Ask user whether to continue
             let should_continue = conversion_state.wait_for_user_response(app);
             if !should_continue {
                 let _ = child.kill();
                 anyhow::bail!("用户取消了转换");
             }
-            // User chose to continue — reset start time for another round
-            // (loop continues, effectively extending the timeout)
+            wait_started = std::time::Instant::now();
         }
 
         std::thread::sleep(poll_interval);
@@ -134,15 +138,6 @@ struct FooterConfig {
 struct IdentityConfig {
     prefix: Option<String>,
     start_number: Option<u32>,
-}
-
-fn fnv1a_hash(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in s.as_bytes() {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
 }
 
 fn has_supported_ext(path: &Path) -> bool {
@@ -220,6 +215,25 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
         }
         files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
         groups.insert(dir_name, files);
+    }
+
+    // Fallback: if no subdirectory groups found, treat root as a single group
+    if groups.is_empty() {
+        let mut root_files = Vec::new();
+        collect_supported_files(root_path, &mut root_files)?;
+        // Filter out files in subdirectories (only keep root-level files)
+        root_files.retain(|(_, path, _, _)| {
+            path.parent().map_or(false, |p| p == root_path)
+        });
+        root_files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+        if !root_files.is_empty() {
+            let group_name = root_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("证据")
+                .to_string();
+            groups.insert(group_name, root_files);
+        }
     }
 
     let mut groups_json = Vec::new();
@@ -394,7 +408,7 @@ pub fn merge_all(args: &serde_json::Value) -> Result<String> {
     };
 
     let overlaid_paths = if let Some(ref cfg) = overlay_cfg {
-        apply_overlay_batch(&qpdf_bin, &renamed_paths, evidence_dir, cfg)?
+        apply_overlay_batch(&renamed_paths, evidence_dir, cfg)?
     } else {
         renamed_paths
     };
@@ -418,31 +432,34 @@ fn convert_word_to_pdf(
     ));
     fs::create_dir_all(&conversion_dir).context("创建 Word 转换工作目录失败")?;
 
-    if cfg!(windows) || cfg!(target_os = "macos") {
-        match crate::external::WordTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_word(doc_path, &conversion_dir, conversion_state) {
-                Ok(path) => return Ok(path),
-                Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
-            },
-            Err(err) => attempts.push(format!("未检测到 Microsoft Word: {err}")),
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        match convert_doc_to_pdf_with_word(doc_path, &conversion_dir, conversion_state) {
+            Ok(path) => return Ok(path),
+            Err(err) => attempts.push(format!("Microsoft Word 转换失败: {err}")),
         }
-    } else {
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
         attempts.push("当前平台不支持 Microsoft Word 自动转换".to_string());
     }
 
-    if cfg!(windows) {
-        match crate::external::WpsTool.binary_path() {
-            Ok(_) => match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir, conversion_state) {
-                Ok(path) => return Ok(path),
-                Err(err) => attempts.push(format!("WPS Writer 转换失败: {err}")),
-            },
-            Err(err) => attempts.push(format!("未检测到 WPS Writer: {err}")),
+    #[cfg(windows)]
+    {
+        match convert_doc_to_pdf_with_wps(doc_path, &conversion_dir, conversion_state) {
+            Ok(path) => return Ok(path),
+            Err(err) => attempts.push(format!("WPS Writer 转换失败: {err}")),
         }
     }
 
     match crate::external::LibreOfficeTool.binary_path() {
-        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(&lo_bin, doc_path, &conversion_dir)
-        {
+        Ok(lo_bin) => match convert_doc_to_pdf_with_libreoffice(
+            &lo_bin,
+            doc_path,
+            &conversion_dir,
+            conversion_state,
+        ) {
             Ok(path) => Ok(path),
             Err(err) => {
                 attempts.push(format!("LibreOffice 转换失败: {err}"));
@@ -493,7 +510,7 @@ fn convert_doc_to_pdf_with_word(
         output = powershell_escape(&output.display().to_string()),
     );
 
-    let mut cmd = std::process::Command::new("powershell");
+    let mut cmd = crate::external::hidden_command("powershell");
     cmd.args([
         "-NoProfile",
         "-ExecutionPolicy",
@@ -502,8 +519,7 @@ fn convert_doc_to_pdf_with_word(
         &script,
     ]);
 
-    let app = crate::get_app_handle()
-        .ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
     let output_result = run_process_with_interactive_timeout(
         &mut cmd,
         std::time::Duration::from_secs(60),
@@ -513,7 +529,10 @@ fn convert_doc_to_pdf_with_word(
     .context("Microsoft Word 转换失败")?;
 
     if !output_result.status.success() || !output.exists() {
-        anyhow::bail!("Microsoft Word 转 PDF 失败: {doc_path}");
+        anyhow::bail!(
+            "Microsoft Word 转 PDF 失败: {doc_path}（{}）",
+            crate::external::command_failure_detail(&output_result)
+        );
     }
     Ok(output.display().to_string())
 }
@@ -554,7 +573,7 @@ fn convert_doc_to_pdf_with_wps(
         output = powershell_escape(&output.display().to_string()),
     );
 
-    let mut cmd = std::process::Command::new("powershell");
+    let mut cmd = crate::external::hidden_command("powershell");
     cmd.args([
         "-NoProfile",
         "-ExecutionPolicy",
@@ -563,8 +582,7 @@ fn convert_doc_to_pdf_with_wps(
         &script,
     ]);
 
-    let app = crate::get_app_handle()
-        .ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
     let output_result = run_process_with_interactive_timeout(
         &mut cmd,
         std::time::Duration::from_secs(60),
@@ -574,25 +592,19 @@ fn convert_doc_to_pdf_with_wps(
     .context("WPS Writer 转换失败")?;
 
     if !output_result.status.success() || !output.exists() {
-        anyhow::bail!("WPS Writer 转 PDF 失败: {doc_path}");
+        anyhow::bail!(
+            "WPS Writer 转 PDF 失败: {doc_path}（{}）",
+            crate::external::command_failure_detail(&output_result)
+        );
     }
     Ok(output.display().to_string())
-}
-
-#[cfg(not(windows))]
-fn convert_doc_to_pdf_with_wps(
-    _doc_path: &str,
-    _output_dir: &Path,
-    _conversion_state: &Arc<ConversionState>,
-) -> Result<String> {
-    anyhow::bail!("当前平台不支持 WPS Writer 自动转换")
 }
 
 #[cfg(target_os = "macos")]
 fn convert_doc_to_pdf_with_word(
     doc_path: &str,
     output_dir: &Path,
-    _conversion_state: &Arc<ConversionState>,
+    conversion_state: &Arc<ConversionState>,
 ) -> Result<String> {
     let input = std::fs::canonicalize(doc_path)
         .with_context(|| format!("读取 Word 文件失败: {doc_path}"))?;
@@ -625,18 +637,26 @@ on run argv
 end run
 "#;
 
-    let status = std::process::Command::new("osascript")
+    let mut command = crate::external::hidden_command("osascript");
+    command
         .arg("-e")
         .arg(script)
         .arg(input.display().to_string())
-        .arg(output.display().to_string())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .context("启动 Microsoft Word 转换失败")?;
+        .arg(output.display().to_string());
+    let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let result = run_process_with_interactive_timeout(
+        &mut command,
+        std::time::Duration::from_secs(60),
+        conversion_state,
+        app,
+    )
+    .context("启动 Microsoft Word 转换失败")?;
 
-    if !status.success() || !output.exists() {
-        anyhow::bail!("Microsoft Word 转 PDF 失败: {doc_path}");
+    if !result.status.success() || !output.exists() {
+        anyhow::bail!(
+            "Microsoft Word 转 PDF 失败: {doc_path}（{}）",
+            crate::external::command_failure_detail(&result)
+        );
     }
     Ok(output.display().to_string())
 }
@@ -654,20 +674,30 @@ fn convert_doc_to_pdf_with_libreoffice(
     lo_bin: &Path,
     doc_path: &str,
     output_dir: &Path,
+    conversion_state: &Arc<ConversionState>,
 ) -> Result<String> {
-    let status = std::process::Command::new(lo_bin)
+    let mut command = crate::external::hidden_command(lo_bin);
+    command
         .arg("--headless")
         .arg("--convert-to")
         .arg("pdf")
         .arg("--outdir")
         .arg(output_dir)
-        .arg(doc_path)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
+        .arg(doc_path);
+    let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
+    let result = run_process_with_interactive_timeout(
+        &mut command,
+        std::time::Duration::from_secs(60),
+        conversion_state,
+        app,
+    )?;
 
-    if !status.success() {
-        anyhow::bail!("Word 文件转换失败: {}", doc_path);
+    if !result.status.success() {
+        anyhow::bail!(
+            "Word 文件转换失败: {}（{}）",
+            doc_path,
+            crate::external::command_failure_detail(&result)
+        );
     }
 
     let stem = Path::new(doc_path)
@@ -693,7 +723,7 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
         anyhow::bail!("没有可合并的 PDF");
     }
 
-    let status = std::process::Command::new(qpdf_bin)
+    let status = crate::external::hidden_command(qpdf_bin)
         .arg("--empty")
         .arg("--pages")
         .args(inputs)
@@ -703,7 +733,7 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
         .stderr(std::process::Stdio::null())
         .status()?;
 
-    if !status.success() {
+    if !super::qpdf::status_is_success(&status) {
         anyhow::bail!("qpdf 合并失败");
     }
 
@@ -711,11 +741,11 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
 }
 
 fn qpdf_page_count(qpdf_bin: &Path, path: &str) -> Result<u32> {
-    let output = std::process::Command::new(qpdf_bin)
+    let output = crate::external::hidden_command(qpdf_bin)
         .arg("--show-npages")
         .arg(path)
         .output()?;
-    if !output.status.success() {
+    if !super::qpdf::status_is_success(&output.status) {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("qpdf 读取页数失败 {}: {}", path, stderr.trim());
     }
@@ -747,11 +777,12 @@ fn apply_identity_rename(
 }
 
 fn apply_overlay_batch(
-    qpdf_bin: &Path,
     inputs: &[String],
     output_dir: &str,
     config: &OverlayConfig,
 ) -> Result<Vec<String>> {
+    use crate::pdf::header_footer;
+
     let overlay_dir = Path::new(output_dir).join("_overlaid");
     fs::create_dir_all(&overlay_dir)?;
 
@@ -767,8 +798,8 @@ fn apply_overlay_batch(
         })
         .unwrap_or(1);
 
-    let mut result = Vec::new();
-    let mut global_seq: u32 = init_seq;
+    let mut jobs = Vec::new();
+    let mut global_seq = init_seq;
 
     for input in inputs {
         let stem = Path::new(input)
@@ -781,251 +812,94 @@ fn apply_overlay_batch(
             fnv1a_hash(input)
         ));
 
-        global_seq = apply_overlay_single(
-            qpdf_bin,
-            input,
-            &output.display().to_string(),
-            config,
-            global_seq,
-        )?;
-        result.push(output.display().to_string());
-    }
+        let mut job = serde_json::json!({
+            "inputPath": input,
+            "outputPath": output.display().to_string(),
+            "pageStart": 1,
+            "normalizeA4": false,
+            "a4Orientation": "portrait",
+            "rasterDpi": 300,
+            "cleanup": {},
+            "extraOverlays": [],
+            "bookmarks": [],
+            "bookmarkRemoveExisting": false,
+        });
 
-    Ok(result)
-}
-
-fn apply_overlay_single(
-    qpdf_bin: &Path,
-    input: &str,
-    output: &str,
-    config: &OverlayConfig,
-    mut seq: u32,
-) -> Result<u32> {
-    let page_count = qpdf_page_count(qpdf_bin, input)?;
-
-    let dims = qpdf_all_page_dimensions(input);
-    let default_dim = (595.276, 841.89);
-
-    let mut overlay_pages: Vec<printpdf::PdfPage> = Vec::new();
-
-    for page_idx in 0..page_count {
-        let page_num = page_idx + 1;
-        let (width_pt, height_pt) = dims.get(page_idx as usize).copied().unwrap_or(default_dim);
-
-        let overlay_ops = build_overlay_ops(
-            config, input, page_num, page_count, seq, width_pt, height_pt,
-        )?;
-
-        if !overlay_ops.is_empty() {
-            use printpdf::*;
-            let page = PdfPage::new(
-                Mm(width_pt as f32 * 25.4 / 72.0),
-                Mm(height_pt as f32 * 25.4 / 72.0),
-                overlay_ops,
-            );
-            overlay_pages.push(page);
-        }
-
-        if matches!(
-            config.header.as_ref().map(|h| h.content.as_str()),
-            Some("sequence")
-        ) {
-            seq += 1;
-        }
-    }
-
-    if overlay_pages.is_empty() {
-        fs::copy(input, output)?;
-        return Ok(seq);
-    }
-
-    let overlay_bytes = create_overlay_pdf_multi(overlay_pages)?;
-    let temp_overlay = unique_temp_pdf(
-        Path::new(output).parent().unwrap_or(Path::new(".")),
-        "_overlay_temp",
-    );
-    fs::write(&temp_overlay, &overlay_bytes)?;
-
-    let status = std::process::Command::new(qpdf_bin)
-        .arg(input)
-        .arg("--overlay")
-        .arg(&temp_overlay)
-        .arg("--")
-        .arg(output)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-
-    let _ = fs::remove_file(&temp_overlay);
-    let status = status?;
-
-    if !status.success() {
-        anyhow::bail!("qpdf overlay 失败: {}", input);
-    }
-
-    Ok(seq)
-}
-
-fn build_overlay_ops(
-    config: &OverlayConfig,
-    file_path: &str,
-    page_num: u32,
-    page_count: u32,
-    seq: u32,
-    _width_pt: f64,
-    height_pt: f64,
-) -> Result<Vec<printpdf::Op>> {
-    use printpdf::*;
-
-    let mut ops: Vec<Op> = Vec::new();
-
-    let has_header = config.header.as_ref().is_some_and(|h| h.enabled);
-    let has_footer = config.footer.as_ref().is_some_and(|f| f.enabled);
-
-    if !has_header && !has_footer {
-        return Ok(ops);
-    }
-
-    ops.push(Op::StartTextSection);
-
-    let font_handle = PdfFontHandle::Builtin(BuiltinFont::Helvetica);
-
-    if let Some(ref header) = config.header {
-        if header.enabled {
-            let font_size = header.font_size.unwrap_or(10.0) as f32;
-            let y_pt = header.y_offset.unwrap_or(height_pt - 30.0) as f32;
-
-            ops.push(Op::SetFont {
-                font: font_handle.clone(),
-                size: Pt(font_size),
-            });
-            ops.push(Op::SetTextCursor {
-                pos: Point {
-                    x: Pt(36.0),
-                    y: Pt(y_pt),
-                },
-            });
-
-            let text = match header.content.as_str() {
-                "filename" => Path::new(file_path)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_string(),
-                "custom" => header.custom_text.clone().unwrap_or_default(),
-                "sequence" => format!("{}", seq),
-                _ => String::new(),
-            };
-
-            if !text.is_empty() {
-                ensure_legacy_overlay_text_supported(&text)?;
-                ops.push(Op::ShowText {
-                    items: vec![TextItem::Text(text)],
+        if let Some(ref header) = config.header {
+            if header.enabled {
+                let text = match header.content.as_str() {
+                    "filename" => Path::new(input)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    "custom" => header.custom_text.clone().unwrap_or_default(),
+                    "sequence" => global_seq.to_string(),
+                    _ => String::new(),
+                };
+                job["header"] = serde_json::json!({
+                    "text": text,
+                    "region": "header",
+                    "fontFamily": "",
+                    "fontSize": header.font_size.unwrap_or(10.0) as f32,
+                    "marginMm": pt_to_mm(header.y_offset.unwrap_or(30.0)) as f32,
+                    "align": "left",
+                    "offsetXMm": 0.0,
+                    "color": "#000000",
+                    "numberStyle": if header.content == "sequence" { "arabic" } else { "" },
+                    "numberOffset": 0,
                 });
+            }
+        }
+
+        if let Some(ref footer) = config.footer {
+            if footer.enabled {
+                let text = match footer.content.as_str() {
+                    "page_total" => "{page} / {total}".to_string(),
+                    _ => String::new(),
+                };
+                job["footer"] = serde_json::json!({
+                    "text": text,
+                    "region": "footer",
+                    "fontFamily": "",
+                    "fontSize": footer.font_size.unwrap_or(9.0) as f32,
+                    "marginMm": pt_to_mm(footer.y_offset.unwrap_or(20.0)) as f32,
+                    "align": "left",
+                    "offsetXMm": 0.0,
+                    "color": "#000000",
+                });
+            }
+        }
+
+        jobs.push(job);
+
+        if config.header.as_ref().map(|h| h.content.as_str()) == Some("sequence") {
+            global_seq += 1;
+        }
+    }
+
+    let args = serde_json::json!({ "items": jobs });
+    let result = header_footer::batch_overlay(&args)?;
+
+    let results = result.get("results").and_then(|v| v.as_array());
+    let mut output_paths = Vec::new();
+    if let Some(results) = results {
+        for r in results {
+            if let Some(path) = r.get("outputPath").and_then(|v| v.as_str()) {
+                output_paths.push(path.to_string());
             }
         }
     }
 
-    if let Some(ref footer) = config.footer {
-        if footer.enabled {
-            let font_size = footer.font_size.unwrap_or(9.0) as f32;
-            let y_pt = footer.y_offset.unwrap_or(20.0) as f32;
-
-            ops.push(Op::SetFont {
-                font: font_handle,
-                size: Pt(font_size),
-            });
-            ops.push(Op::SetTextCursor {
-                pos: Point {
-                    x: Pt(36.0),
-                    y: Pt(y_pt),
-                },
-            });
-
-            let text = match footer.content.as_str() {
-                "page_total" => format!("{} / {}", page_num, page_count),
-                _ => String::new(),
-            };
-
-            if !text.is_empty() {
-                ensure_legacy_overlay_text_supported(&text)?;
-                ops.push(Op::ShowText {
-                    items: vec![TextItem::Text(text)],
-                });
-            }
-        }
+    if output_paths.is_empty() {
+        output_paths = inputs.to_vec();
     }
 
-    ops.push(Op::EndTextSection);
-
-    Ok(ops)
+    Ok(output_paths)
 }
 
-/// The legacy evidence-overlay path only has PDF base-14 fonts available.
-/// Helvetica cannot render CJK text reliably, so fail before producing a PDF
-/// with invisible or corrupted evidence labels. The current evidence workflow
-/// uses the embedded-font header/footer renderer instead.
-fn ensure_legacy_overlay_text_supported(text: &str) -> Result<()> {
-    if !text.is_ascii() {
-        anyhow::bail!(
-            "旧版证据叠加不支持中文或其他非 ASCII 文本；请使用“分项证据处理”的页眉页脚设置"
-        );
-    }
-    Ok(())
-}
-
-fn create_overlay_pdf_multi(pages: Vec<printpdf::PdfPage>) -> Result<Vec<u8>> {
-    use printpdf::*;
-
-    let mut doc = PdfDocument::new("overlay");
-    doc.with_pages(pages);
-
-    let mut warnings = Vec::new();
-    let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
-
-    Ok(bytes)
-}
-
-fn qpdf_all_page_dimensions(path: &str) -> Vec<(f64, f64)> {
-    super::page_info::get_page_infos(path)
-        .map(|pages| {
-            pages
-                .into_iter()
-                .map(|page| (page.width_pt as f64, page.height_pt as f64))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn safe_file_stem(input: &str) -> String {
-    let mut out = String::new();
-    for ch in input.chars() {
-        if ch.is_ascii_alphanumeric()
-            || matches!(
-                ch,
-                '\u{4e00}'..='\u{9fff}' | '-' | '_' | ' ' | '(' | ')' | '[' | ']'
-            )
-        {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    let trimmed = out.trim_matches(|c| matches!(c, ' ' | '.' | '_')).trim();
-    if trimmed.is_empty() {
-        "output".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn unique_temp_pdf(dir: &Path, stem: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    dir.join(format!("{stem}_{pid}_{ts}.pdf"))
+fn pt_to_mm(pt: f64) -> f64 {
+    pt * 25.4 / 72.0
 }
 
 #[cfg(test)]

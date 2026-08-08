@@ -23,9 +23,14 @@
                 <h4>{{ group.name }}</h4>
                 <el-tag size="small" type="info">{{ group.files.length }} 个文件</el-tag>
               </div>
-              <div class="group-files">
-                <span v-for="f in group.files" :key="f.path" class="group-file">{{ f.name }}</span>
-              </div>
+              <FileQueuePanel
+                :items="group.files"
+                :clearable="false"
+                :removable="false"
+                sortable
+                max-height="240px"
+                @reorder="(payload) => reorderGroupFiles(group, payload)"
+              />
             </div>
           </div>
           <el-empty v-else :description="evidenceFolder ? '尚未扫描到证据分组' : '先选择需要扫描的证据文件夹'" />
@@ -60,8 +65,10 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
-import EvidencePdfWorkbench from '../../pdf-tools/views/EvidencePdfWorkbench.vue'
+import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
+import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
+import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 
 const activeTab = ref('merge')
@@ -70,6 +77,10 @@ const evidenceGroups = ref([])
 const scanning = ref(false)
 const building = ref(false)
 const conversionFailures = ref([])
+
+function reorderGroupFiles(group, { from, to }) {
+  group.files = moveItem(group.files, from, to)
+}
 
 async function selectEvidenceFolder() {
   const selected = await open({ directory: true })
@@ -172,19 +183,6 @@ async function buildEvidence() {
 .group-item h4 {
   margin: 0;
   font-size: 13px;
-}
-
-.group-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  margin-top: 8px;
-}
-
-.group-file {
-  font-size: 12px;
-  color: var(--docsy-text-muted);
-  word-break: break-all;
 }
 
 .conversion-alert {

@@ -27,6 +27,49 @@
   --docsy-danger: #b5524b;
   --docsy-shadow: 0 10px 30px rgba(54, 45, 36, 0.08);
 
+  /* Soft semantic colours for backgrounds and borders */
+  --docsy-danger-soft: #fcebeb;
+  --docsy-danger-border: #f5c6c6;
+  --docsy-success-soft: #eaf3de;
+  --docsy-info: #3b82f6;
+  --docsy-info-soft: #eef4ff;
+
+  /* Token colours for FilenameTokenInput / TemplateBuildTab */
+  --docsy-token-green: #d1fae5;
+  --docsy-token-green-text: #065f46;
+  --docsy-token-green-border: #a7f3d0;
+  --docsy-token-amber: #fef3c7;
+  --docsy-token-amber-text: #92400e;
+  --docsy-token-amber-border: #fde68a;
+  --docsy-token-purple: #ede9fe;
+  --docsy-token-purple-text: #5b21b6;
+  --docsy-token-purple-border: #ddd6fe;
+  --docsy-token-blue: #dbeafe;
+  --docsy-token-blue-text: #1e40af;
+  --docsy-token-pink: #fce7f3;
+  --docsy-token-pink-text: #9d174d;
+
+  /* Preview colours for TemplateBuildTab */
+  --docsy-preview-date: #f3e8ff;
+  --docsy-preview-date-text: #6b2fa0;
+  --docsy-preview-select: #e6fffb;
+  --docsy-preview-select-text: #0f766e;
+  --docsy-preview-party: #f0f9eb;
+  --docsy-preview-party-text: #2f6f1f;
+  --docsy-preview-reference: #edf2ff;
+  --docsy-preview-reference-text: #364fc7;
+  --docsy-preview-checkbox: #fff7e6;
+  --docsy-preview-checkbox-text: #9a5b13;
+  --docsy-preview-radio: #fff1f0;
+  --docsy-preview-radio-text: #b42318;
+  --docsy-preview-checkbox-group: #eef2ff;
+  --docsy-preview-checkbox-group-text: #4338ca;
+  --docsy-preview-prefix: #fdf6ec;
+  --docsy-preview-prefix-text: #9a5b13;
+  --docsy-preview-suffix: #f6f6f6;
+  --docsy-preview-delete: #fef0f0;
+  --docsy-preview-delete-text: #c45656;
+
   --el-color-primary: var(--docsy-primary);
   --el-color-white: var(--docsy-surface-elevated);
   --el-color-primary-light-3: #6d928a;
@@ -54,6 +97,9 @@
   --el-border-radius-base: 5px;
   --el-border-radius-small: 4px;
   --el-box-shadow-light: var(--docsy-shadow);
+
+  /* Custom easing curves (emil-design-eng) */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 html,
@@ -176,3 +222,85 @@ select {
 .el-tabs--left > .el-tabs__content {
   min-width: 0;
 }
+
+/* ===== UI-1: Button active feedback (emil-design-eng) ===== */
+.el-button {
+  transition: transform 120ms var(--ease-out), background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.el-button:active {
+  transform: scale(0.97);
+}
+
+/* ===== UI-2: Material — backdrop-filter (macOS only, zero cost on Windows) ===== */
+.el-tabs--left > .el-tabs__header.is-left {
+  background: rgba(241, 232, 220, 0.92);
+}
+
+[data-os="macos"] .el-tabs--left > .el-tabs__header.is-left {
+  background: rgba(241, 232, 220, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+[data-os="macos"] .el-dialog,
+[data-os="macos"] .el-message-box {
+  background: rgba(255, 249, 240, 0.82);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+[data-os="macos"] .el-popper,
+[data-os="macos"] .el-select__popper,
+[data-os="macos"] .el-dropdown__popper {
+  background: rgba(255, 249, 240, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .el-tabs--left > .el-tabs__header.is-left,
+  .el-dialog,
+  .el-message-box,
+  .el-popper {
+    background: var(--docsy-surface-elevated);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* ===== UI-4: Replace default ease with custom easing ===== */
+.el-tabs__item,
+.el-card,
+.header-group-item {
+  transition-duration: 150ms;
+  transition-timing-function: var(--ease-out);
+}
+
+/* ===== UI-5: Global prefers-reduced-motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===== UI-6: Touch device hover protection ===== */
+@media (hover: hover) and (pointer: fine) {
+  .el-tabs--left > .el-tabs__header .el-tabs__item.is-left:hover {
+    background: var(--docsy-sidebar-hover);
+    transition: background 150ms var(--ease-out);
+  }
+}
+
+/* ===== UI-7: Popper transform-origin ===== */
+.el-popper,
+.el-select__popper,
+.el-dropdown__popper {
+  transform-origin: var(--el-popper-transform-origin, center);
+}
+

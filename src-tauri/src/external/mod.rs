@@ -36,6 +36,27 @@ pub use qpdf::QpdfTool;
 pub use word::WordTool;
 pub use wps::WpsTool;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+pub fn hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    let mut command = Command::new(program);
+    hide_command_window(&mut command);
+    command
+}
+
+pub fn hide_command_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 pub fn check_by_name(name: &str) -> ToolStatus {
     match name {
         "qpdf" => QpdfTool.check(),
@@ -56,11 +77,44 @@ pub fn check_by_name(name: &str) -> ToolStatus {
 }
 
 pub fn install_by_name(name: &str) -> anyhow::Result<String> {
-    match name {
+    let installed = match name {
         "qpdf" => QpdfTool.try_install(),
         "ffmpeg" => FfmpegTool.try_install(),
         "poppler" => PopplerTool.try_install(),
         _ => anyhow::bail!("不支持自动安装 {}", name),
+    }?;
+    validate_tool(name)?;
+    Ok(installed)
+}
+
+pub fn validate_tool(name: &str) -> anyhow::Result<ToolStatus> {
+    let status = check_by_name(name);
+    if status.available {
+        Ok(status)
+    } else {
+        anyhow::bail!("工具文件已安装但无法运行：{}", status.install_hint.trim())
+    }
+}
+
+pub fn command_failure_detail(output: &Output) -> String {
+    let code = output
+        .status
+        .code()
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "未知".to_string());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = stderr
+        .lines()
+        .chain(stdout.lines())
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    if detail.is_empty() {
+        format!("退出码 {code}，命令未返回错误文本")
+    } else {
+        let detail = detail.chars().take(300).collect::<String>();
+        format!("退出码 {code}：{detail}")
     }
 }
 
@@ -68,6 +122,7 @@ pub fn command_output_with_timeout(
     command: &mut Command,
     timeout: Duration,
 ) -> anyhow::Result<Output> {
+    hide_command_window(command);
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -103,6 +158,7 @@ pub fn command_output_with_idle_timeout(
     command: &mut Command,
     idle_timeout: Duration,
 ) -> anyhow::Result<Output> {
+    hide_command_window(command);
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -195,5 +251,45 @@ fn drain_output_chunks(
 fn join_reader(handle: Option<thread::JoinHandle<()>>) {
     if let Some(handle) = handle {
         handle.join().ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    fn exit_status(code: i32) -> std::process::ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(code << 8)
+    }
+
+    #[cfg(windows)]
+    fn exit_status(code: u32) -> std::process::ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(code)
+    }
+
+    #[test]
+    fn command_failure_includes_exit_code_when_stderr_is_empty() {
+        let output = Output {
+            status: exit_status(7),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        assert_eq!(
+            command_failure_detail(&output),
+            "退出码 7，命令未返回错误文本"
+        );
+    }
+
+    #[test]
+    fn command_failure_prefers_first_stderr_line() {
+        let output = Output {
+            status: exit_status(2),
+            stdout: b"stdout detail".to_vec(),
+            stderr: b"stderr detail\nmore".to_vec(),
+        };
+        assert_eq!(command_failure_detail(&output), "退出码 2：stderr detail");
     }
 }

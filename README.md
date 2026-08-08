@@ -1,135 +1,168 @@
-# Docsy
+# 📄 Docsy — 你的文档处理百宝箱
 
-轻量本地文档处理工具箱。基于 **Tauri 2 + Vue 3 + Rust**。
+> 一个超好用的本地文档处理桌面工具 ✨
+> 法律人、行政党、文档重度用户的效率神器 💼
+> 所有文件处理都在本地完成，**绝不上传云端** 🔒
 
-当前开发分支：`codex/template-quickxml-0.8`（0.8.2）
+---
 
-## 功能模块
+## 🏠 首页速览
 
-| 模块 | 说明 |
-| --- | --- |
-| **模板系统** | Word 模板制作 / 字段填写 / 生成文书 / 批量填写（Excel 导入导出），基于 quick-xml 引擎解析 OOXML |
-| **PDF 工具** | 解锁、合并、拆分、页眉页脚叠加、页面提取、压缩 |
-| **证据 PDF** | 批量页眉页脚检测与标注、合并证据导入拆分、页码自动分配 |
-| **图片排版** | 批量图片排版为 A4 文档 |
-| **视频抽帧** | 按时间范围或帧率导出视频帧 |
-| **设置** | 外部工具管理（qpdf/poppler/ffmpeg）、模板回收站、菜单排序 |
+打开 Docsy 就是清爽的卡片首页，每个功能模块一目了然 👀
 
-## 技术架构
+还有超可爱的 **Doclet 小宠物** 🐾 长时间处理任务时它会跑出来陪你等～
 
-```
-前端: Vue 3 + Element Plus + Pinia + Vue Router + pdfjs-dist
-后端: Rust (Tauri 2) + quick-xml + lopdf + allsorts + rusqlite
-```
+---
 
-### 模板引擎 (0.8.x)
+## 📝 文书模板 — 再也不用反复改合同了！
 
-0.8 版本将模板引擎从正则表达式改写为 **quick-xml 结构化 XML 树**：
+> Word 标黄 → 自动生成模板 → 填字段出文书，批量导出不是梦 🚀
 
-```
-src-tauri/src/docx_template/
-├── engine.rs    # 命令入口：inspect / save / render
-├── ooxml.rs     # quick-xml 树解析与序列化
-├── scan.rs      # 标黄扫描 + 文本框递归 + 格式检测
-├── save.rs      # 坐标定位 + sdt 包裹 + 同 run 多字段拆分
-├── render.rs    # 值替换 + 格式保留 + 表格行复制 + 前后缀擦除
-├── index.rs     # 稳定文本索引（段落/run/text 坐标）
-├── package.rs   # docx/docsytpl zip 读写 + 大小限制
-├── batch.rs     # 批量填写：Excel 导出/校验/批量生成
-└── mod.rs       # 数据结构 + 验证器 + 模板库管理
-```
+### ✅ 制作模板
+在 Word 里把需要替换的文字**标黄**，导入 Docsy 就能自动识别所有字段！
+- 支持 8 种字段类型：文本、日期、下拉选择、当事人列表、引用、勾选框、单选组、多选组
+- 字段为空时自动删除关联的前缀后缀，**不会出现病句**
 
-**关键改进**（相对 0.7.x 正则引擎）：
-- 坐标管线：scan 和 save 共用 paragraph/run 索引，消除错位
-- 非黄色高亮完整保留，不再被保存模板时误删
-- 既有 Word 内容控件主动检测并拒绝
-- 拆分字段（同 run 子串）按 start/end 偏移精确定位
-- 文本框中标黄可被扫描到
-- 格式保留：渲染时保留原 run 的 `w:rPr`（字体/加粗/斜体/符号字体）
+### ✅ 填写模板
+打开 `.docsytpl` 文件，按字段类型填写就行，格式什么的 Docsy 全帮你搞定 🎯
+- 自动记录历史填写记录，常用值一键复用
+- 跨模板推荐：同一个"甲方名称"字段，换个模板也能自动带出
 
-### Doclet 工作动画
+### ✅ 批量生成
+导出字段表为 Excel → 批量填写 → 校验导入 → **一次性生成几十上百份文书** 📊
+律所朋友们，这个功能真的救命 💉
 
-右下角宠物动画，长耗时操作自动出现（350ms 防闪烁延迟），支持手动触发的 `showLoading()`/`hideLoading()` API：
+### ✅ 核心技术
+基于 quick-xml 引擎，结构化解析 XML，精确到每个字符的位置
+**格式完整保留**，不会出现"改了字段但字体变了"的尴尬 😤
 
-```js
-import { showLoading, hideLoading } from '@/core/tauriBridge.js'
-const id = showLoading('正在导出…')
-await doWork()
-hideLoading(id)
-```
+---
 
-## 开发
+## 📂 证据处理 — 律师必备的 PDF 证据整理工
 
-### 环境
+> 页眉页脚自动检测 + 证据编号 + 合并输出，一步到位 📋
 
-- Rust 1.80+
-- Node.js 20+
-- `cargo install tauri-cli --version "^2" --locked`
+### ✅ 证据文件列表
+导入独立 PDF 或合并 PDF，识别或设置每个文件的证据身份
 
-### 启动
+### ✅ 页眉页脚智能检测（三层检测！）
+- **第一层**：PDF Artifact 标记识别
+- **第二层**：内容文本扫描
+- **第三层**：视觉区域检测
 
-```bash
-npm install
-npm run tauri dev
-```
+检测出的页眉页脚可以逐项选择删除、忽略或编辑 ✏️
 
-### 验证
+### ✅ 新页眉页脚设置
+- 页眉（证据身份）、页脚文字、页码三套独立配置
+- 页码样式超丰富：阿拉伯数字、中文数字、大小写罗马数字、带圈数字（❶❷❸）
+- 页码格式自由组合：`{page}`、`{total}`、`{range}`，还能加自定义符号（如 `-{page}-`）
+- 支持全部文件连续编号或每个文件单独编号
 
-```bash
-npm test                    # 前端 vitest (55 tests)
-npm run lint                # ESLint
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust tests (121 tests)
-cargo check --manifest-path src-tauri/Cargo.toml  # Rust type check
-```
+### ✅ 合并与拆分
+- **合并输出**：按证据列表顺序合并为一个 PDF，页码自动连续计算
+- **拆分输入**：导入合并 PDF，按页眉变化或手动分段拆分为多个证据文件
+- PDF.js 真实页面预览，支持翻页、跳转和坐标定位 🖼️
 
-### 外部工具
+---
 
-qpdf / Poppler / FFmpeg 可在设置页下载安装到 Docsy 工具目录，或使用系统已安装版本。LibreOffice 可选（用于旧版 .doc 转换）。
+## 🔧 PDF 工具 — 基础操作一网打尽
 
-## 目录结构
+| 工具 | 功能 | 适合场景 |
+|------|------|----------|
+| 🔓 **解锁** | 移除 PDF 密码保护 | 收到加密的合同文件 |
+| 📎 **合并** | 多个 PDF 合并，拖拽排序 | 整理多份材料 |
+| ✂️ **提取页面** | 挑选指定页导出（如 `3,7,12-15`） | 只需要某几页 |
+| 🗜️ **压缩** | 重新压缩，减小文件体积 | 邮件附件太大 |
+| 📑 **拆分** | 按页码范围拆分为多个 PDF | 一份文件拆给不同人 |
 
-```
-Docsy/
-├── src/
-│   ├── App.vue
-│   ├── core/               # 核心工具
-│   │   ├── tauriBridge.js  # Tauri IPC + 动画事件
-│   │   ├── loading.js      # 手动加载动画 API
-│   │   ├── moduleRegistry.js
-│   │   ├── filePath.js / numberFormat.js / pdfUtils.js / unitConversion.js
-│   ├── modules/
-│   │   ├── home/           # 首页
-│   │   ├── template/       # 模板系统（制作/填写/历史）
-│   │   ├── pdf-tools/      # PDF 工具 + 证据工作台
-│   │   ├── evidence-pdf/   # 证据 PDF 生成
-│   │   ├── image-paddler/  # 图片排版
-│   │   ├── video-extract/  # 视频抽帧
-│   │   └── settings/       # 设置
-│   ├── router/             # 路由
-│   ├── stores/             # Pinia store
-│   ├── services/           # 日志 / 开发追踪
-│   └── shared/components/  # 共享组件（宠物动画等）
-├── src-tauri/
-│   └── src/
-│       ├── docx_template/  # quick-xml 模板引擎
-│       ├── commands/       # Tauri 命令注册
-│       ├── external/       # 外部工具管理
-│       ├── ffmpeg/         # 视频处理
-│       ├── pdf/            # PDF 处理
-│       ├── services/       # 数据目录 / 模块注册
-│       └── template_history.rs  # 模板填写历史 (SQLite)
-├── .github/workflows/      # CI/CD (macOS + Windows)
-└── docs/                   # 设计文档 / Code Review 报告
-```
+每个工具都有**拖拽排序**和**预览功能**，操作超直观 👆
 
-## 构建
+---
 
-```bash
-# macOS
-npm run tauri:build:mac
+## 🖼️ 图片排版 — 批量图片秒变 A4 文档
 
-# Windows（交叉编译）
-npm run tauri:build:windows
-```
+> 照片、截图、扫描件 → 整齐的 A4 PDF/DOCX 📐
 
-CI 在 `git push --tags v*` 时自动构建 macOS (.dmg) 和 Windows (.exe) 包。
+### ✅ 核心功能
+- 扫描文件夹自动分组（按前缀归类）
+- 三种缩放模式：适应页面 / 填满页面 / 原始尺寸
+- **PDF 和 DOCX 双格式输出**
+- 拖拽排序，所见即所得
+- 输出顺序和预览完全一致，不会乱 🎯
+
+### ✅ 适合场景
+
+- 微信聊天截图整理成证据材料 📱
+- 照片排版打印 📸
+- 扫描件批量归档 🗂️
+
+---
+
+## 🎬 视频抽帧 — 从视频里精准截取画面
+
+> 按时间范围或帧率导出帧画面，还能叠加时间戳水印 🕐
+
+### ✅ 核心功能
+- 读取视频信息（时长、分辨率、编码格式）
+- 按时间范围抽帧（如 1:30 - 2:45）
+- 按固定帧率抽帧（如每秒 1 帧）
+- 时间戳水印叠加，取证必备 🔍
+- FFmpeg 自动检测，缺失时一键安装
+
+### ✅ 适合场景
+
+- 监控视频关键帧提取 📹
+- 视频证据画面截取 ⚖️
+- 视频素材批量截图 🎞️
+
+---
+
+## ⚙️ 设置 — 应用配置与诊断
+
+| 功能 | 说明 |
+|------|------|
+| 🔍 **外部工具检测** | 自动检测 qpdf / Poppler / FFmpeg / Word / WPS / LibreOffice 状态 |
+| 📦 **一键安装** | 缺失的工具支持下载安装到 Docsy 工具目录 |
+| 📋 **主菜单管理** | 模块排序与显示/隐藏 |
+| 🗑️ **模板回收站** | 删除的模板可恢复或彻底删除 |
+| 📊 **诊断信息** | 版本号、系统信息、工具版本、日志查看 |
+
+---
+
+## 🔒 隐私承诺
+
+**你的文件永远不会离开你的电脑。**
+
+Docsy 所有处理都在本地完成，不联网、不上传、不收集任何数据。
+唯一需要网络的地方是下载外部工具（qpdf / FFmpeg 等），你也可以选择手动安装。
+
+---
+
+## 👤 作者
+
+**木小樨 (muxiaoxiii)**
+
+---
+
+## 📜 开源协议
+
+本项目基于 [MIT License](LICENSE) 开源。
+
+你可以自由使用、修改和分发，但请保留版权声明。
+商业使用完全 OK，不需要额外授权 ✅
+
+---
+
+## 🛠️ 技术栈
+
+基于 **Tauri 2 + Vue 3 + Rust** 构建，轻量、快速、安全。
+
+外部工具：qpdf / Poppler / FFmpeg / Microsoft Word / WPS / LibreOffice
+
+---
+
+<div align="center">
+
+**如果觉得有用，点个 ⭐ Star 支持一下吧～**
+
+</div>

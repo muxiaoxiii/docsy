@@ -9,7 +9,7 @@ impl ExternalTool for FfmpegTool {
     fn check(&self) -> ToolStatus {
         match self.binary_path() {
             Ok(path) => {
-                let mut command = std::process::Command::new(&path);
+                let mut command = super::hidden_command(&path);
                 command.arg("-version");
                 let output =
                     super::command_output_with_timeout(&mut command, Duration::from_secs(2));

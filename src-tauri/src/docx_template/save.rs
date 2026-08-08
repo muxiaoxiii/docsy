@@ -56,6 +56,16 @@ pub fn build_template_docx(
 }
 
 fn validate_coordinate_targets(fields: &[TemplateField], index: &DocumentIndex) -> Result<()> {
+    // Pre-index (part, paragraph, run) → node so per-mark lookup is O(1).
+    let mut node_index: HashMap<(String, usize, usize), &super::index::TextNodeRef> = HashMap::new();
+    for (part, part_index) in &index.parts {
+        for node in &part_index.nodes {
+            node_index.insert(
+                (part.clone(), node.paragraph_index, node.run_index),
+                node,
+            );
+        }
+    }
     let mut occupied: HashMap<(String, usize, usize), Vec<(usize, usize)>> = HashMap::new();
     for field in fields {
         let targets: Vec<(&str, Option<usize>, Option<usize>)> =
@@ -82,14 +92,9 @@ fn validate_coordinate_targets(fields: &[TemplateField], index: &DocumentIndex) 
         for (mark_id, start, end) in targets {
             let (part, paragraph_index, run_index) = parse_mark_coords(mark_id)
                 .with_context(|| format!("字段“{}”包含无效标记坐标", field.label))?;
-            let node = index
-                .parts
-                .get(&part)
-                .and_then(|part_index| {
-                    part_index.nodes.iter().find(|node| {
-                        node.paragraph_index == paragraph_index && node.run_index == run_index
-                    })
-                })
+            let node = node_index
+                .get(&(part.clone(), paragraph_index, run_index))
+                .copied()
                 .with_context(|| {
                     format!(
                         "字段“{}”的标记已不在源 Word 中。请重新读取 Word 后再保存模板",
@@ -227,7 +232,8 @@ fn is_marker_field(field_type: &str) -> bool {
     matches!(field_type, "checkbox" | "radio_group" | "checkbox_group")
 }
 
-/// Detect existing content controls in the tree and reject if found inside marked areas
+/// Detect content controls overlapping the yellow marks and reject them.
+/// Ordinary Word content controls outside marked areas are left untouched.
 fn detect_existing_sdt(root: &XmlNode, part_name: &str) -> Result<()> {
     let mut sdt_paths = Vec::new();
     find_sdt_elements(root, &mut sdt_paths, Vec::new());
@@ -239,7 +245,7 @@ fn detect_existing_sdt(root: &XmlNode, part_name: &str) -> Result<()> {
             .collect::<Vec<_>>()
             .join("; ");
         anyhow::bail!(
-            "模板中存在 Word 自带的内容控件（{} 处）: {}。请先在 Word 中移除这些内容控件后重新保存。\n文件: {}",
+            "模板的标黄区域中包含 Word 自带的内容控件（{} 处）: {}。请先在 Word 中移除这些内容控件后重新保存。\n文件: {}",
             sdt_paths.len(),
             paths,
             part_name
@@ -252,14 +258,36 @@ fn find_sdt_elements(node: &XmlNode, paths: &mut Vec<Vec<String>>, current: Vec<
     if let XmlNode::Element { name, children, .. } = node {
         let mut path = current.clone();
         path.push(name.clone());
-        if name == "w:sdt" {
-            paths.push(path);
-            return; // don't descend into existing sdt to avoid double-counting
+        if name == "w:sdt" && subtree_has_yellow(children) {
+            paths.push(path.clone());
         }
         for child in children {
             find_sdt_elements(child, paths, path.clone());
         }
     }
+}
+
+fn subtree_has_yellow(nodes: &[XmlNode]) -> bool {
+    for node in nodes {
+        match node {
+            XmlNode::Element { name, attrs, children } => {
+                if name == "w:highlight" {
+                    let is_yellow = attrs.iter().any(|(k, v)| {
+                        k == "w:val"
+                            && (v == "yellow" || v == "'yellow'" || v == "\"yellow\"")
+                    });
+                    if is_yellow {
+                        return true;
+                    }
+                }
+                if subtree_has_yellow(children) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Walk the tree and wrap runs at specified coordinates.
@@ -293,18 +321,59 @@ fn wrap_paragraph_runs(
     cursor: &mut (usize, usize),
     coord_map: &HashMap<(String, usize, usize), Vec<FieldTarget>>,
 ) -> Result<()> {
-    let mut run_idx = 0;
     let p_idx = cursor.0;
     let mut i = 0;
+    // Word field depth tracking: begin increments, end decrements.
+    // Runs inside the field code region (begin → separate) are skipped
+    // because they are structural (fldChar, instrText), not user content.
+    // See MDG-012 and ECMA-376 §17.16.
+    let mut field_depth: u32 = 0;
+    let mut in_field_code = false;
 
     while i < children.len() {
         let is_wr = matches!(&children[i], XmlNode::Element { name, .. } if name == "w:r");
         if !is_wr {
+            // Nested containers whose runs participate in coordinates must be
+            // traversed exactly like scan does (w:sdt, w:sdtContent, w:hyperlink).
+            if matches!(&children[i], XmlNode::Element { name, .. } if name == "w:sdt" || name == "w:sdtContent" || name == "w:hyperlink") {
+                if let XmlNode::Element { children: sub, .. } = &mut children[i] {
+                    wrap_paragraph_runs(sub, part, cursor, coord_map)?;
+                }
+            }
             i += 1;
             continue;
         }
 
-        let key = (part.to_string(), p_idx, run_idx);
+        // Detect Word field boundaries (MDG-012)
+        if let Some(fld_type) = fldchar_type(&children[i]) {
+            match fld_type {
+                "begin" => {
+                    field_depth += 1;
+                    in_field_code = true;
+                }
+                "separate" => {
+                    in_field_code = false;
+                }
+                "end" => {
+                    field_depth = field_depth.saturating_sub(1);
+                    if field_depth == 0 {
+                        in_field_code = false;
+                    }
+                }
+                _ => {}
+            }
+            // fldChar runs are structural — never wrap as SDT
+            i += 1;
+            continue;
+        }
+
+        // Skip runs inside field code region (instrText etc.)
+        if field_depth > 0 && in_field_code {
+            i += 1;
+            continue;
+        }
+
+        let key = (part.to_string(), p_idx, cursor.1);
         // Pre-check: record whether this run has text BEFORE modification
         let had_text = run_has_text(&children[i]);
         let mut inserted = 0u32;
@@ -369,8 +438,7 @@ fn wrap_paragraph_runs(
         }
         // Use pre-modification check so deletion/wrapping doesn't shift coordinates
         if had_text {
-            run_idx += 1;
-            cursor.1 = run_idx;
+            cursor.1 += 1;
         }
     }
 
@@ -438,6 +506,30 @@ fn is_yellow_highlight_elem(node: &XmlNode) -> bool {
     } else {
         false
     }
+}
+
+/// Check if a w:r contains a w:fldChar and return its type ("begin"/"separate"/"end").
+/// Returns None for runs without fldChar.
+fn fldchar_type(node: &XmlNode) -> Option<&'static str> {
+    if let XmlNode::Element { children, .. } = node {
+        for child in children {
+            if let XmlNode::Element { name, attrs, .. } = child {
+                if name == "w:fldChar" {
+                    for (k, v) in attrs {
+                        if k == "w:fldCharType" {
+                            return match v.as_str() {
+                                "begin" => Some("begin"),
+                                "separate" => Some("separate"),
+                                "end" => Some("end"),
+                                _ => None,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn wrap_as_sdt(run: XmlNode, tag: &str) -> XmlNode {
@@ -624,9 +716,17 @@ fn make_run_with_text(run: &XmlNode, text: &str) -> XmlNode {
 fn run_has_text(node: &XmlNode) -> bool {
     if let XmlNode::Element { children, .. } = node {
         for c in children {
-            if let XmlNode::Element { name, .. } = c {
+            if let XmlNode::Element { name, children: text_children, .. } = c {
                 if name == "w:t" {
-                    return true;
+                    // Match scan.rs behavior: only count runs with non-empty text content.
+                    // Empty <w:t></w:t> elements (generated by WPS/部分工具) must not
+                    // advance the run index, otherwise scan and save coordinates diverge.
+                    let has_content = text_children.iter().any(|tc| {
+                        matches!(tc, XmlNode::Text(s) if !s.is_empty())
+                    });
+                    if has_content {
+                        return true;
+                    }
                 }
             }
         }
@@ -739,13 +839,20 @@ mod tests {
     }
 
     #[test]
-    fn detect_existing_sdt_rejects() {
-        let xml = r#"<w:document><w:body><w:p>
+    fn detect_existing_sdt_rejects_only_yellow_marked() {
+        // sdt without yellow marks is an ordinary content control — allowed
+        let plain = r#"<w:document><w:body><w:p>
             <w:sdt><w:sdtPr/><w:sdtContent><w:r><w:t>old</w:t></w:r></w:sdtContent></w:sdt>
         </w:p></w:body></w:document>"#;
-        let tree = XmlTree::parse(xml.as_bytes()).unwrap();
-        let err = detect_existing_sdt(&tree.root, "word/document.xml");
-        assert!(err.is_err(), "should reject existing sdt: {:?}", err.err());
+        let tree = XmlTree::parse(plain.as_bytes()).unwrap();
+        assert!(detect_existing_sdt(&tree.root, "word/document.xml").is_ok());
+
+        // sdt inside a yellow-marked area must be rejected
+        let marked = r#"<w:document><w:body><w:p>
+            <w:sdt><w:sdtPr/><w:sdtContent><w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>old</w:t></w:r></w:sdtContent></w:sdt>
+        </w:p></w:body></w:document>"#;
+        let tree = XmlTree::parse(marked.as_bytes()).unwrap();
+        assert!(detect_existing_sdt(&tree.root, "word/document.xml").is_err());
     }
 
     #[test]

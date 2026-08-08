@@ -1,8 +1,8 @@
 [package]
 name = "docsy"
-version = "0.8.2"
+version = "0.9.7-beta"
 description = "Docsy - 轻量文档处理工具箱"
-authors = ["only"]
+authors = ["木小樨 <muxiaoxi>"]
 edition = "2021"
 
 [lib]
@@ -20,6 +20,7 @@ tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+thiserror = "2"
 zip = "0.6"
 regex = "1"
 dirs = "5"
@@ -35,6 +36,7 @@ open = "5"
 log = "0.4"
 allsorts = { version = "0.16.1", default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 office_oxide = "0.1"
 quick-xml = { version = "0.37", features = ["serialize", "encoding"] }
 calamine = { version = "0.26", features = ["dates"] }

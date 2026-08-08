@@ -91,6 +91,7 @@ template.docsytpl
 | `date` | 日期 | `<w:sdt>` 内容控件 | 格式化后替换 |
 | `select` | 案由、角色等单选文本 | `<w:sdt>` 内容控件 | 替换为选中值 |
 | `party_list` | 当事人列表 | `<w:sdt>` 内容控件，渲染时可复制所在表格行 | 正文中用顿号连接；表格行中按项复制行 |
+| `reference` | 引用其他字段值 | `<w:sdt>` 内容控件 | 引用目标字段的当前值 |
 | `checkbox` | 单个是否项 | marker 内容控件 | 改勾选符号 |
 | `radio_group` | 互斥勾选 | 多个 marker 内容控件 + manifest 组关系 | 只选一个 |
 | `checkbox_group` | 多选勾选 | 多个 marker 内容控件 + manifest 组关系 | 可选多个 |
@@ -267,7 +268,7 @@ template.docsytpl
 已实现的稳定闭环：
 
 1. 扫描 Word 黄色高亮 mark。
-2. 确认字段类型：`text`、`date`、`select`、`party_list`、`checkbox`、`radio_group`、`checkbox_group`。
+2. 确认字段类型：`text`、`date`、`select`、`party_list`、`reference`、`checkbox`、`radio_group`、`checkbox_group`。
 3. 保存 `.docsytpl`。
 4. 打开 `.docsytpl` 填表。
 5. 生成 docx。

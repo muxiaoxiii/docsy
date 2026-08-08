@@ -4,11 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::page_info::get_page_infos;
+use crate::external::ExternalTool;
 
-#[derive(Debug, Clone, Deserialize)]
+use super::page_info::get_page_infos;
+use super::temp_named_path;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PreviewArgs {
+pub struct PreviewArgs {
     input_path: String,
     #[serde(default = "default_preview_page")]
     page: u32,
@@ -69,10 +72,27 @@ pub fn render_preview(args: &serde_json::Value) -> Result<PreviewResult> {
 
 pub(crate) fn render_pdf_page_to_png(input: &Path, page: u32, dpi: u32) -> Result<PathBuf> {
     let pdftoppm = find_pdftoppm().context("未找到 pdftoppm，无法渲染 PDF 预览")?;
-    let prefix = temp_named_path("docsy_pdf_preview");
+    match run_pdftoppm(&pdftoppm, input, page, dpi) {
+        Ok(output) => Ok(output),
+        Err(first_error) => {
+            let repaired = temp_named_path("docsy_pdf_preview_repaired", "pdf");
+            let repair_result = repair_pdf_for_preview(input, &repaired);
+            if repair_result.is_err() {
+                let _ = fs::remove_file(&repaired);
+                return Err(first_error);
+            }
+            let retry = run_pdftoppm(&pdftoppm, &repaired, page, dpi);
+            let _ = fs::remove_file(&repaired);
+            retry.with_context(|| format!("原文件预览失败；qpdf 修复后重试仍失败：{first_error:#}"))
+        }
+    }
+}
+
+fn run_pdftoppm(pdftoppm: &Path, input: &Path, page: u32, dpi: u32) -> Result<PathBuf> {
+    let prefix = temp_named_path("docsy_pdf_preview", "");
     let output = PathBuf::from(format!("{}.png", prefix.display()));
 
-    let command_output = std::process::Command::new(pdftoppm)
+    let command_output = crate::external::hidden_command(pdftoppm)
         .arg("-png")
         .arg("-singlefile")
         .arg("-r")
@@ -87,8 +107,11 @@ pub(crate) fn render_pdf_page_to_png(input: &Path, page: u32, dpi: u32) -> Resul
         .context("执行 pdftoppm 失败")?;
 
     if !command_output.status.success() {
-        let stderr = String::from_utf8_lossy(&command_output.stderr);
-        anyhow::bail!("pdftoppm 渲染失败: {}", stderr.trim());
+        anyhow::bail!(
+            "pdftoppm 渲染失败（{}）：{}",
+            pdftoppm.display(),
+            crate::external::command_failure_detail(&command_output)
+        );
     }
     if !output.exists() {
         anyhow::bail!("pdftoppm 未生成预览图片");
@@ -97,15 +120,24 @@ pub(crate) fn render_pdf_page_to_png(input: &Path, page: u32, dpi: u32) -> Resul
     Ok(output)
 }
 
-fn find_pdftoppm() -> Option<PathBuf> {
-    crate::external::PopplerTool::binary_path_for("pdftoppm").ok()
+fn repair_pdf_for_preview(input: &Path, output: &Path) -> Result<()> {
+    let qpdf = crate::external::QpdfTool;
+    let bin = qpdf.binary_path()?;
+    let command_output = crate::external::hidden_command(&bin)
+        .arg(input)
+        .arg(output)
+        .output()
+        .context("执行 qpdf 预览修复失败")?;
+    if !super::qpdf::status_is_success(&command_output.status) || !output.exists() {
+        anyhow::bail!(
+            "qpdf 预览修复失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&command_output)
+        );
+    }
+    Ok(())
 }
 
-fn temp_named_path(prefix: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}"))
+fn find_pdftoppm() -> Option<PathBuf> {
+    crate::external::PopplerTool::binary_path_for("pdftoppm").ok()
 }

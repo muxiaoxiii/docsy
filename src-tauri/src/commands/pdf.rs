@@ -1,6 +1,61 @@
 use crate::commands::run_blocking;
+use crate::commands::run_managed;
 use crate::external::ExternalTool;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildEvidenceGroupPdfsArgs {
+    root: String,
+    #[serde(default)]
+    groups: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeEvidencePdfsArgs {
+    evidence_dir: String,
+    group_pdfs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchOverlayArgs {
+    items: Vec<crate::pdf::header_footer::HeaderFooterJob>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewOverlayArgs {
+    job: crate::pdf::header_footer::HeaderFooterJob,
+    #[serde(default)]
+    page: Option<u32>,
+    #[serde(default)]
+    dpi: Option<u32>,
+    #[serde(default)]
+    annotation_rule: Option<serde_json::Value>,
+    // Keep any other payload fields flowing through to the handler.
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyEvidencePdfRulesArgs {
+    #[serde(default)]
+    items: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    jobs: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    merge: Option<serde_json::Value>,
+    #[serde(default)]
+    session: Option<serde_json::Value>,
+    #[serde(default)]
+    annotation_rule: Option<serde_json::Value>,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
+}
 
 #[derive(Debug, Serialize)]
 pub struct QpdfStatus {
@@ -46,6 +101,7 @@ pub async fn inspect_pdf(input: String) -> Result<InspectResult, String> {
 #[derive(Debug, Serialize)]
 pub struct UnlockResult {
     pub output_path: String,
+    pub skipped: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,6 +115,7 @@ pub async fn unlock_pdf(input: String) -> Result<UnlockResult, String> {
         run_blocking(move || crate::pdf::qpdf::unlock(&std::path::PathBuf::from(&input))).await?;
     Ok(UnlockResult {
         output_path: result.output_path,
+        skipped: result.skipped,
     })
 }
 
@@ -101,8 +158,9 @@ pub async fn compress_pdf(
 
 #[tauri::command]
 pub async fn split_merged_evidence_pdf(
-    args: serde_json::Value,
+    args: crate::pdf::split::SplitMergedArgs,
 ) -> Result<crate::pdf::split::SplitMergedResult, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::split::split_merged(&args)).await
 }
 
@@ -113,78 +171,149 @@ pub async fn scan_evidence_folder(root: String) -> Result<serde_json::Value, Str
 
 #[tauri::command]
 pub async fn build_evidence_group_pdfs(
-    args: serde_json::Value,
+    args: BuildEvidenceGroupPdfsArgs,
     conversion_state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
 ) -> Result<serde_json::Value, String> {
     let state = (*conversion_state).clone();
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::evidence::build_group_pdfs(&args, &state)).await
 }
 
 #[tauri::command]
-pub async fn merge_evidence_pdfs(args: serde_json::Value) -> Result<String, String> {
+pub async fn merge_evidence_pdfs(args: MergeEvidencePdfsArgs) -> Result<String, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::evidence::merge_all(&args)).await
 }
 
 #[tauri::command]
-pub async fn overlay_pdf_text(args: serde_json::Value) -> Result<serde_json::Value, String> {
+pub async fn overlay_pdf_text(
+    args: crate::pdf::header_footer::HeaderFooterJob,
+) -> Result<serde_json::Value, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::overlay::overlay_text(&args)).await
 }
 
 #[tauri::command]
-pub async fn batch_overlay_pdf_text(args: serde_json::Value) -> Result<serde_json::Value, String> {
-    run_blocking(move || crate::pdf::overlay::batch_overlay(&args)).await
+pub async fn batch_overlay_pdf_text(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+    args: BatchOverlayArgs,
+) -> Result<serde_json::Value, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
+    run_managed(&manager, "batch_overlay_pdf_text", None, move |token| {
+        crate::pdf::header_footer::batch_overlay_cancellable(&args, &token)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn apply_evidence_pdf_rules(
-    args: serde_json::Value,
+    args: ApplyEvidencePdfRulesArgs,
 ) -> Result<serde_json::Value, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::evidence_session::apply_rules(&args)).await
 }
 
 #[tauri::command]
 pub async fn preview_pdf_header_footer(
-    args: serde_json::Value,
+    args: PreviewOverlayArgs,
 ) -> Result<crate::pdf::overlay::PreviewResult, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::overlay::preview_overlay(&args)).await
 }
 
 #[tauri::command]
 pub async fn detect_pdf_header_footer(
-    args: serde_json::Value,
+    args: crate::pdf::detection::DetectionArgs,
 ) -> Result<crate::pdf::detection::DetectionResult, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::detection::detect(&args)).await
 }
 
 #[tauri::command]
 pub async fn inspect_merged_evidence_pdf(
-    args: serde_json::Value,
+    args: crate::pdf::detection::SplitSuggestionArgs,
 ) -> Result<crate::pdf::detection::SplitSuggestionResult, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::detection::suggest_split_ranges(&args)).await
 }
 
 #[tauri::command]
 pub async fn delete_pdf_annotations(
-    args: serde_json::Value,
+    args: crate::pdf::annotations::DeleteAnnotationsArgs,
 ) -> Result<crate::pdf::annotations::DeleteAnnotationsResult, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::annotations::delete_annotations(&args)).await
 }
 
 #[tauri::command]
 pub async fn delete_pdf_header_footer_artifacts(
-    args: serde_json::Value,
+    args: crate::pdf::artifacts::DeleteHeaderFooterArtifactsArgs,
 ) -> Result<crate::pdf::artifacts::DeleteHeaderFooterArtifactsResult, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::artifacts::delete_header_footer_artifacts(&args)).await
 }
 
 #[tauri::command]
 pub async fn render_pdf_preview(
-    args: serde_json::Value,
+    args: crate::pdf::preview::PreviewArgs,
 ) -> Result<crate::pdf::overlay::PreviewResult, String> {
+    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::overlay::render_preview(&args)).await
 }
 
 #[tauri::command]
 pub async fn get_pdf_page_count(input: String) -> Result<u32, String> {
     run_blocking(move || crate::pdf::qpdf::page_count(&input)).await
+}
+
+#[tauri::command]
+pub async fn detect_anti_copy(
+    input: String,
+) -> Result<crate::pdf::anti_ocr::AntiCopyDetection, String> {
+    run_blocking(move || crate::pdf::anti_ocr::detect_anti_copy(std::path::Path::new(&input))).await
+}
+
+#[tauri::command]
+pub async fn apply_anti_copy(
+    input: String,
+    output: String,
+    method: String,
+) -> Result<usize, String> {
+    let m = match method.as_str() {
+        "cmap_remove" => crate::pdf::anti_ocr::AntiCopyMethod::CmapRemove,
+        _ => crate::pdf::anti_ocr::AntiCopyMethod::CmapScramble,
+    };
+    run_blocking(move || {
+        crate::pdf::anti_ocr::apply_anti_copy(
+            std::path::Path::new(&input),
+            std::path::Path::new(&output),
+            m,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn remove_anti_copy(input: String, output: String) -> Result<usize, String> {
+    run_blocking(move || {
+        crate::pdf::anti_ocr::remove_anti_copy(
+            std::path::Path::new(&input),
+            std::path::Path::new(&output),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn has_pdf_bookmarks(input: String) -> Result<bool, String> {
+    run_blocking(move || crate::pdf::header_footer::has_pdf_bookmarks(std::path::Path::new(&input)))
+        .await
+}
+
+#[tauri::command]
+pub async fn remove_pdf_bookmarks(input: String) -> Result<(), String> {
+    run_blocking(move || {
+        crate::pdf::header_footer::remove_pdf_bookmarks(std::path::Path::new(&input))
+    })
+    .await
 }

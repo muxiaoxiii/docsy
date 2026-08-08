@@ -44,14 +44,6 @@ export function getHomeCards(settings = {}) {
     )
 }
 
-export function getModule(id) {
-  return moduleRegistry.find((m) => m.id === id)
-}
-
-export function getModuleSettings() {
-  return moduleRegistry.filter((m) => m.settings).map((m) => ({ moduleId: m.id, ...m.settings }))
-}
-
 export function getMenuModules() {
   return moduleRegistry
     .filter((m) => m.menuItems?.length)

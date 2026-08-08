@@ -1,82 +1,116 @@
-# Docsy 当前架构
+# Docsy 架构
 
-更新时间：2026-07-30
+更新时间：2026-08-04（v0.9.2）
 
-## 当前边界
+## 模块边界
 
-旧模板生成、内置模板、模板编辑、模板管理、字典推荐和生成记录已从当前应用移除。当前应用只保留可独立运行的工具模块，并重新引入了基于 Word 标黄的新文书模板模块：
+Docsy 由 6 个功能模块组成，通过统一的模块注册系统自动发现：
 
-- PDF 工具
-- 图片排版
-- 视频抽帧
-- 文书模板
-- 设置与诊断
+```
+src/modules/
+├── home/           # 首页（快捷入口 + 版本信息）
+├── evidence-pdf/   # 证据处理入口（→ EvidencePdfView）
+├── pdf-tools/      # PDF 工具（解锁/合并/提取/压缩/拆分 + 证据工作台）
+├── image-paddler/  # 图片排版
+├── video-extract/  # 视频抽帧
+├── template/       # 文书模板（制作/填写/批量/历史）
+└── settings/       # 设置与诊断
+```
+
+每个模块通过 `index.js` 注册路由、菜单项和首页卡片。新增模块只需创建自包含目录。
 
 ## 前端结构
 
-模块仍通过 `src/modules/<name>/index.js` 注册路由、菜单和首页卡片。
-
-当前有效模块：
-
-```text
-src/modules/
-├── home/
-├── pdf-tools/
-├── evidence-pdf/
-├── image-paddler/
-├── video-extract/
-├── template/
-└── settings/
-```
-
-`src/core/moduleRegistry.js` 使用 `import.meta.glob` 自动收集模块。新增模块时，应保持自包含目录，不要把业务状态散落到全局。
-
-## PDF 证据处理设计
-
-PDF 工具中的证据 PDF 合并、拆分、页眉页脚处理、A4 规范化、批注删除和预览能力，统一以 `docs/pdf-evidence-processing-design.md` 为设计依据。
-
-后续实现应围绕“证据文件列表 + 页码范围 + 输出规则”的整体模型收敛，不应继续把页眉页脚插入、PDF 合并、拆分、页面规范化做成互相割裂的临时功能。
+| 层 | 路径 | 职责 |
+| --- | --- | --- |
+| 入口 | `App.vue` | 主布局（侧边栏 + 路由视图 + Doclet 动画） |
+| 路由 | `router/index.js` | 从 moduleRegistry 动态生成 |
+| 状态 | `stores/app.js` | Pinia store（应用设置） |
+| 核心 | `core/` | IPC 封装、模块注册、路径工具、PDF 工具函数 |
+| 共享组件 | `shared/components/` | ToolWorkspaceShell / FileQueuePanel / ReorderableImageGrid / DocletWorkingPet |
+| 业务模块 | `modules/*/` | 各模块的视图、组件和 composables |
 
 ## 后端结构
 
-Tauri 命令集中注册在 `src-tauri/src/commands/mod.rs`。
+Tauri 命令集中在 `src-tauri/src/commands/mod.rs` 注册（共 58 个命令）。
 
-当前命令域：
+| 域 | 命令数 | 业务实现 |
+| --- | --- | --- |
+| `pdf` | 20 | `pdf/` 目录（detection/header_footer/evidence/split/overlay/...） |
+| `template` | 16 | `docx_template/`（quick-xml 引擎）+ `template_history.rs`（SQLite） |
+| `settings` | 8 | `services/history.rs` + `external/`（工具检测与安装） |
+| `system` | 8 | `app_log.rs` + 系统交互 |
+| `video` | 4 | `ffmpeg/`（检测/探测/抽帧） |
+| `image_paddler` | 2 | `image_paddler.rs` |
 
-- `pdf`
-- `image_paddler`
-- `video`
-- `settings`
-- `system`
-- `template`
+## 模板系统设计
 
-业务实现放在 `src-tauri/src/services/`、`src-tauri/src/pdf/`、`src-tauri/src/ffmpeg/`、`src-tauri/src/external/`、`src-tauri/src/docx_template/` 等目录。`services/history.rs` 负责应用设置读写；`template_history.rs` 负责模板填写历史（SQLite）。
-
-## 新文书模板设计
-
-新文书模板模块以 `docs/template-system-design.md` 为依据。它不复用旧系统的 Docsy 内部选区映射、字典编辑器和手写推理规则。
-
-P0 边界：
+设计文档：`docs/template-system-design.md`
 
 - Word 中黄色高亮作为字段制作入口
-- 保存 `.docsytpl` zip 包，包含 `manifest.json + template.docx`
-- 普通字段和勾选 marker 都写入带 `w:tag` 的内容控件
-- 打开 `.docsytpl` 填表并生成 docx
-- 批量填写：导出字段表为 Excel → 用户填写 → 校验导入 → 批量生成（`batch.rs`）
-- 字段类型：text / date / select / party_list / reference / checkbox / radio_group / checkbox_group / delete_text
+- 保存 `.docsytpl` zip 包（manifest.json + template.docx）
+- 普通字段写入 `<w:sdt>` 内容控件，勾选字段写入 marker 控件
+- quick-xml 结构化 XML 树引擎，坐标管线消除错位
+- 批量填写：Excel 导出/校验/批量生成
+- 8 种字段类型 + 4 种历史建议源
 
-## 已移除的旧边界
+## PDF 证据处理设计
 
-以下内容不应被新代码继续引用：
+设计文档：`docs/pdf-evidence-processing-design.md`
 
-- `doc-gen`
-- `template-editor`
-- `template-mgmt`
-- `list_templates`
-- `get_template_meta`
-- `generate_document`
-- `save_template`
-- `query_dictionary`
-- `generation_records`
+- 核心对象：证据文件列表 + 页码范围 + 输出规则
+- 三层检测：Artifact 标记 / 内容文本 / 视觉区域
+- 页眉、页脚文字、页码三类独立对象
+- qpdf 作为安全改写和结构校验底座
+- PDF.js 负责前端真实页面预览
+- Poppler 工具链作为后端渲染和文本检测兜底
 
-后续模板能力应围绕 `template` 模块和 `docs/template-system-design.md` 扩展，不应在现有工具模块中渐进复活旧逻辑。
+## 外部工具抽象
+
+`src-tauri/src/external/` 提供统一的外部工具管理：
+
+| 工具 | 文件 | 用途 |
+| --- | --- | --- |
+| qpdf | `qpdf.rs` | PDF 结构处理、合并、拆分、overlay |
+| Poppler | `poppler.rs` | PDF 文本提取、渲染 |
+| FFmpeg | `ffmpeg.rs` | 视频处理 |
+| Word | `word.rs` | Word → PDF 转换（macOS AppleScript / Windows COM） |
+| WPS | `wps.rs` | WPS → PDF 转换（Windows COM） |
+| LibreOffice | `libreoffice.rs` | DOC/DOCX → PDF 转换（备用） |
+| 托管安装 | `managed.rs` | 工具下载、安装、更新 |
+
+## 数据存储
+
+| 数据 | 位置 | 格式 |
+| --- | --- | --- |
+| 应用设置 | `~/Library/Application Support/docsy/settings.json` | JSON |
+| 模板库 | `~/Library/Application Support/docsy/templates/` | .docsytpl (zip) |
+| 模板回收站 | `~/Library/Application Support/docsy/template-trash/` | .docsytpl (zip) |
+| 模板历史 | `~/Library/Application Support/docsy/template_history.sqlite3` | SQLite |
+| 应用日志 | `~/Library/Logs/docsy/` | 文本日志 |
+
+## 操作生命周期管理（MDG-001）
+
+`src-tauri/src/operations.rs` 提供统一的操作管理（第四通用层）：
+
+| 组件 | 位置 | 作用 |
+| --- | --- | --- |
+| `OperationManager` | `operations.rs` | 操作注册/取消/查询，CancellationToken-based |
+| `run_managed` | `commands/mod.rs` | 替代 `run_blocking`，自动注册/注销操作 |
+| `command_output_cancellable` | `external/mod.rs` | 外部子进程取消（不设固定超时） |
+| 事件 | `docsy-operation-started` / `docsy-operation-finished` | 前端 Doclet 动画接驳 |
+
+**设计原则**：
+- 不设固定超时自动 kill（大文件慢就慢）
+- 只支持用户主动取消（通过 CancellationToken）
+- 与 `run_blocking` 并存，新命令用 `run_managed`，旧命令不改
+- 取消时返回已处理的部分结果（不丢失已完成的工作）
+
+## 测试
+
+```bash
+npm test                    # 前端 vitest (70 tests, 13 files)
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust tests (141 tests)
+```
+
+测试覆盖：docx 模板引擎 / PDF 处理 / 图片排版 / 自然排序 / 历史记录 / 页码检测 / 页码规则 / 拆分范围 / 预览坐标 / 模块注册 / 文件拖放 / Pointer Events 排序。

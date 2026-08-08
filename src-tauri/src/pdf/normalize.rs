@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::page_info::{get_page_infos, PageSize, A4_HEIGHT_PT, A4_WIDTH_PT};
 use super::qpdf;
+use super::temp_named_path;
 
 pub fn normalize_pdf_to_a4(input: &Path, _dpi: u32, orientation: &str) -> Result<PathBuf> {
     let input_str = input.to_string_lossy().to_string();
@@ -47,6 +48,7 @@ fn a4_page_size(source: &PageSize, orientation: &str) -> (f32, f32) {
     match orientation {
         "portrait" => (A4_WIDTH_PT, A4_HEIGHT_PT),
         "landscape" => (A4_HEIGHT_PT, A4_WIDTH_PT),
+        "preserve" if source.width_pt > source.height_pt => (A4_HEIGHT_PT, A4_WIDTH_PT),
         _ if source.width_pt > source.height_pt => (A4_HEIGHT_PT, A4_WIDTH_PT),
         _ => (A4_WIDTH_PT, A4_HEIGHT_PT),
     }
@@ -196,15 +198,6 @@ fn pdf_number(value: f32) -> Object {
     Object::Real(value)
 }
 
-fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let pid = std::process::id();
-    std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,7 +235,7 @@ mod tests {
             raw_height_pt: 842.0,
             rotate: 90,
         };
-        let transform = a4_transform(&source, "auto");
+        let transform = a4_transform(&source, "preserve");
 
         assert_eq!(
             (transform.page_w, transform.page_h),

@@ -1,19 +1,18 @@
 <template>
-  <div class="video-extract-view">
+  <ToolWorkspaceShell title="视频抽帧" description="从视频中按频率或间隔提取帧图片">
     <div class="extract-layout">
       <!-- Left: Settings -->
       <div class="extract-settings">
         <!-- FFmpeg Status -->
         <div class="section-block">
           <div class="section-title">FFmpeg 状态</div>
-          <div v-if="ffmpegLoading" class="status-row">
-            <el-icon class="is-loading"><Loading /></el-icon>
-            <span>检测中...</span>
-          </div>
+          <div v-if="ffmpegLoading" v-loading="true" element-loading-text="检测中..." class="status-row status-loading"></div>
           <div v-else-if="ffmpegStatus.available" class="status-row status-ok">
             <el-icon><CircleCheckFilled /></el-icon>
             <span>可用</span>
-            <el-tag size="small" type="info">{{ ffmpegStatus.version }}</el-tag>
+            <el-tag v-if="ffmpegStatus.version" size="small" type="info" :title="ffmpegStatus.version">
+              FFmpeg {{ shortFfmpegVersion(ffmpegStatus.version) }}
+            </el-tag>
             <el-tag size="small" :type="ffmpegStatus.has_drawtext ? 'success' : 'warning'">
               {{ ffmpegStatus.has_drawtext ? 'drawtext 可用' : 'drawtext 不可用' }}
             </el-tag>
@@ -34,9 +33,6 @@
           <div
             class="drop-zone"
             :class="{ 'drop-zone-active': dragging }"
-            @dragover.prevent="dragging = true"
-            @dragleave="dragging = false"
-            @drop.prevent="onDrop"
             @click="selectFile"
           >
             <template v-if="videoPath">
@@ -198,33 +194,35 @@
         </div>
 
         <div v-if="extracting" class="results-loading">
-          <el-icon class="is-loading" :size="32"><Loading /></el-icon>
           <p>正在抽帧...</p>
         </div>
 
-        <ImagePreviewGrid
+        <ReorderableImageGrid
           v-else-if="resultImages.length > 0"
           class="results-preview"
           :items="resultImages"
           :name-resolver="frameName"
           empty-description="暂无抽帧结果"
+          @reorder="reorderResultImages"
         />
 
         <el-empty v-else description="选择视频并开始抽帧" :image-size="80" />
       </div>
     </div>
-  </div>
+  </ToolWorkspaceShell>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
-import { getCurrentWebview } from '@tauri-apps/api/webview'
-import { Loading, CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
+import { CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import ImagePreviewGrid from '../../../shared/components/ImagePreviewGrid.vue'
+import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
+import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
+import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { fileName } from '../../../core/filePath.js'
+import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
 const ffmpegLoading = ref(true)
 const ffmpegStatus = reactive({ available: false, path: null, version: null, has_drawtext: false })
@@ -254,8 +252,14 @@ const settings = reactive({
 const extracting = ref(false)
 const extractResult = ref(null)
 const resultImages = ref([])
-let unlistenDragDrop = null
 const VIDEO_EXTENSIONS = new Set(['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'])
+
+function shortFfmpegVersion(value) {
+  const text = String(value || '').trim()
+  const version = text.match(/ffmpeg\s+version\s+(\d+(?:\.\d+){1,3})/i)
+  if (version) return version[1]
+  return text.replace(/^ffmpeg\s+version\s+/i, '').split(/\s+/)[0] || '可用'
+}
 
 async function checkFfmpeg() {
   ffmpegLoading.value = true
@@ -302,14 +306,6 @@ async function selectOutputDir() {
   }
 }
 
-async function onDrop(e) {
-  dragging.value = false
-  const files = e.dataTransfer?.files
-  if (files?.length && files[0].path) {
-    await loadVideoIfSupported(files[0].path)
-  }
-}
-
 async function handleDroppedPaths(paths) {
   const first = Array.isArray(paths) ? paths[0] : null
   if (!first) return
@@ -334,7 +330,7 @@ async function loadVideo(path) {
   if (res.ok) {
     videoInfo.value = res.data
   } else {
-    ElMessage.error('无法读取视频信息: ' + res.error)
+    ElMessage.error('无法读取视频信息: ' + (res.error || '请确认文件是有效的视频格式'))
   }
 }
 
@@ -387,7 +383,7 @@ async function extractFrames() {
       await loadResultImages(res.data.output_dir)
     }
   } else {
-    ElMessage.error('抽帧失败: ' + res.error)
+    ElMessage.error('视频抽帧失败: ' + (res.error || '请确认 FFmpeg 可用且磁盘空间充足'))
   }
 }
 
@@ -400,6 +396,10 @@ async function loadResultImages(dir) {
 
 function frameName(img) {
   return fileName(img?.path || '')
+}
+
+function reorderResultImages({ from, to }) {
+  resultImages.value = moveItem(resultImages.value, from, to)
 }
 
 function normalizeSelectedPath(value) {
@@ -434,38 +434,29 @@ function formatSize(bytes) {
   return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
 }
 
-onMounted(async () => {
+onMounted(() => {
   checkFfmpeg()
-  unlistenDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
-    if (event.payload.type === 'enter' || event.payload.type === 'over') {
-      dragging.value = true
-    } else if (event.payload.type === 'drop') {
-      dragging.value = false
-      await handleDroppedPaths(event.payload.paths)
-    } else {
-      dragging.value = false
-    }
-  })
 })
 
-onBeforeUnmount(() => {
-  if (unlistenDragDrop) {
-    unlistenDragDrop()
-  }
+useWindowFileDrop({
+  onEnter: () => {
+    dragging.value = true
+  },
+  onLeave: () => {
+    dragging.value = false
+  },
+  onDrop: handleDroppedPaths,
 })
 </script>
 
 <style scoped>
-.video-extract-view {
-  height: 100%;
-  min-height: 0;
+:deep(.workspace-content) {
   overflow: hidden;
-  background: var(--docsy-surface);
 }
 
 .extract-layout {
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }
@@ -530,7 +521,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.results-preview :deep(.image-preview-scroll) {
+.results-preview :deep(.reorder-image-scroll) {
   flex: 1;
   min-height: 0;
   max-height: none;
@@ -556,17 +547,19 @@ onBeforeUnmount(() => {
 .status-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
   font-size: 13px;
   color: var(--docsy-text);
 }
 
 .status-ok {
-  color: #67c23a;
+  color: var(--el-color-success);
 }
 
 .status-warn {
-  color: #e6a23c;
+  color: var(--el-color-warning);
 }
 
 .drop-zone {
@@ -659,7 +652,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1180px) {
-  .video-extract-view {
+  :deep(.workspace-content) {
     overflow: auto;
   }
 

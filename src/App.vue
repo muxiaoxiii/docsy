@@ -14,9 +14,19 @@
         </template>
       </el-menu>
       <div class="sidebar-footer">
+        <el-tooltip content="关于" placement="right">
+          <el-button
+            class="footer-btn"
+            :class="{ active: route.name === 'about' }"
+            circle
+            @click="router.push({ name: 'about' })"
+          >
+            <el-icon><InfoFilled /></el-icon>
+          </el-button>
+        </el-tooltip>
         <el-tooltip content="设置" placement="right">
           <el-button
-            class="settings-shortcut"
+            class="footer-btn"
             :class="{ active: route.name === 'settings' }"
             circle
             @click="router.push({ name: 'settings' })"
@@ -35,7 +45,15 @@
       </el-main>
       <Transition name="doclet-operation">
         <div v-if="operationVisible" class="doclet-operation-panel">
-          <DocletWorkingPet :message="operationMessage" />
+          <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed" />
+          <button
+            v-if="showCancel"
+            class="doclet-cancel-btn"
+            @click="cancelCurrentOperation"
+            title="取消当前操作"
+          >
+            取消
+          </button>
         </div>
       </Transition>
     </el-container>
@@ -45,27 +63,29 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Setting } from '@element-plus/icons-vue'
+import { Setting, InfoFilled } from '@element-plus/icons-vue'
 import { getMenuItems } from './core/moduleRegistry.js'
 import { tauriCallSafe } from './core/tauriBridge.js'
 import { listen } from '@tauri-apps/api/event'
 import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
+import { useAppStore } from './stores/app.js'
 
 const router = useRouter()
 const route = useRoute()
+const appStore = useAppStore()
 
-const settings = ref({
-  menu_visibility: {},
-  menu_order: [],
-})
-const menuItems = computed(() => getMenuItems(settings.value))
+const menuItems = computed(() => getMenuItems(appStore.settings))
 
 const activeMenu = computed(() => route.name || 'home')
 const operationVisible = ref(false)
 const operationMessage = ref('Doclet 正在处理…')
+const operationElapsed = ref('')
+const showCancel = ref(false)
+let cancelTimer
 let operationTimer
-const pendingOperations = new Map()
+let elapsedTimer
+const pendingOperations = new Map() // id -> { label, startTime }
 
 const currentPageTitle = computed(() => {
   const item = menuItems.value.find((m) => m.route === route.name)
@@ -76,24 +96,46 @@ function onMenuSelect(index) {
   router.push({ name: index })
 }
 
-async function loadSettings() {
-  const result = await tauriCallSafe('get_app_settings')
-  if (result.ok) {
-    settings.value = { ...settings.value, ...result.data }
-  }
+function applySettingsEvent(event) {
+  appStore.settings = { ...appStore.settings, ...(event.detail || {}) }
 }
 
-function applySettingsEvent(event) {
-  settings.value = { ...settings.value, ...(event.detail || {}) }
+function formatElapsed(ms) {
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}秒`
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${minutes}分${secs}秒`
+}
+
+function updateElapsedTime() {
+  const oldest = Array.from(pendingOperations.values()).at(0)
+  if (!oldest) {
+    operationElapsed.value = ''
+    return
+  }
+  const ms = Date.now() - oldest.startTime
+  operationElapsed.value = ms > 3000 ? formatElapsed(ms) : ''
 }
 
 function startOperation(event) {
   const operationId = event.detail?.id || `unknown:${Date.now()}`
-  pendingOperations.set(operationId, event.detail?.label || 'Doclet 正在处理…')
+  pendingOperations.set(operationId, {
+    label: event.detail?.label || 'Doclet 正在处理…',
+    startTime: Date.now(),
+  })
   clearTimeout(operationTimer)
-  operationMessage.value = pendingOperations.get(operationId) || 'Doclet 正在处理…'
+  const entry = pendingOperations.get(operationId)
+  operationMessage.value = entry?.label || 'Doclet 正在处理…'
   operationTimer = window.setTimeout(() => {
     operationVisible.value = true
+    window.clearInterval(elapsedTimer)
+    elapsedTimer = window.setInterval(updateElapsedTime, 1000)
+    // Show cancel button after 30 seconds
+    clearTimeout(cancelTimer)
+    cancelTimer = window.setTimeout(() => {
+      showCancel.value = true
+    }, 30000)
   }, 350)
 }
 
@@ -101,17 +143,47 @@ function finishOperation(event) {
   const operationId = event.detail?.id
   if (operationId) pendingOperations.delete(operationId)
   if (pendingOperations.size) {
-    operationMessage.value = Array.from(pendingOperations.values()).at(-1) || 'Doclet 正在处理…'
+    const entry = Array.from(pendingOperations.values()).at(-1)
+    operationMessage.value = entry?.label || 'Doclet 正在处理…'
     return
   }
   clearTimeout(operationTimer)
+  window.clearInterval(elapsedTimer)
+  clearTimeout(cancelTimer)
   operationVisible.value = false
+  operationElapsed.value = ''
+  showCancel.value = false
+}
+
+async function cancelCurrentOperation() {
+  try {
+    // 查询 Rust 侧活跃操作，按 ID 取消
+    const activeResult = await tauriCallSafe('list_active_operations')
+    if (activeResult.ok && activeResult.data?.length > 0) {
+      // 取消第一个活跃操作（已运行最久的）
+      const target = activeResult.data[0]
+      await tauriCallSafe('cancel_operation', { operationId: target.operationId })
+    }
+  } catch {
+    // Ignore errors — the operation may have already finished
+  }
+  // 清除 UI 状态（pendingOperations 是前端动画追踪，与 Rust 操作管理独立）
+  pendingOperations.clear()
+  clearTimeout(operationTimer)
+  window.clearInterval(elapsedTimer)
+  clearTimeout(cancelTimer)
+  operationVisible.value = false
+  operationElapsed.value = ''
+  showCancel.value = false
 }
 
 let unlistenConversionTimeout = null
 
 onMounted(() => {
-  loadSettings()
+  // Platform detection for OS-specific CSS (backdrop-filter on macOS only)
+  document.documentElement.dataset.os = /mac/i.test(navigator.platform || navigator.userAgent) ? 'macos' : 'windows'
+
+  appStore.loadSettings()
   window.addEventListener('docsy-settings-updated', applySettingsEvent)
   window.addEventListener('docsy-operation-start', startOperation)
   window.addEventListener('docsy-operation-finish', finishOperation)
@@ -119,15 +191,11 @@ onMounted(() => {
   // Listen for conversion timeout events from the backend
   listen('docsy-conversion-timeout', async () => {
     try {
-      await ElMessageBox.confirm(
-        '文档转换耗时较长，可能是大文件或 Office 响应慢。是否继续等待？',
-        '转换超时',
-        {
-          confirmButtonText: '继续等待',
-          cancelButtonText: '取消转换',
-          type: 'warning',
-        },
-      )
+      await ElMessageBox.confirm('文档转换耗时较长，可能是大文件或 Office 响应慢。是否继续等待？', '转换超时', {
+        confirmButtonText: '继续等待',
+        cancelButtonText: '取消转换',
+        type: 'warning',
+      })
       // User chose to continue
       await tauriCallSafe('respond_conversion_timeout', { continueWaiting: true })
     } catch {
@@ -141,6 +209,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearTimeout(operationTimer)
+  window.clearInterval(elapsedTimer)
+  clearTimeout(cancelTimer)
   window.removeEventListener('docsy-settings-updated', applySettingsEvent)
   window.removeEventListener('docsy-operation-start', startOperation)
   window.removeEventListener('docsy-operation-finish', finishOperation)
@@ -225,12 +295,13 @@ onBeforeUnmount(() => {
 .sidebar-footer {
   display: flex;
   justify-content: center;
+  gap: 8px;
   padding: 12px 0 16px;
   border-top: 1px solid var(--docsy-border-subtle);
   background: rgba(255, 253, 250, 0.42);
 }
 
-.settings-shortcut.active {
+.footer-btn.active {
   color: var(--docsy-primary);
   border-color: var(--docsy-primary);
   background: var(--docsy-primary-soft);
@@ -263,7 +334,26 @@ onBeforeUnmount(() => {
   right: 24px;
   bottom: 24px;
   z-index: 999;
-  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.doclet-cancel-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+  background: var(--docsy-surface-elevated);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.doclet-cancel-btn:hover {
+  color: var(--docsy-danger);
+  border-color: var(--docsy-danger);
 }
 
 .doclet-operation-enter-active,

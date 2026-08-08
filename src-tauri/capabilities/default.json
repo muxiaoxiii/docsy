@@ -6,6 +6,31 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "fs:allow-read-file"
+    "fs:allow-read-file",
+    "fs:allow-write-text-file",
+    "shell:allow-open",
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$TEMP/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$HOME/**" },
+        { "path": "$TEMP/**" }
+      ]
+    }
   ]
 }
