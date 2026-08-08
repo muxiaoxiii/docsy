@@ -1,3 +1,4 @@
+use crate::error::DocsyError;
 use crate::external::ExternalTool;
 use serde::Serialize;
 
@@ -10,10 +11,10 @@ pub struct FfmpegStatus {
 }
 
 #[tauri::command]
-pub async fn check_ffmpeg() -> Result<FfmpegStatus, String> {
+pub async fn check_ffmpeg() -> Result<FfmpegStatus, DocsyError> {
     tauri::async_runtime::spawn_blocking(build_ffmpeg_status)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| DocsyError::Unknown { message: e.to_string() })
 }
 
 fn build_ffmpeg_status() -> FfmpegStatus {
@@ -28,11 +29,11 @@ fn build_ffmpeg_status() -> FfmpegStatus {
 }
 
 #[tauri::command]
-pub async fn probe_video(path: String) -> Result<serde_json::Value, String> {
+pub async fn probe_video(path: String) -> Result<serde_json::Value, DocsyError> {
     tauri::async_runtime::spawn_blocking(move || crate::ffmpeg::probe::probe_video(&path))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| DocsyError::Unknown { message: e.to_string() })?
+        .map_err(|e| DocsyError::Unknown { message: e.to_string() })
 }
 
 #[tauri::command]

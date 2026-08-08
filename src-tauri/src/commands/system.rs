@@ -1,19 +1,22 @@
+use crate::error::DocsyError;
+
 #[tauri::command]
-pub fn open_path(path: String) -> Result<(), String> {
-    let path = std::path::PathBuf::from(path);
+pub fn open_path(path: String) -> Result<(), DocsyError> {
+    let path = std::path::PathBuf::from(&path);
     if !path.exists() {
-        return Err("要打开的文件不存在".into());
+        return Err(DocsyError::FileNotFound { path: path.display().to_string() });
     }
-    open::that(&path).map_err(|e| e.to_string())
+    open::that(&path).map_err(|e| DocsyError::Unknown { message: e.to_string() })
 }
 
 #[tauri::command]
-pub fn open_external_url(url: String) -> Result<(), String> {
-    let parsed = reqwest::Url::parse(&url).map_err(|_| "下载地址无效".to_string())?;
+pub fn open_external_url(url: String) -> Result<(), DocsyError> {
+    let parsed = reqwest::Url::parse(&url)
+        .map_err(|_| DocsyError::InvalidArgument { message: "下载地址无效".into() })?;
     if parsed.scheme() != "https" || parsed.host_str().is_none() {
-        return Err("只能打开 HTTPS 下载地址".into());
+        return Err(DocsyError::InvalidArgument { message: "只能打开 HTTPS 下载地址".into() });
     }
-    open::that(parsed.as_str()).map_err(|e| e.to_string())
+    open::that(parsed.as_str()).map_err(|e| DocsyError::Unknown { message: e.to_string() })
 }
 
 #[tauri::command]
@@ -30,25 +33,27 @@ pub fn write_frontend_log(level: String, target: String, message: String, contex
 }
 
 #[tauri::command]
-pub fn get_log_file_path() -> Result<String, String> {
-    crate::app_log::log_file_path().map(|p| p.display().to_string())
+pub fn get_log_file_path() -> Result<String, DocsyError> {
+    crate::app_log::log_file_path()
+        .map(|p| p.display().to_string())
+        .map_err(|e| DocsyError::Unknown { message: e })
 }
 
 #[tauri::command]
-pub fn open_log_file() -> Result<(), String> {
-    let path = crate::app_log::log_file_path()?;
-    open::that(&path).map_err(|e| e.to_string())
+pub fn open_log_file() -> Result<(), DocsyError> {
+    let path = crate::app_log::log_file_path().map_err(|e| DocsyError::Unknown { message: e })?;
+    open::that(&path).map_err(|e| DocsyError::Unknown { message: e.to_string() })
 }
 
 #[tauri::command]
-pub fn open_log_dir() -> Result<(), String> {
-    let path = crate::app_log::log_dir()?;
-    open::that(&path).map_err(|e| e.to_string())
+pub fn open_log_dir() -> Result<(), DocsyError> {
+    let path = crate::app_log::log_dir().map_err(|e| DocsyError::Unknown { message: e })?;
+    open::that(&path).map_err(|e| DocsyError::Unknown { message: e.to_string() })
 }
 
 #[tauri::command]
-pub fn export_diagnostic_report(frontend_snapshots: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
-    let log_dir = crate::app_log::log_dir()?;
+pub fn export_diagnostic_report(frontend_snapshots: Option<serde_json::Value>) -> Result<serde_json::Value, DocsyError> {
+    let log_dir = crate::app_log::log_dir().map_err(|e| DocsyError::Unknown { message: e })?;
     let report_name = format!("diagnostic-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S"));
     let report_path = log_dir.join(&report_name);
 
@@ -63,9 +68,9 @@ pub fn export_diagnostic_report(frontend_snapshots: Option<serde_json::Value>) -
     });
 
     let content = serde_json::to_string_pretty(&report)
-        .map_err(|e| format!("序列化诊断报告失败: {e}"))?;
-    std::fs::write(&report_path, content)
-        .map_err(|e| format!("写入诊断报告失败: {e}"))?;
+        .map_err(|e| DocsyError::InvalidArgument { message: format!("序列化诊断报告失败: {e}") })?;
+    std::fs::write(&report_path, &content)
+        .map_err(|e| DocsyError::Unknown { message: format!("写入诊断报告失败: {e}") })?;
 
     Ok(serde_json::json!({ "path": report_path.display().to_string() }))
 }
@@ -124,13 +129,13 @@ fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
 }
 
 #[tauri::command]
-pub async fn get_diagnostic_info() -> Result<serde_json::Value, String> {
+pub async fn get_diagnostic_info() -> Result<serde_json::Value, DocsyError> {
     tauri::async_runtime::spawn_blocking(build_diagnostic_info)
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| DocsyError::Unknown { message: e.to_string() })?
 }
 
-fn build_diagnostic_info() -> Result<serde_json::Value, String> {
+fn build_diagnostic_info() -> Result<serde_json::Value, DocsyError> {
     let mut info = serde_json::Map::new();
     info.insert(
         "version".into(),
@@ -159,7 +164,7 @@ pub async fn list_system_fonts() -> Result<Vec<String>, String> {
 pub fn respond_conversion_timeout(
     state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
     continue_waiting: bool,
-) -> Result<(), String> {
+) -> Result<(), DocsyError> {
     state.set_response(if continue_waiting { 1 } else { 2 });
     Ok(())
 }
@@ -173,7 +178,7 @@ pub fn cancel_operation(
     manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     registry: tauri::State<'_, std::sync::Arc<crate::SubprocessRegistry>>,
     operation_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, DocsyError> {
     // 优先尝试 OperationManager（异步任务取消）
     if manager.cancel(&operation_id) {
         return Ok(true);
