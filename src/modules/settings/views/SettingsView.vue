@@ -636,18 +636,6 @@ onMounted(() => {
   margin: 0 0 12px;
 }
 
-.bundle-actions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.export-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 @media (max-width: 760px) {
   .settings-view {
     padding: 16px;
@@ -672,7 +660,6 @@ onMounted(() => {
     flex: 1;
   }
 
-  .bundle-actions,
   .diag-actions {
     flex-wrap: wrap;
   }

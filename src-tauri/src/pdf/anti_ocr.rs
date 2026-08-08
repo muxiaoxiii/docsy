@@ -13,19 +13,6 @@ pub enum AntiCopyMethod {
     CmapScramble,
     /// Remove ToUnicode CMap entirely
     CmapRemove,
-    /// Add invisible garbled text overlay on top
-    TextOverlay,
-}
-
-impl AntiCopyMethod {
-    #[allow(dead_code)]
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::CmapScramble => "CMap 篡改",
-            Self::CmapRemove => "CMap 移除",
-            Self::TextOverlay => "文字覆盖",
-        }
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -119,23 +106,6 @@ pub fn apply_anti_copy(
                     if get_tounicode_cmap(&doc, font_id).is_some() {
                         remove_tounicode_cmap(&mut doc, font_id);
                         modified += 1;
-                    }
-                }
-            }
-            AntiCopyMethod::TextOverlay => {
-                // TextOverlay: CMap removal + overlay is done in JS/Python layer
-                // because lopdf doesn't easily support adding content streams
-                for font_id in page_fonts(&doc, *page_id) {
-                    if !seen.insert(font_id) {
-                        continue;
-                    }
-                    if let Some(cmap_bytes) = get_tounicode_cmap(&doc, font_id) {
-                        let cmap_text = String::from_utf8_lossy(&cmap_bytes);
-                        if !is_already_protected(&cmap_text) {
-                            let scrambled = scramble_cmap(&cmap_text);
-                            set_tounicode_cmap(&mut doc, font_id, scrambled.as_bytes());
-                            modified += 1;
-                        }
                     }
                 }
             }
@@ -300,16 +270,6 @@ fn page_fonts(doc: &Document, page_id: ObjectId) -> Vec<ObjectId> {
         }
     }
     fonts
-}
-
-#[allow(dead_code)]
-fn get_font_name(doc: &Document, font_id: ObjectId) -> String {
-    if let Ok(dict) = doc.get_dictionary(font_id) {
-        if let Ok(Object::Name(name)) = dict.get(b"BaseFont") {
-            return String::from_utf8_lossy(name).to_string();
-        }
-    }
-    format!("font_{:?}", font_id)
 }
 
 fn get_tounicode_cmap(doc: &Document, font_id: ObjectId) -> Option<Vec<u8>> {

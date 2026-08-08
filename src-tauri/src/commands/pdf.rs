@@ -281,7 +281,6 @@ pub async fn apply_anti_copy(
 ) -> Result<usize, String> {
     let m = match method.as_str() {
         "cmap_remove" => crate::pdf::anti_ocr::AntiCopyMethod::CmapRemove,
-        "text_overlay" => crate::pdf::anti_ocr::AntiCopyMethod::TextOverlay,
         _ => crate::pdf::anti_ocr::AntiCopyMethod::CmapScramble,
     };
     run_blocking(move || {
