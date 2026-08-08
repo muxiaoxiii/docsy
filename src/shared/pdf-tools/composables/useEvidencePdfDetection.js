@@ -109,7 +109,7 @@ export function useEvidencePdfDetection({
     return tauriCallQuiet('detect_pdf_header_footer', {
       args: {
         inputPath: file.path,
-        maxPages: DETECTION_SCAN_MAX_PAGES,
+        maxPages: file.pages || 0,
         headerZoneMm: headerFooterDetectionZoneMm(cleanupHeaderHeightMm.value),
         footerZoneMm: headerFooterDetectionZoneMm(cleanupFooterHeightMm.value),
         scanArtifacts: true,
