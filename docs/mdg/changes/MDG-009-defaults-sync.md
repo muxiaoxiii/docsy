@@ -1,6 +1,6 @@
 # MDG-009: 前后端默认值统一
 
-## 状态：🔴 未开始
+## 状态：✅ 已完成
 ## 优先级：P1
 1. image_paddler.rs margin_mm 15.0 → 12.0
 2. image_paddler.rs filename_without_ext 统一

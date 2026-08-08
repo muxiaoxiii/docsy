@@ -1,6 +1,6 @@
 # MDG-008: 资源管理 + 文件名
 
-## 状态：🔴 未开始
+## 状态：✅ 已完成
 ## 优先级：P2
 1. header_footer.rs 临时文件 RAII guard
 2. services/history.rs → settings.rs 重命名
