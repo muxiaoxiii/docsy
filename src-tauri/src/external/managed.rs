@@ -249,7 +249,7 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
             mirrors: vec![
                 "https://gh-proxy.com/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip".into(),
                 "https://ghfast.top/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip".into(),
-                "https://ghproxy.cc/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip".into(),
+                "https://gh-proxy.net/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip".into(),
             ],
         }),
         "ffmpeg" => Some(ToolPackage {
@@ -262,7 +262,7 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
             mirrors: vec![
                 "https://gh-proxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
                 "https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
-                "https://ghproxy.cc/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
+                "https://gh-proxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
             ],
         }),
         "poppler" => Some(ToolPackage {
@@ -276,7 +276,7 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
             mirrors: vec![
                 "https://gh-proxy.com/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip".into(),
                 "https://ghfast.top/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip".into(),
-                "https://ghproxy.cc/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip".into(),
+                "https://gh-proxy.net/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip".into(),
             ],
         }),
         _ => None,

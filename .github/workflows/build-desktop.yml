@@ -107,7 +107,7 @@ jobs:
             -Urls @(
               "https://gh-proxy.com/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip",
               "https://ghfast.top/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip",
-              "https://ghproxy.cc/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip"
+              "https://gh-proxy.net/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip"
             ) `
             -Executables @("qpdf.exe")
 
@@ -116,7 +116,7 @@ jobs:
             -Urls @(
               "https://gh-proxy.com/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip",
               "https://ghfast.top/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip",
-              "https://ghproxy.cc/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip"
+              "https://gh-proxy.net/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip"
             ) `
             -Executables @("pdftoppm.exe", "pdftotext.exe")
 
@@ -125,7 +125,7 @@ jobs:
             -Urls @(
               "https://gh-proxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
               "https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-              "https://ghproxy.cc/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+              "https://gh-proxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
             ) `
             -Executables @("ffmpeg.exe", "ffprobe.exe")
 
