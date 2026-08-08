@@ -29,6 +29,9 @@
 | MDG-016 | 证据处理模块页眉页脚全面优化 | P0 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-016](changes/MDG-016-evidence-header-footer.md) |
 | MDG-017 | GLM 全项目审计问题修复 | P0/P1/P2 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-017](changes/MDG-017-glm-audit-fixes.md) |
 | MDG-018 | GLM 审计剩余 + 测试回归修复 | P0/P1 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-018](changes/MDG-018-glm-audit-remaining.md) |
+| MDG-019 | 跨模块 import 下沉 shared/pdf-tools | P2 | ✅ 已完成 | GLM | [changes/MDG-019](changes/MDG-019-shared-pdf-tools.md) |
+| MDG-020 | UI 动效与交互质感改进 | P1 | ✅ 已完成 | GLM | [changes/MDG-020](changes/MDG-020-ui-motion.md) |
+| MDG-021 | MDG-020 验证问题修复 | P2 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-021](changes/MDG-021-mdg020-fixes.md) |
 
 ---
 
