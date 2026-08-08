@@ -14,3 +14,4 @@ test-pdf/
 *.db
 *.db-journal
 *.db-wal
+.workbuddy/
