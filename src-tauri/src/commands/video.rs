@@ -36,11 +36,18 @@ pub async fn probe_video(path: String) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-pub async fn extract_frames(args: serde_json::Value) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || crate::ffmpeg::extract::extract(&args))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+pub async fn extract_frames(
+    args: serde_json::Value,
+    manager: tauri::State<'_, crate::operations::OperationManager>,
+) -> Result<serde_json::Value, String> {
+    let operation_id = args
+        .get("operation_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    super::run_managed(&manager, "extract_frames", operation_id, move |token| {
+        crate::ffmpeg::extract::extract(&args, &token)
+    })
+    .await
 }
 
 #[tauri::command]

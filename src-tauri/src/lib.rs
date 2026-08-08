@@ -1,5 +1,6 @@
 mod app_log;
 mod commands;
+mod error;
 mod docx_template;
 mod external;
 mod ffmpeg;

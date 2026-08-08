@@ -5,6 +5,11 @@ pub mod system;
 pub mod template;
 pub mod video;
 
+fn anyhow_to_json_string(err: anyhow::Error) -> String {
+    let docsy_err: crate::error::DocsyError = err.into();
+    serde_json::to_string(&docsy_err).unwrap_or_else(|_| docsy_err.to_string())
+}
+
 pub async fn run_blocking<T, F>(task: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -13,7 +18,7 @@ where
     tauri::async_runtime::spawn_blocking(task)
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(anyhow_to_json_string)
 }
 
 /// 通用操作管理封装。替代 run_blocking，自动注册/注销操作。
@@ -50,7 +55,7 @@ where
     // 不在 spawn_blocking 上使用 ?，确保 finish() 一定被调用
     let join_result = tauri::async_runtime::spawn_blocking(move || task(token)).await;
     let result = match join_result {
-        Ok(inner) => inner.map_err(|e| e.to_string()),
+        Ok(inner) => inner.map_err(anyhow_to_json_string),
         Err(join_err) => Err(join_err.to_string()),
     };
 

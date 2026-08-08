@@ -989,6 +989,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-shell",
+ "thiserror 2.0.19",
  "tokio-util",
  "zip 0.6.6",
 ]

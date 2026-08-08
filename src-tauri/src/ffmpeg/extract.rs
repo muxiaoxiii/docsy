@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 const FFMPEG_EXTRACT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-pub fn extract(args: &serde_json::Value) -> Result<serde_json::Value> {
+pub fn extract(args: &serde_json::Value, _token: &tokio_util::sync::CancellationToken) -> Result<serde_json::Value> {
     let started = Instant::now();
     let ffmpeg = crate::external::FfmpegTool;
     let bin = ffmpeg.binary_path()?;
