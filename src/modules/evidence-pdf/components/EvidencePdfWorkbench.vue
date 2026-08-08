@@ -89,7 +89,7 @@
               >立即删除</el-button
             >
             <el-button size="small" :loading="deepDetecting" @click="deepDetectAllHeaderFooter"
-              >深度检测</el-button
+              >元素检测</el-button
             >
           </div>
         </div>
