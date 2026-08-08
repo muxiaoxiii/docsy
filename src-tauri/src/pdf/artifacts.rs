@@ -103,7 +103,7 @@ pub(crate) fn inspect_meaningful_header_footer_artifacts(
     for (page_index, page_id) in doc
         .get_pages()
         .into_values()
-        .take(max_pages.max(1) as usize)
+        .take(if max_pages == 0 { usize::MAX } else { max_pages as usize })
         .enumerate()
     {
         let Ok(content) = doc.get_and_decode_page_content(page_id) else {

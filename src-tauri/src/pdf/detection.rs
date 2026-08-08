@@ -452,14 +452,11 @@ fn merge_artifact_first_candidates(
 fn run_pdftotext_bbox(input: &Path, max_pages: u32) -> Result<String> {
     let pdftotext = find_pdftotext().context("未找到 pdftotext，无法检测页眉页脚")?;
     let mut command = crate::external::hidden_command(pdftotext);
-    command
-        .arg("-bbox")
-        .arg("-f")
-        .arg("1")
-        .arg("-l")
-        .arg(max_pages.max(1).to_string())
-        .arg(input)
-        .arg("-");
+    command.arg("-bbox").arg("-f").arg("1");
+    if max_pages > 0 {
+        command.arg("-l").arg(max_pages.to_string());
+    }
+    command.arg(input).arg("-");
     let output = run_command_output(command, "pdftotext 检测")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
