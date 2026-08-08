@@ -185,19 +185,6 @@ async function buildEvidence() {
   font-size: 13px;
 }
 
-.group-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  margin-top: 8px;
-}
-
-.group-file {
-  font-size: 12px;
-  color: var(--docsy-text-muted);
-  word-break: break-all;
-}
-
 .conversion-alert {
   margin-top: 16px;
 }
