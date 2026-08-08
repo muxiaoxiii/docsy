@@ -1164,7 +1164,7 @@ fn build_candidates(
             let position_stable = position_spread <= 0.025;
             let sequence_stable = !is_page_number || page_number_sequence_stable(&lines);
             let is_page_number = labels.iter().any(|label| label == "page-number");
-            let repeating = if is_page_number { count >= 2 } else { count >= 3 } && position_stable;
+            let repeating = count >= 2 && position_stable;
             let mut confidence = if pages_analyzed <= 1 {
                 0.15
             } else {
@@ -2095,7 +2095,7 @@ mod tests {
         let candidates_2 = build_candidates(&pages_2, "header", 2);
         assert_eq!(candidates_2.len(), 1);
         assert_eq!(candidates_2[0].count, 2);
-        assert!(!candidates_2[0].repeating, "count=2 should not be repeating (threshold is 3)");
+        assert!(candidates_2[0].repeating, "count=2 should be repeating (threshold is 2)");
         
         // 3 pages should be repeating
         let pages_3 = vec![

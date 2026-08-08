@@ -205,11 +205,26 @@ export function useEvidencePdfDetection({
 
   function bestReliableHeaderCandidate(candidates = [], totalPages = 1) {
     if (Number(totalPages || 1) <= 1) return candidates[0] || null
+    // First try: repeating candidates (multi-page headers that appear ≥2 times)
+    const repeating = candidates.find(
+      (candidate) =>
+        candidate?.source === 'artifact' ||
+        (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2),
+    )
+    if (repeating) return repeating
+    // Second try: evidence-label candidates on first page (e.g., "证据１", "证据2")
+    // These are single-page by design — each evidence file has its own label only on page 1
+    const evidenceLabel = candidates.find(
+      (candidate) =>
+        candidate?.labels?.includes?.('evidence-label') &&
+        Number(candidate?.count || 0) >= 1,
+    )
+    if (evidenceLabel) return evidenceLabel
+    // Fallback: single-page candidates with stable position
     return (
       candidates.find(
         (candidate) =>
-          candidate?.source === 'artifact' ||
-          (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2),
+          candidate?.positionStable !== false && Number(candidate?.count || 0) >= 1,
       ) || null
     )
   }
@@ -271,7 +286,8 @@ export function useEvidencePdfDetection({
     if (!candidate || isPageNumberCandidate(candidate)) return false
     return (
       candidate?.source === 'artifact' ||
-      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2)
+      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2) ||
+      (candidate?.positionStable !== false && Number(candidate?.count || 0) >= 1)
     )
   }
 
