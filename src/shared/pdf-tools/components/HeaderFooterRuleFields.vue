@@ -603,6 +603,23 @@ const pageNumberEnabledModel = model('pageNumberEnabled'),
   pageNumberOffsetXMmModel = model('pageNumberOffsetXMm'),
   pageNumberColorModel = model('pageNumberColor')
 const pageNumberShowTotalModel = model('pageNumberShowTotal')
+// Sync template when showTotal changes
+watch(() => props.pageNumberShowTotal, (showTotal) => {
+  const tpl = props.pageNumberTemplate || '{page}/{total}'
+  if (!showTotal && tpl.includes('{total}')) {
+    // Strip {total} from template
+    const cleaned = tpl
+      .replaceAll('{total}', '')
+      .replaceAll('//', '/')
+      .replace(/\/+$/, '')
+      .replace(/^\//, '')
+    pageNumberTemplateModel.value = cleaned || '{page}'
+  } else if (showTotal && !tpl.includes('{total}')) {
+    // Add {total} back
+    const preset = PRESETS_WITH_TOTAL[0]?.value || '{page}/{total}'
+    pageNumberTemplateModel.value = preset
+  }
+})
 const pageNumberPresetModel = computed({
   get() {
     const tpl = props.pageNumberTemplate
