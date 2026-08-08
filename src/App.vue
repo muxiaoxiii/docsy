@@ -180,6 +180,9 @@ async function cancelCurrentOperation() {
 let unlistenConversionTimeout = null
 
 onMounted(() => {
+  // Platform detection for OS-specific CSS (backdrop-filter on macOS only)
+  document.documentElement.dataset.os = /mac/i.test(navigator.platform) ? 'macos' : 'windows'
+
   appStore.loadSettings()
   window.addEventListener('docsy-settings-updated', applySettingsEvent)
   window.addEventListener('docsy-operation-start', startOperation)

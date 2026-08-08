@@ -194,7 +194,6 @@
         </div>
 
         <div v-if="extracting" class="results-loading">
-          <el-icon class="is-loading" :size="32"><Loading /></el-icon>
           <p>正在抽帧...</p>
         </div>
 
@@ -217,7 +216,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Loading, CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
+import { CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
