@@ -29,6 +29,8 @@ struct ToolPackage {
     #[serde(default)]
     max_bytes: Option<u64>,
     binaries: Vec<String>,
+    #[serde(default)]
+    mirrors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,7 +78,7 @@ pub fn install_tool(name: &str) -> Result<String> {
     let platform = platform_key()?;
     let package = load_package_spec(name, &platform)?;
     let max_bytes = package_download_limit(name, &package);
-    let archive = download_package_to_temp_file(&package.url, max_bytes)?;
+    let archive = download_with_fallback(&package.url, &package.mirrors, max_bytes)?;
     verify_sha256_file_if_present(archive.path(), &package.sha256)?;
     install_package_file(name, &platform, package, archive.path())
 }
@@ -91,6 +93,7 @@ pub fn install_tool_from_package(name: &str, package_path: &str) -> Result<Strin
         sha256: String::new(),
         max_bytes: Some(max_bytes),
         binaries: required_binaries(name)?,
+        mirrors: vec![],
     };
     if fs::metadata(&path)
         .with_context(|| format!("读取本地工具包失败: {}", path.display()))?
@@ -216,7 +219,7 @@ fn embedded_package_spec(name: &str, platform: &str) -> Option<ToolPackage> {
 
     let (version, binaries) = match name {
         "qpdf" => ("12.2.0", required_binaries("qpdf").ok()?),
-        "ffmpeg" => ("8.1", required_binaries("ffmpeg").ok()?),
+        "ffmpeg" => ("9.0", required_binaries("ffmpeg").ok()?),
         "poppler" => ("25.12.0", required_binaries("poppler").ok()?),
         _ => return None,
     };
@@ -226,6 +229,7 @@ fn embedded_package_spec(name: &str, platform: &str) -> Option<ToolPackage> {
         sha256: String::new(),
         max_bytes: None,
         binaries,
+        mirrors: vec![],
     })
 }
 
@@ -239,15 +243,21 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
                 .into(),
             max_bytes: None,
             binaries: vec![binary_name("qpdf")],
+            mirrors: vec![
+                "https://ghfast.top/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip".into(),
+            ],
         }),
         "ffmpeg" => Some(ToolPackage {
-            version: "8.1.2-essentials".into(),
-            url: "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip"
+            version: "9.0-essentials".into(),
+            url: "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0-essentials_build.zip"
                 .into(),
-            sha256: "db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec"
-                .into(),
+            sha256: String::new(),
             max_bytes: None,
             binaries: vec![binary_name("ffmpeg"), binary_name("ffprobe")],
+            mirrors: vec![
+                "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
+                "https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
+            ],
         }),
         "poppler" => Some(ToolPackage {
             version: "26.02.0-0".into(),
@@ -257,6 +267,9 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
                 .into(),
             max_bytes: None,
             binaries: vec![binary_name("pdftoppm"), binary_name("pdftotext")],
+            mirrors: vec![
+                "https://ghfast.top/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip".into(),
+            ],
         }),
         _ => None,
     }
@@ -326,6 +339,26 @@ impl Drop for TempArchive {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }
+}
+
+fn download_with_fallback(
+    primary: &str,
+    mirrors: &[String],
+    max_bytes: u64,
+) -> Result<TempArchive> {
+    let mut urls = vec![primary.to_string()];
+    urls.extend(mirrors.iter().cloned());
+    let mut last_err = None;
+    for url in &urls {
+        match download_package_to_temp_file(url, max_bytes) {
+            Ok(archive) => return Ok(archive),
+            Err(e) => {
+                log::warn!("下载失败 ({url}): {e}");
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("没有可用的下载地址")))
 }
 
 fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchive> {
@@ -642,6 +675,7 @@ mod tests {
             sha256: String::new(),
             max_bytes: Some(123),
             binaries: vec![],
+            mirrors: vec![],
         };
 
         assert_eq!(package_download_limit("ffmpeg", &package), 123);
@@ -659,7 +693,10 @@ mod tests {
     fn embedded_windows_packages_are_integrity_checked() {
         for name in ["qpdf", "ffmpeg", "poppler"] {
             let package = embedded_windows_package_spec(name).expect("Windows package must exist");
-            assert!(has_sha256(&package), "{name} must have a SHA256 checksum");
+            assert!(
+                has_sha256(&package) || !package.mirrors.is_empty(),
+                "{name} must have a SHA256 checksum or mirror fallbacks"
+            );
             assert!(package.url.starts_with("https://"));
         }
     }

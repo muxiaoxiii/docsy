@@ -825,6 +825,9 @@ import {
   buildFileContentRows,
   buildMergeOutputPath,
   buildOutputDir,
+  createDefaultFooterTextGroup,
+  createDefaultHeaderGroup,
+  createDefaultPageNumberGroup,
   createEvidenceFile,
   fileName,
   groupsFor,
@@ -1111,6 +1114,26 @@ const pageNumberRegion = computed({
   get: () => selectedPageNumberGroup.value.region,
   set: (v) => { selectedPageNumberGroup.value.region = v },
 })
+const HORIZONTAL_OFFSET_LIMIT_MM = 120
+const insertHeaderFooterEnabled = ref(true)
+// useHeaderFooterRules composable vars (locally defined since composable is not yet wired)
+const cleanupHeaderHeightMm = ref(18)
+const cleanupFooterHeightMm = ref(18)
+const globalApplyEnabled = ref(true)
+const globalHeaderGroup = ref(createDefaultHeaderGroup())
+const globalFooterTextGroup = ref(createDefaultFooterTextGroup())
+const globalPageNumberGroup = ref(createDefaultPageNumberGroup())
+const headerInsertEnabled = ref(false)
+const footerInsertEnabled = ref(false)
+const pageNumberShowTotal = ref(true)
+const normalizeA4 = ref(false)
+const a4Orientation = ref('preserve')
+const rasterDpi = ref(200)
+const removeAnnotations = ref(false)
+const bookmarkEnabled = ref(false)
+const bookmarkRemoveExisting = ref(false)
+const bookmarkLabelSource = ref('header')
+const annotationKinds = ref([])
 const footerEnabled = ref(false)
 const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)

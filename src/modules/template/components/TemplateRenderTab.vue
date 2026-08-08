@@ -371,6 +371,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import DocumentPreview from '@/shared/components/DocumentPreview.vue'
 import {

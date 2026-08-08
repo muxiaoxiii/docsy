@@ -104,19 +104,26 @@ jobs:
 
           Install-ZipTool `
             -Name "qpdf" `
-            -Urls @("https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip") `
+            -Urls @(
+              "https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip",
+              "https://ghfast.top/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip"
+            ) `
             -Executables @("qpdf.exe")
 
           Install-ZipTool `
             -Name "poppler" `
-            -Urls @("https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip") `
+            -Urls @(
+              "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip",
+              "https://ghfast.top/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip"
+            ) `
             -Executables @("pdftoppm.exe", "pdftotext.exe")
 
           Install-ZipTool `
             -Name "ffmpeg" `
             -Urls @(
+              "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0-essentials_build.zip",
               "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-              "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+              "https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
             ) `
             -Executables @("ffmpeg.exe", "ffprobe.exe")
 
