@@ -10,6 +10,7 @@ use crate::external::ExternalTool;
 use crate::sort_utils::natural_cmp;
 
 use super::fnv1a_hash;
+use super::safe_file_stem;
 use crate::ConversionState;
 
 const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm"];
@@ -1026,27 +1027,6 @@ fn qpdf_all_page_dimensions(path: &str) -> Vec<(f64, f64)> {
         .unwrap_or_default()
 }
 
-fn safe_file_stem(input: &str) -> String {
-    let mut out = String::new();
-    for ch in input.chars() {
-        if ch.is_ascii_alphanumeric()
-            || matches!(
-                ch,
-                '\u{4e00}'..='\u{9fff}' | '-' | '_' | ' ' | '(' | ')' | '[' | ']'
-            )
-        {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    let trimmed = out.trim_matches(|c| matches!(c, ' ' | '.' | '_')).trim();
-    if trimmed.is_empty() {
-        "output".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
 
 fn unique_temp_pdf(dir: &Path, stem: &str) -> PathBuf {
     let ts = std::time::SystemTime::now()

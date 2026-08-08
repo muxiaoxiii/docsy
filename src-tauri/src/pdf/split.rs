@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::external::ExternalTool;
 
-use super::temp_named_path;
+use super::{safe_file_stem, temp_named_path, unique_output_path};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,7 +158,7 @@ fn extract_range(
 ) -> Result<String> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let output_path = unique_output_path(output_dir, &safe_file_stem(&item.name));
+    let output_path = unique_output_path(Path::new(output_dir), &safe_file_stem(&item.name), "pdf");
     let qpdf_output_path = if cleanup.header_enabled || cleanup.footer_enabled {
         temp_named_path("docsy_split_range", "pdf")
     } else {
@@ -203,32 +203,6 @@ fn default_footer_height_mm() -> f32 {
     18.0
 }
 
-fn safe_file_stem(name: &str) -> String {
-    let mut value = name
-        .trim()
-        .trim_end_matches(".pdf")
-        .chars()
-        .map(|ch| match ch {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            _ => ch,
-        })
-        .collect::<String>();
-    if value.is_empty() {
-        value = "split".to_string();
-    }
-    value
-}
-
-fn unique_output_path(output_dir: &str, stem: &str) -> PathBuf {
-    let dir = Path::new(output_dir);
-    let mut path = dir.join(format!("{stem}.pdf"));
-    let mut index = 1;
-    while path.exists() {
-        path = dir.join(format!("{stem}-{index}.pdf"));
-        index += 1;
-    }
-    path
-}
 
 #[cfg(test)]
 mod tests {
@@ -259,7 +233,7 @@ mod tests {
     #[test]
     fn sanitizes_split_file_names() {
         assert_eq!(safe_file_stem("证据/1:合同.pdf"), "证据_1_合同");
-        assert_eq!(safe_file_stem(""), "split");
+        assert_eq!(safe_file_stem(""), "output");
     }
 
     #[test]
@@ -299,7 +273,7 @@ mod tests {
 
     #[test]
     fn builds_unique_output_path_candidate() {
-        let path = unique_output_path("/tmp", "evidence");
+        let path = unique_output_path(Path::new("/tmp"), "evidence", "pdf");
         assert_eq!(path, Path::new("/tmp").join("evidence.pdf"));
     }
 }

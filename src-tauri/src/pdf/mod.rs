@@ -73,3 +73,61 @@ pub fn fnv1a_hash(value: &str) -> u64 {
             (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
         })
 }
+
+/// 将文件名主干转为文件系统安全字符串。
+///
+/// - 去除尾部 `.pdf` 后缀
+/// - 将 `/\:*?"<>|\0` 及 `.` 替换为 `_`
+/// - 去除首尾 `_`、空格、`-`
+/// - 空结果回退为 `"output"`
+pub fn safe_file_stem(input: &str) -> String {
+    let stripped = input.strip_suffix(".pdf").unwrap_or(input);
+    let mut out = String::new();
+    for ch in stripped.chars() {
+        if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0' | '.' | '（' | '）' | '(' | ')') {
+            out.push('_');
+        } else {
+            out.push(ch);
+        }
+    }
+    let trimmed = out.trim_matches(|c| matches!(c, ' ' | '_' | '-'));
+    if trimmed.is_empty() {
+        "output".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 在 `dir` 中生成一个不与已有文件冲突的路径：`{dir}/{stem}.{ext}`。
+///
+/// 若 `stem.{ext}` 已存在，则依次尝试 `stem-2.{ext}`、`stem-3.{ext}` ……；
+/// 超过 10 000 次后回退到带时间戳的文件名。
+pub fn unique_output_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
+    let candidate = if ext.is_empty() {
+        dir.join(stem)
+    } else {
+        dir.join(format!("{stem}.{ext}"))
+    };
+    if !candidate.exists() {
+        return candidate;
+    }
+    for i in 2..10_000 {
+        let candidate = if ext.is_empty() {
+            dir.join(format!("{stem}-{i}"))
+        } else {
+            dir.join(format!("{stem}-{i}.{ext}"))
+        };
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    if ext.is_empty() {
+        dir.join(format!("{stem}-{stamp}"))
+    } else {
+        dir.join(format!("{stem}-{stamp}.{ext}"))
+    }
+}
