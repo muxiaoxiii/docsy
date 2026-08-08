@@ -28,9 +28,6 @@
       <div v-if="overlaying" v-loading="true" element-loading-text="正在处理证据 PDF" class="local-processing">
         <p>页眉页脚、A4、批注和合并会在后台执行；文件较大时请等待当前批次完成。</p>
       </div>
-      <div v-if="detectingAllHeaderFooter" v-loading="true" :element-loading-text="detectionProgressText || '正在检测导入的文件...'" class="local-processing">
-        <p>正在读取页眉页脚信息，完成后统一显示结果。</p>
-      </div>
 
       <div v-if="showSessionSummary" class="session-summary">
         <div class="summary-item">
@@ -88,7 +85,7 @@
             <el-button size="small" type="danger" :loading="quickCleanupRunning" @click="immediateDeleteExistingHeaderFooter"
               >立即删除</el-button
             >
-            <el-button size="small" :loading="detectingAllHeaderFooter" @click="deepDetectAllHeaderFooter"
+            <el-button size="small" :loading="deepDetecting" @click="deepDetectAllHeaderFooter"
               >深度检测</el-button
             >
           </div>
@@ -1216,6 +1213,7 @@ const previewHeightMm = computed(() => {
 const truePreview = ref(null)
 const truePreviewLoading = ref(false)
 const detectingAllHeaderFooter = ref(false)
+const deepDetecting = ref(false)
 const detectionProgressText = ref('')
 const editingHeaderPath = ref('')
 const editingFooterPath = ref('')
@@ -1875,7 +1873,6 @@ async function loadEvidenceFiles(paths) {
   overlayFiles.value = paths.map(createEvidenceFile)
   selectedOverlayIndex.value = 0
   await refreshOverlayPageCounts()
-  await detectAllHeaderFooter({ silent: true })
   await checkExistingBookmarks()
 }
 
@@ -2656,7 +2653,12 @@ async function deepDetectAllHeaderFooter() {
     ElMessage.info('请先导入 PDF 文件')
     return
   }
-  await detectAllHeaderFooter({ deep: true })
+  deepDetecting.value = true
+  try {
+    await detectAllHeaderFooter({ silent: false })
+  } finally {
+    deepDetecting.value = false
+  }
 }
 
 async function markRemoveExistingHeaderFooter() {
