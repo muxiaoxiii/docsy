@@ -328,9 +328,16 @@ function contentRowText(file, index, kind, group, rules) {
  */
 export function buildHeaderText(file, index, rules) {
   const group = selectedGroupFor(file, 'header')
-  if (!group) return ''
+  if (!group) {
+    // No groups configured — fall back to rules-based resolution (legacy mode)
+    const mode = rules.headerMode
+    if (!mode || mode === 'none') return ''
+    return buildHeaderTextForGroup(file, index, { mode, text: rules.headerText, prefix: rules.headerPrefix }, rules)
+  }
   const mode = rules.headerMode !== undefined ? rules.headerMode : group.mode
-  return buildHeaderTextForGroup(file, index, { ...group, mode }, rules)
+  const prefix = rules.headerPrefix ?? group.prefix
+  const text = rules.headerText ?? group.text
+  return buildHeaderTextForGroup(file, index, { ...group, mode, prefix, text }, rules)
 }
 
 export function buildHeaderTextForGroup(file, index, group, rules) {
@@ -354,8 +361,8 @@ export function resolveTextTemplate(text, file, index, rules = {}) {
 }
 
 function headerBaseTextForGroup(file, index, group, _rules) {
-  if (group.mode === 'per_file') return file.header || `证据${index + 1}`
-  if (group.mode === 'custom' || group.mode === 'template') return group.text || ''
+  if (group.mode === 'per_file') return file.header ?? `证据${index + 1}`
+  if (group.mode === 'custom' || group.mode === 'template') return (group.text || _rules.headerText) ?? ''
   if (group.mode === 'seq') return `证据${index + 1}`
   if (group.mode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`
   if (group.mode === 'prefix_seq') return `${group.text || ''}证据${index + 1}`
@@ -938,7 +945,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         id: file.id || file.path,
         sourcePath: file.path,
         displayName: file.name,
-        evidenceLabel: buildHeaderTextForGroup(file, index, selectedGroupFor(file, 'header'), rules),
+        evidenceLabel: buildHeaderText(file, index, rules),
         order: index + 1,
         pageCount: file.pages || 0,
         pageStart: file.pageStart,
