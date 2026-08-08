@@ -33,7 +33,7 @@
 | MDG-020 | UI 动效与交互质感改进 | P1 | ✅ 已完成 | GLM | [changes/MDG-020](changes/MDG-020-ui-motion.md) |
 | MDG-021 | MDG-020 验证问题修复 | P2 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-021](changes/MDG-021-mdg020-fixes.md) |
 | MDG-022 | evidence overlay 迁移到 header_footer | P2 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-022](changes/MDG-022-evidence-overlay-migration.md) |
-| MDG-023 | 证据处理页眉页脚 UI 修复 | P0 | 🟡 进行中 | v0.9-mdg | [changes/MDG-023](changes/MDG-023-evidence-hf-ui-fixes.md) |
+| MDG-023 | 证据处理页眉页脚 UI 修复 | P0 | ✅ 已完成 | v0.9-mdg | [changes/MDG-023](changes/MDG-023-evidence-hf-ui-fixes.md) |
 
 ---
 
