@@ -36,9 +36,6 @@
           <div
             class="drop-zone"
             :class="{ 'drop-zone-active': dragging }"
-            @dragover.prevent="dragging = true"
-            @dragleave="dragging = false"
-            @drop.prevent="onDrop"
             @click="selectFile"
           >
             <template v-if="videoPath">
@@ -309,14 +306,6 @@ async function selectOutputDir() {
   const selected = await open({ directory: true })
   if (selected) {
     settings.outputDir = normalizeSelectedPath(selected)
-  }
-}
-
-async function onDrop(e) {
-  dragging.value = false
-  const files = e.dataTransfer?.files
-  if (files?.length && files[0].path) {
-    await loadVideoIfSupported(files[0].path)
   }
 }
 

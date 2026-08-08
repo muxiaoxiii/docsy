@@ -63,16 +63,6 @@ pub struct TemplateHistoryFieldSummary {
     pub display: String,
 }
 
-#[allow(dead_code)]
-pub fn record_generation(
-    template_path: &str,
-    manifest: &TemplateManifest,
-    output_path: &str,
-    values: &HashMap<String, Value>,
-) -> Result<()> {
-    record_history_run(template_path, manifest, output_path, values, "single")
-}
-
 pub fn record_template_seed(
     template_path: &str,
     manifest: &TemplateManifest,
@@ -563,32 +553,6 @@ fn ensure_generation_source_column(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-fn upsert_template_meta(
-    conn: &Connection,
-    manifest: &TemplateManifest,
-    template_path: &str,
-    trashed: bool,
-) -> Result<()> {
-    conn.execute(
-        "INSERT INTO template_meta (template_id, template_name, template_path, trashed, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(template_id) DO UPDATE SET
-           template_name = excluded.template_name,
-           template_path = excluded.template_path,
-           trashed = excluded.trashed,
-           updated_at = excluded.updated_at",
-        params![
-            manifest.template.id,
-            manifest.template.name,
-            template_path,
-            if trashed { 1 } else { 0 },
-            chrono::Utc::now().to_rfc3339()
-        ],
-    )?;
-    Ok(())
-}
-
 /// Ensure template_meta exists without changing the trashed flag.
 /// Used by history recording so that trashed templates stay trashed.
 fn ensure_template_meta(
@@ -630,28 +594,6 @@ pub fn query_last_values(conn: &Connection, template_id: &str) -> Result<HashMap
 pub fn last_field_values_for_template(template_id: &str) -> Result<HashMap<String, Value>> {
     let conn = open_db()?;
     query_last_values(&conn, template_id)
-}
-
-#[allow(dead_code)]
-fn query_run_field_summaries(
-    conn: &Connection,
-    run_id: i64,
-) -> Result<Vec<TemplateHistoryFieldSummary>> {
-    let mut stmt = conn.prepare(
-        "SELECT field_name, field_label, display_value
-         FROM field_history
-         WHERE run_id = ?1
-         ORDER BY id ASC
-         LIMIT 8",
-    )?;
-    let rows = stmt.query_map(params![run_id], |row| {
-        Ok(TemplateHistoryFieldSummary {
-            name: row.get(0)?,
-            label: row.get(1)?,
-            display: row.get(2)?,
-        })
-    })?;
-    collect_rows(rows)
 }
 
 fn query_field_suggestions(

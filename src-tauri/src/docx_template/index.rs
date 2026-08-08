@@ -17,7 +17,6 @@ pub struct TextNodeRef {
 
 #[derive(Debug, Clone)]
 pub struct TextIndex {
-    #[allow(dead_code)] // retained for diagnostics when indexing standalone XML parts
     pub part_name: String,
     pub nodes: Vec<TextNodeRef>,
     pub paragraph_count: usize,
@@ -42,7 +41,6 @@ impl TextIndex {
         idx
     }
 
-    #[allow(dead_code)] // exercised by focused index tests and useful to callers during diagnostics
     pub fn total_text_nodes(&self) -> usize {
         self.nodes.len()
     }
@@ -66,7 +64,6 @@ impl DocumentIndex {
         self.parts.insert(name, index);
     }
 
-    #[allow(dead_code)] // retained as the public traversal API for package diagnostics
     pub fn iter_nodes(&self) -> impl Iterator<Item = (&str, &TextNodeRef)> {
         self.parts.iter().flat_map(|(part_name, index)| {
             index
@@ -76,7 +73,6 @@ impl DocumentIndex {
         })
     }
 
-    #[allow(dead_code)] // retained as the public traversal API for package diagnostics
     pub fn iter_highlighted(&self) -> impl Iterator<Item = (&str, &TextNodeRef)> {
         self.iter_nodes().filter(|(_, node)| node.highlighted)
     }
