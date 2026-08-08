@@ -860,7 +860,7 @@ import { renderPageNumberTemplate } from '../../../shared/pdf-tools/composables/
 import { elementIdentity } from '../../../shared/pdf-tools/composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import { useHistory } from '../../../core/composables/useHistory.js'
-import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe, tauriCallQuiet, userFacingError } from '../../../core/tauriBridge.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { useHeaderFooterRules } from '../composables/useHeaderFooterRules.js'
 import { useContentRowEditing } from '../composables/useContentRowEditing.js'
@@ -1887,7 +1887,7 @@ async function checkExistingBookmarks() {
   let count = 0
   for (const file of files) {
     try {
-      const result = await tauriCallSafe('has_pdf_bookmarks', { input: file.path })
+      const result = await tauriCallQuiet('has_pdf_bookmarks', { input: file.path })
       if (result.ok && result.data) count++
     } catch {
       // 忽略单个文件检查失败
@@ -1960,7 +1960,7 @@ async function refreshOverlayPageCounts() {
     for (const file of overlayFiles.value) {
       file.statusText = '读取页数'
       file.statusType = 'warning'
-      const result = await tauriCallSafe('get_pdf_page_count', { input: file.path })
+      const result = await tauriCallQuiet('get_pdf_page_count', { input: file.path })
       if (result.ok) {
         file.pages = result.data
         file.statusText = '就绪'

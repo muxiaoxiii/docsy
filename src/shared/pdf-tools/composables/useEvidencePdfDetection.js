@@ -1,10 +1,10 @@
 import { ElMessage } from 'element-plus'
-import { tauriCallSafe, tauriCallQuiet } from '../../../core/tauriBridge.js'
+import { tauriCallQuiet } from '../../../core/tauriBridge.js'
 import { emitOperationEvent } from '../../../core/tauriBridge.js'
 import { candidateTargetRange } from './useEvidencePdfSession.js'
 import { candidateIdentity, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
 
-const DETECTION_SCAN_MAX_PAGES = 20
+const DETECTION_SCAN_MAX_PAGES = 1
 const ROMAN_PAGE_SCORE_PENALTY = -0.25
 
 export function headerFooterDetectionZoneMm(value) {
@@ -108,6 +108,7 @@ export function useEvidencePdfDetection({
         maxPages: deep ? 0 : DETECTION_SCAN_MAX_PAGES,
         headerZoneMm: headerFooterDetectionZoneMm(cleanupHeaderHeightMm.value),
         footerZoneMm: headerFooterDetectionZoneMm(cleanupFooterHeightMm.value),
+        scanArtifacts: true,
         deep,
       },
     })
@@ -206,13 +207,20 @@ export function useEvidencePdfDetection({
     )
   }
 
+  /** Check if text matches first-page evidence sequence patterns like "证据1", "对比文件3" */
+  function isFirstPageEvidenceSequence(text) {
+    if (!text) return false
+    return /^(证据|对比文件)\s*\d+/.test(String(text).trim())
+  }
+
   function bestReliableHeaderCandidate(candidates = [], totalPages = 1) {
     if (Number(totalPages || 1) <= 1) return candidates[0] || null
     return (
       candidates.find(
         (candidate) =>
           candidate?.source === 'artifact' ||
-          (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2),
+          (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2) ||
+          isFirstPageEvidenceSequence(candidate?.text || candidate?.normalizedText || ''),
       ) || null
     )
   }
@@ -274,7 +282,8 @@ export function useEvidencePdfDetection({
     if (!candidate || isPageNumberCandidate(candidate)) return false
     return (
       candidate?.source === 'artifact' ||
-      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2)
+      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2) ||
+      isFirstPageEvidenceSequence(candidate?.text || candidate?.normalizedText || '')
     )
   }
 
