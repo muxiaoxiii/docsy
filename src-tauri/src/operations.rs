@@ -2,7 +2,8 @@
 //
 // MDG-001: 第四通用层 — 操作生命周期管理
 //
-// 替代 SubprocessRegistry，统一管理异步任务和外部子进程的取消。
+// 异步任务取消管理（CancellationToken）。
+// 与 SubprocessRegistry（PID-based 子进程取消）互补，由 cancel_operation 统一入口。
 // 设计原则：
 //   - 不设固定超时自动 kill（大文件慢就慢）
 //   - 只支持用户主动取消（通过 CancellationToken）
@@ -61,7 +62,8 @@ pub struct ActiveOperation {
 
 /// 操作生命周期管理器。
 ///
-/// 替代 SubprocessRegistry，统一管理异步任务和外部子进程。
+/// CancellationToken-based 异步任务管理。
+/// 与 SubprocessRegistry（PID-based 子进程取消）互补。
 /// 通过 CancellationToken 传递取消信号，执行层自行检查并退出。
 pub struct OperationManager {
     operations: Mutex<HashMap<String, OperationEntry>>,

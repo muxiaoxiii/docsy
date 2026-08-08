@@ -172,7 +172,9 @@ pub fn respond_conversion_timeout(
 /// Cancel a running operation by ID.
 ///
 /// MDG-001: 优先使用 OperationManager（CancellationToken），
-/// 回退到 SubprocessRegistry（PID kill）用于尚未迁移的外部子进程。
+/// 统一取消入口。
+/// OperationManager: CancellationToken-based 异步任务取消（run_managed 注册的任务）
+/// SubprocessRegistry: PID-based 外部子进程 kill（qpdf 等外部命令）
 #[tauri::command]
 pub fn cancel_operation(
     manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
