@@ -33,7 +33,7 @@ defineProps({
   border: 1px solid #dbeafe;
   border-radius: 14px;
   background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%);
-  color: #36526f;
+  color: var(--el-text-color-regular);
 }
 
 .doclet-working__sprite {
@@ -61,7 +61,7 @@ defineProps({
 
 .doclet-working__elapsed {
   font-size: 11px;
-  color: #7a8a9a;
+  color: var(--el-text-color-secondary);
   line-height: 1.4;
 }
 

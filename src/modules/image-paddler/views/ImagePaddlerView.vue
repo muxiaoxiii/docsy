@@ -942,7 +942,7 @@ function scaleModeLabel(value) {
 }
 
 .preview-cell-white-border {
-  border-color: #fff;
+  border-color: white;
   box-shadow: inset 0 0 0 1px #dcdfe6;
 }
 

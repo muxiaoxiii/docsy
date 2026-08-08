@@ -3086,12 +3086,12 @@ h3 {
 }
 
 .summary-pill.active {
-  border-color: #e5bd92;
+  border-color: var(--el-color-warning-light-3);
   background: var(--docsy-accent-soft);
 }
 
 .summary-pill.warning.active strong {
-  color: #b42318;
+  color: var(--el-color-danger);
 }
 
 .rule-grid {
@@ -3466,7 +3466,7 @@ h3 {
 .preview-text {
   position: absolute;
   z-index: 2;
-  color: #111827;
+  color: var(--el-text-color-primary);
   white-space: nowrap;
   max-width: 90%;
   overflow: hidden;
@@ -3490,7 +3490,7 @@ h3 {
   border: 1px dashed #d93025;
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.9);
-  color: #b42318;
+  color: var(--el-color-danger);
   font-size: 11px;
   line-height: 1.2;
   text-decoration: line-through;
@@ -3522,7 +3522,7 @@ h3 {
   border: 2px solid #2563eb;
   border-radius: 2px;
   background: rgba(219, 234, 254, 0.42);
-  color: #1d4ed8;
+  color: var(--el-color-primary);
   font-size: 11px;
   line-height: 1.2;
   pointer-events: none;
@@ -3538,7 +3538,7 @@ h3 {
 
 .preview-error {
   padding: 12px;
-  color: #b42318;
+  color: var(--el-color-danger);
   background: #fff2f0;
   border: 1px solid #ffccc7;
   border-radius: 6px;

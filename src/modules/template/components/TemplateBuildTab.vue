@@ -1335,7 +1335,7 @@ p {
 }
 
 .party-item-arrow {
-  color: #67c23a;
+  color: var(--el-color-success);
   flex: 0 0 auto;
   font-weight: 700;
 }
@@ -1365,7 +1365,7 @@ p {
 }
 
 .muted {
-  color: #c0c4cc;
+  color: var(--el-text-color-disabled);
 }
 
 .party-child-field > span:first-child {
@@ -1385,7 +1385,7 @@ p {
 }
 
 .delete-field-row {
-  color: #c45656;
+  color: var(--el-color-danger);
   background: #fef0f0;
 }
 
@@ -1431,7 +1431,7 @@ p {
 }
 
 .grouped-field-row-1 td:first-child {
-  border-left-color: #67c23a;
+  border-left-color: var(--el-color-success);
 }
 
 .grouped-field-row-2 td {
@@ -1439,7 +1439,7 @@ p {
 }
 
 .grouped-field-row-2 td:first-child {
-  border-left-color: #8e5cf7;
+  border-left-color: var(--el-color-primary-light-3);
 }
 
 .grouped-field-row-3 td {
@@ -1447,7 +1447,7 @@ p {
 }
 
 .grouped-field-row-3 td:first-child {
-  border-left-color: #e6a23c;
+  border-left-color: var(--el-color-warning);
 }
 
 .grouped-field-row-4 td {
