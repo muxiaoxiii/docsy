@@ -282,7 +282,7 @@ function cancelRender() {
 }
 
 .preview-error {
-  color: #b42318;
+  color: var(--el-color-danger);
   background: #fff2f0;
   border: 1px solid #ffccc7;
 }

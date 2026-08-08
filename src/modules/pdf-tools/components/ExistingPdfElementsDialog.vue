@@ -341,7 +341,7 @@ function decisionTagType(decision) {
   position: fixed;
   z-index: 99999;
   background: var(--docsy-primary, #409eff);
-  color: #fff;
+  color: white;
   padding: 3px 10px;
   border-radius: 4px;
   font-size: 12px;

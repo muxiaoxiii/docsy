@@ -1455,7 +1455,7 @@ p {
 }
 
 .grouped-field-row-4 td:first-child {
-  border-left-color: #f56c6c;
+  border-left-color: var(--el-color-danger);
 }
 
 .grouped-field-row-5 td {
@@ -1463,7 +1463,7 @@ p {
 }
 
 .grouped-field-row-5 td:first-child {
-  border-left-color: #14b8c5;
+  border-left-color: var(--el-color-primary-light-2);
 }
 
 .select-options-editor {

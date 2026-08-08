@@ -969,7 +969,7 @@ p {
 
 .fill-field-header em {
   background: #fef0f0;
-  color: #f56c6c;
+  color: var(--el-color-danger);
 }
 
 
@@ -994,12 +994,12 @@ p {
 }
 
 .fill-structure-hint code.empty {
-  color: #c0c4cc;
+  color: var(--el-text-color-disabled);
 }
 
 .fill-structure-hint em {
   margin-left: 4px;
-  color: #c0c4cc;
+  color: var(--el-text-color-disabled);
   font-style: normal;
 }
 

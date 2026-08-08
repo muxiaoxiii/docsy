@@ -75,7 +75,7 @@
                 <p><code>[#]</code> / <code>[##]</code> / <code>[###]</code> — 序号，位数=#个数（01, 001...）</p>
                 <p><code>[日期]</code> — 当前日期（YYYYMMDD）</p>
                 <p><code>[YYYY-MM-DD]</code> — 自定义日期格式</p>
-                <p style="margin-top:6px;color:#aaa;">可与固定文字混合使用，如"证据[#]-[文件名]"</p>
+                <p style="margin-top:6px;color:var(--el-text-color-placeholder);">可与固定文字混合使用，如"证据[#]-[文件名]"</p>
               </div>
             </template>
             <el-icon class="info-icon"><InfoFilled /></el-icon>
@@ -179,7 +179,7 @@
                 <p><code>[#]</code> / <code>[##]</code> / <code>[###]</code> — 序号，位数=#个数（01, 001...）</p>
                 <p><code>[日期]</code> — 当前日期（YYYYMMDD）</p>
                 <p><code>[YYYY-MM-DD]</code> — 自定义日期格式</p>
-                <p style="margin-top:6px;color:#aaa;">可与固定文字混合使用，如"证据[#]-[文件名]"</p>
+                <p style="margin-top:6px;color:var(--el-text-color-placeholder);">可与固定文字混合使用，如"证据[#]-[文件名]"</p>
               </div>
             </template>
             <el-icon class="info-icon"><InfoFilled /></el-icon>

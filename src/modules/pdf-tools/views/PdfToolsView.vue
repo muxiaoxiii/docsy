@@ -1152,10 +1152,10 @@ h3 {
 }
 .anti-copy-message.success {
   background: #f0fdf4;
-  color: #16a34a;
+  color: var(--el-color-success);
 }
 .anti-copy-message.danger {
   background: #fef2f2;
-  color: #dc2626;
+  color: var(--el-color-danger);
 }
 </style>

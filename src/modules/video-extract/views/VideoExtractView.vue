@@ -556,11 +556,11 @@ useWindowFileDrop({
 }
 
 .status-ok {
-  color: #67c23a;
+  color: var(--el-color-success);
 }
 
 .status-warn {
-  color: #e6a23c;
+  color: var(--el-color-warning);
 }
 
 .drop-zone {
