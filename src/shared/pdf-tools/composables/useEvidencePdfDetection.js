@@ -4,7 +4,6 @@ import { emitOperationEvent, emitOperationUpdate } from '../../../core/tauriBrid
 import { candidateTargetRange } from './useEvidencePdfSession.js'
 import { candidateIdentity, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
 
-const DETECTION_SCAN_MAX_PAGES = 0
 const ROMAN_PAGE_SCORE_PENALTY = -0.25
 
 export function headerFooterDetectionZoneMm(value) {
