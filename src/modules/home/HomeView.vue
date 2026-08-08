@@ -132,13 +132,18 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   background: var(--docsy-surface-elevated);
   transition:
-    transform 0.15s,
-    box-shadow 0.15s;
+    transform 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out);
 }
 
 .home-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 36px rgba(54, 45, 36, 0.12);
   border-color: var(--docsy-primary);
+}
+
+.home-card:active {
+  transform: scale(0.98);
 }
 
 .card-icon {
