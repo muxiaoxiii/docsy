@@ -28,7 +28,7 @@
 | MDG-015 | 编译警告清零 + 诊断日志接入 | P1 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-015](changes/MDG-015-warnings-cleanup.md) |
 | MDG-016 | 证据处理模块页眉页脚全面优化 | P0 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-016](changes/MDG-016-evidence-header-footer.md) |
 | MDG-017 | GLM 全项目审计问题修复 | P0/P1/P2 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-017](changes/MDG-017-glm-audit-fixes.md) |
-| MDG-018 | GLM 审计剩余 + 测试回归修复 | P0/P1 | 📋 待实施 | — | [changes/MDG-018](changes/MDG-018-glm-audit-remaining.md) |
+| MDG-018 | GLM 审计剩余 + 测试回归修复 | P0/P1 | 🟡 Phase 1+2 完成 | codex/template-quickxml-0.8 | [changes/MDG-018](changes/MDG-018-glm-audit-remaining.md) |
 
 ---
 
