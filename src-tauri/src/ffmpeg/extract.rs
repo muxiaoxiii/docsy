@@ -1,11 +1,14 @@
 use crate::external::ExternalTool;
 use anyhow::{Context, Result};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const FFMPEG_EXTRACT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-pub fn extract(args: &serde_json::Value, _token: &tokio_util::sync::CancellationToken) -> Result<serde_json::Value> {
+pub fn extract(args: &serde_json::Value, token: &tokio_util::sync::CancellationToken) -> Result<serde_json::Value> {
     let started = Instant::now();
     let ffmpeg = crate::external::FfmpegTool;
     let bin = ffmpeg.binary_path()?;
@@ -44,6 +47,7 @@ pub fn extract(args: &serde_json::Value, _token: &tokio_util::sync::Cancellation
 
     let mut cmd = crate::external::hidden_command(&bin);
     cmd.arg("-hide_banner").arg("-y");
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(start) = time_range.start {
         cmd.arg("-ss").arg(format_seconds_arg(start));
     }
@@ -65,11 +69,97 @@ pub fn extract(args: &serde_json::Value, _token: &tokio_util::sync::Cancellation
     }
 
     cmd.arg(&output_pattern);
-    let output =
-        crate::external::command_output_with_idle_timeout(&mut cmd, FFMPEG_EXTRACT_IDLE_TIMEOUT)?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("ffmpeg 抽帧失败: {}", stderr.trim());
+
+    let mut child = cmd.spawn().context("启动 ffmpeg 进程失败")?;
+    let stderr = child.stderr.take().context("无法捕获 ffmpeg stderr")?;
+
+    // 独立线程逐行读取 stderr
+    let (tx, rx) = mpsc::channel::<String>();
+    let stderr_thread = std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    if tx.send(line).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // 主循环：检查取消 + 空闲超时 + 进度解析
+    let mut last_activity = Instant::now();
+    let mut exit_status = None;
+    let mut stderr_lines: Vec<String> = Vec::new();
+
+    loop {
+        // 检查取消
+        if token.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_thread.join();
+            cleanup_temp_files(&output_dir, &temp_prefix);
+            return Ok(serde_json::json!({
+                "cancelled": true,
+                "count": 0,
+                "elapsed": started.elapsed().as_millis(),
+            }));
+        }
+
+        // 非阻塞接收 stderr 行
+        match rx.try_recv() {
+            Ok(line) => {
+                last_activity = Instant::now();
+                stderr_lines.push(line);
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                // 检查空闲超时
+                if last_activity.elapsed() > FFMPEG_EXTRACT_IDLE_TIMEOUT {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stderr_thread.join();
+                    cleanup_temp_files(&output_dir, &temp_prefix);
+                    anyhow::bail!("ffmpeg 抽帧超时：{}秒内无输出", FFMPEG_EXTRACT_IDLE_TIMEOUT.as_secs());
+                }
+
+                // 检查子进程是否已退出
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        exit_status = Some(status);
+                        break;
+                    }
+                    Ok(None) => {
+                        // 进程仍在运行，短暂休眠避免忙等
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    Err(e) => {
+                        let _ = child.kill();
+                        let _ = stderr_thread.join();
+                        anyhow::bail!("检查 ffmpeg 进程状态失败: {}", e);
+                    }
+                }
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                // stderr 线程结束，等待子进程退出
+                match child.wait() {
+                    Ok(status) => {
+                        exit_status = Some(status);
+                        break;
+                    }
+                    Err(e) => anyhow::bail!("等待 ffmpeg 进程退出失败: {}", e),
+                }
+            }
+        }
+    }
+
+    let _ = stderr_thread.join();
+
+    let status = exit_status.context("ffmpeg 进程状态未知")?;
+    if !status.success() {
+        let stderr_text = stderr_lines.join("\n");
+        anyhow::bail!("ffmpeg 抽帧失败: {}", stderr_text.trim());
     }
 
     let frames = rename_extracted_frames(
@@ -85,7 +175,24 @@ pub fn extract(args: &serde_json::Value, _token: &tokio_util::sync::Cancellation
         "count": frames.len(),
         "elapsed": started.elapsed().as_millis(),
         "frames": frames,
+        "cancelled": false,
     }))
+}
+
+fn cleanup_temp_files(output_dir: &Path, temp_prefix: &str) {
+    if let Ok(entries) = std::fs::read_dir(output_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with(temp_prefix) {
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
