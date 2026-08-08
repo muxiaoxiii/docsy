@@ -27,6 +27,8 @@
 | MDG-014 | 统一文档预览模块 + 编辑 UI 优化 | P1 | ✅ 已合并 | codex/template-quickxml-0.8 | [changes/MDG-014](changes/MDG-014-template-ui-redesign.md) |
 | MDG-015 | 编译警告清零 + 诊断日志接入 | P1 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-015](changes/MDG-015-warnings-cleanup.md) |
 | MDG-016 | 证据处理模块页眉页脚全面优化 | P0 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-016](changes/MDG-016-evidence-header-footer.md) |
+| MDG-017 | GLM 全项目审计问题修复 | P0/P1/P2 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-017](changes/MDG-017-glm-audit-fixes.md) |
+| MDG-018 | GLM 审计剩余 + 测试回归修复 | P0/P1 | 📋 待实施 | — | [changes/MDG-018](changes/MDG-018-glm-audit-remaining.md) |
 
 ---
 
@@ -63,4 +65,3 @@
 ## 日志
 
 - [2026-08-07](logs/2026-08-07.md) — 项目启动，完成全部审阅，建立 MDG 流程
-| MDG-017 | GLM 全项目审计问题修复 | P0/P1/P2 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-017](changes/MDG-017-glm-audit-fixes.md) |
