@@ -45,6 +45,15 @@ export function emitOperationEvent(type, command, operationId) {
   )
 }
 
+export function emitOperationUpdate(operationId, label) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(
+    new CustomEvent('docsy-operation-update', {
+      detail: { id: operationId, label },
+    }),
+  )
+}
+
 export async function tauriCall(command, args = {}) {
   const operationId = nextOperationId(command)
   emitOperationEvent('start', command, operationId)

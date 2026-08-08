@@ -155,6 +155,13 @@ function finishOperation(event) {
   showCancel.value = false
 }
 
+function updateOperation(event) {
+  const label = event.detail?.label
+  if (label) {
+    operationMessage.value = label
+  }
+}
+
 async function cancelCurrentOperation() {
   try {
     // 查询 Rust 侧活跃操作，按 ID 取消
@@ -188,6 +195,7 @@ onMounted(() => {
   window.addEventListener('docsy-settings-updated', applySettingsEvent)
   window.addEventListener('docsy-operation-start', startOperation)
   window.addEventListener('docsy-operation-finish', finishOperation)
+  window.addEventListener('docsy-operation-update', updateOperation)
 
   // Listen for conversion timeout events from the backend
   listen('docsy-conversion-timeout', async () => {
@@ -226,6 +234,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('docsy-settings-updated', applySettingsEvent)
   window.removeEventListener('docsy-operation-start', startOperation)
   window.removeEventListener('docsy-operation-finish', finishOperation)
+  window.removeEventListener('docsy-operation-update', updateOperation)
   if (unlistenConversionTimeout) unlistenConversionTimeout()
   if (unlistenDownloadProgress) unlistenDownloadProgress()
 })

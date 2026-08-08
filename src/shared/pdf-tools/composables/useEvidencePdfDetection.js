@@ -1,6 +1,6 @@
 import { ElMessage } from 'element-plus'
 import { tauriCallQuiet } from '../../../core/tauriBridge.js'
-import { emitOperationEvent } from '../../../core/tauriBridge.js'
+import { emitOperationEvent, emitOperationUpdate } from '../../../core/tauriBridge.js'
 import { candidateTargetRange } from './useEvidencePdfSession.js'
 import { candidateIdentity, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
 
@@ -40,7 +40,9 @@ export function useEvidencePdfDetection({
       const elapsed = Math.floor((Date.now() - startTime) / 1000)
       const m = String(Math.floor(elapsed / 60)).padStart(2, '0')
       const s = String(elapsed % 60).padStart(2, '0')
-      detectionProgressText.value = `正在检测 ${results.length}/${total} 个文件  ${m}:${s}`
+      const text = `正在检测 ${results.length}/${total} 个文件  ${m}:${s}`
+      detectionProgressText.value = text
+      emitOperationUpdate(docletId, text)
     }, 1000)
     try {
       // Detect all files — parallel with concurrency limit
@@ -54,14 +56,18 @@ export function useEvidencePdfDetection({
           const elapsed = Math.floor((Date.now() - startTime) / 1000)
           const m = String(Math.floor(elapsed / 60)).padStart(2, '0')
           const s = String(elapsed % 60).padStart(2, '0')
-          detectionProgressText.value = `正在检测 ${results.length}/${total} 个文件  ${m}:${s}`
+          const text = `正在检测 ${results.length}/${total} 个文件  ${m}:${s}`
+          detectionProgressText.value = text
+          emitOperationUpdate(docletId, text)
         }
       }
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, () => runNext()))
       // Final progress update
       clearInterval(timerId)
       const elapsed = Math.floor((Date.now() - startTime) / 1000)
-      detectionProgressText.value = `检测完成 ${results.length}/${total} 个文件  ${elapsed}s`
+      const finalText = `检测完成 ${results.length}/${total} 个文件  ${elapsed}s`
+      detectionProgressText.value = finalText
+      emitOperationUpdate(docletId, finalText)
       // Phase 2: apply all results at once (single re-render cycle)
       for (const { file, result } of results) {
         if (result.ok) {
