@@ -5,6 +5,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tauri::Emitter;
 
 const DEFAULT_MANIFEST_URL: &str =
     "https://github.com/muxiaoxiii/docsy/releases/download/toolchain-v1/tools-manifest.json";
@@ -119,7 +120,7 @@ fn install_package_file(
     }
     fs::create_dir_all(&staging).context("创建临时工具目录失败")?;
 
-    if let Err(err) = extract_zip_file(archive_path, &staging, package_extract_limit(name)) {
+    if let Err(err) = extract_archive(archive_path, &staging, package_extract_limit(name)) {
         fs::remove_dir_all(&staging).ok();
         return Err(err);
     }
@@ -408,6 +409,13 @@ fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchiv
         let mut reader = response.take(max_bytes + 1);
         let mut total = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
+        let download_start = std::time::Instant::now();
+        let min_bytes_before_check: u64 = 512 * 1024; // 512KB
+        let min_speed_bps: u64 = 30 * 1024; // 30KB/s
+        let speed_check_interval = std::time::Duration::from_secs(10);
+        let mut last_check_time = download_start;
+        let mut last_check_bytes = 0_u64;
+        let mut last_progress_emit = download_start;
         loop {
             let count = reader.read(&mut buffer).context("读取下载内容失败")?;
             if count == 0 {
@@ -420,6 +428,35 @@ fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchiv
             }
             std::io::Write::write_all(&mut output, &buffer[..count])
                 .context("写入工具下载临时文件失败")?;
+
+            // Speed check: if too slow after initial buffer, bail to try next mirror
+            if total > min_bytes_before_check {
+                let now = std::time::Instant::now();
+                if now.duration_since(last_check_time) >= speed_check_interval {
+                    let bytes_since = total.saturating_sub(last_check_bytes);
+                    let elapsed_secs = now.duration_since(last_check_time).as_secs_f64();
+                    let speed = bytes_since as f64 / elapsed_secs;
+                    if speed < min_speed_bps as f64 {
+                        let _ = fs::remove_file(&path);
+                        anyhow::bail!("下载速度过慢 ({:.0} KB/s)，切换到其他镜像", speed / 1024.0);
+                    }
+                    last_check_time = now;
+                    last_check_bytes = total;
+                }
+            }
+
+            // Emit progress event to frontend (throttled to ~1/sec)
+            let now = std::time::Instant::now();
+            if now.duration_since(last_progress_emit) >= std::time::Duration::from_secs(1) {
+                let elapsed_ms = download_start.elapsed().as_millis() as u64;
+                if let Some(app) = crate::get_app_handle() {
+                    let _ = app.emit(
+                        "docsy-tool-download-progress",
+                        serde_json::json!({"bytes": total, "elapsed_ms": elapsed_ms}),
+                    );
+                }
+                last_progress_emit = now;
+            }
         }
         return Ok(TempArchive { path });
     }
@@ -504,6 +541,21 @@ fn verify_sha256_file_if_present(path: &Path, expected: &str) -> Result<()> {
     Ok(())
 }
 
+fn extract_archive(
+    archive_path: &Path,
+    output_dir: &Path,
+    max_total_uncompressed: u64,
+) -> Result<()> {
+    let ext = archive_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext.to_lowercase().as_str() {
+        "7z" => extract_7z_file(archive_path, output_dir, max_total_uncompressed),
+        _ => extract_zip_file(archive_path, output_dir, max_total_uncompressed),
+    }
+}
+
 fn extract_zip_file(
     archive_path: &Path,
     output_dir: &Path,
@@ -535,6 +587,30 @@ fn extract_zip_file(
         }
         let mut output = fs::File::create(&output_path).context("创建解压文件失败")?;
         std::io::copy(&mut file, &mut output).context("解压 zip 文件失败")?;
+    }
+    Ok(())
+}
+
+fn extract_7z_file(
+    archive_path: &Path,
+    output_dir: &Path,
+    max_total_uncompressed: u64,
+) -> Result<()> {
+    let file = fs::File::open(archive_path).context("读取工具 7z 失败")?;
+    sevenz_rust::decompress(file, output_dir).context("解压 7z 文件失败")?;
+
+    // Verify uncompressed size
+    let mut total: u64 = 0;
+    if let Ok(entries) = fs::read_dir(output_dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    if total > max_total_uncompressed {
+        fs::remove_dir_all(output_dir).ok();
+        anyhow::bail!("工具包解压后体积过大，已拒绝解压");
     }
     Ok(())
 }

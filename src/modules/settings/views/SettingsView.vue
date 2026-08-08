@@ -178,6 +178,7 @@ const tools = reactive([
     removing: false,
     autoInstall: true,
     downloadUrl: 'https://github.com/qpdf/qpdf/releases',
+    downloadGuide: 'Windows：选择 qpdf-*-msvc64.zip；macOS：建议直接用 brew install qpdf',
   },
   {
     name: 'poppler',
@@ -192,6 +193,7 @@ const tools = reactive([
     removing: false,
     autoInstall: true,
     downloadUrl: 'https://github.com/oschwartz10612/poppler-windows/releases',
+    downloadGuide: 'Windows：选择最新 Release-*.zip；macOS：建议直接用 brew install poppler',
     runtimeUrl: 'https://aka.ms/vc14/vc_redist.x64.exe',
   },
   {
@@ -206,7 +208,8 @@ const tools = reactive([
     installingLocal: false,
     removing: false,
     autoInstall: true,
-    downloadUrl: 'https://www.gyan.dev/ffmpeg/builds/',
+    downloadUrl: 'https://github.com/BtbN/FFmpeg-Builds/releases',
+    downloadGuide: 'Windows：选择 ffmpeg-master-latest-win64-gpl.zip（GPL 版，含 drawtext）；macOS：建议直接用 brew install ffmpeg',
   },
   {
     name: 'word',
@@ -488,6 +491,28 @@ async function removeManagedTool(tool) {
 }
 
 async function openToolDownload(tool) {
+  try {
+    await ElMessageBox.confirm(
+      `<div style="line-height:1.8">
+        <p><strong>即将打开 ${tool.label} 官方下载页</strong></p>
+        ${tool.downloadGuide ? `<p>📋 <strong>选择指南：</strong>${tool.downloadGuide}</p>` : ''}
+        <p style="color:var(--el-text-color-secondary);font-size:12px;margin-top:8px">
+          ⚠️ 请从官方源下载，不要使用第三方打包版本。<br>
+          下载后放入 Docsy 工具目录（设置页可见路径），或使用「本地 zip 安装」按钮。<br>
+          第三方工具的使用风险由您自行承担。
+        </p>
+      </div>`,
+      '外部下载提示',
+      {
+        confirmButtonText: '打开下载页',
+        cancelButtonText: '取消',
+        dangerouslyUseHTMLString: true,
+        type: 'info',
+      },
+    )
+  } catch {
+    return // User cancelled
+  }
   const result = await openExternalUrl(tool.downloadUrl)
   if (!result.ok) {
     ElMessage.error(result.error || '无法打开下载页')

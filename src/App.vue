@@ -178,6 +178,7 @@ async function cancelCurrentOperation() {
 }
 
 let unlistenConversionTimeout = null
+let unlistenDownloadProgress = null
 
 onMounted(() => {
   // Platform detection for OS-specific CSS (backdrop-filter on macOS only)
@@ -205,6 +206,17 @@ onMounted(() => {
   }).then((unlisten) => {
     unlistenConversionTimeout = unlisten
   })
+
+  // Listen for tool download progress events
+  listen('docsy-tool-download-progress', (event) => {
+    const { bytes, elapsed_ms } = event.payload || {}
+    if (!bytes) return
+    const mb = (bytes / (1024 * 1024)).toFixed(1)
+    const speed = elapsed_ms > 0 ? ((bytes / 1024) / (elapsed_ms / 1000)).toFixed(0) : '?'
+    operationMessage.value = `正在下载工具… ${mb} MB (${speed} KB/s)`
+  }).then((unlisten) => {
+    unlistenDownloadProgress = unlisten
+  })
 })
 
 onBeforeUnmount(() => {
@@ -215,6 +227,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('docsy-operation-start', startOperation)
   window.removeEventListener('docsy-operation-finish', finishOperation)
   if (unlistenConversionTimeout) unlistenConversionTimeout()
+  if (unlistenDownloadProgress) unlistenDownloadProgress()
 })
 </script>
 
