@@ -186,6 +186,8 @@
           v-model:header-margin-mm="headerMarginMm"
           v-model:header-offset-x-mm="headerOffsetXMm"
           v-model:header-color="headerColor"
+          v-model:header-page-start="headerPageStart"
+          v-model:header-page-end="headerPageEnd"
           v-model:footer-text-groups="footerTextGroupsModel"
           v-model:selected-footer-text-group-id="selectedFooterTextGroupId"
           v-model:footer-insert-enabled="footerInsertEnabled"
@@ -196,6 +198,8 @@
           v-model:footer-text-margin-mm="footerTextMarginMm"
           v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
           v-model:footer-text-color="footerTextColor"
+          v-model:footer-text-page-start="footerTextPageStart"
+          v-model:footer-text-page-end="footerTextPageEnd"
           v-model:page-number-groups="pageNumberGroupsModel"
           v-model:selected-page-number-group-id="selectedPageNumberGroupId"
           v-model:page-number-enabled="footerEnabled"
@@ -669,6 +673,8 @@
         v-model:header-margin-mm="headerMarginMm"
         v-model:header-offset-x-mm="headerOffsetXMm"
         v-model:header-color="headerColor"
+        v-model:header-page-start="headerPageStart"
+        v-model:header-page-end="headerPageEnd"
         v-model:footer-text-groups="footerTextGroupsModel"
         v-model:selected-footer-text-group-id="selectedFooterTextGroupId"
         v-model:footer-insert-enabled="footerInsertEnabled"
@@ -679,6 +685,8 @@
         v-model:footer-text-margin-mm="footerTextMarginMm"
         v-model:footer-text-offset-x-mm="footerTextOffsetXMm"
         v-model:footer-text-color="footerTextColor"
+        v-model:footer-text-page-start="footerTextPageStart"
+        v-model:footer-text-page-end="footerTextPageEnd"
         v-model:page-number-groups="pageNumberGroupsModel"
         v-model:selected-page-number-group-id="selectedPageNumberGroupId"
         v-model:page-number-enabled="footerEnabled"
@@ -1074,6 +1082,14 @@ const headerColor = computed({
   get: () => selectedHeaderGroup.value.color,
   set: (v) => { selectedHeaderGroup.value.color = v },
 })
+const headerPageStart = computed({
+  get: () => selectedHeaderGroup.value.pageStart || 1,
+  set: (v) => { selectedHeaderGroup.value.pageStart = v },
+})
+const headerPageEnd = computed({
+  get: () => selectedHeaderGroup.value.pageEnd || 0,
+  set: (v) => { selectedHeaderGroup.value.pageEnd = v },
+})
 const footerTextContent = computed({
   get: () => selectedFooterTextGroup.value.text,
   set: (v) => { selectedFooterTextGroup.value.text = v },
@@ -1101,6 +1117,14 @@ const footerTextOffsetXMm = computed({
 const footerTextColor = computed({
   get: () => selectedFooterTextGroup.value.color,
   set: (v) => { selectedFooterTextGroup.value.color = v },
+})
+const footerTextPageStart = computed({
+  get: () => selectedFooterTextGroup.value.pageStart || 1,
+  set: (v) => { selectedFooterTextGroup.value.pageStart = v },
+})
+const footerTextPageEnd = computed({
+  get: () => selectedFooterTextGroup.value.pageEnd || 0,
+  set: (v) => { selectedFooterTextGroup.value.pageEnd = v },
 })
 const pageNumberSequence = computed({
   get: () => selectedPageNumberGroup.value.sequence,
