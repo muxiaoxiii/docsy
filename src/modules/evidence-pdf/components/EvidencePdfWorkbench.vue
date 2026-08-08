@@ -818,14 +818,13 @@ import PdfJsPreview from '../../pdf-tools/components/PdfJsPreview.vue'
 import HeaderFooterRuleFields from '../../pdf-tools/components/HeaderFooterRuleFields.vue'
 import PageNumberRuleDialog from '../../pdf-tools/components/PageNumberRuleDialog.vue'
 import ExistingPdfElementsDialog from '../../pdf-tools/components/ExistingPdfElementsDialog.vue'
+import EvidenceMergedImportPlan from './EvidenceMergedImportPlan.vue'
+import EvidenceOverlayTable from './EvidenceOverlayTable.vue'
 import {
   buildEvidencePdfRulePayload,
   buildFileContentRows,
   buildMergeOutputPath,
   buildOutputDir,
-  createDefaultFooterTextGroup,
-  createDefaultHeaderGroup,
-  createDefaultPageNumberGroup,
   createEvidenceFile,
   fileName,
   groupsFor,
@@ -848,6 +847,9 @@ import { usePointerReorder } from '../../../core/composables/usePointerReorder.j
 import { useHistory } from '../../../core/composables/useHistory.js'
 import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
+import { useHeaderFooterRules } from '../composables/useHeaderFooterRules.js'
+import { useContentRowEditing } from '../composables/useContentRowEditing.js'
+import { useFileOrdering } from '../composables/useFileOrdering.js'
 
 /** Parse a page number value from detected text (e.g. "1/10 页" → 1, "第3页" → 3). */
 function parsePageNumberValue(text) {
@@ -929,43 +931,8 @@ const splitReplacementOutputDir = ref('')
 const splitCleanupHeader = ref(false)
 const splitCleanupFooter = ref(false)
 
-const DEFAULT_RASTER_DPI = 200
-const HORIZONTAL_OFFSET_LIMIT_MM = 120
-
-const normalizeA4 = ref(false)
-const a4Orientation = ref('preserve')
-const rasterDpi = ref(DEFAULT_RASTER_DPI)
-const removeAnnotations = ref(false)
-const bookmarkEnabled = ref(false)
-const bookmarkRemoveExisting = ref(false)
-const bookmarkLabelSource = ref('header')
 const existingBookmarkCount = ref(0)
 const existingBookmarkAlertVisible = ref(true)
-const annotationKinds = ref([
-  'Text',
-  'FreeText',
-  'Highlight',
-  'Underline',
-  'StrikeOut',
-  'Squiggly',
-  'Ink',
-  'Stamp',
-  'Square',
-  'Circle',
-  'Line',
-  'Polygon',
-  'PolyLine',
-])
-const cleanupHeaderHeightMm = ref(18)
-const cleanupFooterHeightMm = ref(18)
-const insertHeaderFooterEnabled = ref(true)
-const globalApplyEnabled = ref(true)
-const globalHeaderGroup = ref(createDefaultHeaderGroup())
-const globalFooterTextGroup = ref(createDefaultFooterTextGroup())
-const globalPageNumberGroup = ref(createDefaultPageNumberGroup())
-const headerInsertEnabled = ref(false)
-const footerInsertEnabled = ref(false)
-const pageNumberShowTotal = ref(true)
 
 // Per-file overlay rows (must be declared before group computeds that reference selectedOverlayFile)
 const overlayRows = computed(() => {
