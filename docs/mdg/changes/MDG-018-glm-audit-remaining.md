@@ -197,3 +197,10 @@ Phase 3（遗留清理）→ 各项独立
 - 2026-08-08 11:30 — Phase 1 完成：4 个测试回归修复
 - 2026-08-08 11:40 — Phase 2 完成：DocsyError 全覆盖（settings/system/video/image_paddler）
 - 2026-08-08 11:45 — Phase 2c 完成：tauriBridge 前端兼容性修复
+- 2026-08-08 12:27 — Phase 3 遗留修复（GLM 手动执行）：
+  - image-paddler 预览色硬编码 → CSS 变量（`#fbfaf8`→`--docsy-surface-elevated`、`#303133`→`--docsy-text-strong`、`#dcdfe6`→`--docsy-border-subtle`）
+  - EvidencePdfWorkbench.vue 4 处 CSS 硬编码 → CSS 变量（`--docsy-danger`、`--docsy-info`、`--docsy-danger-soft`、`--docsy-danger-border`）
+  - TemplateBuildTab.vue 9 处 CSS 硬编码 → CSS 变量（`--docsy-token-green-border`、`--docsy-success-soft`、`--docsy-danger-soft`、`--docsy-danger-border`、`--docsy-info-soft`、`--docsy-token-purple`）
+  - styles.css 新增 5 个 soft/info 变量（`--docsy-danger-soft/border`、`--docsy-success-soft`、`--docsy-info/info-soft`）
+  - appLogger.js 裸 invoke **不修复** — tauriBridge.js 依赖 appLogger 的 logError，改用 tauriBridge 会造成循环依赖。直接用 invoke 是日志底层的正确架构选择。
+  - 验证：Rust 160 passed / 0 failed，前端 82 passed / 0 failed

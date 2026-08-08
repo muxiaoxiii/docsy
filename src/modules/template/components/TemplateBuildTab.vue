@@ -968,7 +968,7 @@ p {
   align-items: center;
   margin-bottom: 10px;
   padding: 8px 10px;
-  border: 1px solid #cddfd9;
+  border: 1px solid var(--docsy-token-green-border);
   border-radius: 6px;
   background: var(--docsy-primary-soft);
 }
@@ -984,9 +984,9 @@ p {
   gap: 8px;
   margin-bottom: 10px;
   padding: 10px;
-  border: 1px solid #d7e4d1;
+  border: 1px solid var(--docsy-token-green-border);
   border-radius: 6px;
-  background: #f2f7ef;
+  background: var(--docsy-success-soft);
 }
 
 .suggestion-header,
@@ -1292,9 +1292,9 @@ p {
   gap: 6px;
   margin-bottom: 12px;
   padding: 10px;
-  border: 1px solid #fcd3d3;
+  border: 1px solid var(--docsy-danger-border);
   border-radius: 6px;
-  background: #fef0f0;
+  background: var(--docsy-danger-soft);
   color: var(--docsy-text);
 }
 
@@ -1386,7 +1386,7 @@ p {
 
 .delete-field-row {
   color: var(--el-color-danger);
-  background: #fef0f0;
+  background: var(--docsy-danger-soft);
 }
 
 .party-child-row {
@@ -1419,7 +1419,7 @@ p {
 }
 
 .grouped-field-row-0 td {
-  background: #f2f8ff;
+  background: var(--docsy-info-soft);
 }
 
 .grouped-field-row-0 td:first-child {
@@ -1427,7 +1427,7 @@ p {
 }
 
 .grouped-field-row-1 td {
-  background: #f1fbf3;
+  background: var(--docsy-success-soft);
 }
 
 .grouped-field-row-1 td:first-child {
@@ -1435,7 +1435,7 @@ p {
 }
 
 .grouped-field-row-2 td {
-  background: #f9f4ff;
+  background: var(--docsy-token-purple);
 }
 
 .grouped-field-row-2 td:first-child {

@@ -3487,7 +3487,7 @@ h3 {
   min-width: 56px;
   min-height: 16px;
   padding: 1px 4px;
-  border: 1px dashed #d93025;
+  border: 1px dashed var(--docsy-danger);
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.9);
   color: var(--el-color-danger);
@@ -3519,7 +3519,7 @@ h3 {
   min-width: 56px;
   min-height: 16px;
   padding: 1px 4px;
-  border: 2px solid #2563eb;
+  border: 2px solid var(--docsy-info);
   border-radius: 2px;
   background: rgba(219, 234, 254, 0.42);
   color: var(--el-color-primary);
@@ -3539,8 +3539,8 @@ h3 {
 .preview-error {
   padding: 12px;
   color: var(--el-color-danger);
-  background: #fff2f0;
-  border: 1px solid #ffccc7;
+  background: var(--docsy-danger-soft);
+  border: 1px solid var(--docsy-danger-border);
   border-radius: 6px;
 }
 

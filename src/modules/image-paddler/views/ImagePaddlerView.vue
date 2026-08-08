@@ -441,7 +441,7 @@ const {
   min-width: 0;
   min-height: 0;
   border: 1px solid transparent;
-  background: #fbfaf8;
+  background: var(--docsy-surface-elevated);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -450,12 +450,12 @@ const {
 }
 
 .preview-cell-bordered {
-  border: 2px solid #303133;
+  border: 2px solid var(--docsy-text-strong);
 }
 
 .preview-cell-white-border {
   border-color: white;
-  box-shadow: inset 0 0 0 1px #dcdfe6;
+  box-shadow: inset 0 0 0 1px var(--docsy-border-subtle);
 }
 
 .preview-image-area {
