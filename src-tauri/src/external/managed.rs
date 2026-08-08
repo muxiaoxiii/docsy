@@ -244,19 +244,22 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
             max_bytes: None,
             binaries: vec![binary_name("qpdf")],
             mirrors: vec![
+                "https://gh-proxy.com/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip".into(),
                 "https://ghfast.top/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip".into(),
+                "https://ghproxy.cc/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip".into(),
             ],
         }),
         "ffmpeg" => Some(ToolPackage {
-            version: "9.0-essentials".into(),
-            url: "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0-essentials_build.zip"
+            version: "9.0-full".into(),
+            url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
                 .into(),
             sha256: String::new(),
             max_bytes: None,
             binaries: vec![binary_name("ffmpeg"), binary_name("ffprobe")],
             mirrors: vec![
-                "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
+                "https://gh-proxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
                 "https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
+                "https://ghproxy.cc/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".into(),
             ],
         }),
         "poppler" => Some(ToolPackage {
@@ -268,7 +271,9 @@ fn embedded_windows_package_spec(name: &str) -> Option<ToolPackage> {
             max_bytes: None,
             binaries: vec![binary_name("pdftoppm"), binary_name("pdftotext")],
             mirrors: vec![
+                "https://gh-proxy.com/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip".into(),
                 "https://ghfast.top/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip".into(),
+                "https://ghproxy.cc/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip".into(),
             ],
         }),
         _ => None,
