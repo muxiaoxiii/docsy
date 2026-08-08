@@ -1,4 +1,4 @@
-import { sortByNatural } from '../../pdf-tools/composables/useEvidencePdfSession.js'
+import { sortByNatural } from '../../../shared/pdf-tools/composables/useEvidencePdfSession.js'
 
 /**
  * Manages file ordering operations for the evidence PDF workbench:

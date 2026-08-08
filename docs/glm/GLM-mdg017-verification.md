@@ -1,179 +1,172 @@
-# MDG-017 修改验证报告
+# MDG-017/018 修改验证报告（最终版）
 
-> 验证日期：2026-08-08
-> 验证范围：9593017..HEAD（MDG-017 全部 12 个 commit）
+> 验证日期：2026-08-08（二次验证）
+> 验证范围：9593017..097b517（MDG-017 + MDG-018 全部 commit）
 > 验证方法：cargo test + vitest + 代码审查
 
 ---
 
-## 一、验证结果总览
+## 一、最终验证结果
 
-| 验证点 | 结果 | 详情 |
+| 验证点 | 上次结果 | 本次结果 | 变化 |
+|--------|---------|---------|------|
+| 1. P0 XML 注入修复 | ✅ 正确 | ✅ 正确 | 无变化 |
+| 2. P0 模块边界迁移 | ⚠️ 12 处跨模块 import | ⚠️ **16 处**跨模块 import | ⬆ 增加了 4 处 |
+| 3. P1 DocsyError 枚举 | ⚠️ 定义了没用上 | ⚠️ image_paddler 用了（2 命令），其余仍 String | ⬆ 部分改善 |
+| 4. P1 TemplateView 拆分 | ✅ 356 行 | ✅ 356 行 | 无变化 |
+| 5. P1 EvidencePdfWorkbench 拆分 | ⚠️ 耦合仍在 | ⚠️ 耦合仍在 | 无变化 |
+| 6. P2 清理 | ✅ 基本完成 | ✅ **全部完成**（死 CSS 已清） | ⬆ 改善 |
+| 7. 4 个失败测试 | ❌ 回归 | ✅ **全部修复**（82/82 passed） | ⬆ 修复 |
+| 8. 裸 invoke | ⚠️ TemplateView 有 | ✅ **已修复**（0 处） | ⬆ 修复 |
+| 9. 编译警告 | 未检查 | ✅ **0 warnings** | ⬆ 清零 |
+| 10. 硬编码颜色 | ⚠️ 6 处 | ⚠️ image-paddler 边框色映射（可接受） | ⬆ 大部分修复 |
+
+---
+
+## 二、测试状态
+
+```
+Rust:   160 passed / 0 failed / 1 ignored  ✅
+前端:    82 passed / 0 failed (14 files)   ✅
+编译:      0 warnings                       ✅
+```
+
+**4 个测试回归已修复**。MDG-018 Phase 1 修复了 `buildHeaderText` 的旧 API 字段同步问题：
+- `buildHeaderText` 现在正确同步 `rules.headerText` 和 `rules.headerPrefix` 到 group 对象
+- `buildEvidencePdfRulePayload` 的 `evidenceLabel` 修复了 mode 覆盖逻辑
+
+---
+
+## 三、逐项详细验证
+
+### 1. P0 XML 注入 — ✅ 正确（无变化）
+
+`ooxml.rs` 用 `BytesText::from_escaped` + 手动转义 `&<>`，无遗漏注入点。
+
+### 2. P0 模块边界 — ⚠️ 跨模块 import 反而增加了
+
+**上次**：12 处 `../../pdf-tools/` 引用
+**本次**：**16 处**（增加了 4 处）
+
+新增的 4 处来自拆分出的 composables：
+- `useFileOrdering.js:1` — `import { sortByNatural } from '../../pdf-tools/composables/useEvidencePdfSession.js'`
+- `useContentRowEditing.js:10` — `from '../../pdf-tools/composables/useEvidencePdfSession.js'`
+- `useContentRowEditing.js:11` — `from '../../pdf-tools/composables/pdfPageNumberRules.js'`
+- `useHeaderFooterRules.js:9` — `from '../../pdf-tools/composables/useEvidencePdfSession.js'`
+
+**本质问题未解决**：EvidencePdfWorkbench 及其 composables 仍然大量依赖 pdf-tools 的 4 个组件 + 8 个 composables。文件搬家了，但底层依赖未迁移，拆分 composable 反而增加了新的跨模块引用。
+
+**根本修复建议**：将 pdf-tools 下被 evidence-pdf 依赖的共享代码（useEvidencePdfSession.js、pdfPageNumberRules.js、splitFileName.js 等 + 4 个组件）下沉到 `src/shared/pdf-tools/`，两个模块都从 shared 引用。
+
+### 3. P1 DocsyError — ⚠️ 部分使用
+
+**已迁移的命令**（2 个）：
+- `image_paddler.rs` — `analyze_images` 和 `run_images` 返回 `Result<T, DocsyError>`
+
+**未迁移的命令**（仍返回 `Result<T, String>`）：
+- `pdf.rs` — 26 个命令全部返回 String
+- `template.rs` — 26 个命令全部返回 String
+- `system.rs` — 13 个命令全部返回 String
+- `settings.rs` — 7 个命令全部返回 String
+- `video.rs` — 4 个命令全部返回 String
+
+**tauriBridge.js 已兼容**：`tauriBridge.js:79-84` 能解析 DocsyError 的 JSON 对象格式（`{ kind, message/reason }`），提取可读消息。这意味着 image_paddler 的错误前端能拿到结构化信息，但其他命令仍只能拿到 String。
+
+**评估**：DocsyError 的基础设施（枚举定义 + thiserror + tauriBridge 兼容 + mod.rs 转换函数）已就绪，image_paddler 作为试点验证了流程。剩余 76 个命令的迁移是机械性工作，可后续逐步推进。
+
+### 4. P1 TemplateView 拆分 — ✅ 质量好（无变化）
+
+TemplateView.vue 356 行，useTemplateState.js 2579 行。拆分质量好，但 useTemplateState.js 偏大，建议后续按 Build/Render/History 三域再拆。
+
+### 5. P1 EvidencePdfWorkbench 拆分 — ⚠️ 耦合仍在（无变化）
+
+3 个 composable + 2 个组件已拆出，但 16 处跨模块 import 仍在。
+
+### 6. P2 清理 — ✅ 全部完成
+
+| 清理项 | 上次 | 本次 |
 |--------|------|------|
-| 1. P0 XML 注入修复 | ✅ **正确** | `BytesText::from_escaped` + 手动转义 `&<>`，无遗漏 |
-| 2. P0 模块边界迁移 | ⚠️ **部分完成** | 文件已迁移，但 12 处跨模块 import 仍在 |
-| 3. P1 DocsyError 枚举 | ⚠️ **定义了但没用上** | 7 个变体 + thiserror，但命令层仍全返回 String |
-| 4. P1 TemplateView 拆分 | ✅ **质量好** | 2651→356 行，但 useTemplateState.js 2579 行偏大 |
-| 5. P1 EvidencePdfWorkbench 拆分 | ⚠️ **拆分了但耦合仍在** | 3 个 composable + 2 个组件，12 处跨模块 import |
-| 6. P2 清理 | ✅ **基本完成** | dead_code 全清、TextOverlay 删除、Settings 死 CSS 清除 |
-| 7. 4 个失败测试 | ❌ **MDG-017 引入的回归** | 改了 buildHeaderText 但没同步旧 API 字段 |
+| `#[allow(dead_code)]` 7 处 | ✅ 全清 | ✅ |
+| TextOverlay 死代码 | ✅ 删除 | ✅ |
+| SettingsView 死 CSS | ✅ 清除 | ✅ |
+| EvidencePdfView 死 CSS | ❌ 残留 | ✅ **已清理** |
 
----
+### 7. 4 个测试回归 — ✅ 全部修复
 
-## 二、逐项详细验证
-
-### 1. P0 XML 注入 — ✅ 正确
-
-- `ooxml.rs:191` 用 `BytesText::from_escaped` + 手动转义 `&`→`&amp;`、`<`→`&lt;`、`>`→`&gt;`
-- 全代码库无 `BytesText::new` 残留
-- XML 文本节点按规范只需转义 `&` 和 `<`，`>` 为惯例，`"`/`'` 仅属性值需要——当前用法正确
-- `push_attribute` 自动转义属性值，安全
-- **无遗漏注入点**
-
-### 2. P0 模块边界 — ⚠️ 部分完成
-
-**已完成**：
-- `EvidencePdfWorkbench.vue` 已迁移到 `src/modules/evidence-pdf/components/`
-- `src/modules/pdf-tools/views/` 下无残留
-- 新增 3 个 composable（useHeaderFooterRules、useContentRowEditing、useFileOrdering）+ 2 个组件（EvidenceMergedImportPlan、EvidenceOverlayTable）
-- `EvidencePdfView.vue` 自身无跨模块 import
-
-**未完成**：
-- `EvidencePdfWorkbench.vue` 仍有 **12 处** `../../pdf-tools/` 引用（PdfJsPreview、HeaderFooterRuleFields 等 4 个组件 + 8 个 composables）
-- 3 个新拆分的 composable 也全部依赖 `../../pdf-tools/composables/useEvidencePdfSession.js`
-- 本质上是"文件搬家 + 组件拆分"，底层依赖未迁移，跨模块耦合反而更分散
-
-### 3. P1 DocsyError — ⚠️ 定义了但没用上
-
-**已完成**：
-- `src-tauri/src/error.rs` 定义了 7 个变体（FileNotFound、ToolMissing、PdfFailed、Cancelled、TemplateFailed、InvalidArgument、Unknown）
-- thiserror 2 已引入 Cargo.toml
-- 实现 `From<anyhow::Error>` + Serialize
-- `commands/mod.rs` 的 `anyhow_to_json_string` 用 DocsyError 做中间转换
-
-**未完成**：
-- 所有命令文件（pdf、template、settings、system、video、image_paddler）签名**仍是 `Result<T, String>`**，无一例外
-- DocsyError 仅在 mod.rs 内部用作中间转换类型，命令层未直接暴露
-- 距离"前端能区分错误类型"的目标还差一步
-
-### 4. P1 TemplateView 拆分 — ✅ 质量好
-
-- TemplateView.vue：2651 → **356 行**（瘦身 86%）
-- 新增 `useTemplateState.js`（2579 行）作为中央编排者
-- 职责划分清晰：TemplateView 只做 Tab 布局 + props/events 透传
-- **遗留**：useTemplateState.js 2579 行偏大，建议进一步拆分为 useTemplateBuild/Render/History
-
-### 5. P1 EvidencePdfWorkbench 拆分 — ⚠️ 拆分了但耦合仍在
-
-- 拆出 3 个 composable + 2 个组件，拆分方向正确
-- 但所有 composable 依赖 `../../pdf-tools/composables/useEvidencePdfSession.js`（含 sortByNatural、createDefault* 等共享核心）
-- 跨模块耦合未消除，只是从"视图级直连"变成了"composable 级直连"
-
-### 6. P2 清理 — ✅ 基本完成
-
-| 清理项 | 状态 |
-|--------|------|
-| `#[allow(dead_code)]` 7 处 | ✅ 全部清除（仅剩 package.rs:27 有合理注释） |
-| `AntiCopyMethod::TextOverlay` 死代码 | ✅ 彻底删除（零命中） |
-| SettingsView 死 CSS（.bundle-actions / .export-options） | ✅ 已清除 |
-| **EvidencePdfView 死 CSS（.group-files / .group-file）** | ❌ **仍残留，漏清** |
-
-### 7. 4 个失败测试 — ❌ MDG-017 引入的回归
-
-**事实**：MDG-017 之前测试全通过（35/35），之后 4 个失败。**这些失败是 MDG-017 引入的，不是"已有测试问题"**。
-
-**根因分析**：MDG-017 重写了 `buildHeaderText`（useEvidencePdfSession.js:325-332）：
+MDG-018 Phase 1（commit `2da491f`）修复了 `buildHeaderText`：
 
 ```js
-// 旧实现：用 rules.headerMode + rules.headerText
-export function buildHeaderText(file, index, rules) {
-  if (file?.headerEdited) return decorateHeaderText(file.header ?? '', ...)
-  if (rules.headerMode === 'none') return ''
-  const base = headerBaseText(file, index, rules)  // 用 rules.headerText
-  return decorateHeaderText(base, file, index, rules)
-}
-
-// 新实现：委托给 buildHeaderTextForGroup
-export function buildHeaderText(file, index, rules) {
-  const group = selectedGroupFor(file, 'header')
-  if (!group) return ''
-  const mode = rules.headerMode !== undefined ? rules.headerMode : group.mode
-  return buildHeaderTextForGroup(file, index, { ...group, mode }, rules)
-}
+// 修复后：同步旧 API 字段到 group
+return buildHeaderTextForGroup(file, index, {
+  mode,
+  text: rules.headerText,
+  prefix: rules.headerPrefix,
+}, rules)
 ```
 
-**问题**：新实现只覆盖了 `mode`，但没有把 `rules.headerText`、`rules.headerPrefix`、`rules.headerSuffix` 等"旧 API 字段"同步到 group 对象中。`buildHeaderTextForGroup` 内部用的是 `group.text` 而非 `rules.headerText`。
-
-**两个具体失败**：
-
-**失败 1** — `builds a business-level evidence PDF rules payload`（line 460）：
-- 测试设置 `file.header = '证据1 合同'`，`rules.headerMode = 'per_file'`
-- 期望 `evidenceLabel = '证据1 合同'`
-- 实际得到 `'合同'`
-- 原因：`buildEvidencePdfRulePayload` 改用 `buildHeaderTextForGroup(file, index, selectedGroupFor(file, 'header'), rules)`，但 `selectedGroupFor` 返回默认 group（mode='filename'），没有用 `rules.headerMode` 覆盖 mode，所以走了 `filename` 分支返回 `stripPdf(file.name)` = `'合同'`
-
-**失败 2** — `keeps common header naming modes deterministic`（line 509）：
-- 测试设置 `rules.headerMode = 'custom'`，`rules.headerText = '固定说明'`
-- 期望 `'固定说明'`
-- 实际得到 `''`
-- 原因：`buildHeaderText` 新实现用 `{ ...group, mode }` 覆盖了 mode 为 `'custom'`，但 `headerBaseTextForGroup` 中 `custom` 分支返回 `group.text || ''`，而 group.text 是默认空字符串，不是 `rules.headerText`
-
-**修复建议**：
-
-方案 A（推荐）：在 `buildHeaderText` 中同步旧 API 字段到 group：
-
+同时 `headerBaseTextForGroup` 的 custom 分支也做了 fallback：
 ```js
-export function buildHeaderText(file, index, rules) {
-  const group = selectedGroupFor(file, 'header')
-  if (!group) return ''
-  const mode = rules.headerMode !== undefined ? rules.headerMode : group.mode
-  // 同步旧 API 字段到 group
-  const mergedGroup = {
-    ...group,
-    mode,
-    text: rules.headerText ?? group.text,
-    prefix: rules.headerPrefix ?? group.prefix,
-    suffix: rules.headerSuffix ?? group.suffix,
-  }
-  return buildHeaderTextForGroup(file, index, mergedGroup, rules)
-}
+if (group.mode === 'custom' || group.mode === 'template')
+  return (group.text || _rules.headerText) ?? ''
 ```
 
-方案 B：`buildEvidencePdfRulePayload` 中的 `evidenceLabel` 改回用 `buildHeaderText`：
+测试从 78 passed / 4 failed → **82 passed / 0 failed**。
 
-```js
-evidenceLabel: buildHeaderText(file, index, rules),
-```
+### 8. 裸 invoke — ✅ 已修复
 
-建议两个都改——方案 A 修复 `buildHeaderText` 的行为一致性，方案 B 修复 `buildEvidencePdfRulePayload` 的 mode 覆盖问题。
+`src/modules/` 下搜索 `from '@tauri-apps/api/core'` 结果为空。TemplateView.vue 的 `invoke('get_log_file_path')` 已改为 tauriBridge。
 
----
+### 9. 编译警告 — ✅ 清零
 
-## 三、其他发现
+`cargo build` 输出 0 个 warning。MDG-018 最后一个 commit（`2b11edf`）专门做了警告清零。
 
-### EvidencePdfView 死 CSS 漏清
+### 10. 硬编码颜色 — ⚠️ 大部分修复
 
-`.group-files` 和 `.group-file` CSS 类（EvidencePdfView.vue:188-199）模板中无任何引用，是重构残留，MDG-017 遗漏未清。
+**已修复**：
+- PdfToolsView.vue 的 4 处硬编码色 → 已迁移到 `--docsy-*` 变量
+- VideoExtractView.vue 的 2 处硬编码色 → 已迁移
+- DocletWorkingPet.vue 的 1 处硬编码色 → 已迁移
+- DocumentPreview.vue 的不存在的 CSS 变量 → 已修复
+- FilenameTokenInput.vue 的硬编码色 → 已迁移到 `--docsy-token-*` 变量
 
-### image_paddler.rs 拆分质量
-
-`image_paddler.rs` 从 1587 行变为包含 `LayoutContext` 结构体的版本，17 参数函数问题已解决。新增 219 行变更，测试通过。
-
-### anti_ocr 检测并行化
-
-`anti_ocr.rs` 删除 40 行（TextOverlay 死代码），但"检测串行→并行"的改动需要验证——当前测试通过但可能未覆盖并发场景。
+**仍存在**（可接受）：
+- `useImagePaddlerState.js:345-352` — 边框颜色映射表（white/dark_gray/red/yellow/blue/black），这是用户可选的边框颜色值，不适合用 CSS 变量
+- `ImagePaddlerView.vue:444` — `#fbfaf8` 预览背景，应该用 `--docsy-preview-paper`
+- `ImagePaddlerView.vue:453` — `#303133` 预览边框，应该用 `--docsy-text-strong`
 
 ---
 
 ## 四、总结
 
-| 类别 | 数量 | 评估 |
-|------|------|------|
-| ✅ 正确完成 | 3 | XML 注入、TemplateView 拆分、P2 清理 |
-| ⚠️ 部分完成 | 3 | 模块迁移（12 处跨模块 import 仍在）、DocsyError（命令层未用）、Workbench 拆分（耦合仍在） |
-| ❌ 引入回归 | 1 | 4 个测试失败（buildHeaderText 旧 API 字段未同步） |
-| 漏清 | 1 | EvidencePdfView 死 CSS |
+### 已完成 ✅（7 项）
 
-**最紧急**：4 个测试失败是真实的代码回归，不是测试问题。`buildHeaderText` 新实现没有正确处理旧 API 的 `rules.headerText` / `rules.headerPrefix` / `rules.headerSuffix` 字段，需要按方案 A 修复。
+1. XML 注入修复
+2. TemplateView 拆分（2651→356 行）
+3. 4 个测试回归修复
+4. 裸 invoke 修复
+5. 编译警告清零
+6. P2 清理全部完成（dead_code + TextOverlay + 死 CSS）
+7. 硬编码颜色大部分迁移
 
-**次紧急**：`buildEvidencePdfRulePayload` 的 `evidenceLabel` 应该用 `buildHeaderText`（有 mode 覆盖逻辑）而非直接用 `buildHeaderTextForGroup`（无 mode 覆盖）。
+### 部分完成 ⚠️（3 项）
+
+8. **DocsyError** — 基础设施就绪，image_paddler 试点完成，剩余 76 个命令待迁移
+9. **模块边界** — 文件已迁移，但 16 处跨模块 import 未解决（需下沉共享代码到 shared/）
+10. **EvidencePdfWorkbench 拆分** — composable/组件已拆出，但耦合仍在
+
+### 未引入新 bug
+
+- Rust 160 passed / 0 failed
+- 前端 82 passed / 0 failed
+- 编译 0 warnings
+- 无新的跨模块循环依赖
+- 无新的安全漏洞
+
+### 后续建议
+
+| 优先级 | 建议 | 说明 |
+|--------|------|------|
+| P2 | 下沉共享代码到 `src/shared/pdf-tools/` | 解决 16 处跨模块 import 的根本方案 |
+| P2 | 迁移剩余 76 个命令到 DocsyError | 机械性工作，可分批进行 |
+| P3 | useTemplateState.js 进一步拆分 | 2579 行按 Build/Render/History 三域拆 |
+| P3 | ImagePaddlerView 预览色用变量 | `#fbfaf8`→`--docsy-preview-paper`，`#303133`→`--docsy-text-strong` |

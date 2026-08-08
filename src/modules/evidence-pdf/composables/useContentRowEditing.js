@@ -7,8 +7,8 @@ import {
   createDefaultPageNumberGroup,
   groupsFor,
   selectedGroupFor,
-} from '../../pdf-tools/composables/useEvidencePdfSession.js'
-import { renderPageNumberTemplate } from '../../pdf-tools/composables/pdfPageNumberRules.js'
+} from '../../../shared/pdf-tools/composables/useEvidencePdfSession.js'
+import { renderPageNumberTemplate } from '../../../shared/pdf-tools/composables/pdfPageNumberRules.js'
 
 /**
  * Manages inline editing of content rows (header/footer/page-number) in the

@@ -8,7 +8,7 @@
  *   snapshot('template', () => ({ path: templatePath.value, fields: fieldRows.value.length }))
  */
 
-import { tauriCallSafe } from './tauriBridge.js'
+import { tauriCallSafe } from '../core/tauriBridge.js'
 
 const LEVEL_ORDER = { debug: 0, info: 1, warn: 2, error: 3 }
 let minLevel = LEVEL_ORDER.debug

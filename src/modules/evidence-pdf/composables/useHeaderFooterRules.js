@@ -6,7 +6,7 @@ import {
   groupsFor,
   selectedGroupFor,
   setSelectedGroup,
-} from '../../pdf-tools/composables/useEvidencePdfSession.js'
+} from '../../../shared/pdf-tools/composables/useEvidencePdfSession.js'
 
 /**
  * Manages header/footer/page-number rule state for the evidence PDF workbench.
