@@ -63,4 +63,4 @@
 ## 日志
 
 - [2026-08-07](logs/2026-08-07.md) — 项目启动，完成全部审阅，建立 MDG 流程
-| MDG-017 | GLM 全项目审计问题修复 | P0/P1 | ✅ P0+P1 已完成 | codex/template-quickxml-0.8 | [changes/MDG-017](changes/MDG-017-glm-audit-fixes.md) |
+| MDG-017 | GLM 全项目审计问题修复 | P0/P1/P2 | ✅ 已完成 | codex/template-quickxml-0.8 | [changes/MDG-017](changes/MDG-017-glm-audit-fixes.md) |
