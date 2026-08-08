@@ -163,7 +163,7 @@ fn load_package_spec(name: &str, platform: &str) -> Result<ToolPackage> {
     if let Ok(manifest_url) = std::env::var("DOCSY_TOOL_MANIFEST_URL") {
         if !manifest_url.trim().is_empty() {
             if let Ok(package) = fetch_manifest_package(&manifest_url, name, platform) {
-                if has_sha256(&package) {
+                if has_sha256(&package) || !package.mirrors.is_empty() {
                     return Ok(package);
                 }
             }
@@ -175,7 +175,7 @@ fn load_package_spec(name: &str, platform: &str) -> Result<ToolPackage> {
             let manifest_url = manifest_url.trim();
             if !manifest_url.is_empty() {
                 if let Ok(package) = fetch_manifest_package(manifest_url, name, platform) {
-                    if has_sha256(&package) {
+                    if has_sha256(&package) || !package.mirrors.is_empty() {
                         return Ok(package);
                     }
                 }
@@ -183,18 +183,20 @@ fn load_package_spec(name: &str, platform: &str) -> Result<ToolPackage> {
         }
     }
 
-    if let Some(package) = embedded_package_spec(name, platform).filter(has_sha256) {
+    if let Some(package) =
+        embedded_package_spec(name, platform).filter(|p| has_sha256(p) || !p.mirrors.is_empty())
+    {
         return Ok(package);
     }
 
     if let Ok(package) = fetch_manifest_package(DEFAULT_MANIFEST_URL, name, platform) {
-        if has_sha256(&package) {
+        if has_sha256(&package) || !package.mirrors.is_empty() {
             return Ok(package);
         }
     }
 
     anyhow::bail!(
-        "无法取得带 SHA256 校验的 {name} 工具包清单。请检查网络或在设置中配置可信 HTTPS 工具清单；也可以选择已下载的本地工具包安装"
+        "无法取得 {name} 工具包清单。请检查网络或在设置中配置可信 HTTPS 工具清单；也可以选择已下载的本地工具包安装"
     )
 }
 

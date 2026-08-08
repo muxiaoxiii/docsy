@@ -66,7 +66,7 @@
               @click="installToolFromPackage(tool.name)"
               :loading="tool.installingLocal"
             >
-              本地 zip 安装
+              本地安装
             </el-button>
             <el-button size="small" @click="openToolDownload(tool)"> 下载页 </el-button>
             <el-button v-if="tool.runtimeUrl" size="small" @click="openExternalUrl(tool.runtimeUrl)">
@@ -425,7 +425,7 @@ async function installTool(name) {
 async function installToolFromPackage(name) {
   const selected = await open({
     multiple: false,
-    filters: [{ name: 'ZIP 工具包', extensions: ['zip'] }],
+    filters: [{ name: '工具包', extensions: ['zip', '7z'] }],
   })
   if (!selected) return
 
@@ -498,7 +498,7 @@ async function openToolDownload(tool) {
         ${tool.downloadGuide ? `<p>📋 <strong>选择指南：</strong>${tool.downloadGuide}</p>` : ''}
         <p style="color:var(--el-text-color-secondary);font-size:12px;margin-top:8px">
           ⚠️ 请从官方源下载，不要使用第三方打包版本。<br>
-          下载后放入 Docsy 工具目录（设置页可见路径），或使用「本地 zip 安装」按钮。<br>
+          下载后放入 Docsy 工具目录（设置页可见路径），或使用「本地安装」按钮。<br>
           第三方工具的使用风险由您自行承担。
         </p>
       </div>`,
