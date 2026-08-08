@@ -1,6 +1,6 @@
 # MDG-020: UI 动效与交互质感改进
 
-## 状态：🟡 进行中
+## 状态：🟢 已完成
 ## 优先级：P1
 ## 来源：GLM-ui-motion-review.md + GLM-ui-consistency-review.md
 ## 依据：emilkowalski/skills emil-design-eng 审查清单 + apple-design 原则
