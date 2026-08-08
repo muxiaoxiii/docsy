@@ -1,5 +1,5 @@
 <template>
-  <div class="video-extract-view">
+  <ToolWorkspaceShell title="视频抽帧" description="从视频中按频率或间隔提取帧图片">
     <div class="extract-layout">
       <!-- Left: Settings -->
       <div class="extract-settings">
@@ -210,7 +210,7 @@
         <el-empty v-else description="选择视频并开始抽帧" :image-size="80" />
       </div>
     </div>
-  </div>
+  </ToolWorkspaceShell>
 </template>
 
 <script setup>
@@ -219,6 +219,7 @@ import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Loading, CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { fileName } from '../../../core/filePath.js'
@@ -450,16 +451,13 @@ useWindowFileDrop({
 </script>
 
 <style scoped>
-.video-extract-view {
-  height: 100%;
-  min-height: 0;
+:deep(.workspace-content) {
   overflow: hidden;
-  background: var(--docsy-surface);
 }
 
 .extract-layout {
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }
@@ -655,7 +653,7 @@ useWindowFileDrop({
 }
 
 @media (max-width: 1180px) {
-  .video-extract-view {
+  :deep(.workspace-content) {
     overflow: auto;
   }
 

@@ -1,11 +1,8 @@
 <template>
-  <div class="image-paddler-view">
+  <ToolWorkspaceShell title="图片排版" description="将图片批量排版为 A4 文档">
     <div class="paddler-layout">
       <!-- Settings Panel -->
       <div class="settings-panel">
-        <h3>图片排版</h3>
-        <p class="hint">将图片批量排版为 A4 文档</p>
-
         <el-form label-width="80px" size="small">
           <el-form-item label="文件夹">
             <el-button @click="selectFolder">选择文件夹</el-button>
@@ -251,7 +248,7 @@
         <el-empty v-else :description="analyzing ? '正在分析图片...' : '选择文件夹后自动分析'" />
       </div>
     </div>
-  </div>
+  </ToolWorkspaceShell>
 </template>
 
 <script setup>
@@ -259,6 +256,7 @@ import { computed, ref, reactive, watch, onBeforeUnmount } from 'vue'
 import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage } from 'element-plus'
+import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { fileName as baseFileName } from '../../../core/filePath.js'
@@ -762,11 +760,8 @@ function scaleModeLabel(value) {
 </script>
 
 <style scoped>
-.image-paddler-view {
-  height: 100%;
-  min-height: 0;
+:deep(.workspace-content) {
   overflow: hidden;
-  background: var(--docsy-surface);
 }
 
 .paddler-layout {
@@ -782,17 +777,6 @@ function scaleModeLabel(value) {
   padding: 20px;
   border-right: 1px solid var(--docsy-border-subtle);
   background: var(--docsy-surface);
-}
-
-.settings-panel h3 {
-  margin: 0 0 4px;
-  color: var(--docsy-text-strong);
-}
-
-.hint {
-  color: var(--docsy-text-muted);
-  font-size: 12px;
-  margin: 0 0 16px;
 }
 
 .folder-path {
@@ -1050,7 +1034,7 @@ function scaleModeLabel(value) {
 }
 
 @media (max-width: 1180px) {
-  .image-paddler-view {
+  :deep(.workspace-content) {
     overflow: auto;
   }
 
