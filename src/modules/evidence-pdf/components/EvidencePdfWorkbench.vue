@@ -20,28 +20,28 @@
       </div>
 
       <div v-if="importingMergedPdf" class="local-processing">
-        <span class="processing-spinner" />
+        <el-icon class="is-loading" :size="18"><Loading /></el-icon>
         <div>
           <strong>正在分析合并 PDF</strong>
           <p>大文件可能需要一段时间，当前只占用这个任务区域；其他标签和窗口仍可继续操作。</p>
         </div>
       </div>
       <div v-if="splittingMergedImport" class="local-processing">
-        <span class="processing-spinner" />
+        <el-icon class="is-loading" :size="18"><Loading /></el-icon>
         <div>
           <strong>正在拆分 PDF</strong>
           <p>大文件会按页段逐个输出，当前只占用合并证据处理区域；请先不要重复点击确认拆分。</p>
         </div>
       </div>
       <div v-if="overlaying" class="local-processing">
-        <span class="processing-spinner" />
+        <el-icon class="is-loading" :size="18"><Loading /></el-icon>
         <div>
           <strong>正在处理证据 PDF</strong>
           <p>页眉页脚、A4、批注和合并会在后台执行；文件较大时请等待当前批次完成。</p>
         </div>
       </div>
       <div v-if="detectingAllHeaderFooter" class="local-processing">
-        <span class="processing-spinner" />
+        <el-icon class="is-loading" :size="18"><Loading /></el-icon>
         <div>
           <strong>{{ detectionProgressText || '正在检测导入的文件...' }}</strong>
           <p>正在读取页眉页脚信息，完成后统一显示结果。</p>
@@ -827,7 +827,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { Delete, Bottom, Plus, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
+import { Delete, Bottom, Plus, Rank, RefreshLeft, Top, Loading } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../../pdf-tools/components/PdfJsPreview.vue'
@@ -3006,6 +3006,10 @@ onUnmounted(() => window.removeEventListener('keydown', handleGlobalKeydown))
   border-radius: 6px;
   background: var(--docsy-primary-soft);
   color: var(--docsy-text-strong);
+
+  .is-loading {
+    color: var(--docsy-primary);
+  }
 }
 
 .local-processing p {
@@ -3014,20 +3018,6 @@ onUnmounted(() => window.removeEventListener('keydown', handleGlobalKeydown))
   font-size: 12px;
 }
 
-.processing-spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid #a8c1ba;
-  border-top-color: var(--docsy-primary);
-  border-radius: 50%;
-  animation: docsy-spin 0.8s linear infinite;
-}
-
-@keyframes docsy-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 h3 {
   margin: 0 0 6px;

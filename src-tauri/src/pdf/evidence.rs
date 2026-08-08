@@ -108,6 +108,7 @@ impl FileType {
     }
 }
 
+// TODO: GLM-P2 迁移到 header_footer 模块 — 使用 HeaderFooterJob + OverlayTextConfig 替代
 #[derive(Debug, Deserialize)]
 struct OverlayConfig {
     header: Option<HeaderConfig>,
@@ -407,6 +408,7 @@ pub fn merge_all(args: &serde_json::Value) -> Result<String> {
         inputs
     };
 
+    // TODO: GLM-P2 迁移到 header_footer::batch_overlay 替代 apply_overlay_batch
     let overlaid_paths = if let Some(ref cfg) = overlay_cfg {
         apply_overlay_batch(&qpdf_bin, &renamed_paths, evidence_dir, cfg)?
     } else {
@@ -776,6 +778,7 @@ fn apply_identity_rename(
     Ok(result)
 }
 
+// TODO: GLM-P2 迁移到 header_footer::batch_overlay
 fn apply_overlay_batch(
     qpdf_bin: &Path,
     inputs: &[String],
@@ -824,6 +827,7 @@ fn apply_overlay_batch(
     Ok(result)
 }
 
+// TODO: GLM-P2 迁移到 header_footer::overlay_text
 fn apply_overlay_single(
     qpdf_bin: &Path,
     input: &str,
@@ -995,6 +999,7 @@ fn build_overlay_ops(
 /// Helvetica cannot render CJK text reliably, so fail before producing a PDF
 /// with invisible or corrupted evidence labels. The current evidence workflow
 /// uses the embedded-font header/footer renderer instead.
+// TODO: GLM-P2 迁移后删除 — header_footer 使用嵌入字体，无需 ASCII 限制
 fn ensure_legacy_overlay_text_supported(text: &str) -> Result<()> {
     if !text.is_ascii() {
         anyhow::bail!(

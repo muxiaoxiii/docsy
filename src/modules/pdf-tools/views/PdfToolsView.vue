@@ -501,36 +501,43 @@ function addAntiOcrFiles(paths) {
 
 async function inspectAntiOcrFiles(paths) {
   const reactive = antiOcrFiles.value
-  for (const path of paths) {
-    try {
-      const result = await Promise.race([
-        tauriCallSafe('detect_anti_copy', { input: path }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
-      ])
-      const item = reactive.find((f) => f.path === path)
-      if (!item) continue
-      if (!result.ok) {
-        item.statusText = result.error || '检测失败'
-        item.statusType = 'danger'
-      } else {
-        item.hasAntiOcr = result.data.has_anti_ocr
-        const { total_pages, pages_with_scrambled_cmap } = result.data
-        if (result.data.has_anti_ocr) {
-          item.statusText = `已防护 (${pages_with_scrambled_cmap}/${total_pages}页)`
-          item.statusType = 'warning'
+  let nextIndex = 0
+  const workerCount = Math.min(4, paths.length)
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < paths.length) {
+      const path = paths[nextIndex]
+      nextIndex += 1
+      try {
+        const result = await Promise.race([
+          tauriCallSafe('detect_anti_copy', { input: path }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
+        ])
+        const item = reactive.find((f) => f.path === path)
+        if (!item) continue
+        if (!result.ok) {
+          item.statusText = result.error || '检测失败'
+          item.statusType = 'danger'
         } else {
-          item.statusText = `正常 (${total_pages}页)`
-          item.statusType = 'success'
+          item.hasAntiOcr = result.data.has_anti_ocr
+          const { total_pages, pages_with_scrambled_cmap } = result.data
+          if (result.data.has_anti_ocr) {
+            item.statusText = `已防护 (${pages_with_scrambled_cmap}/${total_pages}页)`
+            item.statusType = 'warning'
+          } else {
+            item.statusText = `正常 (${total_pages}页)`
+            item.statusType = 'success'
+          }
+        }
+      } catch (err) {
+        const item = reactive.find((f) => f.path === path)
+        if (item) {
+          item.statusText = userFacingError(err?.message || err, '检测异常')
+          item.statusType = 'danger'
         }
       }
-    } catch (err) {
-      const item = reactive.find((f) => f.path === path)
-      if (item) {
-        item.statusText = userFacingError(err?.message || err, '检测异常')
-        item.statusType = 'danger'
-      }
     }
-  }
+  })
+  await Promise.all(workers)
 }
 
 async function selectAntiOcrFiles() {
