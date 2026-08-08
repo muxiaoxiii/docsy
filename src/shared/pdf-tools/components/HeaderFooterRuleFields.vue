@@ -59,10 +59,13 @@
           <el-option label="文件名" value="filename" />
           <el-option label="按证据列表名称" value="per_file" />
           <el-option label="固定文本" value="custom" />
+          <el-option label="序号（证据1, 证据2）" value="seq" />
+          <el-option label="中文序号（证据一、证据二）" value="seq_cn" />
+          <el-option label="前缀+序号" value="prefix_seq" />
         </el-select>
       </div>
-      <div v-if="headerMode === 'custom'" class="rule-item">
-        <label>页眉文本</label>
+      <div v-if="headerMode === 'custom' || headerMode === 'seq' || headerMode === 'prefix_seq'" class="rule-item">
+        <label>{{ headerMode === 'prefix_seq' ? '前缀' : (headerMode === 'seq' ? '前缀（可选）' : '页眉文本') }}</label>
         <div class="text-input-with-info">
           <el-input v-model="headerTextModel" placeholder="输入文本或模板标记" />
           <el-tooltip placement="top" :show-after="200" class="template-info-tip">

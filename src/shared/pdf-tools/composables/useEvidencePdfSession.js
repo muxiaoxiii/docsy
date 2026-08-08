@@ -253,9 +253,16 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
 
     // 1. New selected group (only when insert toggle is on)
     if (newEnabled && enabled && selectedGroup) {
-      const text = contentRowText(file, index, kind, selectedGroup, rules)
+      // Merge rules overrides into group so list display matches rendering
+      let effectiveGroup = selectedGroup
+      if (kind === 'header' && rules.headerMode !== undefined) {
+        effectiveGroup = { ...selectedGroup, mode: rules.headerMode }
+      } else if (kind === 'pageNumber' && rules.pageNumberSequence) {
+        effectiveGroup = { ...selectedGroup, sequence: rules.pageNumberSequence }
+      }
+      const text = contentRowText(file, index, kind, effectiveGroup, rules)
       // header with mode==='none' → skip; footerText with empty text → skip
-      if (kind === 'header' && selectedGroup.mode === 'none') {
+      if (kind === 'header' && effectiveGroup.mode === 'none') {
         // skip
       } else if (kind === 'footerText' && !text) {
         // skip
@@ -277,7 +284,13 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
     if (newEnabled && enabled) for (const g of allGroups) {
       if (g.id === selectedId || g.enabled === false) continue
       if (kind === 'header' && g.mode === 'none') continue
-      const text = contentRowText(file, index, kind, g, rules)
+      let effectiveG = g
+      if (kind === 'header' && rules.headerMode !== undefined) {
+        effectiveG = { ...g, mode: rules.headerMode }
+      } else if (kind === 'pageNumber' && rules.pageNumberSequence) {
+        effectiveG = { ...g, sequence: rules.pageNumberSequence }
+      }
+      const text = contentRowText(file, index, kind, effectiveG, rules)
       if (kind === 'footerText' && !text) continue
       rows.push({
         kind,
@@ -363,7 +376,10 @@ export function resolveTextTemplate(text, file, index, rules = {}) {
 function headerBaseTextForGroup(file, index, group, _rules) {
   if (group.mode === 'per_file') return file.header ?? `证据${index + 1}`
   if (group.mode === 'custom' || group.mode === 'template') return (group.text || _rules.headerText) ?? ''
-  if (group.mode === 'seq') return `证据${index + 1}`
+  if (group.mode === 'seq') {
+    const prefix = (group.text || _rules.headerText) ?? ''
+    return `${prefix}证据${index + 1}`
+  }
   if (group.mode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`
   if (group.mode === 'prefix_seq') return `${group.text || ''}证据${index + 1}`
   return stripPdf(file.name)
