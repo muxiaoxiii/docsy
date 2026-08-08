@@ -24,6 +24,7 @@ export function useEvidencePdfDetection({
 }) {
   async function detectAllHeaderFooter(options = {}) {
     const silent = Boolean(options.silent)
+    const deep = Boolean(options.deep)
     if (!overlayRows.value.length || detectingAllHeaderFooter.value) return
     detectingAllHeaderFooter.value = true
     detectionProgressText.value = ''
@@ -49,7 +50,7 @@ export function useEvidencePdfDetection({
       const runNext = async () => {
         while (queue.length) {
           const [i, file] = queue.shift()
-          const result = await detectFileHeaderFooter(file)
+          const result = await detectFileHeaderFooter(file, { deep })
           results.push({ file, result })
           const elapsed = Math.floor((Date.now() - startTime) / 1000)
           const m = String(Math.floor(elapsed / 60)).padStart(2, '0')
@@ -99,13 +100,15 @@ export function useEvidencePdfDetection({
     }
   }
 
-  async function detectFileHeaderFooter(file) {
+  async function detectFileHeaderFooter(file, options = {}) {
+    const deep = Boolean(options.deep)
     return tauriCallQuiet('detect_pdf_header_footer', {
       args: {
         inputPath: file.path,
-        maxPages: DETECTION_SCAN_MAX_PAGES,
+        maxPages: deep ? 0 : DETECTION_SCAN_MAX_PAGES,
         headerZoneMm: headerFooterDetectionZoneMm(cleanupHeaderHeightMm.value),
         footerZoneMm: headerFooterDetectionZoneMm(cleanupFooterHeightMm.value),
+        deep,
       },
     })
   }

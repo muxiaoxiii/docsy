@@ -76,22 +76,20 @@
         <div class="block-title-row">
           <div class="block-title">原页眉页脚</div>
           <div class="block-actions">
-            <el-button size="small" @click="confirmAllExistingElements"
-              >一键确认</el-button
+            <el-button size="small" @click="keepAllExistingElements"
+              >一键保留</el-button
             >
-            <el-button
-              size="small"
-              type="warning"
-              :loading="quickCleanupRunning"
-              @click="quickCleanupExistingHeaderFooter"
+            <el-button size="small" @click="ignoreAllExistingElements"
+              >一键忽略</el-button
             >
-              一键清除页眉页脚
-            </el-button>
             <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter"
-              >删除现有</el-button
+              >标记删除</el-button
             >
-            <el-button size="small" :disabled="!hasExistingRemovalRule" @click="restoreExistingHeaderFooterMarks"
-              >恢复删除标记</el-button
+            <el-button size="small" type="danger" :loading="quickCleanupRunning" @click="immediateDeleteExistingHeaderFooter"
+              >立即删除</el-button
+            >
+            <el-button size="small" :loading="detectingAllHeaderFooter" @click="deepDetectAllHeaderFooter"
+              >深度检测</el-button
             >
           </div>
         </div>
@@ -2347,8 +2345,8 @@ async function finishQuickCleanupPipeline() {
       outputMode: 'files_only',
       cleanupHeaderEnabled: hasHeaderDelete,
       cleanupFooterEnabled: hasFooterDelete,
-      cleanupHeaderHeightMm: 18,
-      cleanupFooterHeightMm: 18,
+      cleanupHeaderHeightMm: cleanupHeaderHeightMm.value,
+      cleanupFooterHeightMm: cleanupFooterHeightMm.value,
     }
     const payload = buildEvidencePdfRulePayload(overlayRows.value, cleanupRules, outputDir)
     overlayRows.value.forEach((file) => {
@@ -2456,11 +2454,11 @@ function previewExistingElement(row) {
   refreshPreview()
 }
 
-function confirmAllExistingElements() {
+function keepAllExistingElements() {
   let count = 0
   for (const file of overlayFiles.value) {
     for (const el of file.existingElements || []) {
-      if (!el.decision && !el.lowConfidence) {
+      if (!el.decision) {
         el.decision = 'keep'
         count++
       }
@@ -2470,10 +2468,195 @@ function confirmAllExistingElements() {
     file.statusType = status.type
   }
   if (count > 0) {
-    ElMessage.success(`已确认 ${count} 个检测项`)
+    ElMessage.success(`已保留 ${count} 个检测项`)
   } else {
     ElMessage.info('没有待确认的检测项')
   }
+}
+
+function ignoreAllExistingElements() {
+  let count = 0
+  for (const file of overlayFiles.value) {
+    for (const el of file.existingElements || []) {
+      if (!el.decision) {
+        el.decision = 'ignore'
+        count++
+      }
+    }
+    const status = fileExistingStatus(file)
+    file.statusText = status.text
+    file.statusType = status.type
+  }
+  if (count > 0) {
+    ElMessage.success(`已忽略 ${count} 个检测项`)
+  } else {
+    ElMessage.info('没有待确认的检测项')
+  }
+}
+
+async function immediateDeleteExistingHeaderFooter() {
+  if (!overlayFiles.value.length) {
+    ElMessage.info('请先导入 PDF 文件')
+    return
+  }
+  // Ensure detection is done
+  if (!hasDetectedExistingHeaderFooter.value) {
+    await detectAllHeaderFooter({ silent: true })
+  }
+  if (!hasDetectedExistingHeaderFooter.value) {
+    ElMessage.info('未检测到现有页眉页脚或页码')
+    return
+  }
+  // Check if any elements have been decided
+  const hasDecision = overlayFiles.value.some((file) =>
+    (file.existingElements || []).some((el) => el.decision),
+  )
+  if (!hasDecision) {
+    // No decisions yet — prompt user to decide first
+    try {
+      await ElMessageBox.confirm(
+        '尚未确认任何页眉页脚内容。请先使用"一键保留"或"一键忽略"确认检测结果，然后再执行删除。',
+        '需要先确认',
+        { confirmButtonText: '打开确认面板', cancelButtonText: '取消', type: 'info' },
+      )
+      existingElementsFilter.value = 'all'
+      existingElementsVisible.value = true
+    } catch {
+      // user cancelled
+    }
+    return
+  }
+  // Has decisions — ask user what to do
+  let action
+  try {
+    action = await ElMessageBox.confirm(
+      '请选择操作方式：',
+      '删除已确认的页眉页脚',
+      {
+        confirmButtonText: '立即删除',
+        cancelButtonText: '标记删除',
+        distinguishCancelAndClose: true,
+        type: 'warning',
+      },
+    )
+    action = 'immediate'
+  } catch (e) {
+    action = e === 'cancel' ? 'mark' : null
+  }
+  if (!action) return
+  if (action === 'mark') {
+    await markRemoveExistingHeaderFooter()
+    return
+  }
+  // Immediate delete — reuse quickCleanup logic
+  await executeImmediateDelete()
+}
+
+async function executeImmediateDelete() {
+  const deleteCount = overlayFiles.value.reduce(
+    (sum, file) => sum + (file.existingElements || []).filter((e) => e.decision === 'delete').length,
+    0,
+  )
+  if (!deleteCount) {
+    ElMessage.info('没有标记为删除的内容')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `将立即删除 ${deleteCount} 项已确认的页眉页脚内容。处理后的文件将放在源文件旁边的 _cleaned 文件夹中。`,
+      '确认立即删除',
+      { confirmButtonText: '执行删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  const firstFile = overlayFiles.value[0]
+  if (!firstFile?.path) return
+  const sourceDir = parentDir(firstFile.path)
+  const outputDir = `${sourceDir}/_cleaned`
+
+  overlayFiles.value.forEach((file) => syncLegacyExistingElementState(file))
+
+  quickCleanupRunning.value = true
+  overlaying.value = true
+  try {
+    const hasHeaderDelete = overlayFiles.value.some((f) =>
+      (f.existingElements || []).some((e) => e.kind === 'header' && e.decision === 'delete'),
+    )
+    const hasFooterDelete = overlayFiles.value.some((f) =>
+      (f.existingElements || []).some((e) => (e.kind === 'footerText' || e.kind === 'pageNumber') && e.decision === 'delete'),
+    )
+    const cleanupRules = {
+      headerMode: 'none',
+      headerInsertEnabled: false,
+      footerInsertEnabled: false,
+      pageNumberEnabled: false,
+      footerEnabled: false,
+      normalizeA4: false,
+      removeAnnotations: false,
+      outputMode: 'files_only',
+      cleanupHeaderEnabled: hasHeaderDelete,
+      cleanupFooterEnabled: hasFooterDelete,
+      cleanupHeaderHeightMm: cleanupHeaderHeightMm.value,
+      cleanupFooterHeightMm: cleanupFooterHeightMm.value,
+    }
+    const payload = buildEvidencePdfRulePayload(overlayRows.value, cleanupRules, outputDir)
+    overlayRows.value.forEach((file) => {
+      file.statusText = '处理中'
+      file.statusType = 'warning'
+      file.statusDetail = ''
+    })
+
+    const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    if (!result.ok) {
+      ElMessage.error(userFacingError(result.error, '页眉页脚删除失败'))
+      overlayFiles.value.forEach((file) => {
+        file.statusText = '失败'
+        file.statusType = 'danger'
+      })
+      return
+    }
+
+    const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
+    const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
+    overlayFiles.value.forEach((file) => {
+      const success = successByInput.get(file.path)
+      const failed = failedByInput.get(file.path)
+      if (success) {
+        file.outputPath = success.outputPath
+        file.statusText = '已完成'
+        file.statusType = 'success'
+        file.statusDetail = (success.warnings || []).join('；')
+      } else if (failed) {
+        file.statusText = '失败'
+        file.statusType = 'danger'
+        file.statusDetail = userFacingError(failed.message, '处理失败', 300)
+      }
+    })
+
+    const successCount = result.data.results?.length || 0
+    const failedCount = result.data.failed?.length || 0
+    if (failedCount) {
+      ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个。输出目录：${outputDir}`)
+    } else {
+      ElMessage.success(`已完成 ${successCount} 个 PDF，输出目录：${outputDir}`)
+    }
+  } catch (err) {
+    ElMessage.error(userFacingError(err?.message || err, '页眉页脚删除失败'))
+  } finally {
+    quickCleanupRunning.value = false
+    overlaying.value = false
+  }
+}
+
+async function deepDetectAllHeaderFooter() {
+  if (!overlayFiles.value.length) {
+    ElMessage.info('请先导入 PDF 文件')
+    return
+  }
+  await detectAllHeaderFooter({ deep: true })
 }
 
 async function markRemoveExistingHeaderFooter() {
@@ -2520,20 +2703,6 @@ async function markRemoveExistingHeaderFooter() {
   refreshPreview()
 }
 
-function restoreExistingHeaderFooterMarks() {
-  overlayFiles.value.forEach((file) => {
-    ;(file.existingElements || []).forEach((element) => {
-      element.decision = 'keep'
-      element.editedText = element.detectedText
-    })
-    syncLegacyExistingElementState(file)
-    const status = fileExistingStatus(file)
-    file.statusText = status.text
-    file.statusType = status.type
-  })
-  truePreview.value = null
-  refreshPreview()
-}
 
 function sourceRangeText(row) {
   if (!row.sourcePageStart || !row.sourcePageEnd) return '-'

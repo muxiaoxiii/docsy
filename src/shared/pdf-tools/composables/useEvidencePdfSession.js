@@ -219,7 +219,7 @@ export function totalPages(files) {
 
 export function pageRangeText(file, sequence) {
   if (!file.pages) return '-'
-  if (sequence === 'per-file') return `1-${file.pages}`
+  if (sequence === 'per-file') return `1 (${file.pages})`
   const end = file.pageEnd || file.pageStart + file.pages - 1
   return `${file.pageStart}-${end}`
 }

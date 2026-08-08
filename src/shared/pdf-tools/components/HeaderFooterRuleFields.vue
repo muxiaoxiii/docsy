@@ -55,10 +55,9 @@
       <div class="rule-item">
         <label>页眉来源</label>
         <el-select v-model="headerModeModel">
-          <el-option label="不插入页眉" value="none" />
           <el-option label="文件名" value="filename" />
-          <el-option label="按证据列表名称" value="per_file" />
           <el-option label="固定文本" value="custom" />
+          <el-option label="按证据列表名称" value="per_file" />
         </el-select>
       </div>
       <div v-if="headerMode === 'per_file'" class="rule-item">
@@ -381,7 +380,6 @@ const PRESETS_NO_TOTAL = [
 ]
 
 const MODE_LABELS = {
-  none: '不插入',
   filename: '文件名',
   per_file: '按列表名称',
   custom: '固定文本',
@@ -660,6 +658,23 @@ const pageNumberPreviewText = computed(() => {
   let tpl = props.pageNumberTemplate || '{page}'
   if (!props.pageNumberShowTotal) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
   return renderPageNumberTemplate(tpl, props.pageNumberSamplePage, props.pageNumberSampleTotal, props.pageNumberStyle)
+})
+
+// Sync template when showTotal toggles
+let lastTemplateWithTotal = ''
+watch(() => props.pageNumberShowTotal, (showTotal) => {
+  const tpl = props.pageNumberTemplate || '{page}/{total}'
+  if (!showTotal && tpl.includes('{total}')) {
+    lastTemplateWithTotal = tpl
+    const cleaned = tpl
+      .replaceAll('{total}', '')
+      .replaceAll('//', '/')
+      .replace(/\/+$/, '')
+      .replace(/^\//, '')
+    pageNumberTemplateModel.value = cleaned || '{page}'
+  } else if (showTotal && !tpl.includes('{total}')) {
+    pageNumberTemplateModel.value = lastTemplateWithTotal || '{page}/{total}'
+  }
 })
 
 // Overlap detection
