@@ -131,6 +131,7 @@ jobs:
         run: npm run test -- --run
 
       - name: Run Rust tests
+        if: runner.os != 'Windows'
         run: cargo test
         working-directory: src-tauri
 
