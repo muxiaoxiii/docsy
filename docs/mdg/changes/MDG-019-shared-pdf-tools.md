@@ -1,6 +1,6 @@
 # MDG-019: 跨模块 import 下沉 — 共享 PDF 工具代码迁移到 shared/
 
-## 状态：🟡 进行中
+## 状态：🟢 已完成
 ## 优先级：P2
 ## 来源：MDG-017/018 遗留 — evidence-pdf 模块 16 处跨模块 import pdf-tools
 
@@ -116,3 +116,7 @@ src/shared/pdf-tools/
 
 ## 七、变更日志
 - 2026-08-08 12:32 — 变更单创建，深入设计完成
+- 2026-08-08 12:35 — 实施完成：22 文件移动 + 路径更新 + 旧文件清理
+- 2026-08-08 12:36 — 验证通过：Rust 160/0、前端 82/0、Vite build 成功
+- 2026-08-08 12:36 — Commit 2ecc1ed
+- 额外修复：diagnostics.js 已有路径 bug（`./tauriBridge.js` → `../core/tauriBridge.js`）
