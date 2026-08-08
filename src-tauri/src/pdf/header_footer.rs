@@ -120,34 +120,34 @@ pub struct BookmarkConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OverlayTextConfig {
-    text: String,
+pub struct OverlayTextConfig {
+    pub text: String,
     #[serde(default)]
-    region: String,
+    pub region: String,
     #[serde(default)]
-    font_family: String,
+    pub font_family: String,
     #[serde(default = "default_font_size")]
-    font_size: f32,
+    pub font_size: f32,
     #[serde(default = "default_margin_mm")]
-    margin_mm: f32,
+    pub margin_mm: f32,
     #[serde(default = "default_align")]
-    align: String,
+    pub align: String,
     #[serde(default)]
-    offset_x_mm: f32,
+    pub offset_x_mm: f32,
     #[serde(default = "default_text_color")]
-    color: String,
+    pub color: String,
     #[serde(default)]
-    page_start: Option<u32>,
+    pub page_start: Option<u32>,
     #[serde(default)]
-    page_end: Option<u32>,
+    pub page_end: Option<u32>,
     #[serde(default)]
-    number_style: String,
+    pub number_style: String,
     #[serde(default)]
-    number_offset: i32,
+    pub number_offset: i32,
     #[serde(default)]
-    number_total: Option<u32>,
+    pub number_total: Option<u32>,
     #[serde(default)]
-    artifact_kind: String,
+    pub artifact_kind: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
