@@ -91,10 +91,9 @@ pub fn extract(args: &serde_json::Value, token: &tokio_util::sync::CancellationT
 
     // 主循环：检查取消 + 空闲超时 + 进度解析
     let mut last_activity = Instant::now();
-    let mut exit_status = None;
     let mut stderr_lines: Vec<String> = Vec::new();
 
-    loop {
+    let exit_status = loop {
         // 检查取消
         if token.is_cancelled() {
             let _ = child.kill();
@@ -127,8 +126,7 @@ pub fn extract(args: &serde_json::Value, token: &tokio_util::sync::CancellationT
                 // 检查子进程是否已退出
                 match child.try_wait() {
                     Ok(Some(status)) => {
-                        exit_status = Some(status);
-                        break;
+                        break status;
                     }
                     Ok(None) => {
                         // 进程仍在运行，短暂休眠避免忙等
@@ -145,19 +143,17 @@ pub fn extract(args: &serde_json::Value, token: &tokio_util::sync::CancellationT
                 // stderr 线程结束，等待子进程退出
                 match child.wait() {
                     Ok(status) => {
-                        exit_status = Some(status);
-                        break;
+                        break status;
                     }
                     Err(e) => anyhow::bail!("等待 ffmpeg 进程退出失败: {}", e),
                 }
             }
         }
-    }
+    };
 
     let _ = stderr_thread.join();
 
-    let status = exit_status.context("ffmpeg 进程状态未知")?;
-    if !status.success() {
+    if !exit_status.success() {
         let stderr_text = stderr_lines.join("\n");
         anyhow::bail!("ffmpeg 抽帧失败: {}", stderr_text.trim());
     }

@@ -17,15 +17,13 @@ pub struct TextNodeRef {
 
 #[derive(Debug, Clone)]
 pub struct TextIndex {
-    pub part_name: String,
     pub nodes: Vec<TextNodeRef>,
     pub paragraph_count: usize,
 }
 
 impl TextIndex {
-    pub fn new(part_name: &str) -> Self {
+    pub fn new(_part_name: &str) -> Self {
         Self {
-            part_name: part_name.to_string(),
             nodes: Vec::new(),
             paragraph_count: 0,
         }
@@ -41,6 +39,7 @@ impl TextIndex {
         idx
     }
 
+    #[cfg(test)]
     pub fn total_text_nodes(&self) -> usize {
         self.nodes.len()
     }
@@ -64,6 +63,7 @@ impl DocumentIndex {
         self.parts.insert(name, index);
     }
 
+    #[cfg(test)]
     pub fn iter_nodes(&self) -> impl Iterator<Item = (&str, &TextNodeRef)> {
         self.parts.iter().flat_map(|(part_name, index)| {
             index
@@ -73,6 +73,7 @@ impl DocumentIndex {
         })
     }
 
+    #[cfg(test)]
     pub fn iter_highlighted(&self) -> impl Iterator<Item = (&str, &TextNodeRef)> {
         self.iter_nodes().filter(|(_, node)| node.highlighted)
     }

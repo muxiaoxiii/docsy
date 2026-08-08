@@ -42,20 +42,19 @@ pub(crate) struct PlainTextCleanupResult {
     pub diagnostics: Vec<DeleteDiagnostic>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct DeleteDiagnostic {
-    pub page: u32,
-    pub target_text: String,
     pub reason: DeleteSkipReason,
-    pub extracted_text: Option<String>,
-    pub state_y: f32,
-    pub in_zone: bool,
+}
+
+impl Default for DeleteSkipReason {
+    fn default() -> Self {
+        DeleteSkipReason::FontUndecodable
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DeleteSkipReason {
-    TextNotMatched,
-    BboxOutOfZone,
     FontUndecodable,
 }
 
@@ -315,7 +314,7 @@ fn active_targets(targets: &[PlainTextTarget], page_number: u32) -> Vec<&PlainTe
 fn filter_page_operations(
     operations: &[Operation],
     plan: &PagePlainTextPlan,
-    page_number: u32,
+    _page_number: u32,
 ) -> (Vec<Operation>, PlainTextCleanupResult) {
     let mut output = Vec::with_capacity(operations.len());
     let mut result = PlainTextCleanupResult::default();
@@ -345,22 +344,12 @@ fn filter_page_operations(
                 if header_by_bbox {
                     remove_region = Some(TextRegion::Header);
                     result.diagnostics.push(DeleteDiagnostic {
-                        page: page_number,
-                        target_text: text.to_string(),
                         reason: DeleteSkipReason::FontUndecodable,
-                        extracted_text: Some(text.to_string()),
-                        state_y: state.y,
-                        in_zone: is_in_header_zone(state.y, plan),
                     });
                 } else if footer_by_bbox {
                     remove_region = Some(TextRegion::Footer);
                     result.diagnostics.push(DeleteDiagnostic {
-                        page: page_number,
-                        target_text: text.to_string(),
                         reason: DeleteSkipReason::FontUndecodable,
-                        extracted_text: Some(text.to_string()),
-                        state_y: state.y,
-                        in_zone: is_in_footer_zone(state.y, plan),
                     });
                 }
             }
