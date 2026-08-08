@@ -270,12 +270,12 @@ function toChinese(n) {
 
 .fn-block:hover { opacity: 0.7; }
 
-.fn-block-template { background: #d1fae5; color: #065f46; }
-.fn-block-date     { background: #fef3c7; color: #92400e; }
-.fn-block-seq      { background: #ede9fe; color: #5b21b6; }
+.fn-block-template { background: var(--docsy-token-green); color: var(--docsy-token-green-text); }
+.fn-block-date     { background: var(--docsy-token-amber); color: var(--docsy-token-amber-text); }
+.fn-block-seq      { background: var(--docsy-token-purple); color: var(--docsy-token-purple-text); }
 .fn-block-field    { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); }
 .fn-block-literal  { color: var(--docsy-text-muted); }
-.fn-block-preset   { background: #fef3c7; color: #92400e; }
+.fn-block-preset   { background: var(--docsy-token-amber); color: var(--docsy-token-amber-text); }
 
 .fn-ext { font-size: 11px; color: var(--docsy-text-muted); flex-shrink: 0; }
 .fn-hint { font-size: 11px; color: var(--docsy-text-muted); }
@@ -344,9 +344,9 @@ function toChinese(n) {
 
 .fn-btn:hover { opacity: 0.85; }
 
-.fn-btn-template { background: #d1fae5; color: #065f46; border-color: #a7f3d0; }
-.fn-btn-date     { background: #fef3c7; color: #92400e; border-color: #fde68a; }
-.fn-btn-seq      { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+.fn-btn-template { background: var(--docsy-token-green); color: var(--docsy-token-green-text); border-color: var(--docsy-token-green-border); }
+.fn-btn-date     { background: var(--docsy-token-amber); color: var(--docsy-token-amber-text); border-color: var(--docsy-token-amber-border); }
+.fn-btn-seq      { background: var(--docsy-token-purple); color: var(--docsy-token-purple-text); border-color: var(--docsy-token-purple-border); }
 .fn-btn-field    { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); border-color: var(--docsy-border-subtle); }
 .fn-btn-lit      { background: var(--docsy-surface-muted); color: var(--docsy-text-muted); border-color: var(--docsy-border-subtle); }
 

@@ -27,6 +27,42 @@
   --docsy-danger: #b5524b;
   --docsy-shadow: 0 10px 30px rgba(54, 45, 36, 0.08);
 
+  /* Token colours for FilenameTokenInput / TemplateBuildTab */
+  --docsy-token-green: #d1fae5;
+  --docsy-token-green-text: #065f46;
+  --docsy-token-green-border: #a7f3d0;
+  --docsy-token-amber: #fef3c7;
+  --docsy-token-amber-text: #92400e;
+  --docsy-token-amber-border: #fde68a;
+  --docsy-token-purple: #ede9fe;
+  --docsy-token-purple-text: #5b21b6;
+  --docsy-token-purple-border: #ddd6fe;
+  --docsy-token-blue: #dbeafe;
+  --docsy-token-blue-text: #1e40af;
+  --docsy-token-pink: #fce7f3;
+  --docsy-token-pink-text: #9d174d;
+
+  /* Preview colours for TemplateBuildTab */
+  --docsy-preview-date: #f3e8ff;
+  --docsy-preview-date-text: #6b2fa0;
+  --docsy-preview-select: #e6fffb;
+  --docsy-preview-select-text: #0f766e;
+  --docsy-preview-party: #f0f9eb;
+  --docsy-preview-party-text: #2f6f1f;
+  --docsy-preview-reference: #edf2ff;
+  --docsy-preview-reference-text: #364fc7;
+  --docsy-preview-checkbox: #fff7e6;
+  --docsy-preview-checkbox-text: #9a5b13;
+  --docsy-preview-radio: #fff1f0;
+  --docsy-preview-radio-text: #b42318;
+  --docsy-preview-checkbox-group: #eef2ff;
+  --docsy-preview-checkbox-group-text: #4338ca;
+  --docsy-preview-prefix: #fdf6ec;
+  --docsy-preview-prefix-text: #9a5b13;
+  --docsy-preview-suffix: #f6f6f6;
+  --docsy-preview-delete: #fef0f0;
+  --docsy-preview-delete-text: #c45656;
+
   --el-color-primary: var(--docsy-primary);
   --el-color-white: var(--docsy-surface-elevated);
   --el-color-primary-light-3: #6d928a;
