@@ -52,6 +52,8 @@ jobs:
 
       - name: Install external tools on macOS
         if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_REQUIRE_TAP_TRUST: 1
         run: brew install qpdf poppler ffmpeg
 
       - name: Install external tools on Windows
