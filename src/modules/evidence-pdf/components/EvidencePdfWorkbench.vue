@@ -826,6 +826,7 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Delete, Bottom, Plus, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
+import { log as diagLog } from '../../../shared/diagnostics.js'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import HeaderFooterRuleFields from '../../../shared/pdf-tools/components/HeaderFooterRuleFields.vue'
 import PageNumberRuleDialog from '../../../shared/pdf-tools/components/PageNumberRuleDialog.vue'
@@ -2204,6 +2205,25 @@ async function applyHeaderFooter() {
     const successCount = result.data.results?.length || 0
     const warningCount = (result.data.results || []).filter((item) => item.warnings?.length).length
     const merge = result.data.merge
+
+    // 诊断日志：记录处理结果
+    diagLog.info('processing.result', `处理完成 ${successCount}/${successCount + failedCount}`, {
+      successCount, failedCount, warningCount,
+      results: (result.data.results || []).map(r => ({
+        file: r.inputPath?.split(/[/\\]/).pop(),
+        warnings: r.warnings,
+      })),
+      failed: (result.data.failed || []).map(f => ({
+        file: f.path?.split(/[/\\]/).pop(),
+        error: f.message?.slice(0, 100),
+      })),
+      rules: {
+        cleanupHeaderEnabled: currentRules.value.cleanupHeaderEnabled,
+        cleanupFooterEnabled: currentRules.value.cleanupFooterEnabled,
+        headerMode: currentRules.value.headerMode,
+        headerInsertEnabled: currentRules.value.headerInsertEnabled,
+      },
+    })
     if (merge?.status === 'done') {
       const cleanupText =
         merge.outputMode === 'merge_only' ? `，已清理 ${merge.removedIntermediates || 0} 个中间副本` : ''
