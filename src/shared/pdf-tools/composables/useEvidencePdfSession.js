@@ -524,11 +524,11 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       pageNumberGroup = inheritIfDefault(pageNumberGroup, ['fontFamily'])
     }
     const headerInsertEnabled = rules._globalApply
-      ? (headerGroup && headerGroup.enabled !== false && headerGroup.mode !== 'none')
-      : Boolean(rules.headerInsertEnabled)
+      ? (rules.headerInsertEnabled !== false && headerGroup && headerGroup.enabled !== false && headerGroup.mode !== 'none')
+      : rules.headerInsertEnabled !== false
     const footerInsertEnabled = rules._globalApply
-      ? (footerTextGroup && footerTextGroup.enabled !== false && Boolean(footerTextGroup.text || rules.footerTextContent))
-      : Boolean(rules.footerInsertEnabled)
+      ? (rules.footerInsertEnabled !== false && footerTextGroup && footerTextGroup.enabled !== false && Boolean(footerTextGroup.text || rules.footerTextContent))
+      : rules.footerInsertEnabled !== false
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
     const header =
