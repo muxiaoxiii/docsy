@@ -525,10 +525,10 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     }
     const headerInsertEnabled = rules._globalApply
       ? (headerGroup && headerGroup.enabled !== false && headerGroup.mode !== 'none')
-      : rules.headerInsertEnabled !== false
+      : Boolean(rules.headerInsertEnabled)
     const footerInsertEnabled = rules._globalApply
       ? (footerTextGroup && footerTextGroup.enabled !== false && Boolean(footerTextGroup.text || rules.footerTextContent))
-      : rules.footerInsertEnabled !== false
+      : Boolean(rules.footerInsertEnabled)
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
     const header =
