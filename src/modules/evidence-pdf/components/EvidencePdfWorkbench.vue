@@ -25,8 +25,8 @@
       <div v-if="splittingMergedImport" v-loading="true" element-loading-text="正在拆分 PDF" class="local-processing">
         <p>大文件会按页段逐个输出，当前只占用合并证据处理区域；请先不要重复点击确认拆分。</p>
       </div>
-      <div v-if="overlaying" class="local-processing">
-        <p>正在处理证据 PDF… 文件状态见下方列表。</p>
+      <div v-if="overlaying" v-loading="true" element-loading-text="正在处理证据 PDF" class="local-processing">
+        <p>页眉页脚、A4、批注和合并会在后台执行；文件较大时请等待当前批次完成。</p>
       </div>
       <div v-if="deepDetecting" class="local-processing">
         <p>{{ detectionProgressText || '正在检测页眉页脚...' }}</p>
@@ -3248,6 +3248,19 @@ onUnmounted(() => window.removeEventListener('keydown', handleGlobalKeydown))
   background: var(--docsy-primary-soft);
   color: var(--docsy-text-strong);
   min-height: 60px;
+}
+
+.local-processing :deep(.el-loading-mask) {
+  background-color: color-mix(in srgb, var(--docsy-primary-soft) 85%, transparent);
+  border-radius: 6px;
+}
+
+.local-processing :deep(.el-loading-spinner .circular .path) {
+  stroke: var(--docsy-text-strong);
+}
+
+.local-processing :deep(.el-loading-spinner .el-loading-text) {
+  color: var(--docsy-text-strong);
 }
 
 .local-processing p {
