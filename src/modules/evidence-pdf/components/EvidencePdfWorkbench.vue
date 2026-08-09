@@ -28,8 +28,8 @@
       <div v-if="overlaying" v-loading="true" element-loading-text="正在处理证据 PDF" class="local-processing">
         <p>页眉页脚、A4、批注和合并会在后台执行；文件较大时请等待当前批次完成。</p>
       </div>
-      <div v-if="deepDetecting" v-loading="true" :element-loading-text="detectionProgressText || '正在检测页眉页脚...'" class="local-processing">
-        <p>正在读取页眉页脚信息，完成后统一显示结果。</p>
+      <div v-if="deepDetecting" class="local-processing">
+        <p>{{ detectionProgressText || '正在检测页眉页脚...' }}</p>
       </div>
 
       <div v-if="showSessionSummary" class="session-summary">

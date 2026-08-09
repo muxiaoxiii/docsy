@@ -241,7 +241,7 @@ describe('Evidence PDF session helpers', () => {
       pageEnd: 1,
     })
     expect(items[0].cleanup.plainHeaderTargets[0].bbox).toMatchObject({ x0: 505, y0: 15 })
-    expect(items[0].header.text).toBe('测试页眉3')
+    expect(items[0].header.text).toBe('证据1')
     expect(items[0].extraOverlays[0].text).toBe('新测试页眉3')
     expect(items[0].extraOverlays[0].align).toBe('right')
     expect(items[0].extraOverlays[0].fontSize).toBeCloseTo(11.6, 2)

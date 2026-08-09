@@ -129,7 +129,7 @@ export function createEvidenceFile(path) {
   return {
     path,
     name,
-    header: stripPdf(name),
+    header: undefined,
     footer: null,
     // headerEdited / footerEdited — removed, no longer needed with group-based API
     pages: 0,
