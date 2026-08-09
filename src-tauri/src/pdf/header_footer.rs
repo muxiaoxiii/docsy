@@ -500,10 +500,12 @@ pub fn remove_pdf_bookmarks(path: &Path) -> Result<()> {
 }
 
 fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
+    let job_start = std::time::Instant::now();
     let input = Path::new(&args.input_path);
     if !input.exists() {
         anyhow::bail!("原始 PDF 不存在: {}", input.display());
     }
+    let file_name = input.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let output_requested = Path::new(&args.output_path);
     let output_path = unique_output_path(output_requested);
     let output = output_path.as_path();
@@ -514,7 +516,9 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         fs::create_dir_all(parent).context("创建输出目录失败")?;
     }
 
+    let t0 = std::time::Instant::now();
     let semantic_deleted_path = edit_or_delete_standard_artifacts_if_requested(args)?;
+    let artifact_elapsed = t0.elapsed().as_millis();
     let _semantic_temp_guard = semantic_deleted_path
         .as_ref()
         .map(|result| TempPathGuard::new(result.path.clone()));
