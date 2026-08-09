@@ -104,6 +104,22 @@ fn delete_plain_header_footer_file(
     let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
     let mut result = PlainTextCleanupResult::default();
 
+    // 诊断：记录 target 信息
+    for (i, t) in plan.header_targets.iter().enumerate() {
+        log::info!(
+            "plain_delete.target header[{}]: text={:?} normalized={:?} pages={}-{} bbox={}",
+            i, t.text, t.normalized_text, t.page_start, t.page_end,
+            t.bbox.as_ref().map(|b| format!("({},{} - {},{}) w={} h={}", b.x0, b.y0, b.x1, b.y1, b.width, b.height)).unwrap_or_else(|| "null".to_string())
+        );
+    }
+    for (i, t) in plan.footer_targets.iter().enumerate() {
+        log::info!(
+            "plain_delete.target footer[{}]: text={:?} normalized={:?} pages={}-{} bbox={}",
+            i, t.text, t.normalized_text, t.page_start, t.page_end,
+            t.bbox.as_ref().map(|b| format!("({},{} - {},{}) w={} h={}", b.x0, b.y0, b.x1, b.y1, b.width, b.height)).unwrap_or_else(|| "null".to_string())
+        );
+    }
+
     for (page_index, page_id) in page_ids.into_iter().enumerate() {
         let page_number = page_index as u32 + 1;
         let content = match doc.get_and_decode_page_content(page_id) {
@@ -326,19 +342,18 @@ fn filter_page_operations(
         let mut remove_region = None;
         if let Some(text) = shown_text.as_deref() {
             // 文本匹配：必须在 zone 内 + 文本内容匹配
-            if is_in_header_zone(state.y, plan)
-                && matches_any_target_by_text(text, &plan.header_targets)
-            {
+            let in_header_zone = is_in_header_zone(state.y, plan);
+            let in_footer_zone = is_in_footer_zone(state.y, plan);
+            if in_header_zone && matches_any_target_by_text(text, &plan.header_targets) {
                 remove_region = Some(TextRegion::Header);
-            } else if is_in_footer_zone(state.y, plan)
-                && matches_any_target_by_text(text, &plan.footer_targets)
-            {
+            } else if in_footer_zone && matches_any_target_by_text(text, &plan.footer_targets) {
                 remove_region = Some(TextRegion::Footer);
             }
             // bbox 匹配：独立于 zone check，处理 CID 字体无法解码的情况
             if remove_region.is_none() {
                 let page_h = plan.page_box.max_y;
-                let header_by_bbox = matches_any_target_by_bbox(&state, &plan.header_targets, page_h);
+                let header_by_bbox =
+                    matches_any_target_by_bbox(&state, &plan.header_targets, page_h);
                 let footer_by_bbox = !header_by_bbox
                     && matches_any_target_by_bbox(&state, &plan.footer_targets, page_h);
                 if header_by_bbox {
@@ -352,6 +367,15 @@ fn filter_page_operations(
                         reason: DeleteSkipReason::FontUndecodable,
                     });
                 }
+            }
+            // 诊断：记录前2页文本操作的匹配情况
+            if _page_number <= 2 && !plan.header_targets.is_empty() {
+                log::info!(
+                    "plain_delete.match page={} y={:.1} in_header={} in_footer={} text={:?} matched={:?}",
+                    _page_number, state.y, in_header_zone, in_footer_zone,
+                    text.chars().take(20).collect::<String>(),
+                    remove_region
+                );
             }
         }
         match remove_region {
