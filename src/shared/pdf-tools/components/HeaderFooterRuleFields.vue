@@ -111,7 +111,7 @@
         margin-label="距顶"
       />
       <div class="rule-item page-range-row">
-        <label>显示范围</label>
+        <label>添加范围</label>
         <div class="page-range-inputs">
           <el-checkbox v-model="headerAllPages" size="small">全部页面</el-checkbox>
           <template v-if="!headerAllPages">
@@ -210,7 +210,7 @@
         margin-label="距底"
       />
       <div class="rule-item page-range-row">
-        <label>显示范围</label>
+        <label>添加范围</label>
         <div class="page-range-inputs">
           <el-checkbox v-model="footerTextAllPages" size="small">全部页面</el-checkbox>
           <template v-if="!footerTextAllPages">

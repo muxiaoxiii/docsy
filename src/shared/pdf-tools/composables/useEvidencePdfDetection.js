@@ -132,9 +132,11 @@ export function useEvidencePdfDetection({
       ...headerCandidates
         .filter((candidate) => !isPageNumberCandidate(candidate))
         .filter((candidate) => bestReliableHeaderCandidate([candidate], totalPages))
+        .filter((candidate) => isReliableDetectedCandidate(candidate, totalPages))
         .map((candidate, index) => detectedElementFromCandidate(candidate, 'header', index)),
       ...footerCandidates
         .filter((candidate) => !isPageNumberCandidate(candidate) && isStrongNonPageFooterCandidate(candidate))
+        .filter((candidate) => isReliableDetectedCandidate(candidate, totalPages))
         .map((candidate, index) => detectedElementFromCandidate(candidate, 'footerText', index)),
       ...pageNumberCandidates.map((candidate, index) => detectedElementFromCandidate(candidate, 'pageNumber', index)),
     ]
@@ -209,10 +211,44 @@ export function useEvidencePdfDetection({
     )
   }
 
-  /** Check if text matches first-page evidence sequence patterns like "证据1", "对比文件3" */
-  function isFirstPageEvidenceSequence(text) {
-    if (!text) return false
-    return /^(证据|对比文件)\s*\d+/.test(String(text).trim())
+  /** Check if text matches first-page evidence sequence patterns like "证据1", "对比文件3".
+   *  Uses normalizedText first because it has half-width digits that JS \d can match. */
+  function isFirstPageEvidenceSequence(text, normalizedText) {
+    const candidates = [normalizedText, text].filter(Boolean)
+    return candidates.some(
+      (t) => /^(证据|对比文件)\s*\d+/.test(String(t).trim()),
+    )
+  }
+
+  /** Check if a candidate is a first-page evidence label (e.g. "证据1" on page 1). */
+  function isFirstPageEvidenceCandidate(candidate) {
+    if (!candidate) return false
+    const range = candidate?.pageRange || {}
+    const pageStart = Number(range.start || candidate?.bbox?.page || 1)
+    // Must be on page 1 and match evidence label pattern
+    if (pageStart !== 1) return false
+    return isFirstPageEvidenceSequence(candidate?.normalizedText, candidate?.text)
+  }
+
+  /**
+   * Reliability gate for detected elements that passed bestReliableHeaderCandidate.
+   * Filters out content-text candidates that are likely body text falsely detected
+   * in the header/footer zone (Bug 2: evidence 9 over-detection).
+   *
+   * - Artifact candidates: always reliable (structural PDF metadata)
+   * - First-page evidence labels: always reliable ("证据1" on page 1)
+   * - Content-text repeating candidates: require minimum confidence (0.25)
+   *   to filter body text that barely meets the repeat threshold
+   */
+  function isReliableDetectedCandidate(candidate, totalPages) {
+    if (!candidate) return false
+    // Artifact and first-page evidence are always reliable
+    if (candidate?.source === 'artifact') return true
+    if (isFirstPageEvidenceCandidate(candidate)) return true
+    // For content-text candidates, require a minimum confidence
+    const confidence = Number(candidate?.confidence || 0)
+    if (confidence < 0.25) return false
+    return true
   }
 
   function bestReliableHeaderCandidate(candidates = [], totalPages = 1) {
@@ -222,7 +258,7 @@ export function useEvidencePdfDetection({
         (candidate) =>
           candidate?.source === 'artifact' ||
           (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2) ||
-          isFirstPageEvidenceSequence(candidate?.text || candidate?.normalizedText || ''),
+          isFirstPageEvidenceCandidate(candidate),
       ) || null
     )
   }
@@ -285,7 +321,7 @@ export function useEvidencePdfDetection({
     return (
       candidate?.source === 'artifact' ||
       (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2) ||
-      isFirstPageEvidenceSequence(candidate?.text || candidate?.normalizedText || '')
+      isFirstPageEvidenceCandidate(candidate)
     )
   }
 

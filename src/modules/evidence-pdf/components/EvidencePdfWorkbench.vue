@@ -2842,7 +2842,17 @@ function displayContentRowText(file, index, cr) {
 function mainColumnContentText(file, index) {
   const rows = buildFileContentRows(file, index, currentRules.value)
   if (!rows.length) return '-'
-  return displayContentRowText(file, index, rows[0])
+  const text = displayContentRowText(file, index, rows[0])
+  // Show add-range info for new header rows with a custom page range
+  const cr = rows[0]
+  if (cr.source === 'new' && cr.pageStart > 1) {
+    const end = cr.pageEnd && cr.pageEnd > 0 ? cr.pageEnd : (file.pages || '?')
+    return `${text}  [${cr.pageStart}-${end}页]`
+  }
+  if (cr.source === 'new' && cr.pageEnd && cr.pageEnd > 0) {
+    return `${text}  [1-${cr.pageEnd}页]`
+  }
+  return text
 }
 
 function startMainColumnContentEdit(row, index) {
