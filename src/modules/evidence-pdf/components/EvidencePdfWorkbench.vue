@@ -2164,6 +2164,8 @@ async function applyHeaderFooter() {
   if (!canApplyOverlay.value) return
   overlaying.value = true
   try {
+    // Sync existingElement decisions back to legacy file properties before building payload
+    overlayRows.value.forEach((file) => syncLegacyExistingElementState(file))
     let payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
     payload = await resolveSuffixConflicts(payload)
     if (!payload) { overlaying.value = false; return }
@@ -2486,7 +2488,12 @@ function keepAllExistingElements() {
     const status = fileExistingStatus(file)
     file.statusText = status.text
     file.statusType = status.type
+    syncLegacyExistingElementState(file)
   }
+  // TODO: When user marks existing header/footer as 'keep' AND headerInsertEnabled/footerInsertEnabled is true,
+  // the original header is preserved AND a new group header is inserted, resulting in a double header.
+  // Preview only shows the existing text, masking this mismatch. Consider suppressing the new group header
+  // when the corresponding existing element is kept, or updating the preview to show both.
   if (count > 0) {
     ElMessage.success(`已保留 ${count} 个检测项`)
   } else {
@@ -2506,6 +2513,7 @@ function ignoreAllExistingElements() {
     const status = fileExistingStatus(file)
     file.statusText = status.text
     file.statusType = status.type
+    syncLegacyExistingElementState(file)
   }
   if (count > 0) {
     ElMessage.success(`已忽略 ${count} 个检测项`)
