@@ -92,7 +92,8 @@ fn run_pdftoppm(pdftoppm: &Path, input: &Path, page: u32, dpi: u32) -> Result<Pa
     let prefix = temp_named_path("docsy_pdf_preview", "");
     let output = PathBuf::from(format!("{}.png", prefix.display()));
 
-    let command_output = crate::external::hidden_command(pdftoppm)
+    let mut command = crate::external::hidden_command(pdftoppm);
+    command
         .arg("-png")
         .arg("-singlefile")
         .arg("-r")
@@ -102,9 +103,10 @@ fn run_pdftoppm(pdftoppm: &Path, input: &Path, page: u32, dpi: u32) -> Result<Pa
         .arg("-l")
         .arg(page.to_string())
         .arg(input)
-        .arg(&prefix)
-        .output()
-        .context("执行 pdftoppm 失败")?;
+        .arg(&prefix);
+    // 设置字体配置路径，让 poppler 能找到系统字体（日语、韩语等 CJK 字体）
+    configure_fontconfig_env(&mut command);
+    let command_output = command.output().context("执行 pdftoppm 失败")?;
 
     if !command_output.status.success() {
         anyhow::bail!(
@@ -140,4 +142,105 @@ fn repair_pdf_for_preview(input: &Path, output: &Path) -> Result<()> {
 
 fn find_pdftoppm() -> Option<PathBuf> {
     crate::external::PopplerTool::binary_path_for("pdftoppm").ok()
+}
+
+/// 为 poppler 工具设置字体配置环境变量，让自管理的 poppler 能找到系统字体
+/// （日语、韩语等 CJK 字体在预览渲染时显示为方块的问题）
+fn configure_fontconfig_env(command: &mut std::process::Command) {
+    use std::path::PathBuf;
+
+    // 如果已经有 FONTCONFIG_FILE，说明用户自行配置了，不覆盖
+    if std::env::var("FONTCONFIG_FILE").is_ok() {
+        return;
+    }
+
+    // 如果已经有 FONTCONFIG_PATH 且目录存在，不覆盖
+    if let Ok(existing) = std::env::var("FONTCONFIG_PATH") {
+        if std::path::Path::new(&existing).exists() {
+            return;
+        }
+    }
+
+    // 收集系统字体目录
+    let font_dirs = system_font_dirs();
+    if font_dirs.is_empty() {
+        return;
+    }
+
+    // 生成 fontconfig XML 配置
+    let config_xml = generate_fontconfig_xml(&font_dirs);
+    let config_path = std::env::temp_dir().join("docsy-fontconfig.xml");
+    if std::fs::write(&config_path, config_xml).is_ok() {
+        command.env("FONTCONFIG_FILE", config_path.to_string_lossy().to_string());
+    }
+}
+
+/// 获取系统字体目录列表
+fn system_font_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        dirs.push(PathBuf::from("/System/Library/Fonts"));
+        dirs.push(PathBuf::from("/Library/Fonts"));
+        if let Ok(home) = std::env::var("HOME") {
+            dirs.push(PathBuf::from(format!("{home}/Library/Fonts")));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(windows) = std::env::var("SystemRoot") {
+            dirs.push(PathBuf::from(format!("{windows}\\Fonts")));
+        }
+        // Windows 10+ 用户字体目录
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let user_fonts = PathBuf::from(format!("{local}\\Microsoft\\Windows\\Fonts"));
+            if user_fonts.exists() {
+                dirs.push(user_fonts);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let candidates = [
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+            "/usr/share/fonts/truetype",
+            "/usr/share/fonts/opentype",
+        ];
+        for path in &candidates {
+            let p = PathBuf::from(path);
+            if p.exists() {
+                dirs.push(p);
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let user_fonts = PathBuf::from(format!("{home}/.local/share/fonts"));
+            if user_fonts.exists() {
+                dirs.push(user_fonts);
+            }
+        }
+    }
+
+    dirs
+}
+
+/// 生成 fontconfig XML 配置
+fn generate_fontconfig_xml(font_dirs: &[PathBuf]) -> String {
+    let mut xml = String::from(
+        r#"<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+"#,
+    );
+    for dir in font_dirs {
+        xml.push_str(&format!(
+            "  <dir>{}</dir>\n",
+            dir.display()
+        ));
+    }
+    xml.push_str("</fontconfig>\n");
+    xml
 }
