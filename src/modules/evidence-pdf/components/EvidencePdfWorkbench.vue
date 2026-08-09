@@ -2169,13 +2169,16 @@ async function applyHeaderFooter() {
     let payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
     payload = await resolveSuffixConflicts(payload)
     if (!payload) { overlaying.value = false; return }
-    overlayRows.value.forEach((file) => {
-      file.statusText = '处理中'
-      file.statusType = 'warning'
+
+    overlayFiles.value.forEach((file) => {
+      file.statusText = '处理中…'
+      file.statusType = 'info'
       file.statusDetail = ''
     })
 
+    const startTime = Date.now()
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    const elapsedMs = Date.now() - startTime
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, 'PDF 处理失败'))
       overlayFiles.value.forEach((file) => {
@@ -2209,7 +2212,8 @@ async function applyHeaderFooter() {
     const merge = result.data.merge
 
     // 诊断日志：记录处理结果
-    diagLog.info('processing.result', `处理完成 ${successCount}/${successCount + failedCount}`, {
+    diagLog.info('processing.result', `处理完成 ${successCount}/${successCount + failedCount} (${(elapsedMs / 1000).toFixed(1)}s)`, {
+      elapsedMs,
       successCount, failedCount, warningCount,
       results: (result.data.results || []).map(r => ({
         file: r.inputPath?.split(/[/\\]/).pop(),
