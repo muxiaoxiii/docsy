@@ -25,8 +25,8 @@
       <div v-if="splittingMergedImport" v-loading="true" element-loading-text="正在拆分 PDF" class="local-processing">
         <p>大文件会按页段逐个输出，当前只占用合并证据处理区域；请先不要重复点击确认拆分。</p>
       </div>
-      <div v-if="overlaying" v-loading="true" element-loading-text="正在处理证据 PDF" class="local-processing">
-        <p>页眉页脚、A4、批注和合并会在后台执行；文件较大时请等待当前批次完成。</p>
+      <div v-if="overlaying" class="local-processing">
+        <p>正在处理证据 PDF… 文件状态见下方列表。</p>
       </div>
       <div v-if="deepDetecting" class="local-processing">
         <p>{{ detectionProgressText || '正在检测页眉页脚...' }}</p>
@@ -2230,16 +2230,36 @@ async function applyHeaderFooter() {
         headerInsertEnabled: currentRules.value.headerInsertEnabled,
       },
     })
+    // 收集所有有 warning 的文件的具体提示
+    const warningDetails = (result.data.results || [])
+      .filter(r => r.warnings?.length)
+      .map(r => {
+        const name = r.inputPath?.split(/[/\\]/).pop() || '未知文件'
+        return `${name}：${r.warnings.join('；')}`
+      })
+
     if (merge?.status === 'done') {
       const cleanupText =
         merge.outputMode === 'merge_only' ? `，已清理 ${merge.removedIntermediates || 0} 个中间副本` : ''
-      const warningText = warningCount ? `，其中 ${warningCount} 个有处理提示` : ''
-      const msg = `已完成 ${successCount} 个 PDF，并已合并${cleanupText}${warningText}`
+      const msg = `已完成 ${successCount} 个 PDF，并已合并${cleanupText}`
       ElNotification({ title: '处理完成', message: msg, type: 'success', duration: 0 })
+      if (warningDetails.length) {
+        ElNotification({
+          title: `${warningDetails.length} 个文件有处理提示`,
+          message: warningDetails.join('\n'),
+          type: 'warning',
+          duration: 0,
+        })
+      }
     } else if (failedCount) {
       ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个`)
-    } else if (warningCount) {
-      ElMessage.warning(`已完成 ${successCount} 个 PDF，其中 ${warningCount} 个有处理提示`)
+    } else if (warningDetails.length) {
+      ElNotification({
+        title: `已完成 ${successCount} 个 PDF`,
+        message: warningDetails.join('\n'),
+        type: 'warning',
+        duration: 0,
+      })
     } else if (merge?.status === 'skipped') {
       ElMessage.warning(`已完成 ${successCount} 个 PDF，${merge.message || '未合并'}`)
     } else {
