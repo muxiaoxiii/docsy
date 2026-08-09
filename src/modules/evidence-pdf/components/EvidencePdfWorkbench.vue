@@ -25,8 +25,8 @@
       <div v-if="splittingMergedImport" v-loading="true" element-loading-text="正在拆分 PDF" class="local-processing">
         <p>大文件会按页段逐个输出，当前只占用合并证据处理区域；请先不要重复点击确认拆分。</p>
       </div>
-      <div v-if="overlaying" v-loading="true" element-loading-text="正在处理证据 PDF" class="local-processing">
-        <p>页眉页脚、A4、批注和合并会在后台执行；文件较大时请等待当前批次完成。</p>
+      <div v-if="overlaying" class="local-processing">
+        <p>{{ overlayProgressText }}</p>
       </div>
       <div v-if="deepDetecting" class="local-processing">
         <p>{{ detectionProgressText || '正在检测页眉页脚...' }}</p>
@@ -929,6 +929,8 @@ const overlayFiles = ref([])
 const overlayOutputDir = ref('')
 const checkingOverlayPages = ref(false)
 const overlaying = ref(false)
+const overlayProgressText = ref('')
+let overlayProgressTimer = null
 const quickCleanupRunning = ref(false)
 const evidenceDragging = ref(false)
 let quickCleanupPipeline = false
@@ -2176,9 +2178,23 @@ async function applyHeaderFooter() {
       file.statusDetail = ''
     })
 
+    const overlayStartTime = Date.now()
+    const totalFiles = overlayFiles.value.length
+    overlayProgressText.value = `正在处理 0/${totalFiles} 个文件  0:00`
+    overlayProgressTimer = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - overlayStartTime) / 1000)
+      const m = Math.floor(elapsed / 60)
+      const s = String(elapsed % 60).padStart(2, '0')
+      const done = overlayFiles.value.filter(f => f.statusText !== '处理中…').length
+      overlayProgressText.value = `正在处理 ${done}/${totalFiles} 个文件  ${m}:${s}`
+    }, 1000)
+
     const startTime = Date.now()
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
     const elapsedMs = Date.now() - startTime
+    window.clearInterval(overlayProgressTimer)
+    overlayProgressTimer = null
+    overlayProgressText.value = ''
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, 'PDF 处理失败'))
       overlayFiles.value.forEach((file) => {
@@ -2266,6 +2282,9 @@ async function applyHeaderFooter() {
       ElMessage.success(`已完成 ${successCount} 个 PDF`)
     }
   } catch (err) {
+    window.clearInterval(overlayProgressTimer)
+    overlayProgressTimer = null
+    overlayProgressText.value = ''
     ElMessage.error(userFacingError(err?.message || err, 'PDF 处理失败'))
     overlayFiles.value.forEach((file) => {
       file.statusText = '失败'
@@ -3248,19 +3267,6 @@ onUnmounted(() => window.removeEventListener('keydown', handleGlobalKeydown))
   background: var(--docsy-primary-soft);
   color: var(--docsy-text-strong);
   min-height: 60px;
-}
-
-.local-processing :deep(.el-loading-mask) {
-  background-color: color-mix(in srgb, var(--docsy-primary-soft) 85%, transparent);
-  border-radius: 6px;
-}
-
-.local-processing :deep(.el-loading-spinner .circular .path) {
-  stroke: var(--docsy-text-strong);
-}
-
-.local-processing :deep(.el-loading-spinner .el-loading-text) {
-  color: var(--docsy-text-strong);
 }
 
 .local-processing p {
