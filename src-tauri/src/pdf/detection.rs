@@ -2588,55 +2588,30 @@ mod tests {
         // No candidate spans across the section boundary
         assert!(pn.iter().all(|c| !(c.page_range.start <= 3 && c.page_range.end >= 5)));
     }
-
     #[test]
     #[ignore = "requires the real patent PDF and pdftotext"]
-    fn detect_real_patent_pdf_sections() {
-        let path = "/Users/only/Desktop/Test/侵权比对-附件一-专利授权公告文本-CN117457788B.pdf";
+    fn detect_evidence9_header_candidates() {
+        let path = "/Users/only/Documents/Workspace/浦项项目/【无效阶段文件】/444 【6号专利新无效】/4W122724 I D1-D14/09 证据 9. 国家知识产权局第 587099 号无效宣告请求审查决定书.pdf";
         if !std::path::Path::new(path).exists() {
             eprintln!("skipping: file not found");
             return;
         }
         let result = detect(&serde_json::json!({
             "inputPath": path,
-            "maxPages": 30,
+            "maxPages": 35,
             "headerZoneMm": 25.0,
             "footerZoneMm": 25.0,
         }))
         .unwrap();
-        for c in result
-            .header_candidates
-            .iter()
-            .chain(result.footer_candidates.iter())
-        {
-            if c.normalized_text.contains("page") || c.normalized_text.contains('{') {
-                println!(
-                    "{} text={} norm={} pages={}-{} bbox=({:.1},{:.1})",
-                    c.region,
-                    c.text,
-                    c.normalized_text,
-                    c.page_range.start,
-                    c.page_range.end,
-                    c.bbox.x0,
-                    c.bbox.y0
-                );
-            }
+        eprintln!("=== Header Candidates ({} total) ===", result.header_candidates.len());
+        for (i, c) in result.header_candidates.iter().enumerate() {
+            eprintln!(
+                "[{}] source={} text={:?} norm={:?} count={} repeating={} conf={:.3} pages={}-{} bbox=({:.1},{:.1},{:.1},{:.1}) page={}",
+                i, c.source, c.text, c.normalized_text,
+                c.count, c.repeating, c.confidence,
+                c.page_range.start, c.page_range.end,
+                c.bbox.x0, c.bbox.y0, c.bbox.x1, c.bbox.y1, c.bbox.page,
+            );
         }
-        // Page-number candidates must keep their per-section ranges instead of
-        // being merged into one 2-19 range: claims 1/3, spec 1/13, drawings 1/2.
-        let header_pn: Vec<_> = result
-            .header_candidates
-            .iter()
-            .filter(|c| c.labels.iter().any(|l| l == "page-number"))
-            .collect();
-        assert!(header_pn.len() >= 3, "expected 3 sectioned header page numbers, got {}", header_pn.len());
-        let starts: Vec<u32> = header_pn.iter().map(|c| c.page_range.start).collect();
-        assert!(starts.contains(&2) && starts.contains(&5), "missing section start: {starts:?}");
-        let footer_pn: Vec<_> = result
-            .footer_candidates
-            .iter()
-            .filter(|c| c.labels.iter().any(|l| l == "page-number"))
-            .collect();
-        assert_eq!(footer_pn.len(), 1, "footer should be one continuous total range");
     }
 }

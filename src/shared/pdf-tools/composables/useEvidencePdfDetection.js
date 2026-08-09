@@ -3,8 +3,12 @@ import { tauriCallQuiet } from '../../../core/tauriBridge.js'
 import { emitOperationEvent, emitOperationUpdate } from '../../../core/tauriBridge.js'
 import { candidateTargetRange } from './useEvidencePdfSession.js'
 import { candidateIdentity, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
+import { log as diagLog, registerSnapshotProvider } from '../../../shared/diagnostics.js'
 
 const ROMAN_PAGE_SCORE_PENALTY = -0.25
+
+// 存储最近一次检测结果（用于诊断模块）
+let lastDetectionResults = []
 
 export function headerFooterDetectionZoneMm(value) {
   return Math.max(25, Math.min(60, Number(value || 0) || 25))
@@ -21,6 +25,12 @@ export function useEvidencePdfDetection({
   cleanupHeaderHeightMm,
   cleanupFooterHeightMm,
 }) {
+  // 注册诊断快照提供者
+  registerSnapshotProvider('detection', () => ({
+    lastDetectionResults: lastDetectionResults.slice(-20), // 最近20个文件的检测结果
+    totalDetected: lastDetectionResults.reduce((sum, r) => sum + r.detectedCount, 0),
+    filesWithDetection: lastDetectionResults.filter(r => r.detectedCount > 0).length,
+  }))
   async function detectAllHeaderFooter(options = {}) {
     const silent = Boolean(options.silent)
     if (!overlayRows.value.length || detectingAllHeaderFooter.value) return
@@ -120,6 +130,13 @@ export function useEvidencePdfDetection({
     const totalPages = file.pages || data.pages?.length || data.pagesAnalyzed || 1
     const headerCandidates = data.headerCandidates || []
     const footerCandidates = data.footerCandidates || []
+
+    // === 诊断日志：记录检测输入 ===
+    diagLog.info('detection.apply', `开始处理 ${file.name}`, {
+      totalPages,
+      headerCandidateCount: headerCandidates.length,
+      footerCandidateCount: footerCandidates.length,
+    })
     const pageNumberCandidates = [...headerCandidates, ...footerCandidates].filter(isPageNumberCandidate)
     const header = bestReliableHeaderCandidate(
       headerCandidates.filter((candidate) => !isPageNumberCandidate(candidate)),
@@ -141,6 +158,37 @@ export function useEvidencePdfDetection({
       ...pageNumberCandidates.map((candidate, index) => detectedElementFromCandidate(candidate, 'pageNumber', index)),
     ]
     file.existingElements = mergeExistingElements(file.existingElements || [], detectedElements)
+
+    // 诊断日志：记录最终检测结果
+    const detectionResult = {
+      fileName: file.name,
+      timestamp: new Date().toISOString(),
+      detectedCount: detectedElements.length,
+      detected: detectedElements.map(e => ({
+        kind: e.kind,
+        text: e.text?.slice(0, 40),
+        pageRange: e.pageRange,
+        source: e.source,
+        confidence: e.confidence,
+        decision: e.decision,
+      })),
+      headerChoice: header ? { text: header.text?.slice(0, 40), source: header.source, confidence: header.confidence } : null,
+      footerChoice: footer ? { text: footer.text?.slice(0, 40), source: footer.source } : null,
+      pageNumberChoice: pageNumber ? { text: pageNumber.text?.slice(0, 40), source: pageNumber.source } : null,
+      candidateSummary: headerCandidates.map(c => ({
+        text: c.text?.slice(0, 30),
+        count: c.count,
+        repeating: c.repeating,
+        confidence: c.confidence,
+        source: c.source,
+        passesReliability: bestReliableHeaderCandidate([c], totalPages) !== null,
+        passesConfidence: isReliableDetectedCandidate(c, totalPages),
+      })),
+    }
+    // 存储到全局变量（供诊断模块使用）
+    lastDetectionResults.push(detectionResult)
+    if (lastDetectionResults.length > 100) lastDetectionResults.shift()
+    diagLog.info('detection.result', `${file.name} 检测完成`, detectionResult)
     const parts = []
     if (data.artifact?.hasHeader) parts.push(`发现结构化页眉 ${data.artifact.headerCount} 处`)
     if (data.artifact?.hasFooter) parts.push(`发现结构化页脚 ${data.artifact.footerCount} 处`)
