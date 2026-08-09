@@ -562,6 +562,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
     let semantic_rebuild_overlays = artifact_rebuild_overlays(args, semantic_deleted_path.as_ref());
 
+    let t2 = std::time::Instant::now();
     let normalized_path = if args.normalize_a4 {
         Some(normalize_pdf_to_a4(
             cleanup_input,
@@ -571,6 +572,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     } else {
         None
     };
+    let normalize_elapsed = t2.elapsed().as_millis();
     let _normalized_temp_guard = normalized_path
         .as_ref()
         .map(|path| TempPathGuard::new(path.clone()));
@@ -622,6 +624,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
 
     let extra_overlays = combined_extra_overlays(args, &semantic_rebuild_overlays);
+    let t3 = std::time::Instant::now();
     let (overlay_pdf, mut overlay_warnings) = build_overlay_pdf(
         args.header.as_ref(),
         args.footer.as_ref(),
@@ -631,12 +634,14 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         total_pages,
     )?;
     warnings.append(&mut overlay_warnings);
+    let overlay_build_elapsed = t3.elapsed().as_millis();
     let overlay_path = TempPathGuard::new(temp_named_path("docsy_overlay", "pdf"));
     fs::write(overlay_path.path(), &overlay_pdf).context("写入临时页眉页脚层失败")?;
 
     let qpdf_tool = crate::external::QpdfTool;
     let bin = qpdf_tool.binary_path()?;
     let overlay_output = TempPathGuard::new(temp_named_path("docsy_overlay_result", "pdf"));
+    let t4 = std::time::Instant::now();
     // Redirect stderr to null to avoid "Broken pipe (os error 32)" when qpdf
     // writes progress information to stderr and the pipe is already closed.
     // On failure, re-run briefly to capture the error detail.
@@ -649,6 +654,7 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         .stderr(std::process::Stdio::null())
         .output()
         .context("执行 qpdf overlay 失败")?;
+    let qpdf_elapsed = t4.elapsed().as_millis();
 
     cleanup_temp(normalized_path);
     cleanup_plain_text_temp(plain_deleted_path);
@@ -662,6 +668,13 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
     write_optimized_or_copy(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
     // Bookmarks are now written after merge, not during per-file processing
+
+    let total_elapsed = job_start.elapsed().as_millis();
+    log::info!(
+        "process_job.timing file={:?} total={}ms artifact={}ms plain_delete={}ms normalize={}ms overlay_build={}ms qpdf={}ms pages={}",
+        file_name, total_elapsed, artifact_elapsed, plain_elapsed, normalize_elapsed,
+        overlay_build_elapsed, qpdf_elapsed, pages
+    );
 
     Ok(HeaderFooterResult {
         input_path: args.input_path.clone(),
