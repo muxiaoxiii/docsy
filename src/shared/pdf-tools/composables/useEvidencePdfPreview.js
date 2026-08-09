@@ -61,21 +61,31 @@ export function useEvidencePdfPreview({
   const previewHeaderText = computed(() => {
     if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
     if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
-    const group = selectedGroupFor(selectedOverlayFile.value, 'header')
-    return group ? buildHeaderTextForGroup(selectedOverlayFile.value, selectedOverlayIndex.value, group, currentRules.value) : ''
+    const file = selectedOverlayFile.value
+    // 优先使用文件列表里已确定的页眉文本（来自 existingElements 的选择）
+    if (file.existingHeaderText) return file.existingHeaderText
+    const group = selectedGroupFor(file, 'header')
+    return group ? buildHeaderTextForGroup(file, selectedOverlayIndex.value, group, currentRules.value) : ''
   })
 
   const previewFooterText = computed(() => {
     if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || !footerInsertEnabled.value)
       return ''
     if (!shouldShowLiveFooter(selectedOverlayFile.value)) return ''
+    const file = selectedOverlayFile.value
+    // 优先使用文件列表里已确定的页脚文本（来自 existingElements 的选择）
+    if (file.existingFooterText) {
+      const page = footerContinuous.value ? file.pageStart + previewPage.value - 1 : previewPage.value
+      const total = footerContinuous.value ? totalOverlayPages.value : file.pages || 1
+      return expandPlaceholders(file.existingFooterText, page, total, file, selectedOverlayIndex.value, currentRules.value)
+    }
     const group = selectedFooterTextGroup.value
     if (!group || group.enabled === false || !group.text) return ''
     const page = footerContinuous.value
-      ? selectedOverlayFile.value.pageStart + previewPage.value - 1
+      ? file.pageStart + previewPage.value - 1
       : previewPage.value
-    const total = footerContinuous.value ? totalOverlayPages.value : selectedOverlayFile.value.pages || 1
-    return expandPlaceholders(group.text, page, total, selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value)
+    const total = footerContinuous.value ? totalOverlayPages.value : file.pages || 1
+    return expandPlaceholders(group.text, page, total, file, selectedOverlayIndex.value, currentRules.value)
   })
 
   const previewHeaderStyle = computed(() =>
