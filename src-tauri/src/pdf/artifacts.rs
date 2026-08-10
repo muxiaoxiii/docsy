@@ -2,10 +2,10 @@ use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
 use lopdf::{decode_text_string, Dictionary, Document, Object, ObjectId, StringFormat};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::{same_path, temp_named_path};
+use super::{cmap::ToUnicodeCMap, same_path, temp_named_path};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +58,9 @@ pub(crate) struct HeaderFooterArtifactOccurrence {
     pub text: Option<String>,
     pub docsy_kind: Option<String>,
     pub docsy_id: Option<String>,
+    pub object_ref: Option<String>,
+    pub operation_index: usize,
+    pub visual_object_ref: Option<String>,
 }
 
 impl HeaderFooterArtifactInspection {
@@ -98,37 +101,206 @@ pub(crate) fn inspect_meaningful_header_footer_artifacts(
     input_path: &Path,
     max_pages: u32,
 ) -> Result<HeaderFooterArtifactInspection> {
-    let doc = Document::load(input_path).context("读取 PDF 标准页眉页脚结构失败")?;
+    inspect_meaningful_header_footer_artifacts_qpdf(input_path, max_pages)
+}
+
+fn inspect_meaningful_header_footer_artifacts_qpdf(
+    input_path: &Path,
+    max_pages: u32,
+) -> Result<HeaderFooterArtifactInspection> {
+    let index = super::qpdf_stream::QpdfObjectIndex::load(input_path)?;
+    let font_cmaps = super::cmap::load_font_cmaps(input_path, &index)?;
+    let pages = index
+        .pages()
+        .iter()
+        .take(if max_pages == 0 {
+            usize::MAX
+        } else {
+            max_pages as usize
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let direct_refs = pages
+        .iter()
+        .flat_map(|page| page.contents.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut streams =
+        super::qpdf_stream::load_editable_streams(input_path, &direct_refs, "检测标准页眉页脚")?;
+    let mut frontier = BTreeSet::new();
+    for page in &pages {
+        for content_ref in &page.contents {
+            if let Some(stream) = streams.get(content_ref) {
+                collect_invoked_forms(&stream.operations, &page.xobjects, &index, &mut frontier);
+            }
+        }
+    }
+    let mut loaded_forms = BTreeSet::new();
+    while !frontier.is_empty() {
+        let pending = frontier
+            .iter()
+            .filter(|reference| !streams.contains_key(*reference))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !pending.is_empty() {
+            streams.extend(super::qpdf_stream::load_editable_streams(
+                input_path,
+                &pending,
+                "检测标准页眉页脚 Form",
+            )?);
+        }
+        let current = std::mem::take(&mut frontier);
+        for form_ref in current {
+            if !loaded_forms.insert(form_ref.clone()) {
+                continue;
+            }
+            let Some(stream) = streams.get(&form_ref) else {
+                continue;
+            };
+            let xobjects = index.form_xobjects(&form_ref);
+            collect_invoked_forms(&stream.operations, &xobjects, &index, &mut frontier);
+        }
+        frontier.retain(|reference| !loaded_forms.contains(reference));
+    }
+
     let mut result = HeaderFooterArtifactInspection::default();
-    for (page_index, page_id) in doc
-        .get_pages()
-        .into_values()
-        .take(if max_pages == 0 { usize::MAX } else { max_pages as usize })
-        .enumerate()
-    {
-        let Ok(content) = doc.get_and_decode_page_content(page_id) else {
-            continue;
-        };
-        let properties = page_properties(&doc, page_id);
-        result.merge(inspect_artifact_operations_detailed(
-            &content.operations,
-            &properties,
-            page_index as u32 + 1,
-            &format!("page:{}", page_id.0),
-        ));
-        let xobjects = page_xobjects(&doc, page_id);
-        inspect_referenced_form_artifacts(
-            &doc,
-            &content.operations,
-            &xobjects,
-            0,
-            &mut BTreeSet::new(),
-            &mut result,
-            page_index as u32 + 1,
-            &format!("page:{}", page_id.0),
-        );
+    let started = std::time::Instant::now();
+    for page in &pages {
+        for content_ref in &page.contents {
+            let stream = streams
+                .get(content_ref)
+                .with_context(|| format!("qpdf 未返回页面内容流 {content_ref}"))?;
+            let path = format!("page:{}/content:{content_ref}", page.number);
+            let mut direct = inspect_artifact_operations_detailed_qpdf(
+                &stream.operations,
+                &page.properties,
+                &page.fonts,
+                &font_cmaps,
+                page.number,
+                &path,
+                content_ref,
+            );
+            attach_artifact_visual_forms(&mut direct, &stream.operations, &page.xobjects);
+            result.merge(direct);
+            inspect_qpdf_referenced_forms(
+                &index,
+                &streams,
+                &stream.operations,
+                &page.xobjects,
+                page.number,
+                &font_cmaps,
+                &path,
+                0,
+                &mut BTreeSet::new(),
+                &mut result,
+            )?;
+        }
+        if page.number % 25 == 0 || page.number as usize == pages.len() {
+            crate::app_log::info(
+                "pdf.artifact.scan",
+                "progress",
+                serde_json::json!({
+                    "file": input_path.to_string_lossy(),
+                    "engine": "qpdf-index",
+                    "pagesDone": page.number,
+                    "pagesTotal": pages.len(),
+                    "decodedStreams": streams.len(),
+                    "headers": result.header_count,
+                    "footers": result.footer_count,
+                    "elapsedMs": started.elapsed().as_millis(),
+                }),
+            );
+        }
     }
     Ok(result)
+}
+
+fn collect_invoked_forms(
+    operations: &[Operation],
+    xobjects: &BTreeMap<String, String>,
+    index: &super::qpdf_stream::QpdfObjectIndex,
+    output: &mut BTreeSet<String>,
+) {
+    for operation in operations
+        .iter()
+        .filter(|operation| operation.operator == "Do")
+    {
+        let Some(name) = operation.operands.first().and_then(name_bytes) else {
+            continue;
+        };
+        let Ok(name) = std::str::from_utf8(name) else {
+            continue;
+        };
+        if let Some(reference) = xobjects.get(name).filter(|value| index.is_form(value)) {
+            output.insert(reference.clone());
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn inspect_qpdf_referenced_forms(
+    index: &super::qpdf_stream::QpdfObjectIndex,
+    streams: &BTreeMap<String, super::qpdf_stream::QpdfEditableStream>,
+    operations: &[Operation],
+    xobjects: &BTreeMap<String, String>,
+    page: u32,
+    font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+    page_path: &str,
+    depth: usize,
+    visited: &mut BTreeSet<String>,
+    result: &mut HeaderFooterArtifactInspection,
+) -> Result<()> {
+    if depth >= 128 {
+        anyhow::bail!("标准页眉页脚 Form 嵌套超过安全上限");
+    }
+    for operation in operations
+        .iter()
+        .filter(|operation| operation.operator == "Do")
+    {
+        let Some(name) = operation.operands.first().and_then(name_bytes) else {
+            continue;
+        };
+        let Ok(name) = std::str::from_utf8(name) else {
+            continue;
+        };
+        let Some(object_ref) = xobjects.get(name).filter(|value| index.is_form(value)) else {
+            continue;
+        };
+        if !visited.insert(object_ref.clone()) {
+            continue;
+        }
+        let stream = streams
+            .get(object_ref)
+            .with_context(|| format!("qpdf 未返回标准页眉页脚 Form {object_ref}"))?;
+        let properties = index.form_properties(object_ref);
+        let nested_xobjects = index.form_xobjects(object_ref);
+        let path = format!("{page_path}/form:{object_ref}");
+        let mut inspection = inspect_artifact_operations_detailed_qpdf(
+            &stream.operations,
+            &properties,
+            &index.form_fonts(object_ref),
+            font_cmaps,
+            page,
+            &path,
+            object_ref,
+        );
+        attach_artifact_visual_forms(&mut inspection, &stream.operations, &nested_xobjects);
+        result.merge(inspection);
+        inspect_qpdf_referenced_forms(
+            index,
+            streams,
+            &stream.operations,
+            &nested_xobjects,
+            page,
+            font_cmaps,
+            &path,
+            depth + 1,
+            visited,
+            result,
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -139,11 +311,52 @@ fn inspect_artifact_operations(
     inspect_artifact_operations_detailed(operations, properties, 0, "content")
 }
 
+#[cfg(test)]
 fn inspect_artifact_operations_detailed(
     operations: &[Operation],
     properties: &Dictionary,
     page: u32,
     path: &str,
+) -> HeaderFooterArtifactInspection {
+    inspect_artifact_operations_detailed_inner(
+        operations,
+        properties,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        page,
+        path,
+        None,
+    )
+}
+
+fn inspect_artifact_operations_detailed_qpdf(
+    operations: &[Operation],
+    properties: &Dictionary,
+    fonts: &BTreeMap<String, String>,
+    font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+    page: u32,
+    path: &str,
+    object_ref: &str,
+) -> HeaderFooterArtifactInspection {
+    inspect_artifact_operations_detailed_inner(
+        operations,
+        properties,
+        fonts,
+        font_cmaps,
+        page,
+        path,
+        Some(object_ref),
+    )
+}
+
+fn inspect_artifact_operations_detailed_inner(
+    operations: &[Operation],
+    properties: &Dictionary,
+    fonts: &BTreeMap<String, String>,
+    font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+    page: u32,
+    path: &str,
+    object_ref: Option<&str>,
 ) -> HeaderFooterArtifactInspection {
     let mut result = HeaderFooterArtifactInspection::default();
     let targets = HeaderFooterArtifactTargets {
@@ -160,7 +373,9 @@ fn inspect_artifact_operations_detailed(
                     let text = property
                         .and_then(|dict| dict.get(b"ActualText").ok())
                         .and_then(decode_pdf_string)
-                        .or_else(|| artifact_range_text(&operations[index + 1..end]));
+                        .or_else(|| {
+                            artifact_range_text(&operations[index + 1..end], fonts, font_cmaps)
+                        });
                     let docsy_kind = property
                         .and_then(|dict| dict.get(b"DocsyKind").ok())
                         .and_then(name_bytes)
@@ -180,6 +395,9 @@ fn inspect_artifact_operations_detailed(
                         text,
                         docsy_kind,
                         docsy_id,
+                        object_ref: object_ref.map(str::to_string),
+                        operation_index: index,
+                        visual_object_ref: None,
                     });
                 }
                 index = end + 1;
@@ -189,6 +407,26 @@ fn inspect_artifact_operations_detailed(
         index += 1;
     }
     result
+}
+
+fn attach_artifact_visual_forms(
+    inspection: &mut HeaderFooterArtifactInspection,
+    operations: &[Operation],
+    xobjects: &BTreeMap<String, String>,
+) {
+    for occurrence in &mut inspection.occurrences {
+        let Some(end) = matching_marked_content_end(operations, occurrence.operation_index) else {
+            continue;
+        };
+        occurrence.visual_object_ref = operations[occurrence.operation_index..=end]
+            .iter()
+            .filter(|operation| operation.operator == "Do")
+            .find_map(|operation| {
+                let name = operation.operands.first().and_then(name_bytes)?;
+                let name = std::str::from_utf8(name).ok()?;
+                xobjects.get(name).cloned()
+            });
+    }
 }
 
 fn artifact_property_dictionary<'a>(
@@ -216,22 +454,68 @@ pub(crate) fn decode_pdf_string(object: &Object) -> Option<String> {
     }
     String::from_utf8(bytes.clone())
         .ok()
-        .or_else(|| decode_text_string(object).ok())
+        .or_else(|| decode_legacy_cjk_pdf_string(bytes).or_else(|| decode_text_string(object).ok()))
 }
 
-fn artifact_range_text(operations: &[Operation]) -> Option<String> {
+fn decode_legacy_cjk_pdf_string(bytes: &[u8]) -> Option<String> {
+    if !bytes.iter().any(|byte| *byte >= 0x80) {
+        return None;
+    }
+    for encoding in [
+        encoding_rs::GB18030,
+        encoding_rs::BIG5,
+        encoding_rs::SHIFT_JIS,
+        encoding_rs::EUC_KR,
+    ] {
+        let (decoded, _, had_errors) = encoding.decode(bytes);
+        if had_errors {
+            continue;
+        }
+        let value = decoded.trim();
+        if !value.is_empty() && value.chars().any(is_cjk_character) {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn is_cjk_character(character: char) -> bool {
+    matches!(character as u32,
+        0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xF900..=0xFAFF
+        | 0x3040..=0x30FF
+        | 0xAC00..=0xD7AF)
+}
+
+fn artifact_range_text(
+    operations: &[Operation],
+    fonts: &BTreeMap<String, String>,
+    font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+) -> Option<String> {
     let mut text = String::new();
+    let mut font_name = None;
     for operation in operations {
+        if operation.operator == "Tf" {
+            font_name = operation
+                .operands
+                .first()
+                .and_then(name_bytes)
+                .and_then(|name| std::str::from_utf8(name).ok());
+            continue;
+        }
         match operation.operator.as_str() {
             "Tj" | "'" => {
-                if let Some(value) = operation.operands.first().and_then(decode_pdf_string) {
-                    text.push_str(&value);
-                }
+                let value = operation.operands.first().and_then(|object| {
+                    artifact_object_text(object, font_name, fonts, font_cmaps)
+                })?;
+                text.push_str(&value);
             }
             "\"" => {
-                if let Some(value) = operation.operands.get(2).and_then(decode_pdf_string) {
-                    text.push_str(&value);
-                }
+                let value = operation.operands.get(2).and_then(|object| {
+                    artifact_object_text(object, font_name, fonts, font_cmaps)
+                })?;
+                text.push_str(&value);
             }
             "TJ" => {
                 if let Some(items) = operation
@@ -240,7 +524,8 @@ fn artifact_range_text(operations: &[Operation]) -> Option<String> {
                     .and_then(|value| value.as_array().ok())
                 {
                     for item in items {
-                        if let Some(value) = decode_pdf_string(item) {
+                        if matches!(item, Object::String(_, _)) {
+                            let value = artifact_object_text(item, font_name, fonts, font_cmaps)?;
                             text.push_str(&value);
                         }
                     }
@@ -251,6 +536,23 @@ fn artifact_range_text(operations: &[Operation]) -> Option<String> {
     }
     let text = text.trim().to_string();
     (!text.is_empty()).then_some(text)
+}
+
+fn artifact_object_text(
+    object: &Object,
+    font_name: Option<&str>,
+    fonts: &BTreeMap<String, String>,
+    font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+) -> Option<String> {
+    let Object::String(bytes, _) = object else {
+        return None;
+    };
+    if let Some(font_ref) = font_name.and_then(|name| fonts.get(name)) {
+        if let Some(cmap) = font_cmaps.get(font_ref) {
+            return cmap.decode(bytes);
+        }
+    }
+    decode_pdf_string(object)
 }
 
 fn artifact_range_has_meaningful_text(operations: &[Operation]) -> bool {
@@ -283,78 +585,24 @@ fn text_object_has_meaningful_bytes(object: &Object) -> bool {
         .any(|byte| !byte.is_ascii_whitespace() && *byte != 0)
 }
 
-fn inspect_referenced_form_artifacts(
-    doc: &Document,
-    operations: &[Operation],
-    xobjects: &Dictionary,
-    depth: usize,
-    visited: &mut BTreeSet<ObjectId>,
-    result: &mut HeaderFooterArtifactInspection,
-    page: u32,
-    path: &str,
-) {
-    if depth >= 8 {
-        return;
-    }
-    for operation in operations
-        .iter()
-        .filter(|operation| operation.operator == "Do")
-    {
-        let Some(name) = operation.operands.first().and_then(name_bytes) else {
-            continue;
-        };
-        let Some(object_id) = xobjects.get(name).ok().and_then(object_reference) else {
-            continue;
-        };
-        if !visited.insert(object_id) {
-            continue;
-        }
-        let Some((stream_content, stream_dict)) = doc
-            .get_object(object_id)
-            .ok()
-            .and_then(|object| object.as_stream().ok())
-            .filter(|stream| stream.dict.get(b"Subtype").ok().and_then(name_bytes) == Some(b"Form"))
-            .and_then(|stream| {
-                stream
-                    .get_plain_content()
-                    .ok()
-                    .map(|content| (content, stream.dict.clone()))
-            })
-        else {
-            continue;
-        };
-        let Ok(content) = Content::decode(&stream_content) else {
-            continue;
-        };
-        let resources = resource_dictionary(doc, stream_dict.get(b"Resources").ok());
-        let properties = properties_from_resources(doc, resources.as_ref());
-        let nested_path = format!("{path}/form:{}", object_id.0);
-        result.merge(inspect_artifact_operations_detailed(
-            &content.operations,
-            &properties,
-            page,
-            &nested_path,
-        ));
-        let nested_xobjects = xobjects_from_resources(doc, resources.as_ref());
-        inspect_referenced_form_artifacts(
-            doc,
-            &content.operations,
-            &nested_xobjects,
-            depth + 1,
-            visited,
-            result,
-            page,
-            &nested_path,
-        );
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HeaderFooterArtifactEditPlan {
     pub remove_header: bool,
     pub remove_footer: bool,
     pub header_texts: Vec<String>,
     pub footer_texts: Vec<String>,
+    pub header_targets: Vec<HeaderFooterArtifactEditTarget>,
+    pub footer_targets: Vec<HeaderFooterArtifactEditTarget>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HeaderFooterArtifactEditTarget {
+    pub artifact_id: Option<String>,
+    pub normalized_text: String,
+    pub page_start: u32,
+    pub page_end: u32,
+    pub docsy_kind: Option<String>,
+    pub replacement_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -501,48 +749,216 @@ fn edit_header_footer_artifacts_file(
     output_path: &Path,
     plan: &HeaderFooterArtifactEditPlan,
 ) -> Result<HeaderFooterArtifactEditResult> {
-    let input = Path::new(input_path);
-    let mut doc = Document::load(input).context("读取 PDF 失败")?;
-    let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
-    let mut result = HeaderFooterArtifactEditResult::default();
+    edit_header_footer_artifacts_qpdf(Path::new(input_path), output_path, plan)
+}
 
-    for (page_index, page_id) in page_ids.into_iter().enumerate() {
-        let content = match doc.get_and_decode_page_content(page_id) {
-            Ok(content) => content,
-            Err(_) => continue,
+#[derive(Debug, Clone)]
+struct SelectedArtifactEdit {
+    region: ArtifactRegion,
+    operation_index: usize,
+    pages: BTreeSet<u32>,
+    replacement: Option<String>,
+    visual_object_ref: Option<String>,
+}
+
+fn edit_header_footer_artifacts_qpdf(
+    input: &Path,
+    output: &Path,
+    plan: &HeaderFooterArtifactEditPlan,
+) -> Result<HeaderFooterArtifactEditResult> {
+    let inspection = inspect_meaningful_header_footer_artifacts_qpdf(input, 0)?;
+    type EditKey = (String, usize, String);
+    let mut referenced_pages: BTreeMap<EditKey, BTreeSet<u32>> = BTreeMap::new();
+    let mut selected: BTreeMap<EditKey, Vec<(&HeaderFooterArtifactOccurrence, Option<String>)>> =
+        BTreeMap::new();
+    for occurrence in &inspection.occurrences {
+        let Some(object_ref) = occurrence.object_ref.as_ref() else {
+            continue;
         };
-        let properties = page_properties(&doc, page_id);
-        let (edited, mut page_result) =
-            edit_target_artifact_ranges(&content.operations, plan, &properties, page_index);
-        let direct_changed = page_result.changed_count() > 0;
-        let xobjects = page_xobjects(&doc, page_id);
-        if !xobjects.is_empty() {
-            let nested_result = edit_referenced_form_artifacts(
-                &mut doc,
-                &content.operations,
-                &xobjects,
-                plan,
-                page_index,
-                &mut BTreeSet::new(),
-            )?;
-            merge_edit_result(&mut page_result, nested_result);
-        }
-        if page_result.changed_count() == 0 {
+        let key = (
+            object_ref.clone(),
+            occurrence.operation_index,
+            occurrence.region.to_string(),
+        );
+        referenced_pages
+            .entry(key.clone())
+            .or_default()
+            .insert(occurrence.page);
+        let targets = if occurrence.region == "header" {
+            &plan.header_targets
+        } else {
+            &plan.footer_targets
+        };
+        let selected_target = targets
+            .iter()
+            .find(|target| artifact_occurrence_matches_target(occurrence, target));
+        let legacy_selected = targets.is_empty()
+            && if occurrence.region == "header" {
+                plan.remove_header
+            } else {
+                plan.remove_footer
+            };
+        if selected_target.is_none() && !legacy_selected {
             continue;
         }
-        if direct_changed {
-            let encoded = Content { operations: edited }
-                .encode()
-                .context("编码编辑标准页眉页脚后的内容流失败")?;
-            doc.change_page_content(page_id, encoded)
-                .context("写回编辑标准页眉页脚后的内容流失败")?;
+        if let Some(target) = selected_target {
+            if target.page_end > target.page_start
+                && (target.normalized_text.contains("{page}")
+                    || target.normalized_text.contains("{roman-page}"))
+                && target
+                    .replacement_text
+                    .as_deref()
+                    .is_some_and(|replacement| {
+                        !replacement.contains("{page}") && !replacement.contains("{roman-page}")
+                    })
+            {
+                anyhow::bail!(
+                    "多页页码的编辑内容必须包含 {{page}} 或 {{roman-page}}；原文件已保留"
+                );
+            }
         }
-        merge_edit_result(&mut result, page_result);
+        let replacement = selected_target
+            .and_then(|target| target.replacement_text.as_deref())
+            .map(|template| {
+                expand_artifact_replacement(
+                    template,
+                    occurrence.page,
+                    selected_target
+                        .map(|target| target.page_end.max(target.page_start))
+                        .unwrap_or(occurrence.page),
+                )
+            })
+            .or_else(|| {
+                let values = if occurrence.region == "header" {
+                    &plan.header_texts
+                } else {
+                    &plan.footer_texts
+                };
+                values
+                    .get(occurrence.page.saturating_sub(1) as usize)
+                    .filter(|value| !value.is_empty())
+                    .cloned()
+            });
+        selected
+            .entry(key)
+            .or_default()
+            .push((occurrence, replacement));
+    }
+    if selected.is_empty() {
+        return Ok(HeaderFooterArtifactEditResult::default());
     }
 
-    doc.prune_objects();
-    doc.save(output_path)
-        .context("保存编辑标准页眉页脚后的 PDF 失败")?;
+    let mut edits_by_object: BTreeMap<String, Vec<SelectedArtifactEdit>> = BTreeMap::new();
+    for ((object_ref, operation_index, region), occurrences) in selected {
+        let selected_pages = occurrences
+            .iter()
+            .map(|(occurrence, _)| occurrence.page)
+            .collect::<BTreeSet<_>>();
+        let all_pages = referenced_pages
+            .get(&(object_ref.clone(), operation_index, region.clone()))
+            .cloned()
+            .unwrap_or_default();
+        if selected_pages != all_pages {
+            anyhow::bail!(
+                "标准页眉页脚位于共享内容流中，当前只选择了部分引用页（已选 {:?}，全部 {:?}）；原文件已保留",
+                selected_pages,
+                all_pages
+            );
+        }
+        let replacements = occurrences
+            .iter()
+            .filter_map(|(_, replacement)| replacement.clone())
+            .collect::<BTreeSet<_>>();
+        if replacements.len() > 1 {
+            anyhow::bail!("共享页眉页脚设置了不同替换文字；原文件已保留，请先删除后重新插入");
+        }
+        edits_by_object
+            .entry(object_ref)
+            .or_default()
+            .push(SelectedArtifactEdit {
+                region: if region == "header" {
+                    ArtifactRegion::Header
+                } else {
+                    ArtifactRegion::Footer
+                },
+                operation_index,
+                pages: selected_pages,
+                replacement: replacements.into_iter().next(),
+                visual_object_ref: occurrences
+                    .iter()
+                    .find_map(|(occurrence, _)| occurrence.visual_object_ref.clone()),
+            });
+    }
+    validate_visual_replacements(&edits_by_object)?;
+    let references = edits_by_object
+        .iter()
+        .flat_map(|(reference, edits)| {
+            std::iter::once(reference.clone()).chain(
+                edits
+                    .iter()
+                    .filter(|edit| edit.replacement.is_some())
+                    .filter_map(|edit| edit.visual_object_ref.clone()),
+            )
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut streams =
+        super::qpdf_stream::load_editable_streams(input, &references, "编辑标准页眉页脚")?;
+    apply_visual_replacements(&mut streams, &edits_by_object)?;
+    let mut result = HeaderFooterArtifactEditResult::default();
+    for (object_ref, edits) in &mut edits_by_object {
+        let stream = streams
+            .get_mut(object_ref)
+            .with_context(|| format!("qpdf 未返回标准页眉页脚内容流 {object_ref}"))?;
+        edits.sort_by_key(|edit| std::cmp::Reverse(edit.operation_index));
+        for edit in edits {
+            let Some(end) = matching_marked_content_end(&stream.operations, edit.operation_index)
+            else {
+                anyhow::bail!("标准页眉页脚标记范围不完整：{object_ref}");
+            };
+            let edited = if let Some(replacement) = edit.replacement.as_deref() {
+                let mut range = stream.operations[edit.operation_index..=end].to_vec();
+                let visible_updated = edit.visual_object_ref.is_some()
+                    || replace_first_text_show(&mut range, replacement);
+                if !visible_updated {
+                    anyhow::bail!("标准页眉页脚字体编码不支持安全原位编辑；原文件已保留");
+                }
+                if !replace_inline_artifact_semantic_text(&mut range, replacement) {
+                    anyhow::bail!(
+                        "标准页眉页脚使用命名属性保存语义文字，不能安全同步编辑；原文件已保留"
+                    );
+                }
+                stream.operations.splice(edit.operation_index..=end, range);
+                true
+            } else {
+                stream.operations.drain(edit.operation_index..=end);
+                false
+            };
+            for page in &edit.pages {
+                let page_index = page.saturating_sub(1) as usize;
+                match (edit.region, edited) {
+                    (ArtifactRegion::Header, true) => {
+                        result.edited_header += 1;
+                        result.edited_header_pages.insert(page_index);
+                    }
+                    (ArtifactRegion::Footer, true) => {
+                        result.edited_footer += 1;
+                        result.edited_footer_pages.insert(page_index);
+                    }
+                    (ArtifactRegion::Header, false) => {
+                        result.removed_header += 1;
+                        result.removed_header_pages.insert(page_index);
+                    }
+                    (ArtifactRegion::Footer, false) => {
+                        result.removed_footer += 1;
+                        result.removed_footer_pages.insert(page_index);
+                    }
+                }
+            }
+        }
+    }
+    super::qpdf_stream::update_streams(input, output, &streams, "标准页眉页脚")?;
     Ok(result)
 }
 
@@ -683,6 +1099,172 @@ fn replace_first_text_show(operations: &mut [Operation], replacement: &str) -> b
         }
     }
     replaced
+}
+
+fn artifact_occurrence_matches_target(
+    occurrence: &HeaderFooterArtifactOccurrence,
+    target: &HeaderFooterArtifactEditTarget,
+) -> bool {
+    let page_start = target.page_start.max(1);
+    let page_end = target.page_end.max(page_start);
+    if occurrence.page < page_start || occurrence.page > page_end {
+        return false;
+    }
+    if let (Some(expected), Some(actual)) = (
+        target.docsy_kind.as_deref(),
+        occurrence.docsy_kind.as_deref(),
+    ) {
+        if expected != actual {
+            return false;
+        }
+    }
+    if let Some(expected) = target.artifact_id.as_deref() {
+        if occurrence.id == expected || occurrence.docsy_id.as_deref() == Some(expected) {
+            return true;
+        }
+    }
+    occurrence
+        .text
+        .as_deref()
+        .is_some_and(|text| artifact_selector_text_matches(text, &target.normalized_text))
+}
+
+fn artifact_selector_text_matches(actual: &str, expected: &str) -> bool {
+    let actual = normalize_artifact_match_text(actual);
+    let expected = normalize_artifact_match_text(expected);
+    if actual == expected {
+        return true;
+    }
+    if expected.contains("{page}") || expected.contains("{total}") {
+        let pattern = expected
+            .replace("{page}", "__DOCSY_PAGE__")
+            .replace("{total}", "__DOCSY_TOTAL__");
+        let escaped = regex::escape(&pattern)
+            .replace("__DOCSY_PAGE__", r"\d+")
+            .replace("__DOCSY_TOTAL__", r"\d+");
+        return regex::Regex::new(&format!("^{escaped}$"))
+            .is_ok_and(|regex| regex.is_match(&actual));
+    }
+    false
+}
+
+fn normalize_artifact_match_text(text: &str) -> String {
+    text.chars()
+        .filter_map(|character| {
+            let character = match character {
+                '０'..='９' => {
+                    char::from_u32(character as u32 - '０' as u32 + '0' as u32).unwrap_or(character)
+                }
+                _ => character,
+            };
+            (!character.is_whitespace()).then_some(character)
+        })
+        .collect()
+}
+
+fn expand_artifact_replacement(template: &str, page: u32, total: u32) -> String {
+    let roman = roman_page_number(page);
+    template
+        .replace("{range}", &format!("{page}/{total}"))
+        .replace("{roman-page}", &roman)
+        .replace("{page}", &page.to_string())
+        .replace("{total}", &total.to_string())
+}
+
+fn roman_page_number(mut value: u32) -> String {
+    if value == 0 {
+        return "0".to_string();
+    }
+    let mut output = String::new();
+    for (number, numeral) in [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ] {
+        while value >= number {
+            output.push_str(numeral);
+            value -= number;
+        }
+    }
+    output
+}
+
+fn validate_visual_replacements(
+    edits_by_object: &BTreeMap<String, Vec<SelectedArtifactEdit>>,
+) -> Result<()> {
+    let mut replacements: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for edit in edits_by_object.values().flatten() {
+        if let (Some(reference), Some(replacement)) =
+            (edit.visual_object_ref.as_ref(), edit.replacement.as_ref())
+        {
+            replacements
+                .entry(reference.clone())
+                .or_default()
+                .insert(replacement.clone());
+        }
+    }
+    if let Some((reference, _)) = replacements.iter().find(|(_, values)| values.len() > 1) {
+        anyhow::bail!("共享可见文字流 {reference} 设置了不同替换文字；原文件已保留");
+    }
+    Ok(())
+}
+
+fn apply_visual_replacements(
+    streams: &mut BTreeMap<String, super::qpdf_stream::QpdfEditableStream>,
+    edits_by_object: &BTreeMap<String, Vec<SelectedArtifactEdit>>,
+) -> Result<()> {
+    let replacements = edits_by_object
+        .values()
+        .flatten()
+        .filter_map(|edit| Some((edit.visual_object_ref.clone()?, edit.replacement.clone()?)))
+        .collect::<BTreeMap<_, _>>();
+    for (reference, replacement) in replacements {
+        let stream = streams
+            .get_mut(&reference)
+            .with_context(|| format!("qpdf 未返回页眉页脚可见文字流 {reference}"))?;
+        if !replace_first_text_show(&mut stream.operations, &replacement) {
+            anyhow::bail!("页眉页脚可见文字位于不支持原位编辑的嵌套结构中；原文件已保留");
+        }
+    }
+    Ok(())
+}
+
+fn replace_inline_artifact_semantic_text(operations: &mut [Operation], replacement: &str) -> bool {
+    let Some(start) = operations.first_mut() else {
+        return false;
+    };
+    let Some(property) = start.operands.get_mut(1) else {
+        return true;
+    };
+    let Object::Dictionary(dictionary) = property else {
+        return !matches!(property, Object::Name(_));
+    };
+    let mut found = false;
+    for key in [b"ActualText".as_slice(), b"Contents".as_slice()] {
+        if let Ok(value) = dictionary.get_mut(key) {
+            found |= replace_string_object(value, replacement);
+        }
+    }
+    if !found {
+        dictionary.set(
+            b"ActualText".to_vec(),
+            Object::String(
+                encode_utf16be_pdf_string(replacement),
+                StringFormat::Hexadecimal,
+            ),
+        );
+    }
+    true
 }
 
 fn replace_string_object(object: &mut Object, replacement: &str) -> bool {
@@ -1102,6 +1684,51 @@ mod tests {
     }
 
     #[test]
+    fn inspects_cid_artifact_text_with_tounicode_map() {
+        let operations = vec![
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Type" => "Pagination",
+                        "Subtype" => "Header",
+                    }),
+                ],
+            ),
+            Operation::new("Tf", vec![Object::Name(b"FCID".to_vec()), 12.into()]),
+            Operation::new(
+                "Tj",
+                vec![Object::String(
+                    vec![0, 1, 0, 2],
+                    lopdf::StringFormat::Hexadecimal,
+                )],
+            ),
+            Operation::new("EMC", vec![]),
+        ];
+        let cmap = ToUnicodeCMap::parse(
+            br#"
+            1 begincodespacerange <0000> <00ff> endcodespacerange
+            2 beginbfchar <0001> <4E2D> <0002> <6587> endbfchar
+            "#,
+        )
+        .unwrap();
+        let fonts = BTreeMap::from([(String::from("FCID"), String::from("7 0 R"))]);
+        let cmaps = BTreeMap::from([(String::from("7 0 R"), cmap)]);
+        let inspection = inspect_artifact_operations_detailed_qpdf(
+            &operations,
+            &Dictionary::new(),
+            &fonts,
+            &cmaps,
+            1,
+            "content",
+            "7 0 R",
+        );
+        assert_eq!(inspection.occurrences.len(), 1);
+        assert_eq!(inspection.occurrences[0].text.as_deref(), Some("中文"));
+    }
+
+    #[test]
     fn deletes_header_artifact_from_pdf_file() {
         let input = temp_named_path("docsy_artifact_test_input", "pdf");
         let output = temp_named_path("docsy_artifact_test_output", "pdf");
@@ -1131,6 +1758,57 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!text.iter().any(|value| value.contains("old header")));
         assert!(text.iter().any(|value| value.contains("body text")));
+
+        let _ = std::fs::remove_file(input);
+        let _ = std::fs::remove_file(output);
+    }
+
+    #[test]
+    fn qpdf_inspection_and_targeted_edit_roundtrip() {
+        let input = temp_named_path("docsy_artifact_qpdf_input", "pdf");
+        let output = temp_named_path("docsy_artifact_qpdf_output", "pdf");
+        create_artifact_test_pdf(&input);
+
+        let inspection = inspect_meaningful_header_footer_artifacts(&input, 0).unwrap();
+        let occurrence = inspection
+            .occurrences
+            .iter()
+            .find(|occurrence| occurrence.region == "header")
+            .unwrap();
+        assert_eq!(occurrence.text.as_deref(), Some("old header"));
+        assert!(occurrence.object_ref.is_some());
+
+        let plan = HeaderFooterArtifactEditPlan {
+            remove_header: true,
+            header_targets: vec![HeaderFooterArtifactEditTarget {
+                artifact_id: Some(occurrence.id.clone()),
+                normalized_text: "old header".to_string(),
+                page_start: 1,
+                page_end: 1,
+                replacement_text: Some("new header".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let result =
+            edit_header_footer_artifacts_file(&input.to_string_lossy(), &output, &plan).unwrap();
+        assert_eq!(result.edited_header, 1);
+
+        let rescanned = inspect_meaningful_header_footer_artifacts(&output, 0).unwrap();
+        assert!(rescanned
+            .occurrences
+            .iter()
+            .any(|occurrence| occurrence.text.as_deref() == Some("new header")));
+        let document = Document::load(&output).unwrap();
+        let page_id = document.get_pages().into_values().next().unwrap();
+        let content = document.get_and_decode_page_content(page_id).unwrap();
+        assert!(content.operations.iter().any(|operation| {
+            operation
+                .operands
+                .iter()
+                .filter_map(|object| object.as_str().ok())
+                .any(|bytes| bytes == b"new header")
+        }));
 
         let _ = std::fs::remove_file(input);
         let _ = std::fs::remove_file(output);

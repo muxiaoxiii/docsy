@@ -7,6 +7,7 @@ import {
   createDefaultPageNumberGroup,
   groupsFor,
   selectedGroupFor,
+  setSelectedGroup,
 } from '../../../shared/pdf-tools/composables/useEvidencePdfSession.js'
 import { renderPageNumberTemplate } from '../../../shared/pdf-tools/composables/pdfPageNumberRules.js'
 
@@ -20,7 +21,7 @@ import { renderPageNumberTemplate } from '../../../shared/pdf-tools/composables/
 export function useContentRowEditing({
   overlayFiles,
   overlayRows,
-  selectedOverlayFile,
+  _selectedOverlayFile,
   selectedOverlayIndex,
   currentRules,
   totalOverlayPages,
@@ -273,6 +274,15 @@ export function useContentRowEditing({
   function finishExistingContentRowEdit(row, cr, value) {
     const element = cr.element
     if (!element) return
+    if (
+      cr.kind === 'pageNumber' &&
+      Number(element.pageEnd || 1) > Number(element.pageStart || 1) &&
+      !String(value || '').includes('{page}') &&
+      !String(value || '').includes('{roman-page}')
+    ) {
+      ElMessage.warning('多页页码必须保留 {page} 或 {roman-page} 占位符')
+      return
+    }
     const original = element.detectedText || ''
     const oldDecision = element.decision
     const oldEditedText = element.editedText || element.detectedText || ''

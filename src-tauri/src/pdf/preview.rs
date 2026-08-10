@@ -147,8 +147,6 @@ fn find_pdftoppm() -> Option<PathBuf> {
 /// 为 poppler 工具设置字体配置环境变量，让自管理的 poppler 能找到系统字体
 /// （日语、韩语等 CJK 字体在预览渲染时显示为方块的问题）
 fn configure_fontconfig_env(command: &mut std::process::Command) {
-    use std::path::PathBuf;
-
     // 如果已经有 FONTCONFIG_FILE，说明用户自行配置了，不覆盖
     if std::env::var("FONTCONFIG_FILE").is_ok() {
         return;
@@ -236,10 +234,7 @@ fn generate_fontconfig_xml(font_dirs: &[PathBuf]) -> String {
 "#,
     );
     for dir in font_dirs {
-        xml.push_str(&format!(
-            "  <dir>{}</dir>\n",
-            dir.display()
-        ));
+        xml.push_str(&format!("  <dir>{}</dir>\n", dir.display()));
     }
     xml.push_str("</fontconfig>\n");
     xml

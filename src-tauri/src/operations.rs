@@ -184,7 +184,7 @@ impl OperationManager {
             // 诊断日志：按结果分级
             let ctx = serde_json::json!({ "command": &cmd, "elapsed_ms": elapsed_ms });
             if was_cancelled {
-                crate::app_log::warn("operations", &format!("操作取消"), ctx);
+                crate::app_log::warn("operations", "操作取消", ctx);
             } else if failed {
                 crate::app_log::error_with_op("operations", "操作失败", ctx, operation_id);
             } else {

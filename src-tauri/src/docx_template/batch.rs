@@ -39,7 +39,9 @@ pub fn export_fields_xlsx(
         crate::template_history::last_field_values_for_template(&manifest.template.id)
             .unwrap_or_default();
     for (field, value) in default_values {
-        sample_values.entry(field.clone()).or_insert_with(|| value.clone());
+        sample_values
+            .entry(field.clone())
+            .or_insert_with(|| value.clone());
     }
 
     let mut wb = Workbook::new();
@@ -72,7 +74,7 @@ pub fn export_fields_xlsx(
     if !sample_values.is_empty() {
         for (col, field) in renderable.iter().enumerate() {
             if let Some(value) = sample_values.get(&field.id) {
-                ws.write_string(2, col as u16, &value_to_display(value))?;
+                ws.write_string(2, col as u16, value_to_display(value))?;
             }
         }
         ws.write_string(2, renderable.len() as u16, SAMPLE_ROW_FLAG)?;
@@ -81,7 +83,7 @@ pub fn export_fields_xlsx(
     // Auto-fit column widths (approximate)
     for (col, field) in renderable.iter().enumerate() {
         let label_len = field.label.chars().count().max(field.name.chars().count());
-        let width = (label_len as f64 * 2.0 + 4.0).min(40.0).max(10.0);
+        let width = (label_len as f64 * 2.0 + 4.0).clamp(10.0, 40.0);
         ws.set_column_width(col as u16, width)?;
     }
 
@@ -337,21 +339,15 @@ pub fn validate_imported_xlsx(
             }
 
             // Type-specific validation
-            if !text.trim().is_empty() {
-                match mapping.field_type.as_str() {
-                    "date" => {
-                        if !is_valid_date_text(&text) {
-                            errors.push(BatchValidationError {
-                                row: row_idx,
-                                col: mapping.col,
-                                field_name: mapping.field_name.clone(),
-                                message: format!("日期格式不正确：{}", text),
-                            });
-                            row_valid = false;
-                        }
-                    }
-                    _ => {}
-                }
+            if !text.trim().is_empty() && mapping.field_type == "date" && !is_valid_date_text(&text)
+            {
+                errors.push(BatchValidationError {
+                    row: row_idx,
+                    col: mapping.col,
+                    field_name: mapping.field_name.clone(),
+                    message: format!("日期格式不正确：{}", text),
+                });
+                row_valid = false;
             }
         }
         // Skip fully empty rows
@@ -386,9 +382,8 @@ fn is_valid_date_text(text: &str) -> bool {
     static DATE_RE1: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?$").unwrap()
     });
-    static DATE_RE2: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"^\d{4}年\d{1,2}月\d{1,2}日$").unwrap()
-    });
+    static DATE_RE2: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"^\d{4}年\d{1,2}月\d{1,2}日$").unwrap());
     if DATE_RE1.is_match(t) || DATE_RE2.is_match(t) {
         return true;
     }
@@ -419,9 +414,8 @@ fn cell_to_string(cell: &calamine::Data) -> String {
             if let Some(naive) = dt.as_datetime() {
                 naive.format("%Y-%m-%d").to_string()
             } else {
-                // Fallback: try to get the raw f64 value
-                let serial = dt.to_string();
-                serial
+                // Fallback: preserve calamine's raw representation.
+                dt.to_string()
             }
         }
         calamine::Data::DateTimeIso(s) => {
@@ -464,6 +458,9 @@ pub struct BatchRenderError {
 /// Batch render: read xlsx, generate one docx per data row.
 /// `skip_rows` contains 0-based row indices (relative to data rows starting at row 2)
 /// that should be skipped due to validation errors.
+// This command-facing API mirrors the independently configurable batch options.
+// Grouping them would require a coordinated Tauri payload migration.
+#[allow(clippy::too_many_arguments)]
 pub fn batch_render(
     manifest: &TemplateManifest,
     xlsx_path: &str,
@@ -626,16 +623,18 @@ fn build_row_values(
             }
             "checkbox" => {
                 let trimmed = text.trim().to_lowercase();
-                serde_json::Value::Bool(
-                    matches!(trimmed.as_str(), "true" | "1" | "是" | "yes" | "☑" | "✓" | "✔"),
-                )
+                serde_json::Value::Bool(matches!(
+                    trimmed.as_str(),
+                    "true" | "1" | "是" | "yes" | "☑" | "✓" | "✔"
+                ))
             }
             "radio_group" | "select" => {
                 // Match against field options by label or id
                 let trimmed = text.trim();
-                let matched_option = field.options.iter().find(|opt| {
-                    opt.label == trimmed || opt.id == trimmed
-                });
+                let matched_option = field
+                    .options
+                    .iter()
+                    .find(|opt| opt.label == trimmed || opt.id == trimmed);
                 match matched_option {
                     Some(opt) => serde_json::Value::String(opt.id.clone()),
                     None => serde_json::Value::String(trimmed.to_string()),
@@ -644,7 +643,7 @@ fn build_row_values(
             "checkbox_group" => {
                 // Parse multiple selections separated by 、 or ,
                 let items: Vec<serde_json::Value> = text
-                    .split(|c| c == '、' || c == ',')
+                    .split(['、', ','])
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .map(|s| {
@@ -703,40 +702,51 @@ fn generate_filename(
                 "使用 filenameTemplate 生成文件名",
                 serde_json::json!({ "index": index, "token_count": ft.tokens.len() }),
             );
-            let sep = if ft.separator.is_empty() { "-".to_string() } else { ft.separator.clone() };
-            let parts: Vec<String> = ft.tokens.iter().map(|token| {
-                match token.token_type.as_str() {
+            let sep = if ft.separator.is_empty() {
+                "-".to_string()
+            } else {
+                ft.separator.clone()
+            };
+            let parts: Vec<String> = ft
+                .tokens
+                .iter()
+                .map(|token| match token.token_type.as_str() {
                     "literal" => token.value.clone(),
                     "field" => {
                         let field = manifest.fields.iter().find(|f| f.name == token.value);
                         if let Some(f) = field {
                             values.get(&f.id).map(value_to_display).unwrap_or_default()
                         } else {
-                            values.get(&token.value).map(value_to_display).unwrap_or_default()
+                            values
+                                .get(&token.value)
+                                .map(value_to_display)
+                                .unwrap_or_default()
                         }
                     }
-                    "preset" => {
-                        match token.value.as_str() {
-                            "日期" => chrono::Local::now().format("%Y%m%d").to_string(),
-                            "日期-" => chrono::Local::now().format("%Y-%m-%d").to_string(),
-                            "日期短" => chrono::Local::now().format("%m%d").to_string(),
-                            "模板名" => manifest.template.name.clone(),
-                            "序号" => index.to_string(),
-                            "序号01" => format!("{:02}", index),
-                            "序号001" => format!("{:03}", index),
-                            "中文序号" => to_chinese_number(index),
-                            _ => token.value.clone(),
-                        }
-                    }
+                    "preset" => match token.value.as_str() {
+                        "日期" => chrono::Local::now().format("%Y%m%d").to_string(),
+                        "日期-" => chrono::Local::now().format("%Y-%m-%d").to_string(),
+                        "日期短" => chrono::Local::now().format("%m%d").to_string(),
+                        "模板名" => manifest.template.name.clone(),
+                        "序号" => index.to_string(),
+                        "序号01" => format!("{:02}", index),
+                        "序号001" => format!("{:03}", index),
+                        "中文序号" => to_chinese_number(index),
+                        _ => token.value.clone(),
+                    },
                     _ => token.value.clone(),
-                }
-            }).collect();
+                })
+                .collect();
             let raw = parts.join(&sep);
             let clean = sanitize_filename(&raw);
             if clean.trim().is_empty() || clean == ".docx" {
                 return format!("{}-{}.docx", manifest.template.name, index);
             }
-            return if clean.ends_with(".docx") { clean } else { format!("{clean}.docx") };
+            return if clean.ends_with(".docx") {
+                clean
+            } else {
+                format!("{clean}.docx")
+            };
         }
     }
 
@@ -836,8 +846,12 @@ fn sanitize_filename(raw: &str) -> String {
 fn to_chinese_number(n: usize) -> String {
     const DIGITS: &[char] = &['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
     const UNITS: &[&str] = &["", "十", "百", "千", "万"];
-    if n == 0 { return "零".to_string(); }
-    if n >= 10000 { return n.to_string(); } // fallback for large numbers
+    if n == 0 {
+        return "零".to_string();
+    }
+    if n >= 10000 {
+        return n.to_string();
+    } // fallback for large numbers
     let s = n.to_string();
     let chars: Vec<char> = s.chars().collect();
     let len = chars.len();
@@ -859,7 +873,10 @@ fn to_chinese_number(n: usize) -> String {
         result.pop();
     }
     // Special case: 一十 → 十
-    if result.starts_with('一') && result.len() > 1 && result.chars().nth(1).map(|c| c == '十').unwrap_or(false) {
+    if result.starts_with('一')
+        && result.len() > 1
+        && result.chars().nth(1).map(|c| c == '十').unwrap_or(false)
+    {
         result = result[3..].to_string(); // skip '一' (3 bytes in UTF-8)
     }
     result

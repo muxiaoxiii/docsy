@@ -7,14 +7,18 @@ use std::sync::Mutex;
 /// fire on a 350ms debounce; re-parsing the docsytpl package on every keystroke
 /// is wasteful, and the manifest rarely changes while editing.
 static MANIFEST_CACHE: Mutex<
-    Option<(String, std::time::SystemTime, crate::docx_template::TemplateManifest)>,
+    Option<(
+        String,
+        std::time::SystemTime,
+        crate::docx_template::TemplateManifest,
+    )>,
 > = Mutex::new(None);
 
-fn cached_manifest(
-    path: &str,
-) -> anyhow::Result<crate::docx_template::TemplateManifest> {
-    if let Some((cached_path, cached_mtime, manifest)) =
-        MANIFEST_CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+fn cached_manifest(path: &str) -> anyhow::Result<crate::docx_template::TemplateManifest> {
+    if let Some((cached_path, cached_mtime, manifest)) = MANIFEST_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
     {
         if cached_path == path {
             if let Ok(meta) = std::fs::metadata(path) {
@@ -31,7 +35,8 @@ fn cached_manifest(
         .ok()
         .and_then(|meta| meta.modified().ok())
         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-    *MANIFEST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((path.to_string(), mtime, manifest.clone()));
+    *MANIFEST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((path.to_string(), mtime, manifest.clone()));
     Ok(manifest)
 }
 
@@ -77,17 +82,23 @@ pub async fn list_template_trash() -> Result<Vec<crate::docx_template::TemplateL
 }
 
 #[tauri::command]
-pub async fn move_template_to_trash(args: crate::docx_template::TemplateDeleteArgs) -> Result<String, String> {
+pub async fn move_template_to_trash(
+    args: crate::docx_template::TemplateDeleteArgs,
+) -> Result<String, String> {
     run_blocking(move || crate::docx_template::move_template_to_trash(args)).await
 }
 
 #[tauri::command]
-pub async fn restore_template_from_trash(args: crate::docx_template::TemplateRestoreArgs) -> Result<String, String> {
+pub async fn restore_template_from_trash(
+    args: crate::docx_template::TemplateRestoreArgs,
+) -> Result<String, String> {
     run_blocking(move || crate::docx_template::restore_template_from_trash(args)).await
 }
 
 #[tauri::command]
-pub async fn permanently_delete_template(args: crate::docx_template::TemplatePermanentDeleteArgs) -> Result<(), String> {
+pub async fn permanently_delete_template(
+    args: crate::docx_template::TemplatePermanentDeleteArgs,
+) -> Result<(), String> {
     run_blocking(move || crate::docx_template::permanently_delete_template(args)).await
 }
 
@@ -119,7 +130,9 @@ pub async fn inspect_docsytpl_content(
 }
 
 #[tauri::command]
-pub async fn render_docx_template(args: crate::docx_template::RenderTemplateArgs) -> Result<String, String> {
+pub async fn render_docx_template(
+    args: crate::docx_template::RenderTemplateArgs,
+) -> Result<String, String> {
     run_blocking(move || crate::docx_template::engine::render_docx(args, "single")).await
 }
 
@@ -160,7 +173,10 @@ pub async fn merge_template_field_history(
     target_template_id: String,
 ) -> Result<usize, String> {
     run_blocking(move || {
-        crate::template_history::merge_template_field_history(&source_template_id, &target_template_id)
+        crate::template_history::merge_template_field_history(
+            &source_template_id,
+            &target_template_id,
+        )
     })
     .await
 }
@@ -272,9 +288,7 @@ pub async fn delete_template_database_entry(template_path: String) -> Result<(),
 
 /// Save selected batch rows into the template history database (source "batch").
 #[tauri::command]
-pub async fn save_batch_history_rows(
-    rows: Vec<BatchHistoryRow>,
-) -> Result<usize, String> {
+pub async fn save_batch_history_rows(rows: Vec<BatchHistoryRow>) -> Result<usize, String> {
     run_blocking(move || {
         let mut saved = 0;
         for row in rows {

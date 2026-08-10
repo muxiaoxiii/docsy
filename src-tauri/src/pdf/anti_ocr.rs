@@ -35,7 +35,7 @@ pub fn detect_anti_copy(input: &Path) -> Result<AntiCopyDetection> {
     let mut detected_method: Option<String> = None;
     let mut seen: HashSet<ObjectId> = HashSet::new();
 
-    for (_, page_id) in &page_ids {
+    for page_id in page_ids.values() {
         for font_id in page_fonts(&doc, *page_id) {
             if !seen.insert(font_id) {
                 continue;
@@ -66,11 +66,7 @@ pub fn detect_anti_copy(input: &Path) -> Result<AntiCopyDetection> {
 }
 
 /// Apply anti-copy protection
-pub fn apply_anti_copy(
-    input: &Path,
-    output: &Path,
-    method: AntiCopyMethod,
-) -> Result<usize> {
+pub fn apply_anti_copy(input: &Path, output: &Path, method: AntiCopyMethod) -> Result<usize> {
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
 
     // Build backup data before modifying
@@ -81,7 +77,7 @@ pub fn apply_anti_copy(
     let mut modified = 0;
     let mut seen: HashSet<ObjectId> = HashSet::new();
 
-    for (_, page_id) in &page_ids {
+    for page_id in page_ids.values() {
         match method {
             AntiCopyMethod::CmapScramble => {
                 for font_id in page_fonts(&doc, *page_id) {
@@ -125,7 +121,7 @@ pub fn remove_anti_copy(input: &Path, output: &Path) -> Result<usize> {
     let mut restored = 0;
     let mut seen: HashSet<ObjectId> = HashSet::new();
 
-    for (_, page_id) in &page_ids {
+    for page_id in page_ids.values() {
         for font_id in page_fonts(&doc, *page_id) {
             if !seen.insert(font_id) {
                 continue;
@@ -174,7 +170,7 @@ fn build_backup(doc: &Document) -> BackupData {
     let mut seen: HashSet<ObjectId> = HashSet::new();
     let page_ids = doc.get_pages();
 
-    for (_, page_id) in &page_ids {
+    for page_id in page_ids.values() {
         for font_id in page_fonts(doc, *page_id) {
             if !seen.insert(font_id) {
                 continue;
@@ -197,11 +193,9 @@ fn store_backup_meta(doc: &mut Document, backup: &BackupData) {
     // Try to use existing Info dictionary
     let info_ref = doc.trailer.get(b"Info").ok().cloned();
     if let Some(Object::Reference(info_id)) = info_ref {
-        if let Ok(obj) = doc.get_object_mut(info_id) {
-            if let Object::Dictionary(dict) = obj {
-                dict.set(BACKUP_KEY.to_vec(), Object::string_literal(json_bytes));
-                return;
-            }
+        if let Ok(Object::Dictionary(dict)) = doc.get_object_mut(info_id) {
+            dict.set(BACKUP_KEY.to_vec(), Object::string_literal(json_bytes));
+            return;
         }
     }
 
@@ -232,10 +226,8 @@ fn get_backup_meta(doc: &Document) -> Option<BackupData> {
 fn remove_backup_meta(doc: &mut Document) {
     let info_ref = doc.trailer.get(b"Info").ok().cloned();
     if let Some(Object::Reference(info_id)) = info_ref {
-        if let Ok(obj) = doc.get_object_mut(info_id) {
-            if let Object::Dictionary(dict) = obj {
-                dict.remove(BACKUP_KEY);
-            }
+        if let Ok(Object::Dictionary(dict)) = doc.get_object_mut(info_id) {
+            dict.remove(BACKUP_KEY);
         }
     }
 }

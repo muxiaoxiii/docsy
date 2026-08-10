@@ -13,7 +13,7 @@
           <div class="settings-label-vertical">
             <strong>
               多项字段连接符
-              <el-tooltip content='列表字段（当事人、诉讼请求等）填入多个值时，项与项之间使用的分隔符。留空时默认使用顿号"、"。' placement="top">
+              <el-tooltip content="列表字段（当事人、诉讼请求等）填入多个值时，项与项之间使用的分隔符。留空时默认使用顿号&#34;、&#34;。" placement="top">
                 <el-icon class="info-icon"><InfoFilled /></el-icon>
               </el-tooltip>
             </strong>

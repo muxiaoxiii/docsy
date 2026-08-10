@@ -146,7 +146,10 @@ pub fn delete_database_entry(template_path: &str) -> Result<()> {
         "DELETE FROM generation_runs WHERE template_id = (SELECT template_id FROM template_meta WHERE template_id = ?1)",
         [template_path],
     )?;
-    conn.execute("DELETE FROM template_meta WHERE template_id = ?1", [template_path])?;
+    conn.execute(
+        "DELETE FROM template_meta WHERE template_id = ?1",
+        [template_path],
+    )?;
     Ok(())
 }
 
@@ -350,11 +353,7 @@ fn query_run_field_summaries_for_runs(
     if run_ids.is_empty() {
         return Ok(result);
     }
-    let placeholders = run_ids
-        .iter()
-        .map(|_| "?")
-        .collect::<Vec<_>>()
-        .join(",");
+    let placeholders = run_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!(
         "SELECT run_id, field_name, field_label, display_value
          FROM field_history
@@ -570,7 +569,12 @@ fn ensure_template_meta(
             template_name = excluded.template_name,
             template_path = excluded.template_path,
             updated_at = excluded.updated_at",
-        params![manifest.template.id, manifest.template.name, template_path, now],
+        params![
+            manifest.template.id,
+            manifest.template.name,
+            template_path,
+            now
+        ],
     )?;
     Ok(())
 }
@@ -622,9 +626,10 @@ fn query_field_suggestions(
          ORDER BY freq DESC, last_used DESC
          LIMIT 8",
     )?;
-    let rows = stmt.query_map(params![template_id, field.name, TEMPLATE_COMMON_ID], |row| {
-        suggestion_from_row(row, "field")
-    })?;
+    let rows = stmt.query_map(
+        params![template_id, field.name, TEMPLATE_COMMON_ID],
+        |row| suggestion_from_row(row, "field"),
+    )?;
     collect_rows(rows)
 }
 

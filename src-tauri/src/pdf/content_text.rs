@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::Object;
 use regex::Regex;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::temp_named_path;
+use super::{cmap::ToUnicodeCMap, temp_named_path};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PlainTextCleanupPlan {
@@ -47,14 +47,9 @@ pub(crate) struct DeleteDiagnostic {
     pub reason: DeleteSkipReason,
 }
 
-impl Default for DeleteSkipReason {
-    fn default() -> Self {
-        DeleteSkipReason::FontUndecodable
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum DeleteSkipReason {
+    #[default]
     FontUndecodable,
 }
 
@@ -70,12 +65,13 @@ enum TextRegion {
     Footer,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct TextState {
     in_text: bool,
     x: f32,
     y: f32,
     leading: f32,
+    font_name: Option<String>,
 }
 
 pub(crate) fn delete_plain_header_footer_to_temp(
@@ -100,178 +96,278 @@ fn delete_plain_header_footer_file(
     plan: &PlainTextCleanupPlan,
 ) -> Result<PlainTextCleanupResult> {
     let input = Path::new(input_path);
-    let mut doc = Document::load(input).context("读取 PDF 失败")?;
-    let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
-    let mut result = PlainTextCleanupResult::default();
+    let index = super::qpdf_stream::QpdfObjectIndex::load(input)?;
+    let font_cmaps = super::cmap::load_font_cmaps(input, &index)?;
 
     // 诊断：记录 target 信息
     for (i, t) in plan.header_targets.iter().enumerate() {
         log::info!(
             "plain_delete.target header[{}]: text={:?} normalized={:?} pages={}-{} bbox={}",
-            i, t.text, t.normalized_text, t.page_start, t.page_end,
-            t.bbox.as_ref().map(|b| format!("({},{} - {},{}) w={} h={}", b.x0, b.y0, b.x1, b.y1, b.width, b.height)).unwrap_or_else(|| "null".to_string())
+            i,
+            t.text,
+            t.normalized_text,
+            t.page_start,
+            t.page_end,
+            t.bbox
+                .as_ref()
+                .map(|b| format!(
+                    "({},{} - {},{}) w={} h={}",
+                    b.x0, b.y0, b.x1, b.y1, b.width, b.height
+                ))
+                .unwrap_or_else(|| "null".to_string())
         );
     }
     for (i, t) in plan.footer_targets.iter().enumerate() {
         log::info!(
             "plain_delete.target footer[{}]: text={:?} normalized={:?} pages={}-{} bbox={}",
-            i, t.text, t.normalized_text, t.page_start, t.page_end,
-            t.bbox.as_ref().map(|b| format!("({},{} - {},{}) w={} h={}", b.x0, b.y0, b.x1, b.y1, b.width, b.height)).unwrap_or_else(|| "null".to_string())
+            i,
+            t.text,
+            t.normalized_text,
+            t.page_start,
+            t.page_end,
+            t.bbox
+                .as_ref()
+                .map(|b| format!(
+                    "({},{} - {},{}) w={} h={}",
+                    b.x0, b.y0, b.x1, b.y1, b.width, b.height
+                ))
+                .unwrap_or_else(|| "null".to_string())
         );
     }
 
-    for (page_index, page_id) in page_ids.into_iter().enumerate() {
-        let page_number = page_index as u32 + 1;
-        let content = match doc.get_and_decode_page_content(page_id) {
-            Ok(content) => content,
-            Err(_) => continue,
-        };
-        let Some(page_box) = page_box(&doc, page_id) else {
-            continue;
-        };
-        let page_plan = PagePlainTextPlan {
-            header_targets: active_targets(&plan.header_targets, page_number),
-            footer_targets: active_targets(&plan.footer_targets, page_number),
-            header_zone_pt: mm_to_pt(plan.header_zone_mm.max(1.0)),
-            footer_zone_pt: mm_to_pt(plan.footer_zone_mm.max(1.0)),
-            page_box,
-        };
-        if page_plan.header_targets.is_empty() && page_plan.footer_targets.is_empty() {
-            continue;
+    let direct_references = index
+        .pages()
+        .iter()
+        .flat_map(|page| page.contents.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut streams =
+        super::qpdf_stream::load_editable_streams(input, &direct_references, "删除现有页眉页脚")?;
+    let mut seeds = Vec::new();
+    for page in index.pages() {
+        let has_targets = !active_targets(&plan.header_targets, page.number).is_empty()
+            || !active_targets(&plan.footer_targets, page.number).is_empty();
+        let page_box = page.page_box.map(qpdf_box_to_page_box);
+        if has_targets && page_box.is_none() {
+            anyhow::bail!("第 {} 页缺少可解析的页面尺寸，未修改原文件", page.number);
         }
-        let (operations, page_result) = filter_page_operations(&content.operations, &page_plan, page_number);
-        let direct_changed = page_result.removed() > 0;
-        let mut combined_result = page_result;
-        let xobjects = super::artifacts::page_xobjects(&doc, page_id);
-        if !xobjects.is_empty() {
-            let nested_result = filter_referenced_form_text(
-                &mut doc,
-                &content.operations,
-                &xobjects,
-                &page_plan,
-                &mut HashSet::new(),
-                page_number,
-            )?;
-            combined_result.removed_header += nested_result.removed_header;
-            combined_result.removed_footer += nested_result.removed_footer;
-            combined_result.diagnostics.extend(nested_result.diagnostics);
+        for content_ref in &page.contents {
+            seeds.push(QpdfStreamUsageSeed {
+                object_ref: content_ref.clone(),
+                page: page.number,
+                page_box,
+                fonts: page.fonts.clone(),
+                xobjects: page.xobjects.clone(),
+                depth: 0,
+            });
         }
-        if combined_result.removed() == 0 {
-            continue;
-        }
-        if direct_changed {
-            let encoded = Content { operations }
-                .encode()
-                .context("编码删除普通文本页眉页脚后的内容流失败")?;
-            doc.change_page_content(page_id, encoded)
-                .context("写回删除普通文本页眉页脚后的内容流失败")?;
-        }
-        result.removed_header += combined_result.removed_header;
-        result.removed_footer += combined_result.removed_footer;
     }
 
-    doc.prune_objects();
-    let temp = output_path.with_extension("pdf.tmp");
-    doc.save(&temp)
-        .context("保存删除普通文本页眉页脚后的 PDF 失败")?;
-    std::fs::rename(&temp, output_path)
-        .context("原子重命名 PDF 失败")?;
+    let mut usages: BTreeMap<String, Vec<QpdfStreamUsage>> = BTreeMap::new();
+    let mut visited = BTreeSet::new();
+    let mut cursor = 0;
+    while cursor < seeds.len() {
+        let missing = seeds[cursor..]
+            .iter()
+            .map(|seed| seed.object_ref.clone())
+            .filter(|reference| !streams.contains_key(reference))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            streams.extend(super::qpdf_stream::load_editable_streams(
+                input,
+                &missing,
+                "删除现有页眉页脚 Form",
+            )?);
+        }
+        let seed = seeds[cursor].clone();
+        cursor += 1;
+        if seed.depth >= 128 {
+            anyhow::bail!("PDF Form 嵌套超过安全上限，未修改原文件");
+        }
+        if !visited.insert((seed.object_ref.clone(), seed.page)) {
+            continue;
+        }
+        let stream = streams
+            .get(&seed.object_ref)
+            .with_context(|| format!("qpdf 未返回内容流 {}", seed.object_ref))?;
+        usages
+            .entry(seed.object_ref.clone())
+            .or_default()
+            .push(QpdfStreamUsage {
+                page: seed.page,
+                page_box: seed.page_box,
+                fonts: seed.fonts.clone(),
+            });
+        for operation in stream
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "Do")
+        {
+            let Some(name) = operation
+                .operands
+                .first()
+                .and_then(|object| object.as_name().ok())
+                .and_then(|name| std::str::from_utf8(name).ok())
+            else {
+                continue;
+            };
+            let Some(form_ref) = seed
+                .xobjects
+                .get(name)
+                .filter(|reference| index.is_form(reference))
+            else {
+                continue;
+            };
+            seeds.push(QpdfStreamUsageSeed {
+                object_ref: form_ref.clone(),
+                page: seed.page,
+                page_box: index
+                    .form_box(form_ref)
+                    .map(qpdf_box_to_page_box)
+                    .or(seed.page_box),
+                fonts: index.form_fonts(form_ref),
+                xobjects: index.form_xobjects(form_ref),
+                depth: seed.depth + 1,
+            });
+        }
+    }
+
+    let mut result = PlainTextCleanupResult::default();
+    let mut changed_streams = BTreeMap::new();
+    for (object_ref, stream_usages) in usages {
+        let stream = streams
+            .get(&object_ref)
+            .with_context(|| format!("qpdf 未返回内容流 {object_ref}"))?;
+        let original = encoded_operations(&stream.operations)?;
+        let mut desired_operations = None;
+        let mut desired_bytes = None;
+        let mut changed = false;
+        for usage in &stream_usages {
+            let header_targets = active_targets(&plan.header_targets, usage.page);
+            let footer_targets = active_targets(&plan.footer_targets, usage.page);
+            let Some(page_box) = usage.page_box else {
+                if header_targets.is_empty() && footer_targets.is_empty() {
+                    continue;
+                }
+                anyhow::bail!("第 {} 页引用的内容流缺少坐标范围，未修改原文件", usage.page);
+            };
+            let page_plan = PagePlainTextPlan {
+                header_targets,
+                footer_targets,
+                header_zone_pt: mm_to_pt(plan.header_zone_mm.max(1.0)),
+                footer_zone_pt: mm_to_pt(plan.footer_zone_mm.max(1.0)),
+                page_box,
+            };
+            let local_cmaps = local_font_cmaps(&usage.fonts, &font_cmaps);
+            let (filtered, usage_result) = filter_page_operations_with_cmaps(
+                &stream.operations,
+                &page_plan,
+                usage.page,
+                &local_cmaps,
+            );
+            let bytes = encoded_operations(&filtered)?;
+            if let Some(expected) = desired_bytes.as_ref() {
+                if expected != &bytes {
+                    anyhow::bail!(
+                        "现有页眉页脚位于多页共享内容流中，但只在部分引用页命中；为避免修改未选页面，原文件已保留"
+                    );
+                }
+            } else {
+                desired_bytes = Some(bytes.clone());
+                desired_operations = Some(filtered);
+            }
+            if bytes != original {
+                changed = true;
+                result.removed_header += usage_result.removed_header;
+                result.removed_footer += usage_result.removed_footer;
+                result.diagnostics.extend(usage_result.diagnostics);
+            }
+        }
+        if changed {
+            let mut edited = stream.clone();
+            edited.operations = desired_operations.unwrap_or_else(|| stream.operations.clone());
+            remove_unused_fallback_font_resource(&mut edited);
+            changed_streams.insert(object_ref, edited);
+        }
+    }
+    if result.removed() == 0 {
+        return Ok(result);
+    }
+    super::qpdf_stream::update_streams(input, output_path, &changed_streams, "现有页眉页脚")?;
     Ok(result)
 }
 
-fn filter_referenced_form_text(
-    doc: &mut Document,
-    operations: &[Operation],
-    xobjects: &Dictionary,
-    plan: &PagePlainTextPlan,
-    visited: &mut HashSet<ObjectId>,
-    page_number: u32,
-) -> Result<PlainTextCleanupResult> {
-    let mut result = PlainTextCleanupResult::default();
-    for operation in operations
+#[derive(Debug, Clone)]
+struct QpdfStreamUsageSeed {
+    object_ref: String,
+    page: u32,
+    page_box: Option<PageBox>,
+    fonts: BTreeMap<String, String>,
+    xobjects: BTreeMap<String, String>,
+    depth: usize,
+}
+
+#[derive(Debug, Clone)]
+struct QpdfStreamUsage {
+    page: u32,
+    page_box: Option<PageBox>,
+    fonts: BTreeMap<String, String>,
+}
+
+fn local_font_cmaps(
+    fonts: &BTreeMap<String, String>,
+    all_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+) -> BTreeMap<String, ToUnicodeCMap> {
+    fonts
         .iter()
-        .filter(|operation| operation.operator == "Do")
-    {
-        let Some(name) = operation
-            .operands
-            .first()
-            .and_then(|object| object.as_name().ok())
-        else {
-            continue;
-        };
-        let Some(object_id) = xobjects
-            .get(name)
-            .ok()
-            .and_then(super::artifacts::object_reference)
-        else {
-            continue;
-        };
-        if !visited.insert(object_id) {
-            continue;
-        }
-        let Some((stream_content, stream_dict)) = doc
-            .get_object(object_id)
-            .ok()
-            .and_then(|object| object.as_stream().ok())
-            .filter(|stream| {
-                stream
-                    .dict
-                    .get(b"Subtype")
-                    .ok()
-                    .and_then(|object| object.as_name().ok())
-                    == Some(b"Form")
-            })
-            .and_then(|stream| {
-                stream
-                    .get_plain_content()
-                    .ok()
-                    .map(|content| (content, stream.dict.clone()))
-            })
-        else {
-            continue;
-        };
-        let Ok(content) = Content::decode(&stream_content) else {
-            continue;
-        };
-        // 读取 Form XObject 的 BBox 和 Matrix，构建表单本地坐标的 plan
-        let form_plan = read_form_plan(&stream_dict, plan);
-        let (filtered, form_result) = filter_page_operations(&content.operations, &form_plan, page_number);
-        let direct_changed = form_result.removed() > 0;
-        let resources =
-            super::artifacts::resource_dictionary(doc, stream_dict.get(b"Resources").ok());
-        let nested_xobjects = super::artifacts::xobjects_from_resources(doc, resources.as_ref());
-        let mut combined_result = form_result;
-        if !nested_xobjects.is_empty() {
-            let nested_result = filter_referenced_form_text(
-                doc,
-                &content.operations,
-                &nested_xobjects,
-                plan,
-                visited,
-                page_number,
-            )?;
-            combined_result.removed_header += nested_result.removed_header;
-            combined_result.removed_footer += nested_result.removed_footer;
-            combined_result.diagnostics.extend(nested_result.diagnostics);
-        }
-        if direct_changed {
-            let encoded = Content {
-                operations: filtered.clone(),
-            }
-            .encode()
-            .context("编码 Form XObject 中的普通文本页眉页脚失败")?;
-            doc.get_object_mut(object_id)
-                .and_then(Object::as_stream_mut)
-                .context("写回 Form XObject 普通文本页眉页脚失败")?
-                .set_plain_content(encoded);
-            if !operations_use_font(&filtered, b"FCJKFallback") {
-                remove_direct_form_font_resource(doc, object_id, b"FCJKFallback");
-            }
-        }
-        result.removed_header += combined_result.removed_header;
-        result.removed_footer += combined_result.removed_footer;
+        .filter_map(|(name, reference)| {
+            all_cmaps
+                .get(reference)
+                .cloned()
+                .map(|cmap| (name.clone(), cmap))
+        })
+        .collect()
+}
+
+fn qpdf_box_to_page_box(value: super::qpdf_stream::QpdfBox) -> PageBox {
+    PageBox {
+        width: (value.x1 - value.x0).abs(),
+        min_y: value.y0.min(value.y1),
+        max_y: value.y0.max(value.y1),
     }
-    Ok(result)
+}
+
+fn encoded_operations(operations: &[Operation]) -> Result<Vec<u8>> {
+    Content {
+        operations: operations.to_vec(),
+    }
+    .encode()
+    .context("编码 PDF 内容流失败")
+}
+
+fn remove_unused_fallback_font_resource(stream: &mut super::qpdf_stream::QpdfEditableStream) {
+    if operations_use_font(&stream.operations, b"FCJKFallback") {
+        return;
+    }
+    let Some(dictionary) = stream.dictionary.as_object_mut() else {
+        return;
+    };
+    let Some(resources) = dictionary
+        .get_mut("/Resources")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(fonts) = resources
+        .get_mut("/Font")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    fonts.remove("/FCJKFallback");
 }
 
 fn operations_use_font(operations: &[Operation], font_name: &[u8]) -> bool {
@@ -283,22 +379,6 @@ fn operations_use_font(operations: &[Operation], font_name: &[u8]) -> bool {
                 .and_then(|object| object.as_name().ok())
                 == Some(font_name)
     })
-}
-
-fn remove_direct_form_font_resource(doc: &mut Document, object_id: ObjectId, font_name: &[u8]) {
-    let Ok(stream) = doc
-        .get_object_mut(object_id)
-        .and_then(Object::as_stream_mut)
-    else {
-        return;
-    };
-    let Ok(Object::Dictionary(resources)) = stream.dict.get_mut(b"Resources") else {
-        return;
-    };
-    let Ok(Object::Dictionary(fonts)) = resources.get_mut(b"Font") else {
-        return;
-    };
-    fonts.remove(font_name);
 }
 
 struct PagePlainTextPlan<'a> {
@@ -327,10 +407,20 @@ fn active_targets(targets: &[PlainTextTarget], page_number: u32) -> Vec<&PlainTe
         .collect()
 }
 
+#[cfg(test)]
 fn filter_page_operations(
     operations: &[Operation],
     plan: &PagePlainTextPlan,
+    page_number: u32,
+) -> (Vec<Operation>, PlainTextCleanupResult) {
+    filter_page_operations_with_cmaps(operations, plan, page_number, &BTreeMap::new())
+}
+
+fn filter_page_operations_with_cmaps(
+    operations: &[Operation],
+    plan: &PagePlainTextPlan,
     _page_number: u32,
+    font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
 ) -> (Vec<Operation>, PlainTextCleanupResult) {
     let mut output = Vec::with_capacity(operations.len());
     let mut result = PlainTextCleanupResult::default();
@@ -338,7 +428,7 @@ fn filter_page_operations(
 
     for operation in operations {
         update_text_state_before_show(&mut state, operation);
-        let shown_text = shown_text(operation);
+        let shown_text = shown_text_with_cmaps(operation, &state, font_cmaps);
         let mut remove_region = None;
         if let Some(text) = shown_text.as_deref() {
             // 文本匹配：必须在 zone 内 + 文本内容匹配
@@ -349,25 +439,6 @@ fn filter_page_operations(
             } else if in_footer_zone && matches_any_target_by_text(text, &plan.footer_targets) {
                 remove_region = Some(TextRegion::Footer);
             }
-            // bbox 匹配：独立于 zone check，处理 CID 字体无法解码的情况
-            if remove_region.is_none() {
-                let page_h = plan.page_box.max_y;
-                let header_by_bbox =
-                    matches_any_target_by_bbox(&state, &plan.header_targets, page_h);
-                let footer_by_bbox = !header_by_bbox
-                    && matches_any_target_by_bbox(&state, &plan.footer_targets, page_h);
-                if header_by_bbox {
-                    remove_region = Some(TextRegion::Header);
-                    result.diagnostics.push(DeleteDiagnostic {
-                        reason: DeleteSkipReason::FontUndecodable,
-                    });
-                } else if footer_by_bbox {
-                    remove_region = Some(TextRegion::Footer);
-                    result.diagnostics.push(DeleteDiagnostic {
-                        reason: DeleteSkipReason::FontUndecodable,
-                    });
-                }
-            }
             // 诊断：记录前2页文本操作的匹配情况
             if _page_number <= 2 && !plan.header_targets.is_empty() {
                 log::info!(
@@ -376,6 +447,27 @@ fn filter_page_operations(
                     text.chars().take(20).collect::<String>(),
                     remove_region
                 );
+            }
+        }
+        // bbox 匹配必须独立于文本解码结果。CID 字体没有可用 CMap，或一条
+        // TJ 中混入了不可解码字符时，仍可用检测阶段确认的显示范围做保守删除。
+        if remove_region.is_none()
+            && matches!(operation.operator.as_str(), "Tj" | "TJ" | "'" | "\"")
+        {
+            let page_h = plan.page_box.max_y;
+            let header_by_bbox = matches_any_target_by_bbox(&state, &plan.header_targets, page_h);
+            let footer_by_bbox =
+                !header_by_bbox && matches_any_target_by_bbox(&state, &plan.footer_targets, page_h);
+            if header_by_bbox {
+                remove_region = Some(TextRegion::Header);
+                result.diagnostics.push(DeleteDiagnostic {
+                    reason: DeleteSkipReason::FontUndecodable,
+                });
+            } else if footer_by_bbox {
+                remove_region = Some(TextRegion::Footer);
+                result.diagnostics.push(DeleteDiagnostic {
+                    reason: DeleteSkipReason::FontUndecodable,
+                });
             }
         }
         match remove_region {
@@ -423,6 +515,14 @@ fn update_text_state_before_show(state: &mut TextState, operation: &Operation) {
                 state.y = y;
             }
         }
+        "Tf" => {
+            state.font_name = operation
+                .operands
+                .first()
+                .and_then(|object| object.as_name().ok())
+                .and_then(|name| std::str::from_utf8(name).ok())
+                .map(str::to_string);
+        }
         "TL" => {
             if let Some(leading) = number_operand(operation, 0) {
                 state.leading = leading;
@@ -445,17 +545,33 @@ fn number_operand(operation: &Operation, index: usize) -> Option<f32> {
     }
 }
 
+#[cfg(test)]
 fn shown_text(operation: &Operation) -> Option<String> {
+    shown_text_with_cmaps(operation, &TextState::default(), &BTreeMap::new())
+}
+
+fn shown_text_with_cmaps(
+    operation: &Operation,
+    state: &TextState,
+    font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+) -> Option<String> {
     match operation.operator.as_str() {
-        "Tj" | "'" => operation.operands.first().and_then(object_text),
-        "\"" => operation.operands.get(2).and_then(object_text),
+        "Tj" | "'" => operation
+            .operands
+            .first()
+            .and_then(|object| object_text(object, state, font_cmaps)),
+        "\"" => operation
+            .operands
+            .get(2)
+            .and_then(|object| object_text(object, state, font_cmaps)),
         "TJ" => {
             let Object::Array(items) = operation.operands.first()? else {
                 return None;
             };
             let mut text = String::new();
             for item in items {
-                if let Some(part) = object_text(item) {
+                if matches!(item, Object::String(_, _)) {
+                    let part = object_text(item, state, font_cmaps)?;
                     text.push_str(&part);
                 }
             }
@@ -469,10 +585,19 @@ fn shown_text(operation: &Operation) -> Option<String> {
     }
 }
 
-fn object_text(object: &Object) -> Option<String> {
+fn object_text(
+    object: &Object,
+    state: &TextState,
+    font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+) -> Option<String> {
     let Object::String(bytes, _) = object else {
         return None;
     };
+    if let Some(font_name) = state.font_name.as_deref() {
+        if let Some(cmap) = font_cmaps.get(font_name) {
+            return cmap.decode(bytes);
+        }
+    }
     if bytes.starts_with(&[0xFE, 0xFF]) {
         let units = bytes[2..]
             .chunks_exact(2)
@@ -480,7 +605,7 @@ fn object_text(object: &Object) -> Option<String> {
             .collect::<Vec<_>>();
         return String::from_utf16(&units).ok();
     }
-    Some(String::from_utf8_lossy(bytes).to_string())
+    String::from_utf8(bytes.clone()).ok()
 }
 
 fn is_in_header_zone(y: f32, plan: &PagePlainTextPlan) -> bool {
@@ -499,7 +624,11 @@ fn matches_any_target_by_text(text: &str, targets: &[&PlainTextTarget]) -> bool 
     targets.iter().any(|target| target_matches(text, target))
 }
 
-fn matches_any_target_by_bbox(state: &TextState, targets: &[&PlainTextTarget], page_height: f32) -> bool {
+fn matches_any_target_by_bbox(
+    state: &TextState,
+    targets: &[&PlainTextTarget],
+    page_height: f32,
+) -> bool {
     targets
         .iter()
         .any(|target| target_bbox_matches(state, target, page_height))
@@ -535,7 +664,11 @@ fn target_bbox_matches(state: &TextState, target: &PlainTextTarget, page_height:
     let y_padding = 18.0;
     // 使用 lopdf 的页面高度（page_height）而非 pdftotext 的 bbox.height
     // 避免 CropBox/MediaBox 不一致导致的坐标偏移
-    let height = if page_height > 0.0 { page_height } else { bbox.height };
+    let height = if page_height > 0.0 {
+        page_height
+    } else {
+        bbox.height
+    };
     let pdf_y0 = height - bbox.y1;
     let pdf_y1 = height - bbox.y0;
     state.x >= bbox.x0 - x_padding
@@ -583,102 +716,6 @@ fn normalize_for_match(text: &str) -> String {
         .collect()
 }
 
-fn page_box(doc: &Document, page_id: ObjectId) -> Option<PageBox> {
-    let mut current_id = page_id;
-    let mut seen = HashSet::new();
-    loop {
-        if !seen.insert(current_id) {
-            return None;
-        }
-        let node = doc.get_object(current_id).ok()?.as_dict().ok()?;
-        if let Some(page_box) =
-            node_box(doc, node, b"CropBox").or_else(|| node_box(doc, node, b"MediaBox"))
-        {
-            return Some(page_box);
-        }
-        current_id = node.get(b"Parent").ok()?.as_reference().ok()?;
-    }
-}
-
-fn node_box(doc: &Document, node: &lopdf::Dictionary, key: &[u8]) -> Option<PageBox> {
-    let value = node.get(key).ok()?;
-    let page_box = match value {
-        Object::Reference(id) => doc.get_object(*id).ok()?,
-        other => other,
-    };
-    let page_box = page_box.as_array().ok()?;
-    if page_box.len() != 4 {
-        return None;
-    }
-    let x0 = object_number(&page_box[0])?;
-    let y0 = object_number(&page_box[1])?;
-    let x1 = object_number(&page_box[2])?;
-    let y1 = object_number(&page_box[3])?;
-    Some(PageBox {
-        width: (x1 - x0).abs(),
-        min_y: y0.min(y1),
-        max_y: y0.max(y1),
-    })
-}
-
-fn object_number(object: &Object) -> Option<f32> {
-    match object {
-        Object::Integer(value) => Some(*value as f32),
-        Object::Real(value) => Some(*value),
-        _ => None,
-    }
-}
-
-/// 从 Form XObject 的 BBox 构建表单本地坐标的 plan
-/// 表单内容使用 form-local 坐标，zone check 也需要在 form-local 坐标中进行
-/// 所以 page_box 直接使用表单 BBox（不转换为页面坐标）
-fn read_form_plan<'a>(
-    stream_dict: &lopdf::Dictionary,
-    page_plan: &'a PagePlainTextPlan<'a>,
-) -> PagePlainTextPlan<'a> {
-    let form_bbox = stream_dict
-        .get(b"BBox")
-        .ok()
-        .and_then(|v| v.as_array().ok())
-        .and_then(|arr| {
-            if arr.len() >= 4 {
-                Some((
-                    object_number(&arr[0]).unwrap_or(0.0),
-                    object_number(&arr[1]).unwrap_or(0.0),
-                    object_number(&arr[2]).unwrap_or(0.0),
-                    object_number(&arr[3]).unwrap_or(0.0),
-                ))
-            } else {
-                None
-            }
-        });
-
-    let Some((fx0, fy0, fx1, fy1)) = form_bbox else {
-        // 没有 BBox，回退到页面级 plan
-        return PagePlainTextPlan {
-            header_targets: page_plan.header_targets.clone(),
-            footer_targets: page_plan.footer_targets.clone(),
-            header_zone_pt: page_plan.header_zone_pt,
-            footer_zone_pt: page_plan.footer_zone_pt,
-            page_box: page_plan.page_box,
-        };
-    };
-
-    // 直接使用表单 BBox 作为 page_box
-    // 表单内容的 state.y 是 form-local 坐标，zone check 也需要在同坐标系中
-    PagePlainTextPlan {
-        header_targets: page_plan.header_targets.clone(),
-        footer_targets: page_plan.footer_targets.clone(),
-        header_zone_pt: page_plan.header_zone_pt,
-        footer_zone_pt: page_plan.footer_zone_pt,
-        page_box: PageBox {
-            width: fx1 - fx0,
-            min_y: fy0,
-            max_y: fy1,
-        },
-    }
-}
-
 fn mm_to_pt(mm: f32) -> f32 {
     mm * 72.0 / 25.4
 }
@@ -688,7 +725,7 @@ mod tests {
     use super::*;
     use lopdf::content::Operation;
     use lopdf::dictionary;
-    use lopdf::Stream;
+    use lopdf::{Dictionary, Document, Stream};
 
     #[test]
     fn removes_matching_header_text_in_header_zone() {
@@ -824,6 +861,63 @@ mod tests {
         let text = filtered.iter().filter_map(shown_text).collect::<Vec<_>>();
         assert!(!text.iter().any(|value| value == "encoded-glyphs"));
         assert!(text.iter().any(|value| value == "body text"));
+    }
+
+    #[test]
+    fn decodes_cid_text_with_current_font_tounicode_map() {
+        let operations = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec![Object::Name(b"FCID".to_vec()), 12.into()]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    120.into(),
+                    812.into(),
+                ],
+            ),
+            Operation::new(
+                "Tj",
+                vec![Object::String(
+                    vec![0, 1, 0, 2],
+                    lopdf::StringFormat::Hexadecimal,
+                )],
+            ),
+            Operation::new("ET", vec![]),
+        ];
+        let target = PlainTextTarget {
+            text: "中文".to_string(),
+            normalized_text: "中文".to_string(),
+            page_start: 1,
+            page_end: 1,
+            bbox: None,
+        };
+        let plan = PagePlainTextPlan {
+            header_targets: vec![&target],
+            footer_targets: vec![],
+            header_zone_pt: 60.0,
+            footer_zone_pt: 60.0,
+            page_box: PageBox {
+                width: 595.0,
+                min_y: 0.0,
+                max_y: 842.0,
+            },
+        };
+        let cmap = ToUnicodeCMap::parse(
+            br#"
+            1 begincodespacerange <0000> <00ff> endcodespacerange
+            2 beginbfchar <0001> <4E2D> <0002> <6587> endbfchar
+            "#,
+        )
+        .unwrap();
+        let font_cmaps = BTreeMap::from([(String::from("FCID"), cmap)]);
+        let (filtered, result) =
+            filter_page_operations_with_cmaps(&operations, &plan, 1, &font_cmaps);
+        assert_eq!(result.removed_header, 1);
+        assert!(filtered.iter().all(|operation| operation.operator != "Tj"));
     }
 
     #[test]

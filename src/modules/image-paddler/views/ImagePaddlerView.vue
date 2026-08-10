@@ -257,12 +257,12 @@ import ReorderableImageGrid from '../../../shared/components/ReorderableImageGri
 import { useImagePaddlerState } from '../composables/useImagePaddlerState.js'
 
 const {
-  folder, folders, analyzing, generating, analysis, generatedResult,
-  previewSources, pageZoom, settings, layoutGrid, resolvedOrientation,
+  folders, analyzing, generating, analysis, generatedResult,
+  pageZoom, settings, layoutGrid, resolvedOrientation,
   resolvedOrientationLabel, orderedImages, previewImages, previewSlots,
   generatedOutputPaths, previewPageStyle, previewGridStyle, previewCellStyle,
-  layoutMetrics, previewImageAreaStyle, previewNameStyle,
-  selectFolder, analyze, run, reorderLayoutImages, openGeneratedOutput,
+  previewImageAreaStyle, previewNameStyle,
+  selectFolder, run, reorderLayoutImages, openGeneratedOutput,
   imageSrc, fileName, fileNameLines, previewImageStyle,
   imageItemName, imageItemMeta,
   addFilenameRule, removeFilenameRule, rulePlaceholder,

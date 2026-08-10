@@ -82,10 +82,9 @@ fn wps_installation() -> Result<PathBuf> {
         // Try mdfind
         let mut cmd = super::hidden_command("mdfind");
         cmd.arg("kMDItemCFBundleIdentifier == 'cn.wps.macos.wpsoffice'");
-        if let Ok(output) = super::command_output_with_timeout(
-            &mut cmd,
-            std::time::Duration::from_secs(2),
-        ) {
+        if let Ok(output) =
+            super::command_output_with_timeout(&mut cmd, std::time::Duration::from_secs(2))
+        {
             if output.status.success() {
                 for line in String::from_utf8_lossy(&output.stdout).lines() {
                     let path = std::path::PathBuf::from(line.trim());

@@ -293,13 +293,13 @@ export function useHeaderFooterRules({
       notes.push('只生成合并 PDF 时，中间单文件副本会在合并成功后清理')
     }
     if (hasExistingRemovalRule.value) {
-      notes.push('删除现有页眉页脚不会使用白色遮盖；只能删除标准结构或已确认匹配的普通文本')
+      notes.push('仅删除已确认的现有页眉、页脚和页码，不使用白色遮盖；无法可靠删除的内容会保留并提示')
     }
     if (hasExistingEditRule.value) {
-      notes.push('原页眉、原页脚、原页码列中的标准结构编辑会尽量原位处理；普通文本型旧内容会先删除匹配文本再按原位置重建')
+      notes.push('编辑已确认的现有页眉、页脚和页码后，会在原位置生成可继续识别和编辑的内容')
     }
     if (hasExistingConvertRule.value) {
-      notes.push('普通文本型旧页眉页脚页码会先删除匹配文本，再按检测到的位置重建')
+      notes.push('修改后的现有页眉、页脚和页码会按检测位置重新生成')
     }
     return notes
   })

@@ -44,9 +44,6 @@
       <el-table-column column-key="pageStart" prop="pageStart" label="页段" width="90" sortable>
         <template #default="{ row }">{{ row.element.pageStart }}-{{ row.element.pageEnd }}</template>
       </el-table-column>
-      <el-table-column column-key="source" prop="source" label="来源" width="105" sortable>
-        <template #default="{ row }">{{ row.element.source === 'artifact' ? '标准结构' : '页面文本' }}</template>
-      </el-table-column>
       <el-table-column column-key="decision" prop="decision" label="处理" width="100" sortable>
         <template #default="{ row }">
           <el-tag :type="decisionTagType(row.element.decision)" size="small">
@@ -239,9 +236,6 @@ function selectBySequence(row) {
       .map(r => r.key)
   }
 }
-function selectByKind(kind) {
-  selectedKeys.value = filteredRows.value.filter(row => row.element.kind === kind).map(row => row.key)
-}
 function invertSelection() {
   const selected = new Set(selectedKeys.value)
   selectedKeys.value = filteredRows.value.filter((row) => !selected.has(row.key)).map((row) => row.key)
@@ -281,7 +275,7 @@ function handleRowClick(row, _column, event) {
 function handleMouseMove(event) {
   tooltipPos.value = { x: event.clientX, y: event.clientY }
 }
-function handleRowMouseEnter(_row, _column, _cell, event) {
+function handleRowMouseEnter(_row, _column, _cell, _event) {
   const rowIndex = filteredRows.value.findIndex(r => r.key === _row.key)
   if (rowIndex >= 0) hoverRowIndex.value = rowIndex
 }
@@ -295,7 +289,14 @@ function applyDecision(decision) {
 }
 function setDecision(row, decision) {
   row.element.decision = decision
-  if (decision !== 'edit') row.element.editedText = row.element.detectedText
+  if (decision === 'edit' && row.element.kind === 'pageNumber') {
+    const template = String(row.element.normalizedText || '')
+    row.element.editedText = template.includes('{page}') || template.includes('{roman-page}')
+      ? template
+      : row.element.detectedText
+  } else if (decision !== 'edit') {
+    row.element.editedText = row.element.detectedText
+  }
   emit('change', row)
 }
 function previewRow(row) {

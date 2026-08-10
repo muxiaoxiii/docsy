@@ -85,7 +85,7 @@
       <el-tab-pane label="压缩" name="compress" lazy>
         <ToolWorkspaceShell
           title="PDF 压缩整理"
-          description="使用 qpdf 重新压缩流、整理对象并移除未引用资源，不改变页面内容。"
+          description="重编码图片并压缩流、整理对象，大幅减小文件体积。"
         >
           <template #toolbar>
             <el-button type="primary" @click="selectCompressFile">选择 PDF</el-button>
@@ -95,6 +95,14 @@
           <div v-if="compressOutputDir" class="path-line">{{ compressOutputDir }}</div>
           <el-empty v-if="!compressFile" description="先选择需要压缩整理的 PDF 文件" />
           <template #actions>
+            <div class="compress-level-row">
+              <span class="compress-level-label">压缩级别：</span>
+              <el-radio-group v-model="compressLevel" size="default">
+                <el-radio-button :value="1">低（适合打印）</el-radio-button>
+                <el-radio-button :value="2">中（推荐）</el-radio-button>
+                <el-radio-button :value="3">高（适合屏幕）</el-radio-button>
+              </el-radio-group>
+            </div>
             <el-button type="success" :loading="compressing" :disabled="!compressFile" @click="doCompressPdf">
               压缩 PDF
             </el-button>
@@ -459,6 +467,7 @@ const extractingPages = ref(false)
 const compressFile = ref('')
 const compressOutputDir = ref('')
 const compressing = ref(false)
+const compressLevel = ref(2)
 const splitFile = ref('')
 const splitOutputDir = ref('')
 const splitRanges = ref([])
@@ -720,6 +729,7 @@ async function doCompressPdf() {
   const result = await tauriCallSafe('compress_pdf', {
     input: compressFile.value,
     output_dir: compressOutputDir.value || null,
+    level: compressLevel.value,
   })
   compressing.value = false
   if (result.ok) {
@@ -1157,5 +1167,16 @@ h3 {
 .anti-copy-message.danger {
   background: #fef2f2;
   color: var(--el-color-danger);
+}
+.compress-level-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.compress-level-label {
+  font-size: 13px;
+  color: var(--docsy-text);
+  white-space: nowrap;
 }
 </style>

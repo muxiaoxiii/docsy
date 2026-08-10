@@ -59,7 +59,8 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
     // Editing a library template re-saves from the docsytpl package itself
     // (its embedded word/document.xml) instead of an external Word file.
     let pkg = if args.source_docx.to_lowercase().ends_with(".docsytpl") {
-        let (_manifest, pkg) = package::read_docsytpl_package(std::path::Path::new(&args.source_docx))?;
+        let (_manifest, pkg) =
+            package::read_docsytpl_package(std::path::Path::new(&args.source_docx))?;
         pkg
     } else {
         package::read_docx_package(&source)?
@@ -814,5 +815,4 @@ mod tests {
 
         Ok(docx_path)
     }
-
 }

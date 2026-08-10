@@ -13,7 +13,10 @@
     <el-table-column type="expand" width="36">
       <template #default="{ row, $index }">
         <div class="content-subrows">
-          <template v-for="contentRows in [buildFileContentRows(row, $index, currentRules)]" :key="row.path">
+          <template
+            v-for="contentRows in [buildFileContentRows(row, $index, currentRules)]"
+            :key="`${row.path}:${contentRows.length}`"
+          >
             <el-table
               :data="contentRows"
               size="small"
@@ -189,7 +192,7 @@
 </template>
 
 <script setup>
-import { Delete, Bottom, Plus, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
+import { Delete, Bottom, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
 
 defineProps({
   overlayRows: { type: Array, required: true },

@@ -419,16 +419,6 @@ export function overlayConfigForGroup(file, region, text, group) {
   return config
 }
 
-/** @deprecated Use headerBaseTextForGroup instead. */
-function headerBaseText(file, index, rules) {
-  if (rules.headerMode === 'per_file') return file.header ?? stripPdf(file.name)
-  if (rules.headerMode === 'custom' || rules.headerMode === 'template') return rules.headerText || ''
-  if (rules.headerMode === 'seq') return `证据${index + 1}`
-  if (rules.headerMode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`
-  if (rules.headerMode === 'prefix_seq') return `${rules.headerText || ''}证据${index + 1}`
-  return stripPdf(file.name)
-}
-
 export function canWriteHeader(file) {
   return Boolean(file?.path)
 }
@@ -472,18 +462,6 @@ export function sortByNatural(items, valueGetter, order = 'ascending') {
     .map(({ item }) => item)
 }
 
-/** @deprecated Use decorateHeaderTextForGroup instead. */
-function decorateHeaderText(base, file, index, rules) {
-  const name = stripPdf(file?.name || '')
-  const contextText = String(base || '')
-    .replaceAll('[name]', name)
-    .replaceAll('[文件名]', name)
-  const prefix = expandSplitNameTokens(rules.headerPrefix || '', index, rules.headerDateValue || '')
-  const suffix = expandSplitNameTokens(rules.headerSuffix || '', index, rules.headerDateValue || '')
-  const body = expandSplitNameTokens(contextText, index, rules.headerDateValue || '')
-  return `${prefix}${body}${suffix}`.trim()
-}
-
 export function expandPlaceholders(template, page, total, file, index, rules) {
   let text = template || ''
   if (file != null) {
@@ -498,7 +476,6 @@ export function expandPlaceholders(template, page, total, file, index, rules) {
 export function buildHeaderFooterItems(files, rules, outputDir = '') {
   const rangedFiles = assignPageRanges(files)
   const total = totalPages(rangedFiles)
-  const isGlobal = Boolean(rules._globalApply)
   return rangedFiles.map((file, index) => {
     const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
     // When global apply is ON, infer enabled state from group content
@@ -645,6 +622,8 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         footerHeightMm: rules.cleanupFooterHeightMm,
         plainHeaderTargets: buildPlainTextTargets(file, 'header'),
         plainFooterTargets: buildPlainTextTargets(file, 'footer'),
+        artifactHeaderTargets: buildArtifactTargets(file, ['header']),
+        artifactFooterTargets: buildArtifactTargets(file, ['footerText', 'pageNumber']),
         headerReplacement: existingHeaderReplacement,
         footerReplacement: existingFooterReplacement,
       },
@@ -711,6 +690,28 @@ function buildPlainTextTargets(file, region) {
   }
   if (region === 'header') return [plainTextTarget(file, 'header')].filter(Boolean)
   return [plainTextTarget(file, 'footer'), plainTextTarget(file, 'pageNumber')].filter(Boolean)
+}
+
+function buildArtifactTargets(file, kinds) {
+  if (!Array.isArray(file.existingElements) || !file.existingElements.length) return []
+  return file.existingElements
+    .filter(
+      (element) =>
+        kinds.includes(element.kind) &&
+        element.source === 'artifact' &&
+        ['delete', 'edit'].includes(element.decision),
+    )
+    .map((element) => ({
+      artifactId: element.artifactId || null,
+      normalizedText: element.normalizedText || element.detectedText || '',
+      pageStart: element.pageStart || 1,
+      pageEnd: element.pageEnd || file.pages || 1,
+      docsyKind: element.docsyKind || null,
+      replacementText:
+        element.decision === 'edit' && canEditArtifactInPlace(element)
+          ? String(element.editedText || element.normalizedText || element.detectedText || '')
+          : null,
+    }))
 }
 
 function plainTextTarget(file, region) {
@@ -808,7 +809,11 @@ function inferDetectedFontSize(bbox, fallback, text = '') {
 function convertedExistingOverlays(file, rules) {
   if (Array.isArray(file.existingElements) && file.existingElements.length) {
     return file.existingElements
-      .filter((element) => element.source !== 'artifact' && element.decision === 'edit')
+      .filter(
+        (element) =>
+          element.decision === 'edit' &&
+          (element.source !== 'artifact' || !canEditArtifactInPlace(element)),
+      )
       .map((element) => overlayConfigForDetectedElement(element, rules))
       .filter(Boolean)
   }
@@ -826,6 +831,13 @@ function convertedExistingOverlays(file, rules) {
     if (text) overlays.push(overlayConfigForFile(file, 'pageNumber', text, rules))
   }
   return overlays
+}
+
+function canEditArtifactInPlace(element) {
+  const before = String(element?.detectedText || '')
+  const after = String(element?.editedText || before)
+  const isAscii = (value) => Array.from(value).every((character) => character.codePointAt(0) <= 0x7f)
+  return isAscii(before) && isAscii(after)
 }
 
 function hasArtifactDecision(file, kinds, decision) {

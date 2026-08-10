@@ -222,9 +222,7 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
         let mut root_files = Vec::new();
         collect_supported_files(root_path, &mut root_files)?;
         // Filter out files in subdirectories (only keep root-level files)
-        root_files.retain(|(_, path, _, _)| {
-            path.parent().map_or(false, |p| p == root_path)
-        });
+        root_files.retain(|(_, path, _, _)| path.parent().is_some_and(|p| p == root_path));
         root_files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
         if !root_files.is_empty() {
             let group_name = root_path

@@ -72,7 +72,13 @@ pub fn install_panic_hook() {
 }
 
 pub fn write_frontend(entry: FrontendLogEntry) -> Result<(), String> {
-    write_result(&entry.level, &entry.target, &entry.message, entry.context, None)
+    write_result(
+        &entry.level,
+        &entry.target,
+        &entry.message,
+        entry.context,
+        None,
+    )
 }
 
 pub fn info(target: &str, message: &str, context: Value) {
@@ -133,7 +139,13 @@ fn cleanup_old_logs(retain_days: i64) {
     }
 }
 
-fn write(level: &str, target: &str, message: &str, context: Option<Value>, operation_id: Option<&str>) {
+fn write(
+    level: &str,
+    target: &str,
+    message: &str,
+    context: Option<Value>,
+    operation_id: Option<&str>,
+) {
     if let Err(err) = write_result(level, target, message, context, operation_id) {
         eprintln!("Docsy log write failed: {err}");
     }

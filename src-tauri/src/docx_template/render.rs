@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -98,9 +98,14 @@ fn render_tree(
             // Table row replication: if child is w:tr with party_list sdt, expand it
             if let XmlNode::Element { name, .. } = &children[i] {
                 if name == "w:tr" {
-                    if let Some(new_rows) =
-                        try_expand_table_row(children, i, tag_map, values, overrides, item_separator)?
-                    {
+                    if let Some(new_rows) = try_expand_table_row(
+                        children,
+                        i,
+                        tag_map,
+                        values,
+                        overrides,
+                        item_separator,
+                    )? {
                         children.splice(i..i + 1, new_rows);
                         continue; // new rows already rendered by try_expand_table_row
                     }
@@ -172,7 +177,14 @@ fn render_tree(
                                 continue;
                             }
 
-                            replace_sdt_content(&mut children[i], field, *slot, &tag, &value, item_separator)?;
+                            replace_sdt_content(
+                                &mut children[i],
+                                field,
+                                *slot,
+                                &tag,
+                                &value,
+                                item_separator,
+                            )?;
                             let sdt =
                                 std::mem::replace(&mut children[i], XmlNode::Text(String::new()));
                             let content = unwrap_sdt_content(sdt);
@@ -225,7 +237,13 @@ fn try_expand_table_row(
                     // Clone the row subtree directly instead of a serialize →
                     // parse round-trip per item.
                     let mut row_clone = children[idx].clone();
-                    render_tree(&mut row_clone, tag_map, &item_values, overrides, item_separator)?;
+                    render_tree(
+                        &mut row_clone,
+                        tag_map,
+                        &item_values,
+                        overrides,
+                        item_separator,
+                    )?;
                     new_rows.push(row_clone);
                 }
                 return Ok(Some(new_rows));
@@ -694,9 +712,9 @@ fn render_into_existing_runs(children: &[XmlNode], text: &str) -> XmlNode {
                 if first {
                     // MDG-012: Don't inject w:t into runs that don't have one
                     // (e.g. fldChar, instrText). Only replace existing w:t content.
-                    let has_wt = new_children.iter().any(|c| {
-                        matches!(c, XmlNode::Element { name, .. } if name == "w:t")
-                    });
+                    let has_wt = new_children
+                        .iter()
+                        .any(|c| matches!(c, XmlNode::Element { name, .. } if name == "w:t"));
                     if has_wt {
                         // w:t already exists but was empty — inject text
                         new_children.push(XmlNode::Element {
@@ -1259,7 +1277,14 @@ mod tests {
             ]),
         );
 
-        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new(), "、").unwrap();
+        render_tree(
+            &mut tree.root,
+            &field_map(&m),
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
         let out = tree.to_xml().unwrap();
         assert!(out.contains("李琼律师"));
         assert!(out.contains("吕晗实习律师"));
@@ -1289,7 +1314,14 @@ mod tests {
         let mut values = HashMap::new();
         values.insert("party".to_string(), Value::String("原告甲".to_string()));
 
-        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new(), "、").unwrap();
+        render_tree(
+            &mut tree.root,
+            &field_map(&m),
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
         let out = tree.to_xml().unwrap();
         assert_eq!(out.matches("原告甲").count(), 1);
     }
@@ -1318,7 +1350,14 @@ mod tests {
         let mut values = HashMap::new();
         values.insert("party".to_string(), Value::String("原告甲".to_string()));
 
-        render_tree(&mut tree.root, &field_map(&m), &values, &HashMap::new(), "、").unwrap();
+        render_tree(
+            &mut tree.root,
+            &field_map(&m),
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
         let out = tree.to_xml().unwrap();
         assert_eq!(out.matches("原告甲").count(), 2);
     }

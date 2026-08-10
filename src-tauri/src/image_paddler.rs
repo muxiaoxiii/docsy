@@ -1053,7 +1053,11 @@ fn generate_pdf(
             }
         }
 
-        let page = PdfPage::new(Mm(config.page_w_mm as f32), Mm(config.page_h_mm as f32), ops);
+        let page = PdfPage::new(
+            Mm(config.page_w_mm as f32),
+            Mm(config.page_h_mm as f32),
+            ops,
+        );
 
         if page_idx == 0 {
             doc.with_pages(vec![page]);
@@ -1109,11 +1113,7 @@ fn pdf_border_color(color: &str) -> printpdf::Color {
     printpdf::Color::Rgb(printpdf::Rgb::new(r, g, b, None))
 }
 
-fn generate_docx(
-    images: &[ImageInfo],
-    output_path: &Path,
-    config: &LayoutConfig,
-) -> Result<()> {
+fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig) -> Result<()> {
     use docx_rs::{
         AlignmentType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph, Pic, Run,
         Table, TableAlignmentType, TableCell, TableCellBorder, TableCellBorderPosition,

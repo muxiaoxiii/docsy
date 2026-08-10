@@ -148,9 +148,11 @@ pub async fn extract_pdf_pages(
 pub async fn compress_pdf(
     input: String,
     output_dir: Option<String>,
+    level: Option<u8>,
 ) -> Result<PdfOutputResult, String> {
     let result =
-        run_blocking(move || crate::pdf::qpdf::compress(&input, output_dir.as_deref())).await?;
+        run_blocking(move || crate::pdf::qpdf::compress(&input, output_dir.as_deref(), level))
+            .await?;
     Ok(PdfOutputResult {
         output_path: result.output_path,
     })
@@ -207,10 +209,14 @@ pub async fn batch_overlay_pdf_text(
 
 #[tauri::command]
 pub async fn apply_evidence_pdf_rules(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     args: ApplyEvidencePdfRulesArgs,
 ) -> Result<serde_json::Value, String> {
     let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
-    run_blocking(move || crate::pdf::evidence_session::apply_rules(&args)).await
+    run_managed(&manager, "apply_evidence_pdf_rules", None, move |token| {
+        crate::pdf::evidence_session::apply_rules_cancellable(&args, &token)
+    })
+    .await
 }
 
 #[tauri::command]

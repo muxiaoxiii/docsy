@@ -476,7 +476,10 @@
         <el-table-column type="expand" width="36">
           <template #default="{ row, $index }">
             <div class="content-subrows">
-              <template v-for="contentRows in [buildFileContentRows(row, $index, currentRules)]" :key="row.path">
+              <template
+                v-for="contentRows in [buildFileContentRows(row, $index, currentRules)]"
+                :key="`${row.path}:${contentRows.length}`"
+              >
                 <el-table
                   :data="contentRows"
                   size="small"
@@ -823,7 +826,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { Delete, Bottom, Plus, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
+import { Delete, Bottom, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
 import { log as diagLog } from '../../../shared/diagnostics.js'
@@ -831,8 +834,6 @@ import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import HeaderFooterRuleFields from '../../../shared/pdf-tools/components/HeaderFooterRuleFields.vue'
 import PageNumberRuleDialog from '../../../shared/pdf-tools/components/PageNumberRuleDialog.vue'
 import ExistingPdfElementsDialog from '../../../shared/pdf-tools/components/ExistingPdfElementsDialog.vue'
-import EvidenceMergedImportPlan from './EvidenceMergedImportPlan.vue'
-import EvidenceOverlayTable from './EvidenceOverlayTable.vue'
 import {
   buildEvidencePdfRulePayload,
   buildFileContentRows,
@@ -860,12 +861,8 @@ import { useEvidencePdfExistingEditing } from '../../../shared/pdf-tools/composa
 import { renderPageNumberTemplate } from '../../../shared/pdf-tools/composables/pdfPageNumberRules.js'
 import { elementIdentity } from '../../../shared/pdf-tools/composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
-import { useHistory } from '../../../core/composables/useHistory.js'
 import { openPath, tauriCallSafe, tauriCallQuiet, userFacingError } from '../../../core/tauriBridge.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
-import { useHeaderFooterRules } from '../composables/useHeaderFooterRules.js'
-import { useContentRowEditing } from '../composables/useContentRowEditing.js'
-import { useFileOrdering } from '../composables/useFileOrdering.js'
 
 /** Parse a page number value from detected text (e.g. "1/10 页" → 1, "第3页" → 3). */
 function parsePageNumberValue(text) {
@@ -1155,7 +1152,6 @@ const pageNumberRegion = computed({
 })
 const HORIZONTAL_OFFSET_LIMIT_MM = 120
 const insertHeaderFooterEnabled = ref(true)
-// useHeaderFooterRules composable vars (locally defined since composable is not yet wired)
 const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
 const globalApplyEnabled = ref(true)
@@ -1418,13 +1414,13 @@ const processingNotes = computed(() => {
     notes.push('只生成合并 PDF 时，中间单文件副本会在合并成功后清理')
   }
   if (hasExistingRemovalRule.value) {
-    notes.push('删除现有页眉页脚不会使用白色遮盖；只能删除标准结构或已确认匹配的普通文本')
+    notes.push('仅删除已确认的现有页眉、页脚和页码，不使用白色遮盖；无法可靠删除的内容会保留并提示')
   }
   if (hasExistingEditRule.value) {
-    notes.push('原页眉、原页脚、原页码列中的标准结构编辑会尽量原位处理；普通文本型旧内容会先删除匹配文本再按原位置重建')
+    notes.push('编辑已确认的现有页眉、页脚和页码后，会在原位置生成可继续识别和编辑的内容')
   }
   if (hasExistingConvertRule.value) {
-    notes.push('普通文本型旧页眉页脚页码会先删除匹配文本，再按检测到的位置重建')
+    notes.push('修改后的现有页眉、页脚和页码会按检测位置重新生成')
   }
   if (hasUnresolvedExistingOverlapRisk.value) {
     notes.push('存在未处理的原页眉页脚，新插入内容可能与旧内容重叠')
@@ -1638,11 +1634,6 @@ const currentRules = computed(() => ({
 const {
   detectAllHeaderFooter,
   candidateKey,
-  footerCandidateMeta,
-  footerCandidateRoleText: detectionFooterCandidateRoleText,
-  footerCandidateRoleType: detectionFooterCandidateRoleType,
-  previewFooterCandidate: detectionPreviewFooterCandidate,
-  assignFooterCandidate: detectionAssignFooterCandidate,
   fileExistingStatus,
   hasExistingHeader,
   hasExistingFooter,
@@ -1662,9 +1653,6 @@ const {
   previewHeaderStyle,
   previewFooterStyle,
   truePreviewFrameStyle,
-  selectedFooterCandidates,
-  footerCandidatePanelVisible,
-  footerCandidatePreviewMarker,
   deletionPreviewMarkers,
   convertedExistingPreviewOverlays,
   headerFooterOverflowWarnings,
@@ -1716,30 +1704,6 @@ const {
   cleanupFooterHeightMm,
   selectedFooterCandidateKey,
 })
-
-function footerCandidateRoleText(candidate) {
-  return detectionFooterCandidateRoleText(candidate, selectedOverlayFile)
-}
-
-function footerCandidateRoleType(candidate) {
-  return detectionFooterCandidateRoleType(candidate, selectedOverlayFile)
-}
-
-function previewFooterCandidate(candidate) {
-  selectedFooterCandidateKey.value = candidateKey(candidate)
-  detectionPreviewFooterCandidate(candidate, selectedOverlayFile, previewMaxPage, previewPage, truePreview)
-}
-
-function assignFooterCandidate(candidate, role) {
-  detectionAssignFooterCandidate(
-    candidate,
-    role,
-    selectedOverlayFile,
-    selectedFooterCandidateKey,
-    truePreview,
-    refreshPreview,
-  )
-}
 
 const {
   mergedImportWarnings,
@@ -2076,7 +2040,6 @@ async function resolveSuffixConflicts(payload) {
       do {
         candidate = `${base}_${seq}${ext}`
         seq++
-        // eslint-disable-next-line no-await-in-loop
       } while (await exists(candidate).catch(() => false))
       item.outputPath = candidate
     }
@@ -2330,34 +2293,6 @@ function openExistingElements(filter = 'all') {
   existingElementsVisible.value = true
 }
 
-async function quickCleanupExistingHeaderFooter() {
-  if (!overlayFiles.value.length) {
-    ElMessage.info('请先导入 PDF 文件')
-    return
-  }
-  quickCleanupRunning.value = true
-  try {
-    // Step 1: Ensure detection is done
-    if (!hasDetectedExistingHeaderFooter.value) {
-      await detectAllHeaderFooter({ silent: true })
-    }
-    if (!hasDetectedExistingHeaderFooter.value) {
-      ElMessage.info('未检测到现有页眉页脚或页码')
-      return
-    }
-    // Step 2: Open dialog for user to select what to delete
-    quickCleanupPipeline = true
-    existingElementsFilter.value = 'all'
-    existingElementsVisible.value = true
-    // The watcher will call finishQuickCleanupPipeline when dialog closes
-  } catch (err) {
-    quickCleanupPipeline = false
-    ElMessage.error(userFacingError(err?.message || err, '检测失败'))
-  } finally {
-    quickCleanupRunning.value = false
-  }
-}
-
 async function finishQuickCleanupPipeline() {
   // Check if anything was marked for deletion
   const deleteCount = overlayFiles.value.reduce(
@@ -2372,7 +2307,7 @@ async function finishQuickCleanupPipeline() {
   // Step 3: Confirm
   try {
     await ElMessageBox.confirm(
-      `将删除 ${deleteCount} 项已检测到的页眉页脚内容。标准结构直接删除，普通文本删除区域内匹配内容。处理后的文件将放在源文件旁边的 _cleaned 文件夹中。`,
+      `将删除 ${deleteCount} 项已确认的页眉、页脚或页码。不会遮盖正文；无法可靠删除的内容会保留并提示。处理后的文件将放在源文件旁边的 _cleaned 文件夹中。`,
       '确认删除页眉页脚',
       { confirmButtonText: '执行删除', cancelButtonText: '取消', type: 'warning' },
     )
@@ -2743,7 +2678,7 @@ async function markRemoveExistingHeaderFooter() {
   }
   try {
     await ElMessageBox.confirm(
-      '将标记删除检测到的现有页眉页脚。标准结构会直接删除；普通文本只删除页眉页脚区域内匹配内容，匹配不到的文本会保留。是否插入新页眉页脚由当前设置决定。',
+      '将标记删除已确认的现有页眉、页脚和页码。不会遮盖正文；无法可靠删除的内容会保留并提示。是否插入新内容由当前设置决定。',
       '删除现有页眉页脚',
       {
         confirmButtonText: '标记删除',
@@ -2845,13 +2780,6 @@ function reorderMergedImportItems(from, to) {
 function removeOverlayFile(index) {
   overlayFiles.value.splice(index, 1)
   selectedOverlayIndex.value = Math.min(selectedOverlayIndex.value, Math.max(0, overlayFiles.value.length - 1))
-  refreshPreview()
-}
-
-function focusGroup(row, kind, groupId) {
-  const index = overlayRows.value.findIndex((item) => item.path === row.path)
-  if (index >= 0) selectedOverlayIndex.value = index
-  setSelectedGroup(row, kind, groupId)
   refreshPreview()
 }
 

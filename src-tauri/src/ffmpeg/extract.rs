@@ -8,7 +8,10 @@ use std::time::{Duration, Instant};
 
 const FFMPEG_EXTRACT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-pub fn extract(args: &serde_json::Value, token: &tokio_util::sync::CancellationToken) -> Result<serde_json::Value> {
+pub fn extract(
+    args: &serde_json::Value,
+    token: &tokio_util::sync::CancellationToken,
+) -> Result<serde_json::Value> {
     let started = Instant::now();
     let ffmpeg = crate::external::FfmpegTool;
     let bin = ffmpeg.binary_path()?;
@@ -120,7 +123,10 @@ pub fn extract(args: &serde_json::Value, token: &tokio_util::sync::CancellationT
                     let _ = child.wait();
                     let _ = stderr_thread.join();
                     cleanup_temp_files(&output_dir, &temp_prefix);
-                    anyhow::bail!("ffmpeg 抽帧超时：{}秒内无输出", FFMPEG_EXTRACT_IDLE_TIMEOUT.as_secs());
+                    anyhow::bail!(
+                        "ffmpeg 抽帧超时：{}秒内无输出",
+                        FFMPEG_EXTRACT_IDLE_TIMEOUT.as_secs()
+                    );
                 }
 
                 // 检查子进程是否已退出

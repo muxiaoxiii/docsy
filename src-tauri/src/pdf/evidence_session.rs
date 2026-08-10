@@ -6,7 +6,20 @@ use std::path::{Path, PathBuf};
 
 use super::{annotations, header_footer, qpdf, same_path};
 
-pub fn apply_rules(args: &Value) -> Result<Value> {
+pub fn apply_rules_cancellable(
+    args: &Value,
+    token: &tokio_util::sync::CancellationToken,
+) -> Result<Value> {
+    apply_rules_inner(args, Some(token))
+}
+
+fn apply_rules_inner(
+    args: &Value,
+    token: Option<&tokio_util::sync::CancellationToken>,
+) -> Result<Value> {
+    if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+        anyhow::bail!("操作已取消");
+    }
     let items = extract_job_items(args)?;
     let annotation_rule = extract_annotation_rule(args);
     let mut temp_paths = Vec::new();
@@ -23,7 +36,13 @@ pub fn apply_rules(args: &Value) -> Result<Value> {
     let batch_result = if prepared_items.is_empty() {
         json!({ "results": [], "failed": [] })
     } else {
-        match header_footer::batch_overlay(&json!({ "items": prepared_items })) {
+        let batch_args = json!({ "items": prepared_items });
+        let batch = if let Some(token) = token {
+            header_footer::batch_overlay_cancellable(&batch_args, token)
+        } else {
+            header_footer::batch_overlay(&batch_args)
+        };
+        match batch {
             Ok(value) => value,
             Err(err) => {
                 cleanup_temp_paths(temp_paths);
@@ -45,6 +64,10 @@ pub fn apply_rules(args: &Value) -> Result<Value> {
         .cloned()
         .unwrap_or_default();
     failed.extend(annotation_failed);
+    if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+        cleanup_temp_paths(temp_paths);
+        anyhow::bail!("操作已取消");
+    }
     let merge_result = match apply_merge_if_requested(&merge, &prepared_items, &results, &failed) {
         Ok(value) => value,
         Err(err) => {
@@ -267,12 +290,8 @@ fn apply_merge_if_requested(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     if !merge_bookmarks.is_empty() || remove_existing {
-        header_footer::apply_bookmarks(
-            Path::new(&output),
-            &merge_bookmarks,
-            remove_existing,
-        )
-        .context("合并 PDF 写入书签失败")?;
+        header_footer::apply_bookmarks(Path::new(&output), &merge_bookmarks, remove_existing)
+            .context("合并 PDF 写入书签失败")?;
     }
 
     let removed_intermediates = if merge.output_mode == "merge_only" {
@@ -292,20 +311,22 @@ fn apply_merge_if_requested(
 /// Collect all bookmarks from items, adjusting page_index to global position
 /// in the merged PDF. Each file's bookmarks get an offset equal to the sum of
 /// page counts of all preceding files.
-fn collect_merge_bookmarks(items: &[Value], results: &[Value]) -> Vec<header_footer::BookmarkConfig> {
+fn collect_merge_bookmarks(
+    items: &[Value],
+    results: &[Value],
+) -> Vec<header_footer::BookmarkConfig> {
     let mut bookmarks = Vec::new();
     let mut page_offset: u32 = 0;
 
     for (item, result) in items.iter().zip(results.iter()) {
-        let pages = result
-            .get("pages")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as u32;
+        let pages = result.get("pages").and_then(Value::as_u64).unwrap_or(0) as u32;
 
         // Collect bookmarks from the bookmarks array
         if let Some(bms) = item.get("bookmarks").and_then(Value::as_array) {
             for bm_value in bms {
-                if let Ok(bm) = serde_json::from_value::<header_footer::BookmarkConfig>(bm_value.clone()) {
+                if let Ok(bm) =
+                    serde_json::from_value::<header_footer::BookmarkConfig>(bm_value.clone())
+                {
                     if bm.enabled && !bm.label.is_empty() {
                         let mut adjusted = bm;
                         adjusted.page_index += page_offset;

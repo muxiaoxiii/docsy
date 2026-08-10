@@ -14,7 +14,9 @@ pub struct FfmpegStatus {
 pub async fn check_ffmpeg() -> Result<FfmpegStatus, DocsyError> {
     tauri::async_runtime::spawn_blocking(build_ffmpeg_status)
         .await
-        .map_err(|e| DocsyError::Unknown { message: e.to_string() })
+        .map_err(|e| DocsyError::Unknown {
+            message: e.to_string(),
+        })
 }
 
 fn build_ffmpeg_status() -> FfmpegStatus {
@@ -32,8 +34,12 @@ fn build_ffmpeg_status() -> FfmpegStatus {
 pub async fn probe_video(path: String) -> Result<serde_json::Value, DocsyError> {
     tauri::async_runtime::spawn_blocking(move || crate::ffmpeg::probe::probe_video(&path))
         .await
-        .map_err(|e| DocsyError::Unknown { message: e.to_string() })?
-        .map_err(|e| DocsyError::Unknown { message: e.to_string() })
+        .map_err(|e| DocsyError::Unknown {
+            message: e.to_string(),
+        })?
+        .map_err(|e| DocsyError::Unknown {
+            message: e.to_string(),
+        })
 }
 
 #[tauri::command]
@@ -45,7 +51,7 @@ pub async fn extract_frames(
         .get("operation_id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    super::run_managed(&*manager, "extract_frames", operation_id, move |token| {
+    super::run_managed(&manager, "extract_frames", operation_id, move |token| {
         crate::ffmpeg::extract::extract(&args, &token)
     })
     .await

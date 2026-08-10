@@ -84,7 +84,10 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
 
     let output_path = unique_output_path(input, "_unlocked");
     let mut cmd = crate::external::hidden_command(&bin);
-    cmd.arg("--decrypt").arg("--password=").arg(input).arg(&output_path);
+    cmd.arg("--decrypt")
+        .arg("--password=")
+        .arg(input)
+        .arg(&output_path);
     let output = run_cancellable("解锁", cmd)?;
 
     if !status_is_success(&output.status) {
@@ -145,13 +148,30 @@ pub fn optimize_to(input: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn compress(input: &str, output_dir: Option<&str>) -> Result<PdfOutputResult> {
+pub fn compress(
+    input: &str,
+    output_dir: Option<&str>,
+    level: Option<u8>,
+) -> Result<PdfOutputResult> {
     let input_path = Path::new(input);
     if !input_path.exists() {
         anyhow::bail!("PDF 文件不存在: {}", input);
     }
+
+    let level = level.unwrap_or(2);
+    let options = super::compress::CompressOptions::from_level(level);
+
+    // Step 1: 图片重编码压缩
+    let temp_path = unique_output_path_in_dir(input_path, output_dir, "_imgtmp");
+    super::compress::compress_pdf(input_path, &temp_path, &options)?;
+
+    // Step 2: qpdf 结构优化
     let output_path = unique_output_path_in_dir(input_path, output_dir, "_compressed");
-    optimize_to(input_path, &output_path)?;
+    optimize_to(&temp_path, &output_path)?;
+
+    // 清理临时文件
+    let _ = std::fs::remove_file(&temp_path);
+
     Ok(PdfOutputResult {
         output_path: output_path.display().to_string(),
     })

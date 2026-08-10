@@ -1,6 +1,8 @@
 pub mod annotations;
 pub mod anti_ocr;
 pub mod artifacts;
+pub(crate) mod cmap;
+pub mod compress;
 pub mod content_text;
 pub mod detection;
 pub mod evidence;
@@ -11,9 +13,13 @@ pub mod overlay;
 pub mod page_info;
 pub mod preview;
 pub mod qpdf;
+pub(crate) mod qpdf_stream;
 pub mod split;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEMP_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// 比较两个路径是否指向同一文件。
 ///
@@ -50,17 +56,18 @@ fn normalize_path_components(path: &Path) -> PathBuf {
     normalized
 }
 
-/// 生成临时文件路径：`{prefix}_{pid}_{timestamp}.{extension}`
+/// 生成进程内和并发任务间都不会碰撞的临时文件路径。
 pub fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis();
+        .as_nanos();
     let pid = std::process::id();
+    let sequence = TEMP_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     if extension.is_empty() {
-        std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}"))
+        std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}_{sequence}"))
     } else {
-        std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}.{extension}"))
+        std::env::temp_dir().join(format!("{prefix}_{pid}_{ts}_{sequence}.{extension}"))
     }
 }
 
@@ -84,7 +91,23 @@ pub fn safe_file_stem(input: &str) -> String {
     let stripped = input.strip_suffix(".pdf").unwrap_or(input);
     let mut out = String::new();
     for ch in stripped.chars() {
-        if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0' | '.' | '（' | '）' | '(' | ')') {
+        if matches!(
+            ch,
+            '/' | '\\'
+                | ':'
+                | '*'
+                | '?'
+                | '"'
+                | '<'
+                | '>'
+                | '|'
+                | '\0'
+                | '.'
+                | '（'
+                | '）'
+                | '('
+                | ')'
+        ) {
             out.push('_');
         } else {
             out.push(ch);

@@ -1,7 +1,7 @@
 mod app_log;
 mod commands;
-mod error;
 mod docx_template;
+mod error;
 mod external;
 mod ffmpeg;
 mod image_paddler;
@@ -194,6 +194,12 @@ impl ConversionState {
         }
         self.timed_out.store(false, Ordering::SeqCst);
         *state == 1 // true = continue, false = cancel
+    }
+}
+
+impl Default for ConversionState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

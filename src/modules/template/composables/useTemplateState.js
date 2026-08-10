@@ -19,7 +19,7 @@ import {
 import { useTemplateSettings } from './useTemplateSettings.js'
 import { useBatchFill } from './useBatchFill.js'
 import { markToRow, normalizeFieldRows, autoMergeMarks, inferFieldFromText, validateFieldRowsBeforeSave, buildFields } from './useFieldNormalization.js'
-import { ensureExtension, splitPartyLabelSegments, fieldFormKey, sliceChars, referenceSourceKey, formatDateValue, parseReferenceSourceKey, syncReferenceSourceFromKey, normalizedReferenceSource, partyItemsToValues } from './fieldRowUtils.js'
+import { ensureExtension, splitPartyLabelSegments, fieldFormKey, sliceChars, referenceSourceKey, formatDateValue, parseReferenceSourceKey, syncReferenceSourceFromKey, partyItemsToValues } from './fieldRowUtils.js'
 import { usePreviewSelection } from './usePreviewSelection.js'
 import { registerSnapshotProvider } from '../../../shared/diagnostics.js'
 

@@ -15,7 +15,7 @@ export function useEvidencePdfExistingEditing({
   footerContinuous,
   totalOverlayPages,
   currentRules,
-  workflowMode,
+  _workflowMode,
   footerText,
   hasExistingHeader,
   hasExistingFooter,
@@ -100,7 +100,7 @@ export function useEvidencePdfExistingEditing({
       row.existingHeaderText = next
       row.convertPlainHeader = true
       row.removeExistingHeader = false
-      ElMessage.info('普通文本型旧页眉会删除匹配旧文本，并在检测到的位置重建')
+      ElMessage.info('现有页眉会在检测到的位置更新')
     }
     const status = fileExistingStatus(row)
     row.statusText = status.text
@@ -144,7 +144,7 @@ export function useEvidencePdfExistingEditing({
       row.existingFooterText = next
       row.convertPlainFooter = true
       row.removeExistingFooter = false
-      ElMessage.info('普通文本型旧页脚会删除匹配旧文本，并在检测到的位置重建')
+      ElMessage.info('现有页脚会在检测到的位置更新')
     }
     const status = fileExistingStatus(row)
     row.statusText = status.text

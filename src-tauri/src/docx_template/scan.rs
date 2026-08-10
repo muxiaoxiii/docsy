@@ -281,7 +281,8 @@ mod tests {
     }
 
     #[test]
-    fn scan_multiple_paragraphs() {        let tree = parse_xml(
+    fn scan_multiple_paragraphs() {
+        let tree = parse_xml(
             r#"<w:document><w:body>
             <w:p><w:r><w:t>A</w:t></w:r></w:p>
             <w:p><w:r><w:t>B</w:t></w:r></w:p>
@@ -305,7 +306,10 @@ mod tests {
         );
         let index = scan_document_index("word/document.xml", &tree).unwrap();
         assert_eq!(index.total_text_nodes(), 1);
-        assert!(index.nodes[0].highlighted, "hyperlink run should be highlighted");
+        assert!(
+            index.nodes[0].highlighted,
+            "hyperlink run should be highlighted"
+        );
     }
 
     #[test]

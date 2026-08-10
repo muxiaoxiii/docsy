@@ -203,7 +203,6 @@ fn default_footer_height_mm() -> f32 {
     18.0
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

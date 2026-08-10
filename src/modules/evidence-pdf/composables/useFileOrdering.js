@@ -8,7 +8,7 @@ import { sortByNatural } from '../../../shared/pdf-tools/composables/useEvidence
  */
 export function useFileOrdering({
   overlayFiles,
-  overlayRows,
+  _overlayRows,
   selectedOverlayFile,
   selectedOverlayIndex,
   mergedImportPlan,

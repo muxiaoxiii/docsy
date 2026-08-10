@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "docsy"
-version = "0.9.7-beta"
+version = "0.9.7-beta6"
 dependencies = [
  "allsorts",
  "anyhow",
@@ -1000,6 +1000,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "docx-rs",
+ "encoding_rs",
  "image",
  "log",
  "lopdf",

@@ -76,9 +76,30 @@ struct CleanupConfig {
     #[serde(default)]
     plain_footer_targets: Vec<PlainTextCleanupTargetConfig>,
     #[serde(default)]
+    artifact_header_targets: Vec<ArtifactCleanupTargetConfig>,
+    #[serde(default)]
+    artifact_footer_targets: Vec<ArtifactCleanupTargetConfig>,
+    #[serde(default)]
     header_replacement: Option<OverlayTextConfig>,
     #[serde(default)]
     footer_replacement: Option<OverlayTextConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtifactCleanupTargetConfig {
+    #[serde(default)]
+    artifact_id: Option<String>,
+    #[serde(default)]
+    normalized_text: String,
+    #[serde(default = "default_page_start")]
+    page_start: u32,
+    #[serde(default)]
+    page_end: u32,
+    #[serde(default)]
+    docsy_kind: Option<String>,
+    #[serde(default)]
+    replacement_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -294,7 +315,8 @@ pub fn batch_overlay(args: &serde_json::Value) -> Result<serde_json::Value> {
         let bm_rm = first.get("bookmarkRemoveExisting");
         log::debug!(
             "[batch_overlay] first item bookmarks={:?}, bookmarkRemoveExisting={:?}",
-            bm, bm_rm
+            bm,
+            bm_rm
         );
     }
 
@@ -397,7 +419,7 @@ pub fn apply_bookmarks(
     let temp = temp_named_path("docsy_bookmarks", "pdf");
     let mut doc = Document::load(output).context("加载 PDF 以写入书签失败")?;
     let pages = doc.get_pages();
-    let page_ids: Vec<ObjectId> = pages.into_iter().map(|(_, id)| id).collect();
+    let page_ids: Vec<ObjectId> = pages.into_values().collect();
 
     // Create outline items
     let mut item_ids = Vec::new();
@@ -505,7 +527,10 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     if !input.exists() {
         anyhow::bail!("原始 PDF 不存在: {}", input.display());
     }
-    let file_name = input.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let file_name = input
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
     let output_requested = Path::new(&args.output_path);
     let output_path = unique_output_path(output_requested);
     let output = output_path.as_path();
@@ -531,8 +556,10 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
         .as_ref()
         .map(|artifact_result| artifact_result.path.as_path())
         .unwrap_or(input);
+    let t1 = std::time::Instant::now();
     let plain_deleted_path =
         delete_confirmed_plain_text_header_footer_if_requested(args, semantic_input)?;
+    let plain_elapsed = t1.elapsed().as_millis();
     let _plain_text_temp_guard = plain_deleted_path
         .as_ref()
         .map(|(path, _)| TempPathGuard::new(path.clone()));
@@ -799,7 +826,11 @@ impl StandardArtifactProcessingResult {
 fn edit_or_delete_standard_artifacts_if_requested(
     args: &HeaderFooterJob,
 ) -> Result<Option<StandardArtifactProcessingResult>> {
-    if !args.cleanup.header_enabled && !args.cleanup.footer_enabled {
+    if !args.cleanup.header_enabled
+        && !args.cleanup.footer_enabled
+        && args.cleanup.artifact_header_targets.is_empty()
+        && args.cleanup.artifact_footer_targets.is_empty()
+    {
         return Ok(None);
     }
     let page_infos = get_page_infos(&args.input_path)?;
@@ -829,6 +860,18 @@ fn edit_or_delete_standard_artifacts_if_requested(
             remove_footer: args.cleanup.footer_enabled,
             header_texts,
             footer_texts,
+            header_targets: args
+                .cleanup
+                .artifact_header_targets
+                .iter()
+                .map(artifact_target_from_config)
+                .collect(),
+            footer_targets: args
+                .cleanup
+                .artifact_footer_targets
+                .iter()
+                .map(artifact_target_from_config)
+                .collect(),
         },
     )?;
     Ok(
@@ -842,6 +885,19 @@ fn edit_or_delete_standard_artifacts_if_requested(
             removed_footer_pages: result.removed_footer_pages,
         }),
     )
+}
+
+fn artifact_target_from_config(
+    target: &ArtifactCleanupTargetConfig,
+) -> artifacts::HeaderFooterArtifactEditTarget {
+    artifacts::HeaderFooterArtifactEditTarget {
+        artifact_id: target.artifact_id.clone(),
+        normalized_text: target.normalized_text.clone(),
+        page_start: target.page_start.max(1),
+        page_end: target.page_end.max(target.page_start.max(1)),
+        docsy_kind: target.docsy_kind.clone(),
+        replacement_text: target.replacement_text.clone(),
+    }
 }
 
 fn combined_extra_overlays(
@@ -1481,10 +1537,8 @@ fn append_overlay_text_ops(
         config,
         region,
         current_page,
-        config.font_size,
         x,
         y,
-        &config.color,
         text,
     ));
     Ok(())
@@ -1514,13 +1568,11 @@ fn text_ops(
     config: &OverlayTextConfig,
     region: OverlayRegion,
     current_page: u32,
-    font_size: f32,
     x: f32,
     y: f32,
-    color: &str,
     text: String,
 ) -> Vec<Operation> {
-    let (r, g, b) = parse_hex_color(color).unwrap_or((0.0, 0.0, 0.0));
+    let (r, g, b) = parse_hex_color(&config.color).unwrap_or((0.0, 0.0, 0.0));
     let (font_name, text_object) = match font_ref {
         OverlayFontRef::Builtin(name) => (*name, Object::string_literal(text.clone())),
         OverlayFontRef::Embedded(font) => (
@@ -1576,7 +1628,7 @@ fn text_ops(
             "Tf",
             vec![
                 Object::Name(font_name.as_bytes().to_vec()),
-                font_size.into(),
+                config.font_size.into(),
             ],
         ),
         Operation::new("rg", vec![r.into(), g.into(), b.into()]),
@@ -2294,6 +2346,94 @@ mod tests {
     }
 
     #[test]
+    fn confirmed_plain_header_edit_rebuilds_as_standard_artifact() {
+        if crate::external::QpdfTool.binary_path().is_err() {
+            return;
+        }
+        let input = temp_named_path("docsy_plain_header_input", "pdf");
+        let output = temp_named_path("docsy_plain_header_output", "pdf");
+        create_plain_header_test_pdf(&input, "Legacy Header");
+
+        let result = process_job(&HeaderFooterJob {
+            input_path: input.to_string_lossy().to_string(),
+            output_path: output.to_string_lossy().to_string(),
+            page_start: 1,
+            total_pages: Some(1),
+            normalize_a4: false,
+            a4_orientation: default_a4_orientation(),
+            raster_dpi: default_raster_dpi(),
+            cleanup: CleanupConfig {
+                header_enabled: true,
+                header_height_mm: 25.0,
+                plain_header_targets: vec![PlainTextCleanupTargetConfig {
+                    text: "Legacy Header".to_string(),
+                    normalized_text: "LegacyHeader".to_string(),
+                    page_start: 1,
+                    page_end: 1,
+                    bbox: Some(PlainTextCleanupBBoxConfig {
+                        x0: 75.0,
+                        y0: 20.0,
+                        x1: 170.0,
+                        y1: 40.0,
+                        page: 1,
+                        width: 595.0,
+                        height: 842.0,
+                    }),
+                }],
+                ..CleanupConfig::default()
+            },
+            header: None,
+            footer: None,
+            extra_overlays: vec![OverlayTextConfig {
+                text: "Updated Header".to_string(),
+                region: "header".to_string(),
+                font_family: "auto".to_string(),
+                font_size: 12.0,
+                margin_mm: 10.0,
+                align: "left".to_string(),
+                offset_x_mm: 10.0,
+                color: "#000000".to_string(),
+                page_start: Some(1),
+                page_end: Some(1),
+                number_style: String::new(),
+                number_offset: 0,
+                number_total: None,
+                artifact_kind: "HeaderText".to_string(),
+            }],
+            bookmarks: Vec::new(),
+            bookmark_remove_existing: false,
+        })
+        .unwrap();
+
+        let inspection = artifacts::inspect_meaningful_header_footer_artifacts(
+            Path::new(&result.output_path),
+            1,
+        )
+        .unwrap();
+        assert!(inspection.occurrences.iter().any(|occurrence| {
+            occurrence.region == "header"
+                && occurrence.text.as_deref() == Some("Updated Header")
+                && occurrence.docsy_kind.as_deref() == Some("HeaderText")
+        }));
+
+        if let Ok(text_output) = crate::external::hidden_command("pdftotext")
+            .arg(&result.output_path)
+            .arg("-")
+            .output()
+        {
+            if text_output.status.success() {
+                let extracted = String::from_utf8_lossy(&text_output.stdout);
+                assert!(!extracted.contains("Legacy Header"));
+                assert!(extracted.contains("Updated Header"));
+            }
+        }
+
+        let _ = fs::remove_file(input);
+        let _ = fs::remove_file(result.output_path);
+        let _ = fs::remove_file(output);
+    }
+
+    #[test]
     fn bookmark_roundtrip() {
         let path = temp_named_path("docsy_bookmark_rt", "pdf");
         create_simple_test_pdf(&path);
@@ -2358,6 +2498,77 @@ mod tests {
                 Operation::new("BT", vec![]),
                 Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 12.into()]),
                 Operation::new("Td", vec![80.into(), 500.into()]),
+                Operation::new("Tj", vec![Object::string_literal("body text")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.save(path).unwrap();
+    }
+
+    fn create_plain_header_test_pdf(path: &Path, header: &str) {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! {
+                "F1" => font_id,
+            },
+        });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 12.into()]),
+                Operation::new(
+                    "Tm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        80.into(),
+                        812.into(),
+                    ],
+                ),
+                Operation::new("Tj", vec![Object::string_literal(header)]),
+                Operation::new("ET", vec![]),
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 12.into()]),
+                Operation::new(
+                    "Tm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        80.into(),
+                        500.into(),
+                    ],
+                ),
                 Operation::new("Tj", vec![Object::string_literal("body text")]),
                 Operation::new("ET", vec![]),
             ],

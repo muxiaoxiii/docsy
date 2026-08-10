@@ -187,7 +187,10 @@ fn write_node(writer: &mut Writer<Cursor<Vec<u8>>>, node: &XmlNode) -> Result<()
             }
         }
         XmlNode::Text(text) => {
-            let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+            let escaped = text
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
             writer.write_event(Event::Text(BytesText::from_escaped(escaped)))?;
         }
     }
@@ -232,7 +235,10 @@ mod tests {
         let mut buf = Vec::new();
         let mut writer = Writer::new(Cursor::new(&mut buf));
         let text = "Tom & Jerry <script>alert('xss')</script>";
-        let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        let escaped = text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
         writer
             .write_event(Event::Text(BytesText::from_escaped(escaped)))
             .unwrap();

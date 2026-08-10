@@ -45,7 +45,7 @@ export function useEvidencePdfDetection({
     const results = []
     const startTime = Date.now()
     // Elapsed timer — updates the progress text every second via setInterval
-    const timerId = setInterval(() => {
+    const timerId = globalThis.setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000)
       const m = String(Math.floor(elapsed / 60)).padStart(2, '0')
       const s = String(elapsed % 60).padStart(2, '0')
@@ -59,7 +59,7 @@ export function useEvidencePdfDetection({
       const queue = [...overlayRows.value.entries()]
       const runNext = async () => {
         while (queue.length) {
-          const [i, file] = queue.shift()
+          const [, file] = queue.shift()
           const result = await detectFileHeaderFooter(file)
           results.push({ file, result })
           const elapsed = Math.floor((Date.now() - startTime) / 1000)
@@ -72,7 +72,7 @@ export function useEvidencePdfDetection({
       }
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, () => runNext()))
       // Final progress update
-      clearInterval(timerId)
+      globalThis.clearInterval(timerId)
       const elapsed = Math.floor((Date.now() - startTime) / 1000)
       const finalText = `检测完成 ${results.length}/${total} 个文件  ${elapsed}s`
       detectionProgressText.value = finalText
@@ -106,7 +106,7 @@ export function useEvidencePdfDetection({
           : ElMessage.success(`已检测 ${success} 个 PDF`)
       }
     } finally {
-      clearInterval(timerId)
+      globalThis.clearInterval(timerId)
       // Stop Doclet
       emitOperationEvent('finish', 'detect_pdf_header_footer', docletId)
       detectingAllHeaderFooter.value = false
@@ -190,8 +190,8 @@ export function useEvidencePdfDetection({
     if (lastDetectionResults.length > 100) lastDetectionResults.shift()
     diagLog.info('detection.result', `${file.name} 检测完成`, detectionResult)
     const parts = []
-    if (data.artifact?.hasHeader) parts.push(`发现结构化页眉 ${data.artifact.headerCount} 处`)
-    if (data.artifact?.hasFooter) parts.push(`发现结构化页脚 ${data.artifact.footerCount} 处`)
+    if (data.artifact?.hasHeader) parts.push(`发现现有页眉 ${data.artifact.headerCount} 处`)
+    if (data.artifact?.hasFooter) parts.push(`发现现有页脚 ${data.artifact.footerCount} 处`)
     if (header) parts.push(`页眉候选：${header.text}`)
     if (footer) parts.push(`页脚候选：${footer.text}`)
     if (pageNumber) parts.push(`页码候选：${pageNumber.text}`)
@@ -245,7 +245,7 @@ export function useEvidencePdfDetection({
     if (!hasExistingHeader(file)) file.removeExistingHeader = false
     if (!hasExistingFooter(file)) file.removeExistingFooter = false
     if (!hasExistingPageNumber(file)) file.removeExistingPageNumber = false
-    file.detectionSummary = parts.length ? parts.join('；') : '未发现稳定的文本型页眉页脚候选'
+    file.detectionSummary = parts.length ? parts.join('；') : '未发现稳定的现有页眉、页脚或页码'
     file.detectionCandidates = candidates
   }
 
@@ -259,40 +259,20 @@ export function useEvidencePdfDetection({
     )
   }
 
-  /** Check if text matches first-page evidence sequence patterns like "证据1", "对比文件3".
-   *  Uses normalizedText first because it has half-width digits that JS \d can match. */
-  function isFirstPageEvidenceSequence(text, normalizedText) {
-    const candidates = [normalizedText, text].filter(Boolean)
-    return candidates.some(
-      (t) => /^(证据|对比文件)\s*\d+/.test(String(t).trim()),
-    )
-  }
-
-  /** Check if a candidate is a first-page evidence label (e.g. "证据1" on page 1). */
-  function isFirstPageEvidenceCandidate(candidate) {
-    if (!candidate) return false
-    const range = candidate?.pageRange || {}
-    const pageStart = Number(range.start || candidate?.bbox?.page || 1)
-    // Must be on page 1 and match evidence label pattern
-    if (pageStart !== 1) return false
-    return isFirstPageEvidenceSequence(candidate?.normalizedText, candidate?.text)
-  }
-
   /**
    * Reliability gate for detected elements that passed bestReliableHeaderCandidate.
    * Filters out content-text candidates that are likely body text falsely detected
    * in the header/footer zone (Bug 2: evidence 9 over-detection).
    *
    * - Artifact candidates: always reliable (structural PDF metadata)
-   * - First-page evidence labels: always reliable ("证据1" on page 1)
    * - Content-text repeating candidates: require minimum confidence (0.25)
    *   to filter body text that barely meets the repeat threshold
    */
-  function isReliableDetectedCandidate(candidate, totalPages) {
+  function isReliableDetectedCandidate(candidate, _totalPages) {
     if (!candidate) return false
-    // Artifact and first-page evidence are always reliable
+    // PDF structure is authoritative. Page text still needs repetition and
+    // stable placement; its wording does not receive a special exception.
     if (candidate?.source === 'artifact') return true
-    if (isFirstPageEvidenceCandidate(candidate)) return true
     // For content-text candidates, require a minimum confidence
     const confidence = Number(candidate?.confidence || 0)
     if (confidence < 0.25) return false
@@ -305,8 +285,7 @@ export function useEvidencePdfDetection({
       candidates.find(
         (candidate) =>
           candidate?.source === 'artifact' ||
-          (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2) ||
-          isFirstPageEvidenceCandidate(candidate),
+          (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 3),
       ) || null
     )
   }
@@ -368,8 +347,7 @@ export function useEvidencePdfDetection({
     if (!candidate || isPageNumberCandidate(candidate)) return false
     return (
       candidate?.source === 'artifact' ||
-      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 2) ||
-      isFirstPageEvidenceCandidate(candidate)
+      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 3)
     )
   }
 
@@ -378,7 +356,7 @@ export function useEvidencePdfDetection({
     const start = range.start || candidate?.bbox?.page || 1
     const end = range.end || start
     const count = candidate?.count ? `，${candidate.count} 次` : ''
-    const label = isPageNumberCandidate(candidate) ? '页码型' : '文本型'
+    const label = isPageNumberCandidate(candidate) ? '页码' : '页脚文字'
     return `${label}，第 ${start}${end !== start ? `-${end}` : ''} 页${count}`
   }
 
@@ -530,10 +508,10 @@ export function useEvidencePdfDetection({
 
   function fileExistingStatus(file) {
     if (file.removeExistingHeader || file.removeExistingFooter || file.removeExistingPageNumber) {
-      return { text: '删除待处理', type: 'warning' }
+      return { text: '待删除', type: 'warning' }
     }
     if (file.existingHeaderEdited || file.existingFooterEdited || file.existingPageNumberEdited) {
-      return { text: '旧内容已编辑', type: 'warning' }
+      return { text: '待编辑', type: 'warning' }
     }
     // Check if all existing elements have been confirmed (decision: keep/ignore)
     const elements = file.existingElements || []
@@ -555,13 +533,13 @@ export function useEvidencePdfDetection({
       return { text: '页脚需确认', type: 'warning' }
     }
     if (file.convertPlainHeader || file.convertPlainFooter || file.convertPlainPageNumber) {
-      return { text: '转换待处理', type: 'warning' }
+      return { text: '待编辑', type: 'warning' }
     }
     if (file.existingHeaderArtifact || file.existingFooterArtifact) {
-      return { text: '现有可编辑', type: 'warning' }
+      return { text: '待确认', type: 'warning' }
     }
     if (file.existingHeaderText || file.existingFooterText) {
-      return { text: '普通文本可转换', type: 'warning' }
+      return { text: '待确认', type: 'warning' }
     }
     return { text: '无旧页眉页码', type: 'success' }
   }
