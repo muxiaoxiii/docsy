@@ -707,6 +707,9 @@ fn parse_binary_encoding_cmap(data: &[u8]) -> Result<EncodingCMap> {
             2 => {
                 let mut code = stream.read_hex_fixed(data_size)?;
                 let mut cid = stream.read_number()? as i64;
+                if !(0..=u16::MAX as i64).contains(&cid) {
+                    anyhow::bail!("bcmap CID 超出范围")
+                }
                 mappings.insert(code.clone(), encode_number(cid as u32, 2));
                 for _ in 1..count {
                     increment_fixed(&mut code)?;

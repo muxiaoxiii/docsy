@@ -5,7 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::{cmap::ToUnicodeCMap, same_path, temp_named_path, text_utils::normalize_for_match};
+use super::{
+    cmap::ToUnicodeCMap,
+    same_path, temp_named_path,
+    text_utils::{is_cjk_char, normalize_for_match},
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -461,6 +465,12 @@ fn decode_legacy_cjk_pdf_string(bytes: &[u8]) -> Option<String> {
     if !bytes.iter().any(|byte| *byte >= 0x80) {
         return None;
     }
+    // GB18030 accepts almost every byte sequence, so picking the first
+    // encoding that decodes without errors mostly returns GB18030 mojibake
+    // for Big5 / Shift-JIS / EUC-KR input. Score every error-free candidate
+    // by how well its decoded script distribution matches the encoding and
+    // pick the best one instead.
+    let mut best: Option<(i32, String)> = None;
     for encoding in [
         encoding_rs::GB18030,
         encoding_rs::BIG5,
@@ -472,20 +482,85 @@ fn decode_legacy_cjk_pdf_string(bytes: &[u8]) -> Option<String> {
             continue;
         }
         let value = decoded.trim();
-        if !value.is_empty() && value.chars().any(is_cjk_character) {
-            return Some(value.to_string());
+        if value.is_empty() || !value.chars().any(is_cjk_char) {
+            continue;
+        }
+        let score = legacy_cjk_candidate_score(encoding, value);
+        if best.as_ref().is_none_or(|(best_score, _)| score > *best_score) {
+            best = Some((score, value.to_string()));
         }
     }
-    None
+    best.map(|(_, value)| value)
 }
 
-fn is_cjk_character(character: char) -> bool {
-    matches!(character as u32,
-        0x3400..=0x4DBF
-        | 0x4E00..=0x9FFF
-        | 0xF900..=0xFAFF
-        | 0x3040..=0x30FF
-        | 0xAC00..=0xD7AF)
+/// Score a legacy-CJK decode candidate by script plausibility. Signals,
+/// strongest first: private-use-area characters always indicate mojibake;
+/// kana only appears in real Japanese text and precomposed Hangul only in
+/// real Korean text; common documentary characters make a Chinese decode
+/// more plausible than same-script gibberish.
+fn legacy_cjk_candidate_score(encoding: &'static encoding_rs::Encoding, text: &str) -> i32 {
+    // Frequent characters in documentary Chinese / Korean text, used to tell a
+    // correct decode apart from same-script mojibake.
+    const COMMON_SIMPLIFIED: &str =
+        "的一是不了在人我有他这中大来上国个地说时出就得可而下之与及等第页证据编号原告被告法院民事件案审判决书试";
+    const COMMON_TRADITIONAL: &str =
+        "的一是不了在人我有他這中大來上國個地說時出就得可而下之與及等第頁證據編號原告被告法院民事件案審判決書試測";
+    const COMMON_HANGUL: &str = "한국어는은을를이가의에도로고수등제조항목원피인신청판결대";
+
+    let mut score = 0;
+    for character in text.chars() {
+        let code = character as u32;
+        score += match code {
+            // Private use area: mojibake in every candidate encoding.
+            0xE000..=0xF8FF => -3,
+            // CJK unified ideographs are plausible in every candidate encoding.
+            0x4E00..=0x9FFF => {
+                let common = match () {
+                    _ if encoding == encoding_rs::GB18030 => COMMON_SIMPLIFIED.contains(character),
+                    _ if encoding == encoding_rs::BIG5 => COMMON_TRADITIONAL.contains(character),
+                    _ => false,
+                };
+                if common {
+                    3
+                } else {
+                    1
+                }
+            }
+            // Extension A and compatibility ideographs are common Big5 output.
+            0x3400..=0x4DBF | 0xF900..=0xFAFF => i32::from(encoding == encoding_rs::BIG5),
+            // Fullwidth kana strongly indicates Japanese; anywhere else it
+            // signals mojibake. Halfwidth kana barely appears in modern
+            // documents and mostly results from misdecoding.
+            0x3040..=0x30FF => {
+                if encoding == encoding_rs::SHIFT_JIS {
+                    3
+                } else {
+                    -2
+                }
+            }
+            0xFF61..=0xFF9F => -2,
+            // Precomposed Hangul syllables indicate Korean; conjoining jamo
+            // barely appear in modern documents and signal mojibake.
+            0xAC00..=0xD7AF => {
+                if encoding == encoding_rs::EUC_KR {
+                    if COMMON_HANGUL.contains(character) {
+                        5
+                    } else {
+                        3
+                    }
+                } else {
+                    -2
+                }
+            }
+            0x1100..=0x11FF => -2,
+            // CJK punctuation and fullwidth forms.
+            0x3000..=0x303F | 0xFF00..=0xFF60 => 1,
+            // ASCII is neutral; any other script is likely mojibake.
+            _ if code < 0x80 => 0,
+            _ => -2,
+        };
+    }
+    score
 }
 
 fn artifact_range_text(
@@ -2054,5 +2129,54 @@ mod tests {
         let result = inspect_artifact_operations(&operations, &Dictionary::new());
         assert_eq!(result.header_count, 0);
         assert_eq!(result.footer_count, 1);
+    }
+
+    #[test]
+    fn legacy_cjk_decode_prefers_big5_over_gb18030_mojibake() {
+        // "中文測試" in Big5 also decodes "successfully" as GB18030 mojibake
+        // ("いゅ代刚"); the script score must pick Big5.
+        let bytes = [0xA4, 0xA4, 0xA4, 0xE5, 0xB4, 0xFA, 0xB8, 0xD5];
+        assert_eq!(
+            decode_legacy_cjk_pdf_string(&bytes).as_deref(),
+            Some("中文測試")
+        );
+    }
+
+    #[test]
+    fn legacy_cjk_decode_prefers_shift_jis_for_japanese() {
+        // "テスト日本語" in Shift-JIS; GB18030 would decode it without errors
+        // into wrong ideographs ("僥僗僩擔杮岅").
+        let bytes = [
+            0x83, 0x65, 0x83, 0x58, 0x83, 0x67, 0x93, 0xFA, 0x96, 0x7B, 0x8C, 0xEA,
+        ];
+        assert_eq!(
+            decode_legacy_cjk_pdf_string(&bytes).as_deref(),
+            Some("テスト日本語")
+        );
+    }
+
+    #[test]
+    fn legacy_cjk_decode_prefers_euc_kr_for_korean() {
+        // "한국어증거" in EUC-KR.
+        let bytes = [0xC7, 0xD1, 0xB1, 0xB9, 0xBE, 0xEE, 0xC1, 0xF5, 0xB0, 0xC5];
+        assert_eq!(
+            decode_legacy_cjk_pdf_string(&bytes).as_deref(),
+            Some("한국어증거")
+        );
+    }
+
+    #[test]
+    fn legacy_cjk_decode_keeps_gb18030_for_simplified_chinese() {
+        // "证据编号" in GB18030.
+        let bytes = [0xD6, 0xA4, 0xBE, 0xDD, 0xB1, 0xE0, 0xBA, 0xC5];
+        assert_eq!(
+            decode_legacy_cjk_pdf_string(&bytes).as_deref(),
+            Some("证据编号")
+        );
+    }
+
+    #[test]
+    fn legacy_cjk_decode_rejects_pure_ascii() {
+        assert_eq!(decode_legacy_cjk_pdf_string(b"page 1"), None);
     }
 }

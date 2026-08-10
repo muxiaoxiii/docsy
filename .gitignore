@@ -15,6 +15,7 @@ test-pdf/
 *.db-journal
 *.db-wal
 .workbuddy/
+.mimocode/
 
 docs/
 Archived/
