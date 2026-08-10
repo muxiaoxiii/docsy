@@ -3,6 +3,9 @@
 //! This module provides mapping from Adobe Glyph List and related names
 //! to Unicode characters.
 
+// GENERATED from the Adobe Glyph List (AGL/AGLFN) — do not edit by hand.
+// 本地补充/修正请加到下方 `GLYPH_TO_UNICODE` 的 overrides，不要直接改表。
+
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -4571,15 +4574,23 @@ pub fn glyph_to_char(name: &str) -> Option<char> {
     // non-ASCII bytes (e.g. U+FFFD from lossy UTF-8 decoding of an attacker
     // controlled /Differences name), so byte index 7 may not be a char
     // boundary and `&name[3..7]` would panic.
-    if let Some(hex) = name.strip_prefix("uni").and_then(|rest| rest.get(..4)) {
-        if let Ok(code) = u32::from_str_radix(hex, 16) {
-            // Strip PUA F000 offset: uniF0XX → U+00XX (Windows Symbol encoding convention)
-            let code = if (0xF000..=0xF0FF).contains(&code) {
-                code - 0xF000
-            } else {
-                code
-            };
-            return char::from_u32(code);
+    if let Some(rest) = name.strip_prefix("uni") {
+        // AGL: `uni` 后接多个 4 位码点是连字名（如 uni4E2D4E2E），映射到一个
+        // 字符串而非单个 char。保守返回 None，让调用方走不可解码兜底。
+        if rest.len() > 4 && rest.len() % 4 == 0 && rest.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        if let Some(hex) = rest.get(..4) {
+            if let Ok(code) = u32::from_str_radix(hex, 16) {
+                // Strip PUA F000 offset: uniF0XX → U+00XX (Windows Symbol encoding convention)
+                let code = if (0xF000..=0xF0FF).contains(&code) {
+                    code - 0xF000
+                } else {
+                    code
+                };
+                return char::from_u32(code);
+            }
         }
     }
 
@@ -4603,6 +4614,10 @@ mod tests {
         assert_eq!(glyph_to_char("uni00e9"), Some('\u{00e9}'));
         // PUA F0xx symbol-encoding offset is stripped.
         assert_eq!(glyph_to_char("uniF041"), Some('A'));
+        // 单个 4 位码点正常解码。
+        assert_eq!(glyph_to_char("uni4E2D"), Some('中'));
+        // 多码点连字名映射不到单个 char，返回 None 走兜底。
+        assert_eq!(glyph_to_char("uni4E2D4E2E"), None);
     }
 
     #[test]

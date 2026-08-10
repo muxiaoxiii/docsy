@@ -521,6 +521,11 @@ fn load_builtin_encoding_cmap(name: &str) -> Option<EncodingCMap> {
     parse_binary_encoding_cmap(data).ok()
 }
 
+/// 将编码 CMap（code → CID）与 ToUnicode CMap（CID → Unicode）按 CID 合成。
+///
+/// 已知覆盖缺口：合成结果只有单一 codespace（固定 `code_byte_length` 宽度），
+/// 不支持混合宽度编码。例如 90ms-RKSJ-H 中 1 字节的半角片假名（0xA1–0xDF）
+/// 会匹配不到 codespace，这些字符退化为按 bbox 提取。
 fn compose_encoding_and_unicode(
     encoding: EncodingCMap,
     cid_to_unicode: ToUnicodeCMap,

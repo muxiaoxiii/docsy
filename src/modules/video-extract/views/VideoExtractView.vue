@@ -214,7 +214,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openExternalUrl, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -277,7 +277,7 @@ async function installFfmpeg() {
     ElMessage.success(res.data)
     await checkFfmpeg()
   } else {
-    ElMessage.error('安装失败: ' + res.error)
+    ElMessage.error(userFacingError(res.error, '安装失败'))
   }
   installing.value = false
 }
@@ -285,7 +285,7 @@ async function installFfmpeg() {
 async function openFfmpegDownload() {
   const res = await openExternalUrl('https://www.gyan.dev/ffmpeg/builds/')
   if (!res.ok) {
-    ElMessage.error('无法打开 FFmpeg 下载页: ' + res.error)
+    ElMessage.error(userFacingError(res.error, '无法打开 FFmpeg 下载页'))
   }
 }
 
@@ -330,7 +330,7 @@ async function loadVideo(path) {
   if (res.ok) {
     videoInfo.value = res.data
   } else {
-    ElMessage.error('无法读取视频信息: ' + (res.error || '请确认文件是有效的视频格式'))
+    ElMessage.error(userFacingError(res.error, '无法读取视频信息，请确认文件是有效的视频格式'))
   }
 }
 
@@ -383,7 +383,7 @@ async function extractFrames() {
       await loadResultImages(res.data.output_dir)
     }
   } else {
-    ElMessage.error('视频抽帧失败: ' + (res.error || '请确认 FFmpeg 可用且磁盘空间充足'))
+    ElMessage.error(userFacingError(res.error, '视频抽帧失败，请确认 FFmpeg 可用且磁盘空间充足'))
   }
 }
 

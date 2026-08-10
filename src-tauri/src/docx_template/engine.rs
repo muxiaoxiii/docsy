@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::docx_template::package;
 use crate::pdf::fnv1a_hash;
+use crate::util::fs::TempPathGuard;
 
 use super::{
     is_word_xml_part, unique_docx_output_path, RenderTemplateArgs, SaveTemplateArgs,
@@ -289,22 +290,6 @@ fn convert_doc_to_docx(path: &std::path::Path) -> Result<std::path::PathBuf> {
     doc.save_as(output.display().to_string())
         .with_context(|| format!("转换 .doc → .docx 失败: {}", path.display()))?;
     Ok(output)
-}
-
-struct TempPathGuard {
-    path: std::path::PathBuf,
-}
-
-impl TempPathGuard {
-    fn new(path: std::path::PathBuf) -> Self {
-        Self { path }
-    }
-}
-
-impl Drop for TempPathGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
 }
 
 /// Scan all XML parts and produce runs + marks for the Tauri inspect response.

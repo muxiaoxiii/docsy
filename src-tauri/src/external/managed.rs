@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::Emitter;
 
+// TempArchive 与通用 TempPathGuard 语义相同（drop 时删除临时文件），收敛为别名。
+use crate::util::fs::TempPathGuard as TempArchive;
+
 const DEFAULT_MANIFEST_URL: &str =
     "https://github.com/muxiaoxiii/docsy/releases/download/toolchain-v1/tools-manifest.json";
 const DEFAULT_RELEASE_BASE: &str =
@@ -333,22 +336,6 @@ fn download_package(url: &str, max_bytes: u64) -> Result<Vec<u8>> {
     unreachable!("重定向循环必须在上方返回或报错")
 }
 
-struct TempArchive {
-    path: PathBuf,
-}
-
-impl TempArchive {
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempArchive {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
 fn download_with_fallback(
     primary: &str,
     mirrors: &[String],
@@ -408,6 +395,8 @@ fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchiv
         }
         let path = std::env::temp_dir().join(format!("docsy-tool-{}.zip", unique_suffix()));
         let mut output = fs::File::create(&path).context("创建工具下载临时文件失败")?;
+        // 下载临时文件收紧权限（非 unix 为 no-op）
+        let _ = crate::util::fs::set_private_permissions(&path);
         let mut reader = response.take(max_bytes + 1);
         let mut total = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
@@ -460,7 +449,7 @@ fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchiv
                 last_progress_emit = now;
             }
         }
-        return Ok(TempArchive { path });
+        return Ok(TempArchive::new(path));
     }
     unreachable!("重定向循环必须在上方返回或报错")
 }

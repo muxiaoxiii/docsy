@@ -9,7 +9,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile } from '@tauri-apps/plugin-fs'
 import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
-import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import {
   normalizeSuggestionSearchText,
   PUBLIC_CAUSE_ACTIONS,
@@ -612,7 +612,7 @@ export function useTemplateState() {
         dateFormat: null,
       })
       if (!result.ok) {
-        ElMessage.error(result.error || '保存引用来源失败')
+        ElMessage.error(userFacingError(result.error, '保存引用来源失败'))
         return
       }
       if (templateManifest.value) {
@@ -640,7 +640,7 @@ export function useTemplateState() {
         dateFormat: null,
       })
       if (!result.ok) {
-        ElMessage.error(result.error || '保存引用来源失败')
+        ElMessage.error(userFacingError(result.error, '保存引用来源失败'))
         return
       }
       if (templateManifest.value) {
@@ -660,7 +660,7 @@ export function useTemplateState() {
       dateFormat: fmt || 'iso',
     })
     if (!result.ok) {
-      ElMessage.error(result.error || '保存日期格式失败')
+      ElMessage.error(userFacingError(result.error, '保存日期格式失败'))
       return
     }
     if (templateManifest.value) {
@@ -740,7 +740,7 @@ export function useTemplateState() {
     const result = await tauriCallSafe('inspect_docx_template', { path: sourceDocx.value })
     scanning.value = false
     if (!result.ok) {
-      ElMessage.error(result.error || 'Word 文档读取失败，请确认文件未损坏且不是加密文件')
+      ElMessage.error(userFacingError(result.error, 'Word 文档读取失败，请确认文件未损坏且不是加密文件'))
       return
     }
     marks.value = result.data.marks || []
@@ -1262,7 +1262,7 @@ export function useTemplateState() {
     })
     saving.value = false
     if (!result.ok) {
-      ElMessage.error(result.error || '保存模板失败，请检查文件是否被其他程序占用')
+      ElMessage.error(userFacingError(result.error, '保存模板失败，请检查文件是否被其他程序占用'))
       return
     }
     const actualOutputPath = result.data?.outputPath || ''
@@ -1349,7 +1349,7 @@ export function useTemplateState() {
     const result = await tauriCallSafe('list_template_library')
     templateLibraryLoading.value = false
     if (!result.ok) {
-      ElMessage.error(result.error || '读取模板库失败')
+      ElMessage.error(userFacingError(result.error, '读取模板库失败'))
       return
     }
     templateLibrary.value = result.data || []
@@ -1360,7 +1360,7 @@ export function useTemplateState() {
     const result = await tauriCallSafe('list_template_generation_runs', { limit: 300 })
     historyRunsLoading.value = false
     if (!result.ok) {
-      ElMessage.error(result.error || '读取填写历史失败')
+      ElMessage.error(userFacingError(result.error, '读取填写历史失败'))
       return
     }
     historyRuns.value = result.data || []
@@ -1405,7 +1405,7 @@ export function useTemplateState() {
     }
     const result = await tauriCallSafe('move_template_to_trash', { args: { path: item.path } })
     if (!result.ok) {
-      ElMessage.error(result.error || '删除模板失败')
+      ElMessage.error(userFacingError(result.error, '删除模板失败'))
       return
     }
     if (templatePath.value === item.path) {
@@ -1667,7 +1667,7 @@ export function useTemplateState() {
     if (!item?.path) return
     const result = await tauriCallSafe('inspect_docsytpl', { path: item.path })
     if (!result.ok) {
-      ElMessage.error(result.error || '读取模板失败')
+      ElMessage.error(userFacingError(result.error, '读取模板失败'))
       return
     }
     const manifest = result.data
@@ -1714,7 +1714,7 @@ export function useTemplateState() {
     const result = knownManifest ? { ok: true, data: knownManifest } : await tauriCallSafe('inspect_docsytpl', { path })
     if (requestSeq !== templateOpenRequestSeq) return false
     if (!result.ok) {
-      ElMessage.error(result.error || '读取模板失败，文件可能已被移动或删除')
+      ElMessage.error(userFacingError(result.error, '读取模板失败，文件可能已被移动或删除'))
       return false
     }
     templatePath.value = path
@@ -1953,7 +1953,7 @@ export function useTemplateState() {
     }
     const result = await tauriCallSafe('import_template_to_library', { sourcePath: selected })
     if (!result.ok) {
-      ElMessage.error(result.error || '导入失败')
+      ElMessage.error(userFacingError(result.error, '导入失败'))
       return
     }
     ElMessage.success(existing ? '模板已覆盖导入' : '模板已导入')
@@ -1978,7 +1978,7 @@ export function useTemplateState() {
       outputDir: dir,
     })
     if (!result.ok) {
-      ElMessage.error(result.error || '导出失败')
+      ElMessage.error(userFacingError(result.error, '导出失败'))
       return
     }
     exportResultDir = result.data
@@ -2027,7 +2027,7 @@ export function useTemplateState() {
     })
     rendering.value = false
     if (!result.ok) {
-      ElMessage.error(result.error || 'Word 文书生成失败，请检查模板字段是否完整')
+      ElMessage.error(userFacingError(result.error, 'Word 文书生成失败，请检查模板字段是否完整'))
       return
     }
     ElMessage.success('Word 文书已生成')

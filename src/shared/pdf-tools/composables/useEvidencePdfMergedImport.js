@@ -2,7 +2,7 @@ import { computed } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import {
   buildRangeAfter,
   insertRangeAfter,
@@ -240,7 +240,7 @@ export function useEvidencePdfMergedImport({
         },
       })
       if (!split.ok) {
-        ElMessage.error(split.error || '拆分合并 PDF 失败')
+        ElMessage.error(userFacingError(split.error, '拆分合并 PDF 失败'))
         return
       }
 

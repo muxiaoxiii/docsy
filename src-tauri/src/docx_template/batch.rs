@@ -808,27 +808,14 @@ fn generate_filename(
     }
 }
 
+// 收敛说明：统一委托 crate::util::fs::unique_output_path（filename 固定为 .docx）。
+// 与原本地实现的差异仅在撞名场景：原实现从 `-1` 起编号，现从 `-2` 起。
 fn unique_output_path(dir: &Path, filename: &str) -> PathBuf {
-    let path = dir.join(filename);
-    if !path.exists() {
-        return path;
-    }
     let stem = Path::new(filename)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
-    for i in 1..=9999 {
-        let candidate = dir.join(format!("{stem}-{i}.docx"));
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    // Never overwrite: fall back to a timestamped name.
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    dir.join(format!("{stem}-{stamp}.docx"))
+    crate::util::fs::unique_output_path(dir, stem, "docx")
 }
 
 fn sanitize_filename(raw: &str) -> String {

@@ -24,6 +24,7 @@ use super::page_info::{get_page_infos, PageSize};
 use super::preview::{render_preview, PreviewResult};
 use super::qpdf;
 use super::{fnv1a_hash, same_path, temp_named_path};
+use crate::util::fs::{set_private_permissions, TempPathGuard};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -664,6 +665,8 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     let overlay_build_elapsed = t3.elapsed().as_millis();
     let overlay_path = TempPathGuard::new(temp_named_path("docsy_overlay", "pdf"));
     fs::write(overlay_path.path(), &overlay_pdf).context("写入临时页眉页脚层失败")?;
+    // 文件在 guard 创建后才写入，这里收紧临时文件权限（非 unix 为 no-op）
+    let _ = set_private_permissions(overlay_path.path());
 
     let qpdf_tool = crate::external::QpdfTool;
     let bin = qpdf_tool.binary_path()?;
@@ -693,6 +696,8 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
             command_output.status.code().unwrap_or(-1)
         );
     }
+    // qpdf 刚生成的临时结果文件，收紧权限（非 unix 为 no-op）
+    let _ = set_private_permissions(overlay_output.path());
     write_optimized_or_copy(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
     // Bookmarks are now written after merge, not during per-file processing
 
@@ -779,10 +784,10 @@ fn write_optimized_or_copy(input: &Path, output: &Path) -> Result<()> {
     }
 }
 
+// 收敛说明：统一委托 crate::util::fs::unique_output_path。与原本地实现的差异仅在
+// 撞名场景：原实现从 `-1` 起编号、超限后回退覆盖原路径，现从 `-2` 起、超限回退
+// 时间戳命名（不再覆盖已有文件）。
 fn unique_output_path(path: &Path) -> PathBuf {
-    if !path.exists() {
-        return path.to_path_buf();
-    }
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
     let stem = path
         .file_stem()
@@ -793,18 +798,7 @@ fn unique_output_path(path: &Path) -> PathBuf {
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("");
-    for index in 1..10_000 {
-        let name = if extension.is_empty() {
-            format!("{stem}-{index}")
-        } else {
-            format!("{stem}-{index}.{extension}")
-        };
-        let candidate = parent.join(name);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    path.to_path_buf()
+    crate::util::fs::unique_output_path(parent, stem, extension)
 }
 
 struct StandardArtifactProcessingResult {
@@ -1946,26 +1940,6 @@ fn estimate_char_width(c: char, is_builtin: bool) -> f32 {
 
 fn mm_to_pt(mm: f32) -> f32 {
     mm * 72.0 / 25.4
-}
-
-struct TempPathGuard {
-    path: PathBuf,
-}
-
-impl TempPathGuard {
-    fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempPathGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
 }
 
 fn cleanup_temp(path: Option<PathBuf>) {

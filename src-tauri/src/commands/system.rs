@@ -127,6 +127,8 @@ fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
 
     const MAX_PREVIEW_EDGE: u32 = 1600;
     const MAX_SOURCE_PIXELS: u64 = 64_000_000;
+    // 源文件大小上限，防止前端传任意大文件读爆内存
+    const MAX_SOURCE_BYTES: u64 = 50 * 1024 * 1024;
 
     let path = std::path::PathBuf::from(path);
     let ext = path
@@ -134,10 +136,17 @@ fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
         .and_then(|v| v.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+    // 扩展名白名单（大小写不敏感）：仅允许常见图片格式
     match ext.as_str() {
-        "jpg" | "jpeg" | "png" | "webp" | "bmp" | "tif" | "tiff" => {}
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "ico" | "tif" | "tiff" => {}
         _ => anyhow::bail!("不支持的图片格式"),
     };
+    let file_size = std::fs::metadata(&path)
+        .map_err(|error| anyhow::anyhow!("无法读取图片文件: {error}"))?
+        .len();
+    if file_size > MAX_SOURCE_BYTES {
+        anyhow::bail!("图片文件过大（超过 50MB），无法生成预览");
+    }
     let (width, height) = image::image_dimensions(&path)
         .map_err(|error| anyhow::anyhow!("无法读取图片尺寸: {error}"))?;
     if u64::from(width) * u64::from(height) > MAX_SOURCE_PIXELS {

@@ -3,7 +3,7 @@
  */
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 
 export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns) {
   const itemSeparatorSetting = ref(window.localStorage.getItem('docsy.template.itemSeparator') || '、')
@@ -25,14 +25,14 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
     if (result.ok) {
       templateTrash.value = result.data || []
     } else {
-      ElMessage.error(result.error || '读取模板回收站失败')
+      ElMessage.error(userFacingError(result.error, '读取模板回收站失败'))
     }
   }
 
   async function restoreTemplate(row) {
     const result = await tauriCallSafe('restore_template_from_trash', { args: { path: row.path } })
     if (!result.ok) {
-      ElMessage.error(result.error || '恢复失败')
+      ElMessage.error(userFacingError(result.error, '恢复失败'))
       return
     }
     ElMessage.success('模板已恢复')
@@ -61,7 +61,7 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
       args: { path: row.path, migrateToCommon },
     })
     if (!result.ok) {
-      ElMessage.error(result.error || '彻底删除失败')
+      ElMessage.error(userFacingError(result.error, '彻底删除失败'))
       return
     }
     ElMessage.success(migrateToCommon ? '模板已删除，数据已迁移为模板通用数据' : '模板和内部数据已删除')
@@ -83,7 +83,7 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
     const result = await tauriCallSafe('clear_template_history')
     clearingHistory.value = false
     if (!result.ok) {
-      ElMessage.error(result.error || '清空历史失败')
+      ElMessage.error(userFacingError(result.error, '清空历史失败'))
       return
     }
     ElMessage.success(`已清空 ${result.data ?? 0} 条填写记录`)
@@ -98,7 +98,7 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
     if (result.ok) {
       templateDatabase.value = result.data || []
     } else {
-      ElMessage.error(result.error || '读取模板数据库失败')
+      ElMessage.error(userFacingError(result.error, '读取模板数据库失败'))
     }
   }
 
@@ -114,7 +114,7 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
     }
     const result = await tauriCallSafe('delete_template_database_entry', { templatePath: row.templateId })
     if (!result.ok) {
-      ElMessage.error(result.error || '删除失败')
+      ElMessage.error(userFacingError(result.error, '删除失败'))
       return
     }
     ElMessage.success('模板数据已删除')

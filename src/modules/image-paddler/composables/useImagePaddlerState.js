@@ -1,5 +1,5 @@
 import { computed, ref, reactive, watch, onBeforeUnmount } from 'vue'
-import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage } from 'element-plus'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
@@ -139,7 +139,7 @@ export function useImagePaddlerState() {
       analysis.value = result.data
       await preloadVisibleImages()
     } else {
-      ElMessage.error(result.error || '图片文件夹分析失败，请确认文件夹路径正确')
+      ElMessage.error(userFacingError(result.error, '图片文件夹分析失败，请确认文件夹路径正确'))
     }
     analyzing.value = false
   }
@@ -165,7 +165,7 @@ export function useImagePaddlerState() {
           : `已生成 ${result.data.images} 张图片，${result.data.pages} 页`,
       )
     } else {
-      ElMessage.error(result.error || '图片排版文档生成失败，请确认图片文件未被占用')
+      ElMessage.error(userFacingError(result.error, '图片排版文档生成失败，请确认图片文件未被占用'))
     }
     generating.value = false
   }
@@ -185,7 +185,7 @@ export function useImagePaddlerState() {
     if (!path) return
     const result = await openPath(path)
     if (!result.ok) {
-      ElMessage.error(result.error || '无法打开生成文件')
+      ElMessage.error(userFacingError(result.error, '无法打开生成文件'))
     }
   }
 

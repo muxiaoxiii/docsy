@@ -24,6 +24,11 @@ export default [
         crypto: 'readonly',
         URL: 'readonly',
         console: 'readonly',
+        fetch: 'readonly',
+        FileReader: 'readonly',
+        Blob: 'readonly',
+        FormData: 'readonly',
+        AbortController: 'readonly',
       },
     },
     rules: {

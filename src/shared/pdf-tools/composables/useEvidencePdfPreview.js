@@ -79,19 +79,22 @@ export function useEvidencePdfPreview({
       return ''
     if (!shouldShowLiveFooter(selectedOverlayFile.value)) return ''
     const file = selectedOverlayFile.value
-    // 优先使用文件列表里已确定的页脚文本（来自 existingElements 的选择）
-    if (file.existingFooterText) {
-      const page = footerContinuous.value ? file.pageStart + previewPage.value - 1 : previewPage.value
-      const total = footerContinuous.value ? totalOverlayPages.value : file.pages || 1
-      return expandPlaceholders(file.existingFooterText, page, total, file, selectedOverlayIndex.value, currentRules.value)
-    }
-    const group = selectedFooterTextGroup.value
-    if (!group || group.enabled === false || !group.text) return ''
+    // Mirror buildHeaderFooterItems' footer branch: global group wins when
+    // global apply is on, and the detected existing footer must not
+    // short-circuit here — processing writes the new rule text regardless of
+    // file.existingFooterText. The legacy branch (file.footer ??
+    // rules.footerText) is not mirrored: the workbench always defines
+    // footerInsertEnabled/pageNumberEnabled in currentRules, so
+    // legacyFooterMode is never true in this UI.
+    const rules = currentRules.value
+    const group = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
+    const template = group && group.enabled !== false ? group.text || rules.footerTextContent : ''
+    if (!template) return ''
     const page = footerContinuous.value
       ? file.pageStart + previewPage.value - 1
       : previewPage.value
     const total = footerContinuous.value ? totalOverlayPages.value : file.pages || 1
-    return expandPlaceholders(group.text, page, total, file, selectedOverlayIndex.value, currentRules.value)
+    return expandPlaceholders(template, page, total, file, selectedOverlayIndex.value, rules)
   })
 
   const previewHeaderStyle = computed(() =>

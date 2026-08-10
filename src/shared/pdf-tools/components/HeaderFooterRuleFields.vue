@@ -71,6 +71,10 @@
           <el-option label="中文（一, 二, 三）" value="chinese" />
         </el-select>
       </div>
+      <div v-if="headerMode === 'per_file'" class="rule-item">
+        <label>序号起始</label>
+        <el-input-number v-model="headerPerFileSeqStartModel" :min="0" :max="9999" size="small" controls-position="right" />
+      </div>
       <div v-if="headerMode === 'custom'" class="rule-item">
         <label>页眉文本</label>
         <div class="text-input-with-info">
@@ -356,7 +360,7 @@ import { Plus, InfoFilled } from '@element-plus/icons-vue'
 import TextPlacementFields from './TextPlacementFields.vue'
 import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
 import { useHistory } from '../../../core/composables/useHistory.js'
-import UndoRedoButtons from '../../../components/UndoRedoButtons.vue'
+import UndoRedoButtons from '../../components/UndoRedoButtons.vue'
 
 function debounce(fn, ms) {
   let timer
@@ -402,6 +406,7 @@ const props = defineProps({
   headerColor: { type: String, required: true },
   headerPerFilePrefix: { type: String, default: '证据' },
   headerPerFileSeqType: { type: String, default: 'numeric' },
+  headerPerFileSeqStart: { type: Number, default: 1 },
   headerPageStart: { type: Number, default: 1 },
   headerPageEnd: { type: Number, default: 0 },
   filePages: { type: Number, default: 0 },
@@ -461,6 +466,7 @@ const emit = defineEmits([
     'headerColor',
     'headerPerFilePrefix',
     'headerPerFileSeqType',
+    'headerPerFileSeqStart',
     'headerPageStart',
     'headerPageEnd',
     'footerInsertEnabled',
@@ -596,6 +602,7 @@ const headerAlignModel = model('headerAlign'),
   headerColorModel = model('headerColor')
 const headerPerFilePrefixModel = model('headerPerFilePrefix')
 const headerPerFileSeqTypeModel = model('headerPerFileSeqType')
+const headerPerFileSeqStartModel = model('headerPerFileSeqStart')
 const headerPageStartModel = model('headerPageStart')
 const headerPageEndModel = model('headerPageEnd')
 const headerAllPages = computed({

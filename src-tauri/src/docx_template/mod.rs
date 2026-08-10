@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 pub mod batch;
 pub mod engine;
@@ -483,6 +484,39 @@ pub fn permanently_delete_template(args: TemplatePermanentDeleteArgs) -> Result<
 
 pub fn inspect_template_package(path: &str) -> Result<TemplateManifest> {
     read_template_manifest(Path::new(path))
+}
+
+/// Small manifest cache keyed by template path + mtime. History suggestions
+/// fire on a 350ms debounce; re-parsing the docsytpl package on every keystroke
+/// is wasteful, and the manifest rarely changes while editing.
+static MANIFEST_CACHE: Mutex<Option<(String, std::time::SystemTime, TemplateManifest)>> =
+    Mutex::new(None);
+
+/// 读取模板清单（带 mtime 失效缓存），供历史建议等高频调用使用。
+pub fn cached_manifest(path: &str) -> Result<TemplateManifest> {
+    if let Some((cached_path, cached_mtime, manifest)) = MANIFEST_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        if cached_path == path {
+            if let Ok(meta) = std::fs::metadata(path) {
+                if let Ok(mtime) = meta.modified() {
+                    if mtime == *cached_mtime {
+                        return Ok(manifest.clone());
+                    }
+                }
+            }
+        }
+    }
+    let manifest = inspect_template_package(path)?;
+    let mtime = std::fs::metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    *MANIFEST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((path.to_string(), mtime, manifest.clone()));
+    Ok(manifest)
 }
 
 /// Update a field's reference (data source) and/or date format in the template

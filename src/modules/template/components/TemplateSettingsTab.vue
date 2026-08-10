@@ -173,7 +173,7 @@
 <script setup>
 import { InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { shortDateTime } from '../composables/fieldRowUtils.js'
 import { computed, ref } from 'vue'
 
@@ -241,7 +241,7 @@ async function executeMerge() {
     targetTemplateId: targetId,
   })
   if (!result.ok) {
-    ElMessage.error(result.error || '合并失败')
+    ElMessage.error(userFacingError(result.error, '合并失败'))
     return
   }
   ElMessage.success(`已合并 ${result.data ?? 0} 条同名字段数据`)

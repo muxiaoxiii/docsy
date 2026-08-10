@@ -192,7 +192,7 @@ pub async fn overlay_pdf_text(
     args: crate::pdf::header_footer::HeaderFooterJob,
 ) -> Result<serde_json::Value, String> {
     let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
-    run_blocking(move || crate::pdf::overlay::overlay_text(&args)).await
+    run_blocking(move || crate::pdf::header_footer::overlay_text(&args)).await
 }
 
 #[tauri::command]
@@ -222,9 +222,9 @@ pub async fn apply_evidence_pdf_rules(
 #[tauri::command]
 pub async fn preview_pdf_header_footer(
     args: PreviewOverlayArgs,
-) -> Result<crate::pdf::overlay::PreviewResult, String> {
+) -> Result<crate::pdf::preview::PreviewResult, String> {
     let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
-    run_blocking(move || crate::pdf::overlay::preview_overlay(&args)).await
+    run_blocking(move || crate::pdf::header_footer::preview_overlay(&args)).await
 }
 
 #[tauri::command]
@@ -262,9 +262,9 @@ pub async fn delete_pdf_header_footer_artifacts(
 #[tauri::command]
 pub async fn render_pdf_preview(
     args: crate::pdf::preview::PreviewArgs,
-) -> Result<crate::pdf::overlay::PreviewResult, String> {
+) -> Result<crate::pdf::preview::PreviewResult, String> {
     let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
-    run_blocking(move || crate::pdf::overlay::render_preview(&args)).await
+    run_blocking(move || crate::pdf::preview::render_preview(&args)).await
 }
 
 #[tauri::command]
@@ -285,10 +285,7 @@ pub async fn apply_anti_copy(
     output: String,
     method: String,
 ) -> Result<usize, String> {
-    let m = match method.as_str() {
-        "cmap_remove" => crate::pdf::anti_ocr::AntiCopyMethod::CmapRemove,
-        _ => crate::pdf::anti_ocr::AntiCopyMethod::CmapScramble,
-    };
+    let m = crate::pdf::anti_ocr::AntiCopyMethod::parse(&method);
     run_blocking(move || {
         crate::pdf::anti_ocr::apply_anti_copy(
             std::path::Path::new(&input),

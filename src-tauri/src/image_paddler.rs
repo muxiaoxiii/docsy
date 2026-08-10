@@ -870,6 +870,9 @@ fn sanitize_output_name(name: &str) -> String {
     }
 }
 
+// 注意：本函数有意保留本地版本，未收敛到 crate::util::fs::unique_output_path ——
+// 撞名序号格式为 `{stem}_{N}`（下划线），有测试依赖该命名（见本文件 tests：
+// `evidence_clip_docsy_paddler_2.docx`）；通用版本使用 `{stem}-{N}`。
 fn unique_output_path(dir: &Path, stem: &str, ext: &str) -> std::path::PathBuf {
     let mut candidate = dir.join(format!("{stem}.{ext}"));
     let mut index = 2;

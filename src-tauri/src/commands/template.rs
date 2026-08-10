@@ -1,44 +1,6 @@
 use super::run_blocking;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Mutex;
-
-/// Small manifest cache keyed by template path + mtime. History suggestions
-/// fire on a 350ms debounce; re-parsing the docsytpl package on every keystroke
-/// is wasteful, and the manifest rarely changes while editing.
-static MANIFEST_CACHE: Mutex<
-    Option<(
-        String,
-        std::time::SystemTime,
-        crate::docx_template::TemplateManifest,
-    )>,
-> = Mutex::new(None);
-
-fn cached_manifest(path: &str) -> anyhow::Result<crate::docx_template::TemplateManifest> {
-    if let Some((cached_path, cached_mtime, manifest)) = MANIFEST_CACHE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-    {
-        if cached_path == path {
-            if let Ok(meta) = std::fs::metadata(path) {
-                if let Ok(mtime) = meta.modified() {
-                    if mtime == *cached_mtime {
-                        return Ok(manifest.clone());
-                    }
-                }
-            }
-        }
-    }
-    let manifest = crate::docx_template::inspect_template_package(path)?;
-    let mtime = std::fs::metadata(path)
-        .ok()
-        .and_then(|meta| meta.modified().ok())
-        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-    *MANIFEST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) =
-        Some((path.to_string(), mtime, manifest.clone()));
-    Ok(manifest)
-}
 
 #[tauri::command]
 pub async fn inspect_docx_template(
@@ -143,7 +105,7 @@ pub async fn get_template_history_context(
     full_refresh: Option<bool>,
 ) -> Result<crate::template_history::TemplateHistoryContext, String> {
     run_blocking(move || {
-        let manifest = cached_manifest(&template_path)?;
+        let manifest = crate::docx_template::cached_manifest(&template_path)?;
         crate::template_history::history_context(
             &manifest,
             values.as_ref(),

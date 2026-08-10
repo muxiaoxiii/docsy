@@ -5,7 +5,7 @@ import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
-import { openPath, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { ensureExtension } from './fieldRowUtils.js'
 
 export function useBatchFill(templatePath, templateManifest, normalizeValues, normalizeStructureOverrides, itemSeparatorSetting, loadTemplateHistoryRuns) {
@@ -40,7 +40,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
     batchProcessing.value = false
 
     if (!result.ok) {
-      ElMessage.error(result.error || '导出失败')
+      ElMessage.error(userFacingError(result.error, '导出失败'))
       return
     }
     ElMessage.success('字段表已导出')
@@ -70,7 +70,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
 
     if (!validation.ok) {
       batchProcessing.value = false
-      ElMessage.error(validation.error || '校验失败')
+      ElMessage.error(userFacingError(validation.error, '校验失败'))
       return
     }
 
@@ -103,7 +103,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
     batchProcessing.value = false
 
     if (!result.ok) {
-      ElMessage.error(result.error || '批量生成失败')
+      ElMessage.error(userFacingError(result.error, '批量生成失败'))
       return
     }
 
@@ -200,7 +200,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
       batchSaveVisible.value = false
       if (loadTemplateHistoryRuns) loadTemplateHistoryRuns()
     } else {
-      ElMessage.error(result.error || '保存填写记录失败')
+      ElMessage.error(userFacingError(result.error, '保存填写记录失败'))
     }
   }
 

@@ -336,22 +336,11 @@ pub fn page_count(input: &str) -> Result<u32> {
 }
 
 fn unique_output_path(input: &Path, suffix: &str) -> PathBuf {
-    let parent = input.parent().unwrap_or(Path::new("."));
-    let stem = input
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
-    let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("pdf");
-
-    let mut path = parent.join(format!("{}{}.{}", stem, suffix, ext));
-    let mut i = 1;
-    while path.exists() {
-        path = parent.join(format!("{}{}-{}.{}", stem, suffix, i, ext));
-        i += 1;
-    }
-    path
+    unique_output_path_in_dir(input, None, suffix)
 }
 
+// 收敛说明：统一委托 crate::util::fs::unique_output_path。与原本地实现的差异仅在
+// 撞名场景：原实现从 `-1` 起编号且无上限，现从 `-2` 起、超过 10 000 回退时间戳命名。
 fn unique_output_path_in_dir(input: &Path, output_dir: Option<&str>, suffix: &str) -> PathBuf {
     let parent = output_dir
         .map(PathBuf::from)
@@ -361,13 +350,7 @@ fn unique_output_path_in_dir(input: &Path, output_dir: Option<&str>, suffix: &st
         .and_then(|s| s.to_str())
         .unwrap_or("output");
     let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("pdf");
-    let mut path = parent.join(format!("{stem}{suffix}.{ext}"));
-    let mut i = 1;
-    while path.exists() {
-        path = parent.join(format!("{stem}{suffix}-{i}.{ext}"));
-        i += 1;
-    }
-    path
+    crate::util::fs::unique_output_path(&parent, &format!("{stem}{suffix}"), ext)
 }
 
 fn unique_suffix() -> String {

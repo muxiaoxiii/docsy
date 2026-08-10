@@ -216,6 +216,10 @@ pub(crate) fn normalize_for_match(text: &str) -> String {
                 '\u{FF01}'..='\u{FF5E}' => {
                     char::from_u32(character as u32 - 0xFEE0).unwrap_or(character)
                 }
+                // 半角片假名（FF61–FF9F）：单字符 NFKC（如 ｶ→カ）。
+                // 半角浊点 FF9E/FF9F 只做单字符映射（→ 组合用浊点），
+                // 不做「ﾊﾟ→パ」这类跨码点组合逻辑。
+                '\u{FF61}'..='\u{FF9F}' => character.nfkc().next().unwrap_or(character),
                 _ => character,
             };
             (!normalized.is_whitespace()).then_some(normalized)
@@ -303,5 +307,10 @@ mod tests {
     #[test]
     fn normalizes_fullwidth_ascii_for_matching() {
         assert_eq!(normalize_for_match("Ｈｅａｄｅｒ２０２４"), "Header2024");
+    }
+
+    #[test]
+    fn normalizes_halfwidth_katakana_for_matching() {
+        assert_eq!(normalize_for_match("ﾃｽﾄ"), "テスト");
     }
 }

@@ -69,7 +69,7 @@ import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 
 const activeTab = ref('merge')
 const evidenceFolder = ref('')
@@ -95,7 +95,7 @@ async function scanEvidence() {
   if (result.ok) {
     evidenceGroups.value = result.data.groups || []
   } else {
-    ElMessage.error(result.error || '扫描失败')
+    ElMessage.error(userFacingError(result.error, '扫描失败'))
   }
   scanning.value = false
 }
@@ -116,7 +116,7 @@ async function buildEvidence() {
       ElMessage.success('证据 PDF 生成完成')
     }
   } else {
-    ElMessage.error(result.error || '证据 PDF 生成失败')
+    ElMessage.error(userFacingError(result.error, '证据 PDF 生成失败'))
   }
   building.value = false
 }

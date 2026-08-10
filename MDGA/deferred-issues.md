@@ -1,8 +1,8 @@
 # MDGA — 待修改事项记录
 
-> 本文档记录 0.9.7-beta9 全量代码审查中发现、但**暂未在本版本修复**的问题，按优先级排序，供后续迭代参考。
+> 本文档记录 0.9.7-beta9 全量代码审查中发现、但**暂未修复**的问题，按优先级排序，供后续迭代参考。
 > 审查时间：2026-08-10；审查范围：最近提交 `5d033b4` / `6ba0223` + Rust 后端 + 前端整体架构。
-> 已在 beta9 修复的问题见 `CHANGELOG.md`，不在此列出。
+> 已在各版本修复的问题见 `CHANGELOG.md`；beta12 完成的条目在下方以 ✅ 标注存档。
 
 ---
 
@@ -38,48 +38,23 @@
 - `SubprocessRegistry::cancel`（`lib.rs:49-74`）按 PID kill：子进程已退出后 PID 可能被系统复用，kill 会误伤无关进程；且注释写 "then SIGKILL if needed" 但 Unix 分支只发了 SIGTERM，没有兜底。
 - `evidence.rs:14` 反向依赖 `crate::ConversionState` 和 AppHandle（`evidence.rs:22-27`），pdf 业务层耦合 lib.rs 的 UI 全局状态，破坏分层。应改为注入 trait/回调。
 
-### 5. 重复工具代码 / 临时文件泄漏（P2）
-- `unique_output_path` 有 6 份：`pdf/mod.rs:130`（pub）、`pdf/qpdf.rs:338`、`pdf/qpdf.rs:355`、`pdf/header_footer.rs:782`、`docx_template/batch.rs:811`、`image_paddler.rs:873`。
-- `TempPathGuard` 有 3 份：`docx_template/engine.rs:294`、`pdf/header_footer.rs:1951`、`external/managed.rs:340`。而多数临时文件点（`annotations.rs:100`、`normalize.rs:25-27`、`artifacts.rs`、`content_text.rs:84`、`header_footer.rs:367/419/507`、`split.rs:163`）仍是手动 `let _ = remove_file`，错误/取消路径会泄漏临时文件到系统 temp 目录（PDF 内容可能敏感）。
-
-建议：建 crate 级 `util/fs.rs` 统一收敛 + 全面改用 RAII guard。
-
 ### 6. 双 PDF 引擎并存（P3）
 lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normalize.rs` 先用 qpdf 取页尺寸、再用 lopdf 改内容、再调 qpdf 优化。`qpdf_stream.rs:389` 还维护了 qpdf JSON → lopdf Object 的对象模型桥接，是长期脆弱点。短期可接受，建议收敛"读取"路径到一侧。
 
-### 7. 业务逻辑泄露到命令层（P3）
-- `commands/template.rs:9-41`：`MANIFEST_CACHE`（带 mtime 失效的模板清单缓存）是业务缓存，应下沉到 `docx_template`。
-- `commands/pdf.rs:288-291`：method 字符串 → 枚举的映射留在命令层（轻微）。
-
-### 8. 安全细节（P3）
-- `read_image_data_url`（`commands/system.rs:119-122`）接受前端任意路径读取本地文件并返回 base64，是一个任意文件读原语（限于 image crate 可解码格式）。建议加目录白名单或走 tauri fs plugin 的 scope。
-- 临时文件权限未收紧（系统 temp 目录默认权限），处理敏感 PDF 时建议 0600。
-
-### 9. 小问题（P4）
-- `pdf/overlay.rs` 是 8 行兼容 facade，迁移完成后应删除。
-- `pdf/mod.rs` 里 `annotations`/`evidence`/`split` 等全是 `pub`，实际只需 `pub(crate)`。
-- `glyph_names.rs` 4627 行是生成的字形表，建议文件头标注 "generated" 或拆到 `data/`。
-- `error.rs` 的枚举缺 `#[non_exhaustive]`。
+### 8. 安全细节（P3，beta12 部分处理）
+- `read_image_data_url`（`commands/system.rs`）：beta12 已补 gif/ico 解码与 50MB 上限，但仍接受前端任意路径读取本地文件并返回 base64，是一个任意文件读原语（限于 image crate 可解码格式）。建议加目录白名单或走 tauri fs plugin 的 scope。
+- 临时文件权限：beta12 已在 `util/fs.rs` 提供 0600 的 `set_private_permissions`（`#[cfg(unix)]`），但各临时文件点尚未全面接线。
 
 ---
 
-## 二、PDF 文本处理（本次修复的遗留缺口）
+## 二、PDF 文本处理（遗留缺口）
 
 ### 10. 合成预定义 CMap 不支持混合宽度编码（轻微）
-`cmap.rs` `compose_encoding_and_unicode`：codespace 合成 `[0;n]–[FF;n]`（n=最大码长），而 `decode` 要求码长等于 codespace 长度，混合宽度编码（如 `90ms-RKSJ-H` 的 1 字节半角片假名）里的短码永远匹配不到 → 整串解码失败退 bbox。属覆盖缺口而非错误。同函数内 `cid_to_unicode.decode(&cid_bytes)?` 任一 CID 缺失就放弃整个字体映射，偏严。
+`cmap.rs` `compose_encoding_and_unicode`：codespace 合成 `[0;n]–[FF;n]`（n=最大码长），而 `decode` 要求码长等于 codespace 长度，混合宽度编码（如 `90ms-RKSJ-H` 的 1 字节半角片假名）里的短码永远匹配不到 → 整串解码失败退 bbox。属覆盖缺口而非错误（beta12 已加注释说明）。同函数内 `cid_to_unicode.decode(&cid_bytes)?` 任一 CID 缺失就放弃整个字体映射，偏严。
 
-### 11. `glyph_to_char` 对多单元 uni 名处理不符 AGL 规范（轻微）
-`glyph_names.rs:4574-4584`：`uni4E2D4E2E` 这类连字名只取前 4 位返回 `'中'`，按规范应整体映射或返回 None（返回 `char` 的签名本身表达不了连字）。
-
-### 12. 归一化覆盖缺口（轻微）
-- `normalize_for_match` 的全角映射只覆盖 `FF01–FF5E`（全角 ASCII）；半角片假名（`FF61–FF9F`）不归一化，除非输入碰巧含 RTL 展示形式触发了 NFKC。
+### 12. 归一化覆盖缺口（轻微，beta12 部分处理）
+- ~~半角片假名（`FF61–FF9F`）不归一化~~ ✅ beta12 已在 `text_utils` 对其做 NFKC 归一化。
 - 遗留 CJK 编码打分（`artifacts.rs::legacy_cjk_candidate_score`）是启发式：常用字表只覆盖高频文书用字，生僻内容或纯繁体古文仍可能误判编码；韩语常用音节表同理。如出现误判案例，优先扩充对应常用字表。
-
-### 12a. 预览页脚也存在同类短路（轻微，beta11 只修了页眉）
-`useEvidencePdfPreview.js` 的 `previewFooterText` 仍有 `file.existingFooterText` 优先短路（约 L77）：检测过的文件在设置新页脚规则后，预览可能显示旧页脚而非实际生成文本。beta11 修复页眉时未一并处理（页脚带 `{page}` 占位符展开，改动面更大）。同理可对照 `buildHeaderFooterItems` 的页脚逻辑对齐。
-
-### 12b. `useHeaderFooterRules.js` 是死代码（P3）
-`src/modules/evidence-pdf/composables/useHeaderFooterRules.js` 全仓库无人 import；`EvidencePdfWorkbench.vue` 内联了一份逐字重复的实现（group computeds 959–1045、currentRules 1561–1640、mode watch 1303–1321）。两份副本靠手工保持同步（本次 preview bug 排查时已确认逻辑一致），应删除 composable 或让 workbench 改用它。
 
 ### 12c. 普通文本删除路径不组合 CTM（已知限制）
 `content_text.rs` 的 bbox 兜底匹配在嵌套 Form（带 `cm` 变换）内坐标不组合，导致无法解码的文本在深层 Form 中既匹配不了文本也对不上 bbox。beta11 通过 artifact `/Contents` 通道覆盖了 iText 印章类文件；非 artifact 的深层嵌套文本仍是保守跳过（告警不改动原文）。如需支持，要在 `QpdfStreamUsageSeed` 里累积 CTM。
@@ -98,17 +73,31 @@ lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normali
 
 `src/shared/pdf-tools/composables/useEvidencePdfSession.js`（1083 行）也偏大，但已有测试覆盖，优先级低。
 
-### 14. 错误展示不统一（P3）
-封装层（`src/core/tauriBridge.js`）本身做得好，但展示层一半走 `userFacingError()`（全项目仅 21 处），一半直接 `ElMessage.error(result.error || '...')` 把 Rust/anyhow 原始错误串弹给用户（如 `VideoExtractView.vue:280,288,333`、`PdfToolsView.vue:652,709,738,885`）。建议约定：凡 `res.error` 上屏前必须过 `userFacingError`。
-另：`tauriBridge.js:4-26` 的 `operationLabels` 是硬编码命令→文案映射，新增 Rust 命令需记得回前端补文案。
+另（beta12 批次 4 新发现的孤儿文件，全仓库无引用，建议删除）：
+- `src/modules/evidence-pdf/composables/useContentRowEditing.js`（内含一份带旧 bug 的 `displayContentRowText` 副本）
+- `src/modules/evidence-pdf/components/EvidenceOverlayTable.vue`
 
-### 15. 目录/命名一致性（P4）
-- `src/components/UndoRedoButtons.vue` 孤零零一个文件，与 `src/shared/components/`（7 个组件）职责重叠，两处"共享组件"目录应合并。
+### 15. 目录/命名一致性（P4，beta12 部分处理）
+- ~~`src/components/UndoRedoButtons.vue` 孤零零一个文件~~ ✅ beta12 已移入 `src/shared/components/`。
 - `src/shared/pdf-tools/` 名不副实：里面主要是 evidence-pdf 的会话逻辑，建议改名或按真实归属拆分。
 - 模块内部布局不统一：home 是扁平结构，其余模块用 `views/` 子目录。
 
-### 16. 工程化小项（P4）
-- `eslint.config.js:15-27` 手维护浏览器 globals 白名单，缺 `fetch`、`FileReader`、`Blob`、`FormData`、`AbortController` 等；建议引入 `globals` 包的 `globals.browser`。
+### 16. 工程化小项（P4，beta12 部分处理）
+- ~~eslint globals 白名单缺 `fetch` 等~~ ✅ beta12 已补 5 个；仍可考虑引入 `globals` 包的 `globals.browser` 彻底替代手维护。
 - `vite ^5.2.0` 偏旧（Vite 6/7 已发布），与 `@vitejs/plugin-vue ^5` 自洽，升级可作技术债记录。
 - 事件总线靠裸字符串 CustomEvent（`docsy-operation-*`、`docsy-template-library-changed`），事件名散落多处，建议集中定义事件名常量。
-- 前端测试覆盖率低：~29.9k 行源码仅 5 个测试文件，template 模块（最复杂）零测试。
+- 前端测试覆盖率低：~29.9k 行源码仅 15 个测试文件，template 模块（最复杂）零测试。
+- `tauriBridge.js:4-26` 的 `operationLabels` 是硬编码命令→文案映射，新增 Rust 命令需记得回前端补文案。
+
+---
+
+## 存档：beta12 已完成条目
+
+- ✅ **5. 重复工具代码 / 临时文件泄漏**：新建 `util/fs.rs` 收敛 `same_path`/`temp_named_path`/`safe_file_stem`/`unique_output_path`/`TempPathGuard`/`set_private_permissions`；顺带修复 header_footer 旧版撞名超限会覆盖原文件的隐患。
+- ✅ **7. 业务逻辑泄露到命令层**：`MANIFEST_CACHE` 下沉 `docx_template/mod.rs`；`AntiCopyMethod::parse` 下移。
+- ✅ **9. 小问题**：`pdf/overlay.rs` facade 已删除；`pdf/mod.rs` 15 个子模块改 `pub(crate)`；`glyph_names.rs` 标注 GENERATED；`error.rs` 加 `#[non_exhaustive]`；`glyph_to_char` 多码点 uni 名返回 None（条目 11）。
+- ✅ **12a. 预览页脚短路**：`previewFooterText` 去掉 `existingFooterText` 短路，与 `buildHeaderFooterItems` 同源。
+- ✅ **12b. `useHeaderFooterRules.js` 死代码**：已删除。
+- ✅ **14. 错误展示不统一**：38 处后端 error 统一过 `userFacingError`。
+- ✅ **单独编号页码列表显示 bug**（用户报告）：`buildFileContentRows` 页码行携带规则覆盖后的 `effectiveGroup.sequence`，`displayContentRowText` 优先使用，列表与实际/预览渲染一致。
+- ✅ **per_file 页眉序号起点设置**（用户报告）：`perFileSeqStart` 字段贯通预览与实际生成，UI 在 per_file 模式提供"序号起始"输入（0–9999）。

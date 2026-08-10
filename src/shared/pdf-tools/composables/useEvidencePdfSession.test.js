@@ -706,4 +706,43 @@ describe('Evidence PDF session helpers', () => {
     expect(extra.pageStart).toBe(6)
     expect(extra.pageEnd).toBe(10)
   })
+
+  it('per-file header sequence honors a custom start (numeric and chinese)', () => {
+    const files = [createEvidenceFile('/case/合同.pdf'), createEvidenceFile('/case/付款.pdf')]
+    const group = { ...createDefaultHeaderGroup(), mode: 'per_file', perFileSeqStart: 3 }
+    const rules = { ...baseRules, headerMode: 'per_file', headerInsertEnabled: true, footerEnabled: false }
+
+    const items = buildHeaderFooterItems(files, { ...rules, _globalApply: true, _globalHeaderGroup: group }, '/out')
+    expect(items[0].header.text).toBe('证据3')
+    expect(items[1].header.text).toBe('证据4')
+
+    const cnGroup = { ...group, perFileSeqType: 'chinese' }
+    const cnItems = buildHeaderFooterItems(files, { ...rules, _globalApply: true, _globalHeaderGroup: cnGroup }, '/out')
+    expect(cnItems[0].header.text).toBe('证据三')
+    expect(cnItems[1].header.text).toBe('证据四')
+
+    // Legacy groups without perFileSeqStart keep starting from 1
+    const legacyGroup = { ...createDefaultHeaderGroup(), mode: 'per_file' }
+    delete legacyGroup.perFileSeqStart
+    const legacyItems = buildHeaderFooterItems(files, { ...rules, _globalApply: true, _globalHeaderGroup: legacyGroup }, '/out')
+    expect(legacyItems[0].header.text).toBe('证据1')
+  })
+
+  it('page number content row carries the effective sequence from rules', () => {
+    // Global apply + per-file numbering: the file's own group stays 'continuous'
+    // (default), but the generated output follows rules.pageNumberSequence.
+    const file = createEvidenceFile('/case/合同.pdf')
+    const rules = {
+      insertHeaderFooterEnabled: true,
+      headerInsertEnabled: false,
+      footerInsertEnabled: false,
+      pageNumberEnabled: true,
+      pageNumberSequence: 'per-file',
+    }
+    const rows = buildFileContentRows(file, 0, rules)
+    const pn = rows.find((r) => r.kind === 'pageNumber')
+    expect(pn.sequence).toBe('per-file')
+    // The raw group keeps the file's own value so in-place editing still works
+    expect(pn.group.sequence).toBe('continuous')
+  })
 })

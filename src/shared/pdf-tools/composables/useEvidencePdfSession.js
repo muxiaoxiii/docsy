@@ -25,6 +25,7 @@ export function createDefaultHeaderGroup() {
     pageEnd: 0,
     perFilePrefix: '证据',
     perFileSeqType: 'numeric',
+    perFileSeqStart: 1,
   }
 }
 
@@ -275,6 +276,10 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
           id: `${kind}-${selectedGroup.id}`,
           text,
           group: selectedGroup,
+          // Effective sequence after the rules.pageNumberSequence override, so the
+          // list display matches the generated output; `group` keeps the file's
+          // own group object for in-place editing.
+          sequence: kind === 'pageNumber' ? effectiveGroup.sequence : undefined,
           pageStart: selectedGroup.pageStart || 1,
           pageEnd: selectedGroup.pageEnd || 0,
         })
@@ -300,6 +305,8 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
         id: `${kind}-${g.id}`,
         text,
         group: g,
+        // Same effective-sequence override as the selected group above
+        sequence: kind === 'pageNumber' ? effectiveExtraGroup.sequence : undefined,
         pageStart: g.pageStart || 1,
         pageEnd: g.pageEnd || 0,
       })
@@ -378,7 +385,11 @@ function headerBaseTextForGroup(file, index, group, _rules) {
   if (group.mode === 'per_file') {
     if (file.header !== undefined && file.header !== null) return file.header
     const prefix = group.perFilePrefix || '证据'
-    const seq = group.perFileSeqType === 'chinese' ? toChineseNumber(index + 1) : String(index + 1)
+    // Configurable sequence start (default 1). The UI clamps the input to >= 0;
+    // toChineseNumber(0) renders '零' and negatives fall back to plain digits.
+    const parsedStart = Number(group.perFileSeqStart)
+    const start = Number.isFinite(parsedStart) ? parsedStart : 1
+    const seq = group.perFileSeqType === 'chinese' ? toChineseNumber(index + start) : String(index + start)
     return `${prefix}${seq}`
   }
   if (group.mode === 'custom' || group.mode === 'template') return (group.text || _rules.headerText) ?? ''

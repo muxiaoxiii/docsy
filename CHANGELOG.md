@@ -2,6 +2,21 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.7-beta12] - 2026-08-10
+
+### 修复
+- **"每个文件单独编号"时列表页码与实际不一致**：全局应用开启后，实际生成与预览按规则覆盖后的编号方式（per-file 从 1 起）渲染，而文件列表仍按文件自带页码组的连续编号显示。列表行现在携带规则覆盖后的生效编号方式，三处显示一致。
+- **页眉页脚旧版撞名覆盖原文件隐患**：header_footer 旧路径在输出名冲突编号超限时可能覆盖原始文件，已随工具函数收敛一并修复。
+
+### 新增
+- **按证据列表页眉的序号起始设置**：页眉来源"按证据列表"时可在规则面板设置序号起始值（0–9999，默认 1），数字与中文序号均生效，预览与实际生成同步。
+
+### 变更
+- **Rust 工具函数收敛**：新建 `util/fs.rs` 统一 `same_path`/`temp_named_path`/`safe_file_stem`/`unique_output_path`/`TempPathGuard`/私有权限（0600）；`pdf/mod.rs` 改为 re-export，15 个子模块收窄为 `pub(crate)`；删除 `pdf/overlay.rs` 兼容 facade；`MANIFEST_CACHE` 下沉 `docx_template`；`read_image_data_url` 补 gif/ico 解码与 50MB 上限。
+- **文本归一化补强**：半角片假名（FF61–FF9F）经 NFKC 归一化；`glyph_to_char` 对多码点 uni 名按 AGL 规范返回 None；cmap 混合宽度 codespace 限制补注释说明。
+- **前端清理**：预览页脚去掉旧页脚短路、与 `buildHeaderFooterItems` 同源；删除死代码 `useHeaderFooterRules.js`；38 处后端错误统一经 `userFacingError` 上屏；`UndoRedoButtons.vue` 归入 `src/shared/components/`；eslint 浏览器 globals 补全。
+- **MDGA 文档**：beta9–beta11 完成项归档，孤儿文件（`useContentRowEditing.js`、`EvidenceOverlayTable.vue`）等新发现条目补记。
+
 ## [0.9.7-beta11] - 2026-08-10
 
 ### 修复

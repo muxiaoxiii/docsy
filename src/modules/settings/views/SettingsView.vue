@@ -144,7 +144,7 @@
 
 <script setup>
 import { computed, ref, reactive, onMounted } from 'vue'
-import { openExternalUrl, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { openExternalUrl, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -313,7 +313,7 @@ async function saveSettings() {
     window.dispatchEvent(new CustomEvent('docsy-settings-updated', { detail: payload }))
     ElMessage.success('设置已保存')
   } else {
-    ElMessage.error(result.error || '保存设置失败')
+    ElMessage.error(userFacingError(result.error, '保存设置失败'))
   }
 }
 
@@ -417,7 +417,7 @@ async function installTool(name) {
     await checkTools()
     await loadDiagnostic()
   } else {
-    ElMessage.error(result.error || '安装失败')
+    ElMessage.error(userFacingError(result.error, '安装失败'))
   }
   if (tool) tool.installing = false
 }
@@ -440,7 +440,7 @@ async function installToolFromPackage(name) {
     await checkTools()
     await loadDiagnostic()
   } else {
-    ElMessage.error(result.error || '安装失败')
+    ElMessage.error(userFacingError(result.error, '安装失败'))
   }
   if (tool) tool.installingLocal = false
 }
@@ -448,21 +448,21 @@ async function installToolFromPackage(name) {
 async function openLogDir() {
   const result = await tauriCallSafe('open_log_dir')
   if (!result.ok) {
-    ElMessage.error(result.error || '无法打开日志目录')
+    ElMessage.error(userFacingError(result.error, '无法打开日志目录'))
   }
 }
 
 async function openLogFile() {
   const result = await tauriCallSafe('open_log_file')
   if (!result.ok) {
-    ElMessage.error(result.error || '无法打开日志文件')
+    ElMessage.error(userFacingError(result.error, '无法打开日志文件'))
   }
 }
 
 async function openManagedToolsDir() {
   const result = await tauriCallSafe('open_managed_tools_dir')
   if (!result.ok) {
-    ElMessage.error(result.error || '无法打开工具目录')
+    ElMessage.error(userFacingError(result.error, '无法打开工具目录'))
   }
 }
 
@@ -483,7 +483,7 @@ async function removeManagedTool(tool) {
       ElMessage.success(result.data || '已清除')
       await checkTool(tool)
     } else {
-      ElMessage.error(result.error || '清除失败')
+      ElMessage.error(userFacingError(result.error, '清除失败'))
     }
   } finally {
     tool.removing = false
@@ -515,7 +515,7 @@ async function openToolDownload(tool) {
   }
   const result = await openExternalUrl(tool.downloadUrl)
   if (!result.ok) {
-    ElMessage.error(result.error || '无法打开下载页')
+    ElMessage.error(userFacingError(result.error, '无法打开下载页'))
   }
 }
 

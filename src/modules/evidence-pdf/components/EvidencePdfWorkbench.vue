@@ -186,6 +186,7 @@
           v-model:header-color="headerColor"
           v-model:header-per-file-prefix="headerPerFilePrefix"
           v-model:header-per-file-seq-type="headerPerFileSeqType"
+          v-model:header-per-file-seq-start="headerPerFileSeqStart"
           v-model:header-page-start="headerPageStart"
           v-model:header-page-end="headerPageEnd"
           :file-pages="selectedOverlayFile?.pages || 0"
@@ -679,6 +680,7 @@
         v-model:header-color="headerColor"
         v-model:header-per-file-prefix="headerPerFilePrefix"
         v-model:header-per-file-seq-type="headerPerFileSeqType"
+        v-model:header-per-file-seq-start="headerPerFileSeqStart"
         v-model:header-page-start="headerPageStart"
         v-model:header-page-end="headerPageEnd"
         :file-pages="selectedOverlayFile?.pages || 0"
@@ -1093,6 +1095,10 @@ const headerPerFilePrefix = computed({
 const headerPerFileSeqType = computed({
   get: () => selectedHeaderGroup.value.perFileSeqType || 'numeric',
   set: (v) => { selectedHeaderGroup.value.perFileSeqType = v },
+})
+const headerPerFileSeqStart = computed({
+  get: () => selectedHeaderGroup.value.perFileSeqStart ?? 1,
+  set: (v) => { selectedHeaderGroup.value.perFileSeqStart = v },
 })
 const headerPageStart = computed({
   get: () => selectedHeaderGroup.value.pageStart || 1,
@@ -1897,7 +1903,7 @@ async function openPlannedOutputDir() {
   if (!overlayFiles.value.length) return
   const result = await openPath(plannedOutputDir.value)
   if (!result.ok) {
-    ElMessage.error(result.error || '无法打开输出文件夹')
+    ElMessage.error(userFacingError(result.error, '无法打开输出文件夹'))
   }
 }
 
@@ -1906,7 +1912,7 @@ async function openEvidenceFile(row) {
   if (!path) return
   const result = await openPath(path)
   if (!result.ok) {
-    ElMessage.error(result.error || '无法打开 PDF 文件')
+    ElMessage.error(userFacingError(result.error, '无法打开 PDF 文件'))
   }
 }
 
@@ -2824,9 +2830,12 @@ function contentStatusTagType(status) {
 function displayContentRowText(file, index, cr) {
   if (cr.source === 'new') {
     if (cr.kind === 'pageNumber') {
-      // Show rendered page number
+      // Show rendered page number. Prefer the effective sequence stored by
+      // buildFileContentRows (rules.pageNumberSequence override applied, e.g.
+      // per-file numbering under global apply) — cr.group keeps the file's own
+      // group value for editing.
       const group = cr.group
-      const seq = group.sequence || 'continuous'
+      const seq = cr.sequence || group.sequence || 'continuous'
       const continuous = seq !== 'per-file'
       const page = continuous ? file.pageStart || 1 : 1
       const total = continuous ? totalOverlayPages.value : file.pages || 1

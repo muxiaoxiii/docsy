@@ -15,6 +15,16 @@ pub enum AntiCopyMethod {
     CmapRemove,
 }
 
+impl AntiCopyMethod {
+    /// 解析前端传入的 method 字符串；未知值回退到 CmapScramble（与历史行为一致）。
+    pub fn parse(method: &str) -> Self {
+        match method {
+            "cmap_remove" => Self::CmapRemove,
+            _ => Self::CmapScramble,
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AntiCopyDetection {
     pub has_protection: bool,

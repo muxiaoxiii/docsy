@@ -649,7 +649,7 @@ async function doMerge() {
       inputs: mergeFiles.value.map((file) => file.path),
       output: outputPath,
     })
-    result.ok ? ElMessage.success('合并完成') : ElMessage.error(result.error || 'PDF 合并失败，请确认文件未损坏且未被其他程序占用')
+    result.ok ? ElMessage.success('合并完成') : ElMessage.error(userFacingError(result.error, 'PDF 合并失败，请确认文件未损坏且未被其他程序占用'))
   }
   merging.value = false
 }
@@ -680,7 +680,7 @@ async function loadExtractFile(path) {
   if (pageCount.ok) {
     extractTotalPages.value = pageCount.data || 0
   } else {
-    ElMessage.error(pageCount.error || '读取页数失败')
+    ElMessage.error(userFacingError(pageCount.error, '读取页数失败'))
   }
 }
 
@@ -706,7 +706,7 @@ async function doExtractPages() {
   if (result.ok) {
     ElMessage.success(`已导出：${result.data.output_path}`)
   } else {
-    ElMessage.error(result.error || 'PDF 页面提取失败，请确认文件未损坏')
+    ElMessage.error(userFacingError(result.error, 'PDF 页面提取失败，请确认文件未损坏'))
   }
 }
 
@@ -735,7 +735,7 @@ async function doCompressPdf() {
   if (result.ok) {
     ElMessage.success(`已压缩：${result.data.output_path}`)
   } else {
-    ElMessage.error(result.error || 'PDF 压缩失败，请确认文件未损坏且磁盘空间充足')
+    ElMessage.error(userFacingError(result.error, 'PDF 压缩失败，请确认文件未损坏且磁盘空间充足'))
   }
 }
 
@@ -882,7 +882,7 @@ async function doSplitMerged() {
       ? ElMessage.warning(`已拆分 ${outputs} 个，失败 ${failed} 个`)
       : ElMessage.success(`已拆分 ${outputs} 个 PDF`)
   } else {
-    ElMessage.error(result.error || 'PDF 拆分失败，请确认文件未损坏且页码范围正确')
+    ElMessage.error(userFacingError(result.error, 'PDF 拆分失败，请确认文件未损坏且页码范围正确'))
   }
   splittingMerged.value = false
 }
