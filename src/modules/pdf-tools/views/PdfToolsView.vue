@@ -85,7 +85,7 @@
       <el-tab-pane label="压缩" name="compress" lazy>
         <ToolWorkspaceShell
           title="PDF 压缩整理"
-          description="重编码图片并压缩流、整理对象，大幅减小文件体积。"
+          description="无损整理结构，仅对超出清晰度需要的图片降采样，扫描件默认保持原画质。"
         >
           <template #toolbar>
             <el-button type="primary" @click="selectCompressFile">选择 PDF</el-button>
@@ -98,9 +98,9 @@
             <div class="compress-level-row">
               <span class="compress-level-label">压缩级别：</span>
               <el-radio-group v-model="compressLevel" size="default">
-                <el-radio-button :value="1">低（适合打印）</el-radio-button>
-                <el-radio-button :value="2">中（推荐）</el-radio-button>
-                <el-radio-button :value="3">高（适合屏幕）</el-radio-button>
+                <el-radio-button :value="1">清晰优先(推荐)</el-radio-button>
+                <el-radio-button :value="2">均衡</el-radio-button>
+                <el-radio-button :value="3">体积最小</el-radio-button>
               </el-radio-group>
             </div>
             <el-button type="success" :loading="compressing" :disabled="!compressFile" @click="doCompressPdf">
@@ -315,13 +315,14 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import { splitRangeWarnings } from '../../../shared/pdf-tools/composables/usePdfSplitRanges.js'
+import { sizeSavingText } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
 import { getPdfPageCount, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
@@ -467,7 +468,7 @@ const extractingPages = ref(false)
 const compressFile = ref('')
 const compressOutputDir = ref('')
 const compressing = ref(false)
-const compressLevel = ref(2)
+const compressLevel = ref(1)
 const splitFile = ref('')
 const splitOutputDir = ref('')
 const splitRanges = ref([])
@@ -733,7 +734,14 @@ async function doCompressPdf() {
   })
   compressing.value = false
   if (result.ok) {
-    ElMessage.success(`已压缩：${result.data.output_path}`)
+    const data = result.data || {}
+    const hasSizes = Number(data.input_size) > 0 && Number(data.output_size) >= 0
+    ElNotification({
+      type: 'success',
+      title: hasSizes ? `已压缩:${sizeSavingText(data.input_size, data.output_size)}` : 'PDF 压缩完成',
+      message: data.output_path ? `输出:${data.output_path}` : '',
+      duration: 6000,
+    })
   } else {
     ElMessage.error(userFacingError(result.error, 'PDF 压缩失败，请确认文件未损坏且磁盘空间充足'))
   }

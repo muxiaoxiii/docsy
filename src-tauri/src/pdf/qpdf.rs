@@ -33,6 +33,15 @@ pub struct UnlockResult {
 
 pub struct PdfOutputResult {
     pub output_path: String,
+    pub input_size: u64,
+    pub output_size: u64,
+}
+
+pub struct OptimizeResult {
+    pub output_path: String,
+    pub input_size: u64,
+    pub output_size: u64,
+    pub changed: bool,
 }
 
 pub fn inspect(path: &str) -> Result<InspectResult> {
@@ -158,8 +167,10 @@ pub fn compress(
         anyhow::bail!("PDF 文件不存在: {}", input);
     }
 
-    let level = level.unwrap_or(2);
+    let level = level.unwrap_or(1);
     let options = super::compress::CompressOptions::from_level(level);
+
+    let input_size = std::fs::metadata(input_path)?.len();
 
     // Step 1: 图片重编码压缩
     let temp_path = unique_output_path_in_dir(input_path, output_dir, "_imgtmp");
@@ -172,8 +183,11 @@ pub fn compress(
     // 清理临时文件
     let _ = std::fs::remove_file(&temp_path);
 
+    let output_size = std::fs::metadata(&output_path)?.len();
     Ok(PdfOutputResult {
         output_path: output_path.display().to_string(),
+        input_size,
+        output_size,
     })
 }
 
@@ -201,9 +215,10 @@ pub fn extract_pages(
     let bin = qpdf.binary_path()?;
     let output_path = unique_output_path_in_dir(input_path, output_dir, "_pages");
     let mut command = crate::external::hidden_command(&bin);
-    command.arg("--empty").arg("--pages").arg(input_path);
+    command.arg("--empty").arg("--pages");
+    // qpdf --pages 里每个文件名后只认一个页段，多页需重复文件名
     for page in pages {
-        command.arg(page.to_string());
+        command.arg(input_path).arg(page.to_string());
     }
     command.arg("--").arg(&output_path);
 
@@ -219,12 +234,76 @@ pub fn extract_pages(
         anyhow::bail!("qpdf 未生成页面提取输出文件");
     }
 
+    let input_size = std::fs::metadata(input_path)?.len();
+    let output_size = std::fs::metadata(&output_path)?.len();
     Ok(PdfOutputResult {
         output_path: output_path.display().to_string(),
+        input_size,
+        output_size,
     })
 }
 
-fn add_optimization_args(command: &mut std::process::Command) {
+/// 无损结构优化：按页重建（--empty --pages 1-z）丢弃页树不可达的垃圾对象。
+/// 输出 sibling 文件「（已优化）<stem>.pdf」；若无收益则删除输出并返回 changed=false。
+pub fn optimize_lossless(input: &str) -> Result<OptimizeResult> {
+    let input_path = Path::new(input);
+    if !input_path.exists() {
+        anyhow::bail!("PDF 文件不存在: {}", input);
+    }
+    let input_size = std::fs::metadata(input_path)?.len();
+
+    let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = input_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    let ext = input_path.extension().and_then(|e| e.to_str()).unwrap_or("pdf");
+    let output_path =
+        crate::util::fs::unique_output_path(parent, &format!("（已优化）{stem}"), ext);
+
+    let qpdf = crate::external::QpdfTool;
+    let bin = qpdf.binary_path()?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    add_optimization_args(&mut cmd);
+    cmd.arg("--empty")
+        .arg("--pages")
+        .arg(input_path)
+        .arg("1-z")
+        .arg("--")
+        .arg(&output_path);
+    let output = run_cancellable("无损优化", cmd)?;
+    if !status_is_success(&output.status) {
+        anyhow::bail!(
+            "qpdf 无损优化失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&output)
+        );
+    }
+    if !output_path.exists() {
+        anyhow::bail!("qpdf 未生成无损优化输出文件");
+    }
+
+    let output_size = std::fs::metadata(&output_path)?.len();
+    if output_size >= input_size {
+        // 优化无效：删除输出，回退原路径
+        let _ = std::fs::remove_file(&output_path);
+        return Ok(OptimizeResult {
+            output_path: input.to_string(),
+            input_size,
+            output_size: input_size,
+            changed: false,
+        });
+    }
+
+    Ok(OptimizeResult {
+        output_path: output_path.display().to_string(),
+        input_size,
+        output_size,
+        changed: true,
+    })
+}
+
+pub(crate) fn add_optimization_args(command: &mut std::process::Command) {
     command
         .arg("--object-streams=generate")
         .arg("--compress-streams=y")

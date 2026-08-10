@@ -74,6 +74,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         pdf::split_pdf,
         pdf::extract_pdf_pages,
         pdf::compress_pdf,
+        pdf::optimize_pdf_lossless,
         pdf::split_merged_evidence_pdf,
         pdf::scan_evidence_folder,
         pdf::build_evidence_group_pdfs,

@@ -158,6 +158,9 @@
             <label>删除批注对象</label>
             <el-switch v-model="removeAnnotations" active-text="启用" inactive-text="关闭" />
           </div>
+          <div class="rule-item">
+            <el-checkbox v-model="autoOptimizeOnImport">导入时自动优化体积(无损,不动原件)</el-checkbox>
+          </div>
         </div>
       </div>
 
@@ -861,6 +864,11 @@ import { useEvidencePdfPreview } from '../../../shared/pdf-tools/composables/use
 import { useEvidencePdfMergedImport } from '../../../shared/pdf-tools/composables/useEvidencePdfMergedImport.js'
 import { useEvidencePdfExistingEditing } from '../../../shared/pdf-tools/composables/useEvidencePdfExistingEditing.js'
 import { renderPageNumberTemplate } from '../../../shared/pdf-tools/composables/pdfPageNumberRules.js'
+import {
+  formatFileSize,
+  optimizeImportsLossless,
+  summarizeOptimizedImports,
+} from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
 import { elementIdentity } from '../../../shared/pdf-tools/composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import { openPath, tauriCallSafe, tauriCallQuiet, userFacingError } from '../../../core/tauriBridge.js'
@@ -932,6 +940,11 @@ const overlayProgressText = ref('')
 let overlayProgressTimer = null
 const quickCleanupRunning = ref(false)
 const evidenceDragging = ref(false)
+const AUTO_OPTIMIZE_ON_IMPORT_KEY = 'docsy.evidencePdf.autoOptimizeOnImport'
+const autoOptimizeOnImport = ref(window.localStorage.getItem(AUTO_OPTIMIZE_ON_IMPORT_KEY) !== '0')
+watch(autoOptimizeOnImport, (value) => {
+  window.localStorage.setItem(AUTO_OPTIMIZE_ON_IMPORT_KEY, value ? '1' : '0')
+})
 let quickCleanupPipeline = false
 const importingMergedPdf = ref(false)
 const splittingMergedImport = ref(false)
@@ -1846,7 +1859,18 @@ async function handleEvidenceDrop(paths) {
 
 async function loadEvidenceFiles(paths) {
   mergedImportPlan.value = null
-  overlayFiles.value = paths.map(createEvidenceFile)
+  let importPaths = paths
+  if (autoOptimizeOnImport.value) {
+    const decisions = await optimizeImportsLossless(paths)
+    importPaths = decisions.map((d) => d.path)
+    const summary = summarizeOptimizedImports(decisions)
+    if (summary.count > 0) {
+      ElMessage.success(
+        `已自动优化 ${summary.count} 个文件(共 ${formatFileSize(summary.inputSize)} → ${formatFileSize(summary.outputSize)});原件未修改,优化副本保存在原文件旁`,
+      )
+    }
+  }
+  overlayFiles.value = importPaths.map(createEvidenceFile)
   selectedOverlayIndex.value = 0
   await refreshOverlayPageCounts()
   await checkExistingBookmarks()

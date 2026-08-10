@@ -107,6 +107,16 @@ pub struct UnlockResult {
 #[derive(Debug, Serialize)]
 pub struct PdfOutputResult {
     pub output_path: String,
+    pub input_size: u64,
+    pub output_size: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OptimizeResult {
+    pub output_path: String,
+    pub input_size: u64,
+    pub output_size: u64,
+    pub changed: bool,
 }
 
 #[tauri::command]
@@ -141,6 +151,8 @@ pub async fn extract_pdf_pages(
     .await?;
     Ok(PdfOutputResult {
         output_path: result.output_path,
+        input_size: result.input_size,
+        output_size: result.output_size,
     })
 }
 
@@ -155,6 +167,19 @@ pub async fn compress_pdf(
             .await?;
     Ok(PdfOutputResult {
         output_path: result.output_path,
+        input_size: result.input_size,
+        output_size: result.output_size,
+    })
+}
+
+#[tauri::command]
+pub async fn optimize_pdf_lossless(input: String) -> Result<OptimizeResult, String> {
+    let result = run_blocking(move || crate::pdf::qpdf::optimize_lossless(&input)).await?;
+    Ok(OptimizeResult {
+        output_path: result.output_path,
+        input_size: result.input_size,
+        output_size: result.output_size,
+        changed: result.changed,
     })
 }
 

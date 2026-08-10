@@ -165,15 +165,16 @@ fn extract_range(
         output_path.clone()
     };
     let range = format!("{}-{}", item.page_start, item.page_end);
-    let status = crate::external::hidden_command(&bin)
-        .arg("--empty")
+    // 与压缩输出一致：按页重建时顺手做结构优化，丢弃不可达对象
+    let mut cmd = crate::external::hidden_command(&bin);
+    super::qpdf::add_optimization_args(&mut cmd);
+    cmd.arg("--empty")
         .arg("--pages")
         .arg(input_path)
         .arg(range)
         .arg("--")
-        .arg(&qpdf_output_path)
-        .status()
-        .context("执行 qpdf 页段拆分失败")?;
+        .arg(&qpdf_output_path);
+    let status = cmd.status().context("执行 qpdf 页段拆分失败")?;
 
     if !super::qpdf::status_is_success(&status) {
         anyhow::bail!("qpdf 页段拆分失败");
