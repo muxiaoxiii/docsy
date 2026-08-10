@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::{cmap::ToUnicodeCMap, same_path, temp_named_path};
+use super::{cmap::ToUnicodeCMap, same_path, temp_named_path, text_utils::normalize_for_match};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1149,17 +1149,7 @@ fn artifact_selector_text_matches(actual: &str, expected: &str) -> bool {
 }
 
 fn normalize_artifact_match_text(text: &str) -> String {
-    text.chars()
-        .filter_map(|character| {
-            let character = match character {
-                '０'..='９' => {
-                    char::from_u32(character as u32 - '０' as u32 + '0' as u32).unwrap_or(character)
-                }
-                _ => character,
-            };
-            (!character.is_whitespace()).then_some(character)
-        })
-        .collect()
+    normalize_for_match(text)
 }
 
 fn expand_artifact_replacement(template: &str, page: u32, total: u32) -> String {

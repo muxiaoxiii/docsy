@@ -5,7 +5,7 @@ use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::{cmap::ToUnicodeCMap, temp_named_path};
+use super::{cmap::ToUnicodeCMap, temp_named_path, text_utils::normalize_for_match};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PlainTextCleanupPlan {
@@ -605,7 +605,11 @@ fn object_text(
             .collect::<Vec<_>>();
         return String::from_utf16(&units).ok();
     }
-    String::from_utf8(bytes.clone()).ok()
+    // Ordinary content streams often use PDFDocEncoding or a legacy CJK
+    // single-byte encoding even when no ToUnicode CMap is attached. Reuse the
+    // artifact decoder here instead of silently treating those strings as
+    // undecodable; bbox fallback remains available when it still returns None.
+    super::artifacts::decode_pdf_string(object)
 }
 
 fn is_in_header_zone(y: f32, plan: &PagePlainTextPlan) -> bool {
@@ -698,22 +702,6 @@ fn placeholder_pattern_matches(text: &str, pattern: &str) -> bool {
     Regex::new(&regex)
         .map(|re| re.is_match(text))
         .unwrap_or(false)
-}
-
-fn normalize_for_match(text: &str) -> String {
-    text.chars()
-        .filter_map(|ch| {
-            let normalized = match ch {
-                '０'..='９' => char::from_u32(ch as u32 - '０' as u32 + '0' as u32).unwrap_or(ch),
-                _ => ch,
-            };
-            if normalized.is_whitespace() {
-                None
-            } else {
-                Some(normalized)
-            }
-        })
-        .collect()
 }
 
 fn mm_to_pt(mm: f32) -> f32 {
@@ -918,6 +906,19 @@ mod tests {
             filter_page_operations_with_cmaps(&operations, &plan, 1, &font_cmaps);
         assert_eq!(result.removed_header, 1);
         assert!(filtered.iter().all(|operation| operation.operator != "Tj"));
+    }
+
+    #[test]
+    fn decodes_pdf_doc_encoding_in_plain_content_streams() {
+        let operation = Operation::new(
+            "Tj",
+            vec![Object::String(
+                b"Header \x8dQuoted\x8e".to_vec(),
+                lopdf::StringFormat::Literal,
+            )],
+        );
+
+        assert_eq!(shown_text(&operation), Some("Header “Quoted”".to_string()));
     }
 
     #[test]

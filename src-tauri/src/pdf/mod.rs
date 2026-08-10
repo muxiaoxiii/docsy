@@ -16,6 +16,7 @@ pub mod preview;
 pub mod qpdf;
 pub(crate) mod qpdf_stream;
 pub mod split;
+pub(crate) mod text_utils;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};

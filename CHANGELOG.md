@@ -8,10 +8,12 @@
 - **预定义 CMap 资源**：内置 Adobe/PDF.js 预定义 CMap，支持通过 Encoding 与 CIDSystemInfo 严格组合 CID 到 Unicode 的映射。
 - **Glyph Name 回退**：嵌入字体没有可用 cmap 表时，使用 Adobe Glyph List 解析标准字形名；无法确认的字形继续判定为不可可靠编辑。
 - **PDF 解码可靠性测试**：覆盖 Adobe GB1、GB-EUC 预定义映射、变长 CMap、Glyph Name 和不完整映射拒绝场景。
+- **PDF 文本匹配增强**：共享 CJK、连字、不可见字符和 RTL 展示形态归一化；仅作用于检测/匹配表示，不改写原始内容流。
 
 ### 变更
 - **字体解码优先级**：显式 ToUnicode 优先，其次是满足结构条件的嵌入字体映射，最后才使用匹配 CIDSystemInfo 的预定义 CMap；不再使用 CID 直通 Unicode 或 Latin-1 猜测。
 - **内置资源打包**：预定义 CMap 随 Docsy 一起打包，离线处理不依赖外部 CMap 文件。
+- **普通内容流解码复用**：无 ToUnicode CMap 时，普通内容流复用 PDFDocEncoding 与遗留 CJK 解码回退，无法可靠解码时仍保留 bbox 保守路径。
 
 ## [0.9.7-beta7] - 2026-08-10
 
