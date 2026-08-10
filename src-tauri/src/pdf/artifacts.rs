@@ -371,12 +371,23 @@ fn inspect_artifact_operations_detailed_inner(
     while index < operations.len() {
         if let Some(region) = target_artifact_region(&operations[index], targets, properties) {
             if let Some(end) = matching_marked_content_end(operations, index) {
-                if artifact_range_has_meaningful_text(&operations[index + 1..end]) {
+                let property = artifact_property_dictionary(&operations[index], properties);
+                // /Contents is the alternate text of the marked content. Some
+                // producers (e.g. iText stamps) wrap only a form Do in the
+                // artifact range, so the range has no text-showing ops of its
+                // own; a non-empty /Contents still makes it meaningful.
+                let contents_text = property
+                    .and_then(|dict| dict.get(b"Contents").ok())
+                    .and_then(decode_pdf_string)
+                    .filter(|value| !value.trim().is_empty());
+                if artifact_range_has_meaningful_text(&operations[index + 1..end])
+                    || contents_text.is_some()
+                {
                     result.add_region(region);
-                    let property = artifact_property_dictionary(&operations[index], properties);
                     let text = property
                         .and_then(|dict| dict.get(b"ActualText").ok())
                         .and_then(decode_pdf_string)
+                        .or(contents_text)
                         .or_else(|| {
                             artifact_range_text(&operations[index + 1..end], fonts, font_cmaps)
                         });
@@ -2178,5 +2189,133 @@ mod tests {
     #[test]
     fn legacy_cjk_decode_rejects_pure_ascii() {
         assert_eq!(decode_legacy_cjk_pdf_string(b"page 1"), None);
+    }
+
+    #[test]
+    fn artifact_with_contents_but_only_form_do_is_meaningful() {
+        // iText-style stamp: the artifact range wraps only a form Do, and the
+        // label text lives in /Contents (GBK bytes for "证据13").
+        let operations = vec![
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Type" => "Pagination",
+                        "Subtype" => "Header",
+                        "Contents" => Object::String(
+                            vec![0xD6, 0xA4, 0xBE, 0xDD, b'1', b'3'],
+                            StringFormat::Literal,
+                        ),
+                    }),
+                ],
+            ),
+            Operation::new("q", vec![]),
+            Operation::new("Do", vec![Object::Name(b"KSPX3".to_vec())]),
+            Operation::new("Q", vec![]),
+            Operation::new("EMC", vec![]),
+        ];
+        let result = inspect_artifact_operations(&operations, &Dictionary::new());
+        assert_eq!(result.header_count, 1);
+        assert_eq!(result.occurrences.len(), 1);
+        assert_eq!(result.occurrences[0].text.as_deref(), Some("证据13"));
+    }
+
+    #[test]
+    fn artifact_without_contents_and_without_text_is_still_skipped() {
+        let operations = vec![
+            Operation::new(
+                "BDC",
+                vec![
+                    Object::Name(b"Artifact".to_vec()),
+                    Object::Dictionary(dictionary! {
+                        "Type" => "Pagination",
+                        "Subtype" => "Header",
+                    }),
+                ],
+            ),
+            Operation::new("q", vec![]),
+            Operation::new("Do", vec![Object::Name(b"Fm0".to_vec())]),
+            Operation::new("Q", vec![]),
+            Operation::new("EMC", vec![]),
+        ];
+        let result = inspect_artifact_operations(&operations, &Dictionary::new());
+        assert_eq!(result.header_count, 0);
+        assert!(result.occurrences.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod repro_artifact_tests {
+    #[test]
+    #[ignore = "requires the local PDF fixture directory and qpdf"]
+    fn evidence13_do_only_artifact_is_detected_via_contents() {
+        // This fixture stamps "证据１３" as a Pagination/Header artifact whose
+        // marked-content range wraps only a form Do; the label text lives in
+        // the /Contents entry (GBK bytes).
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("test-pdf/4W122724 I D1-D14/13 证据 13. 中航试金石检测科技（大厂）有限公司 R-D-M-26-003139 检测报告.pdf");
+        if !path.exists() {
+            eprintln!("skipping: fixture not found");
+            return;
+        }
+        let result = super::inspect_meaningful_header_footer_artifacts(&path, 2).unwrap();
+        let label = result
+            .occurrences
+            .iter()
+            .find(|o| o.text.as_deref() == Some("证据13"));
+        assert!(
+            label.is_some(),
+            "expected the 证据13 header artifact via /Contents, got {:?}",
+            result
+                .occurrences
+                .iter()
+                .map(|o| (o.page, o.region.to_string(), o.text.clone()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(label.unwrap().page, 1);
+        assert_eq!(label.unwrap().region, "header");
+    }
+
+    #[test]
+    #[ignore = "requires the local PDF fixture directory and qpdf"]
+    fn evidence13_do_only_artifact_is_deleted() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("test-pdf/4W122724 I D1-D14/13 证据 13. 中航试金石检测科技（大厂）有限公司 R-D-M-26-003139 检测报告.pdf");
+        if !path.exists() {
+            eprintln!("skipping: fixture not found");
+            return;
+        }
+        let result = super::edit_header_footer_artifacts_to_temp(
+            &path.to_string_lossy(),
+            &super::HeaderFooterArtifactEditPlan {
+                remove_header: true,
+                remove_footer: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let Some((edited, stats)) = result else {
+            panic!("expected the Do-only header artifact to be deleted");
+        };
+        assert!(stats.removed_header >= 1, "stats: {stats:?}");
+        // The edited file must no longer report the artifact.
+        let after = super::inspect_meaningful_header_footer_artifacts(&edited, 2).unwrap();
+        assert!(
+            after
+                .occurrences
+                .iter()
+                .all(|o| o.text.as_deref() != Some("证据13")),
+            "artifact still present after deletion: {:?}",
+            after
+                .occurrences
+                .iter()
+                .map(|o| o.text.clone())
+                .collect::<Vec<_>>()
+        );
     }
 }

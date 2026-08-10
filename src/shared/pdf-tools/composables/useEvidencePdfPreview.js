@@ -62,10 +62,16 @@ export function useEvidencePdfPreview({
     if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
     if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
     const file = selectedOverlayFile.value
-    // 优先使用文件列表里已确定的页眉文本（来自 existingElements 的选择）
-    if (file.existingHeaderText) return file.existingHeaderText
-    const group = selectedGroupFor(file, 'header')
-    return group ? buildHeaderTextForGroup(file, selectedOverlayIndex.value, group, currentRules.value) : ''
+    // Mirror buildHeaderFooterItems: global group wins when global apply is on,
+    // and rules.headerMode overrides the group's own mode. The detected
+    // existing header must not short-circuit here — processing writes the new
+    // rule text regardless of file.existingHeaderText.
+    const rules = currentRules.value
+    const group = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
+    if (!group || group.enabled === false) return ''
+    const mode = rules.headerMode !== undefined ? rules.headerMode : group.mode
+    if (mode === 'none') return ''
+    return buildHeaderTextForGroup(file, selectedOverlayIndex.value, { ...group, mode }, rules)
   })
 
   const previewFooterText = computed(() => {

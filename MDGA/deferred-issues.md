@@ -75,6 +75,15 @@ lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normali
 - `normalize_for_match` 的全角映射只覆盖 `FF01–FF5E`（全角 ASCII）；半角片假名（`FF61–FF9F`）不归一化，除非输入碰巧含 RTL 展示形式触发了 NFKC。
 - 遗留 CJK 编码打分（`artifacts.rs::legacy_cjk_candidate_score`）是启发式：常用字表只覆盖高频文书用字，生僻内容或纯繁体古文仍可能误判编码；韩语常用音节表同理。如出现误判案例，优先扩充对应常用字表。
 
+### 12a. 预览页脚也存在同类短路（轻微，beta11 只修了页眉）
+`useEvidencePdfPreview.js` 的 `previewFooterText` 仍有 `file.existingFooterText` 优先短路（约 L77）：检测过的文件在设置新页脚规则后，预览可能显示旧页脚而非实际生成文本。beta11 修复页眉时未一并处理（页脚带 `{page}` 占位符展开，改动面更大）。同理可对照 `buildHeaderFooterItems` 的页脚逻辑对齐。
+
+### 12b. `useHeaderFooterRules.js` 是死代码（P3）
+`src/modules/evidence-pdf/composables/useHeaderFooterRules.js` 全仓库无人 import；`EvidencePdfWorkbench.vue` 内联了一份逐字重复的实现（group computeds 959–1045、currentRules 1561–1640、mode watch 1303–1321）。两份副本靠手工保持同步（本次 preview bug 排查时已确认逻辑一致），应删除 composable 或让 workbench 改用它。
+
+### 12c. 普通文本删除路径不组合 CTM（已知限制）
+`content_text.rs` 的 bbox 兜底匹配在嵌套 Form（带 `cm` 变换）内坐标不组合，导致无法解码的文本在深层 Form 中既匹配不了文本也对不上 bbox。beta11 通过 artifact `/Contents` 通道覆盖了 iText 印章类文件；非 artifact 的深层嵌套文本仍是保守跳过（告警不改动原文）。如需支持，要在 `QpdfStreamUsageSeed` 里累积 CTM。
+
 ---
 
 ## 三、前端
