@@ -12,6 +12,9 @@ use std::path::Path;
 
 use super::qpdf_stream::{self, QpdfObjectIndex};
 
+static BUILTIN_CMAPS: include_dir::Dir<'_> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/external/bcmaps");
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CodeSpaceRange {
     start: Vec<u8>,
@@ -121,6 +124,17 @@ fn build_identity_cid_cmap(font_data: &[u8]) -> Option<ToUnicodeCMap> {
             // in fonts and do not provide a better answer for a CID.
             gid_to_unicode.entry(gid.0).or_insert(character);
         });
+    }
+    if gid_to_unicode.is_empty() {
+        for gid in 0..face.number_of_glyphs() {
+            let glyph_id = ttf_parser::GlyphId(gid);
+            let Some(name) = face.glyph_name(glyph_id) else {
+                continue;
+            };
+            if let Some(character) = super::glyph_names::glyph_to_char(name) {
+                gid_to_unicode.entry(gid).or_insert(character);
+            }
+        }
     }
     if gid_to_unicode.is_empty() {
         return None;
@@ -396,7 +410,8 @@ pub(crate) fn load_font_cmaps(
     let font_refs = index.font_references();
     let cmap_refs = index.to_unicode_stream_references(&font_refs);
     let embedded_font_refs = index.identity_cid_font_stream_references(&font_refs);
-    if cmap_refs.is_empty() && embedded_font_refs.is_empty() {
+    let predefined_font_info = index.predefined_font_info(&font_refs);
+    if cmap_refs.is_empty() && embedded_font_refs.is_empty() && predefined_font_info.is_empty() {
         return Ok(BTreeMap::new());
     }
     let stream_refs = cmap_refs
@@ -442,7 +457,474 @@ pub(crate) fn load_font_cmaps(
             maps.insert(font_ref, cmap);
         }
     }
+
+    // Finally use the PDF specification's predefined CMap chain.  This is
+    // deliberately last: an explicit ToUnicode map or a deterministic
+    // embedded-font map has stronger evidence.  A predefined map is accepted
+    // only when both halves of the chain are present and parse completely.
+    for (font_ref, info) in predefined_font_info {
+        if maps.contains_key(&font_ref) {
+            continue;
+        }
+        if let Some(cmap) = build_predefined_font_cmap(&info.encoding, &info.ordering) {
+            log::debug!(
+                "从 PDF 预定义 CMap 建立字体映射 font={} entries={}",
+                font_ref,
+                cmap.mappings.len()
+            );
+            maps.insert(font_ref, cmap);
+        }
+    }
     Ok(maps)
+}
+
+fn build_predefined_font_cmap(
+    encoding: &Option<String>,
+    ordering: &Option<String>,
+) -> Option<ToUnicodeCMap> {
+    let encoding_name = encoding.as_deref()?;
+
+    let ordering = ordering.as_deref()?;
+    let cid_to_unicode = load_builtin_tounicode_cmap(&format!("Adobe-{ordering}-UCS2"))?;
+    if matches!(encoding_name, "Identity-H" | "Identity-V") {
+        return Some(cid_to_unicode);
+    }
+    let code_to_cid = load_builtin_encoding_cmap(encoding_name)?;
+    compose_encoding_and_unicode(code_to_cid, cid_to_unicode)
+}
+
+fn load_builtin_tounicode_cmap(name: &str) -> Option<ToUnicodeCMap> {
+    let data = BUILTIN_CMAPS.get_file(format!("{name}.bcmap"))?.contents();
+    let mut cmap = match parse_binary_tounicode_cmap(data) {
+        Ok(cmap) => cmap,
+        Err(error) => {
+            log::debug!("跳过无法解析的预定义 CMap {name}: {error:#}");
+            return None;
+        }
+    };
+    if cmap.mappings.is_empty() || cmap.code_spaces.is_empty() {
+        return None;
+    }
+    cmap.code_spaces
+        .sort_by_key(|range| std::cmp::Reverse(range.start.len()));
+    Some(cmap)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EncodingCMap {
+    mappings: BTreeMap<Vec<u8>, Vec<u8>>,
+    code_byte_length: usize,
+}
+
+fn load_builtin_encoding_cmap(name: &str) -> Option<EncodingCMap> {
+    let data = BUILTIN_CMAPS.get_file(format!("{name}.bcmap"))?.contents();
+    parse_binary_encoding_cmap(data).ok()
+}
+
+fn compose_encoding_and_unicode(
+    encoding: EncodingCMap,
+    cid_to_unicode: ToUnicodeCMap,
+) -> Option<ToUnicodeCMap> {
+    let mut mappings = BTreeMap::new();
+    for (code, cid_bytes) in encoding.mappings {
+        let unicode = cid_to_unicode.decode(&cid_bytes)?;
+        mappings.insert(code, unicode);
+    }
+    if mappings.is_empty() {
+        return None;
+    }
+    Some(ToUnicodeCMap {
+        code_spaces: vec![CodeSpaceRange {
+            start: vec![0; encoding.code_byte_length],
+            end: vec![u8::MAX; encoding.code_byte_length],
+        }],
+        mappings,
+    })
+}
+
+fn parse_binary_tounicode_cmap(data: &[u8]) -> Result<ToUnicodeCMap> {
+    let mut stream = BinaryCMapStream::new(data);
+    stream.read_byte().context("bcmap 缺少头部")?;
+    let mut cmap = ToUnicodeCMap {
+        code_spaces: Vec::new(),
+        mappings: BTreeMap::new(),
+    };
+    let mut use_cmap = None;
+    while let Some(command) = stream.read_byte() {
+        if command >> 5 == 7 {
+            match command & 0x1f {
+                0 => {
+                    let _ = stream.read_string()?;
+                }
+                1 => use_cmap = Some(stream.read_string()?),
+                _ => {}
+            }
+            continue;
+        }
+        let kind = command >> 5;
+        let sequence = command & 0x10 != 0;
+        let data_size = usize::from(command & 0x0f);
+        let count = stream.read_number()? as usize;
+        match kind {
+            0 => {
+                for _ in 0..count {
+                    let start = stream.read_hex_fixed(data_size)?;
+                    let mut end = stream.read_hex_number(data_size)?;
+                    add_big_endian_wrap(&mut end, &start);
+                    cmap.code_spaces.push(CodeSpaceRange { start, end });
+                }
+            }
+            4 => {
+                let mut source = stream.read_hex_fixed(1)?;
+                let mut destination = stream.read_hex_fixed(data_size)?;
+                cmap.mappings.insert(
+                    source.clone(),
+                    decode_binary_unicode(&destination).context("bcmap bfchar Unicode 目标无效")?,
+                );
+                for _ in 1..count {
+                    increment_fixed(&mut source)?;
+                    if !sequence {
+                        let delta = stream.read_hex_number(1)?;
+                        add_big_endian_wrap(&mut source, &delta);
+                    }
+                    increment_fixed(&mut destination)?;
+                    let delta = stream.read_hex_signed(data_size)?;
+                    add_big_endian_wrap(&mut destination, &delta);
+                    cmap.mappings.insert(
+                        source.clone(),
+                        decode_binary_unicode(&destination)
+                            .context("bcmap bfchar Unicode 目标无效")?,
+                    );
+                }
+            }
+            5 => {
+                let mut start = stream.read_hex_fixed(1)?;
+                let mut end = stream.read_hex_number(1)?;
+                add_big_endian_wrap(&mut end, &start);
+                let destination = stream.read_hex_fixed(data_size)?;
+                add_binary_bfrange(&mut cmap.mappings, &start, &end, &destination)?;
+                for _ in 1..count {
+                    increment_fixed(&mut end)?;
+                    if !sequence {
+                        start = stream.read_hex_number(1)?;
+                        add_big_endian_wrap(&mut start, &end);
+                    } else {
+                        start = end.clone();
+                    }
+                    let mut next_end = stream.read_hex_number(1)?;
+                    add_big_endian_wrap(&mut next_end, &start);
+                    end = next_end;
+                    let destination = stream.read_hex_fixed(data_size)?;
+                    add_binary_bfrange(&mut cmap.mappings, &start, &end, &destination)?;
+                }
+            }
+            1 => {
+                for _ in 0..count {
+                    let _ = stream.read_hex_fixed(data_size)?;
+                    let _ = stream.read_hex_number(data_size)?;
+                    let _ = stream.read_number()?;
+                }
+            }
+            _ => anyhow::bail!("bcmap ToUnicode 包含不支持的类型 {kind}"),
+        }
+    }
+    if cmap.code_spaces.is_empty() {
+        cmap.code_spaces.push(CodeSpaceRange {
+            start: vec![0, 0],
+            end: vec![u8::MAX, u8::MAX],
+        });
+    }
+    if let Some(name) = use_cmap {
+        if let Some(base) = load_builtin_tounicode_cmap(&name) {
+            cmap = merge_tounicode_cmaps(base, cmap);
+        }
+    }
+    Ok(cmap)
+}
+
+fn decode_binary_unicode(bytes: &[u8]) -> Option<String> {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(2) {
+        return None;
+    }
+    let units = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&units)
+        .ok()
+        .filter(|text| !text.is_empty())
+}
+
+fn add_binary_bfrange(
+    mappings: &mut BTreeMap<Vec<u8>, String>,
+    start: &[u8],
+    end: &[u8],
+    destination: &[u8],
+) -> Result<()> {
+    let base = decode_binary_unicode(destination).context("bcmap bfrange Unicode 目标无效")?;
+    let mut source = start.to_vec();
+    let mut offset = 0_u64;
+    loop {
+        mappings.insert(source.clone(), increment_unicode(base.clone(), offset)?);
+        if source == end {
+            break;
+        }
+        increment_fixed(&mut source)?;
+        offset += 1;
+    }
+    Ok(())
+}
+
+fn merge_tounicode_cmaps(mut base: ToUnicodeCMap, overlay: ToUnicodeCMap) -> ToUnicodeCMap {
+    base.code_spaces.extend(overlay.code_spaces);
+    base.mappings.extend(overlay.mappings);
+    base
+}
+
+fn parse_binary_encoding_cmap(data: &[u8]) -> Result<EncodingCMap> {
+    let mut stream = BinaryCMapStream::new(data);
+    stream.read_byte().context("bcmap 缺少头部")?;
+    let mut mappings = BTreeMap::new();
+    let mut code_byte_length = 1_usize;
+    let mut use_cmap = None;
+    while let Some(command) = stream.read_byte() {
+        if command >> 5 == 7 {
+            match command & 0x1f {
+                0 => {
+                    let _ = stream.read_string()?;
+                }
+                1 => use_cmap = Some(stream.read_string()?),
+                _ => {}
+            }
+            continue;
+        }
+        let kind = command >> 5;
+        let sequence = command & 0x10 != 0;
+        let data_size = usize::from(command & 0x0f);
+        code_byte_length = code_byte_length.max(data_size + 1);
+        let count = stream.read_number()? as usize;
+        match kind {
+            2 => {
+                let mut code = stream.read_hex_fixed(data_size)?;
+                let mut cid = stream.read_number()? as i64;
+                mappings.insert(code.clone(), encode_number(cid as u32, 2));
+                for _ in 1..count {
+                    increment_fixed(&mut code)?;
+                    if !sequence {
+                        let delta = stream.read_hex_number(data_size)?;
+                        add_big_endian_wrap(&mut code, &delta);
+                    }
+                    cid += i64::from(stream.read_signed()?) + 1;
+                    if !(0..=u16::MAX as i64).contains(&cid) {
+                        anyhow::bail!("bcmap CID 超出范围")
+                    }
+                    mappings.insert(code.clone(), encode_number(cid as u32, 2));
+                }
+            }
+            3 => {
+                let mut start = stream.read_hex_fixed(data_size)?;
+                let mut end = stream.read_hex_number(data_size)?;
+                add_big_endian_wrap(&mut end, &start);
+                let mut cid = stream.read_number()? as u16;
+                add_binary_cid_range(&mut mappings, &start, &end, cid)?;
+                for _ in 1..count {
+                    increment_fixed(&mut end)?;
+                    if !sequence {
+                        start = stream.read_hex_number(data_size)?;
+                        add_big_endian_wrap(&mut start, &end);
+                    } else {
+                        start = end.clone();
+                    }
+                    let mut next_end = stream.read_hex_number(data_size)?;
+                    add_big_endian_wrap(&mut next_end, &start);
+                    end = next_end;
+                    cid = stream.read_number()? as u16;
+                    add_binary_cid_range(&mut mappings, &start, &end, cid)?;
+                }
+            }
+            0 | 1 => {
+                for _ in 0..count {
+                    let _ = stream.read_hex_fixed(data_size)?;
+                    let _ = stream.read_hex_number(data_size)?;
+                    if kind == 1 {
+                        let _ = stream.read_number()?;
+                    }
+                }
+            }
+            _ => anyhow::bail!("bcmap 编码包含不支持的类型 {kind}"),
+        }
+    }
+    if let Some(name) = use_cmap {
+        if let Some(base) = load_builtin_encoding_cmap(&name) {
+            let mut merged = base.mappings;
+            merged.extend(mappings);
+            return Ok(EncodingCMap {
+                mappings: merged,
+                code_byte_length: code_byte_length.max(base.code_byte_length),
+            });
+        }
+    }
+    if mappings.is_empty() {
+        anyhow::bail!("bcmap 编码映射为空")
+    }
+    Ok(EncodingCMap {
+        mappings,
+        code_byte_length,
+    })
+}
+
+fn add_binary_cid_range(
+    mappings: &mut BTreeMap<Vec<u8>, Vec<u8>>,
+    start: &[u8],
+    end: &[u8],
+    mut cid: u16,
+) -> Result<()> {
+    let mut code = start.to_vec();
+    loop {
+        mappings.insert(code.clone(), encode_number(u32::from(cid), 2));
+        if code == end {
+            break;
+        }
+        increment_fixed(&mut code)?;
+        cid = cid.checked_add(1).context("bcmap CID 溢出")?;
+    }
+    Ok(())
+}
+
+fn encode_number(value: u32, width: usize) -> Vec<u8> {
+    let mut output = vec![0; width];
+    let bytes = value.to_be_bytes();
+    let start = bytes.len().saturating_sub(width);
+    output.copy_from_slice(&bytes[start..]);
+    output
+}
+
+fn add_big_endian_wrap(left: &mut [u8], right: &[u8]) {
+    if left.len() != right.len() {
+        return;
+    }
+    let mut carry = 0_u16;
+    for index in (0..left.len()).rev() {
+        let value = u16::from(left[index]) + u16::from(right[index]) + carry;
+        left[index] = value as u8;
+        carry = value >> 8;
+    }
+}
+
+fn increment_fixed(bytes: &mut [u8]) -> Result<()> {
+    for byte in bytes.iter_mut().rev() {
+        if *byte < u8::MAX {
+            *byte += 1;
+            return Ok(());
+        }
+        *byte = 0;
+    }
+    anyhow::bail!("bcmap 数值溢出")
+}
+
+struct BinaryCMapStream<'a> {
+    data: &'a [u8],
+    position: usize,
+}
+
+impl<'a> BinaryCMapStream<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, position: 0 }
+    }
+
+    fn read_byte(&mut self) -> Option<u8> {
+        let byte = *self.data.get(self.position)?;
+        self.position += 1;
+        Some(byte)
+    }
+
+    fn read_hex_fixed(&mut self, width_minus_one: usize) -> Result<Vec<u8>> {
+        self.read_bytes(width_minus_one + 1)
+    }
+
+    fn read_bytes(&mut self, length: usize) -> Result<Vec<u8>> {
+        let end = self
+            .position
+            .checked_add(length)
+            .context("bcmap 数据长度溢出")?;
+        let value = self
+            .data
+            .get(self.position..end)
+            .context("bcmap 数据提前结束")?
+            .to_vec();
+        self.position = end;
+        Ok(value)
+    }
+
+    fn read_number(&mut self) -> Result<u32> {
+        let mut value = 0_u32;
+        loop {
+            let byte = self.read_byte().context("bcmap 数字提前结束")?;
+            value = value
+                .checked_shl(7)
+                .and_then(|value| value.checked_add(u32::from(byte & 0x7f)))
+                .context("bcmap 数字溢出")?;
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+        }
+    }
+
+    fn read_hex_number(&mut self, width_minus_one: usize) -> Result<Vec<u8>> {
+        let mut chunks = Vec::new();
+        loop {
+            let byte = self.read_byte().context("bcmap 十六进制数字提前结束")?;
+            chunks.push(byte & 0x7f);
+            if byte & 0x80 == 0 {
+                break;
+            }
+        }
+        let width = width_minus_one + 1;
+        let mut output = vec![0; width];
+        let mut buffer = 0_u32;
+        let mut buffered_bits = 0_u32;
+        for index in (0..width).rev() {
+            while buffered_bits < 8 && !chunks.is_empty() {
+                let chunk = chunks.pop().unwrap();
+                buffer |= u32::from(chunk) << buffered_bits;
+                buffered_bits += 7;
+            }
+            output[index] = buffer as u8;
+            buffer >>= 8;
+            buffered_bits = buffered_bits.saturating_sub(8);
+        }
+        Ok(output)
+    }
+
+    fn read_hex_signed(&mut self, width_minus_one: usize) -> Result<Vec<u8>> {
+        let mut value = self.read_hex_number(width_minus_one)?;
+        let sign = value.last().copied().unwrap_or_default() & 1 != 0;
+        let mut carry = 0_u16;
+        for byte in &mut value {
+            let current = (carry << 8) | u16::from(*byte);
+            *byte = (current >> 1) as u8 ^ if sign { u8::MAX } else { 0 };
+            carry = current & 1;
+        }
+        Ok(value)
+    }
+
+    fn read_signed(&mut self) -> Result<i32> {
+        let value = self.read_number()?;
+        let magnitude = (value >> 1) as i32;
+        Ok(if value & 1 == 0 {
+            magnitude
+        } else {
+            !magnitude
+        })
+    }
+
+    fn read_string(&mut self) -> Result<String> {
+        let length = self.read_number()? as usize;
+        let bytes = (0..length)
+            .map(|_| self.read_number().map(|value| value as u8))
+            .collect::<Result<Vec<_>>>()?;
+        String::from_utf8(bytes).context("bcmap 名称不是 UTF-8")
+    }
 }
 
 #[cfg(test)]
@@ -530,5 +1012,52 @@ mod tests {
     #[test]
     fn invalid_embedded_font_is_not_guessed() {
         assert!(build_identity_cid_cmap(b"not-a-font").is_none());
+    }
+
+    #[test]
+    fn loads_embedded_adobe_ucs2_maps() {
+        let cmap = load_builtin_tounicode_cmap("Adobe-GB1-UCS2").unwrap();
+        assert!(cmap.mapping_count() > 100);
+        assert_eq!(cmap.code_spaces.len(), 1);
+    }
+
+    #[test]
+    fn composes_predefined_encoding_and_ucs2_maps() {
+        let cmap =
+            build_predefined_font_cmap(&Some("GB-EUC-H".to_string()), &Some("GB1".to_string()))
+                .unwrap();
+        assert!(cmap.mapping_count() > 100);
+    }
+
+    #[test]
+    fn glyph_name_mapping_is_available_for_font_fallbacks() {
+        assert_eq!(
+            super::super::glyph_names::glyph_to_char("Aacute"),
+            Some('Á')
+        );
+        assert_eq!(
+            super::super::glyph_names::glyph_to_char("uni4E2D"),
+            Some('中')
+        );
+    }
+
+    #[test]
+    fn bundled_cmap_resources_are_parseable() {
+        let mut parsed = 0;
+        let mut failures = Vec::new();
+        for file in BUILTIN_CMAPS.files() {
+            if file.path().extension().and_then(|value| value.to_str()) != Some("bcmap") {
+                continue;
+            }
+            let data = file.contents();
+            if parse_binary_tounicode_cmap(data).is_ok() || parse_binary_encoding_cmap(data).is_ok()
+            {
+                parsed += 1;
+            } else {
+                failures.push(file.path().display().to_string());
+            }
+        }
+        assert!(failures.is_empty(), "无法解析的内置 CMap: {failures:?}");
+        assert!(parsed >= 160, "内置 CMap 资源数量异常: {parsed}");
     }
 }

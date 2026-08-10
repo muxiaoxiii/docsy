@@ -39,6 +39,12 @@ pub(crate) struct QpdfObjectIndex {
     pages: Vec<QpdfIndexedPage>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PredefinedFontInfo {
+    pub encoding: Option<String>,
+    pub ordering: Option<String>,
+}
+
 impl QpdfObjectIndex {
     pub(crate) fn load(input: &Path) -> Result<Self> {
         let qpdf_bin = crate::external::QpdfTool.binary_path()?;
@@ -212,6 +218,40 @@ impl QpdfObjectIndex {
             .collect()
     }
 
+    /// Return the PDF-defined Encoding and CIDSystemInfo/Ordering for Type0
+    /// fonts.  These values are metadata for selecting a predefined CMap; they
+    /// are never treated as text by themselves.
+    pub(crate) fn predefined_font_info(
+        &self,
+        font_refs: &BTreeSet<String>,
+    ) -> BTreeMap<String, PredefinedFontInfo> {
+        font_refs
+            .iter()
+            .filter_map(|font_ref| {
+                let font = self.object_dictionary(font_ref)?;
+                if font.get("/Subtype").and_then(Value::as_str) != Some("/Type0") {
+                    return None;
+                }
+                let descendants = self.resolve_array(font.get("/DescendantFonts")?)?;
+                let descendant_ref = descendants.first()?.as_str()?;
+                let descendant = self.object_dictionary(descendant_ref)?;
+                let system_info = self.resolve_dictionary(descendant.get("/CIDSystemInfo")?);
+                let ordering = system_info
+                    .and_then(|dict| dict.get("/Ordering"))
+                    .and_then(qpdf_string)
+                    .map(|value| value.trim_start_matches('/').to_string());
+                let encoding = font
+                    .get("/Encoding")
+                    .and_then(Value::as_str)
+                    .map(|value| value.trim_start_matches('/').to_string());
+                if encoding.is_none() && ordering.is_none() {
+                    return None;
+                }
+                Some((font_ref.clone(), PredefinedFontInfo { encoding, ordering }))
+            })
+            .collect()
+    }
+
     pub(crate) fn form_properties(&self, object_ref: &str) -> Dictionary {
         let resources = self
             .object_dictionary(object_ref)
@@ -338,6 +378,12 @@ impl QpdfObjectIndex {
         }
         output
     }
+}
+
+fn qpdf_string(value: &Value) -> Option<&str> {
+    value
+        .as_str()
+        .map(|value| value.strip_prefix("u:").unwrap_or(value))
 }
 
 fn json_to_lopdf_object(value: &Value, objects: &Map<String, Value>) -> Option<Object> {

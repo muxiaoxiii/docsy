@@ -1,6 +1,6 @@
 [package]
 name = "docsy"
-version = "0.9.7-beta7"
+version = "0.9.7-beta8"
 description = "Docsy - 轻量文档处理工具箱"
 authors = ["木小樨 <muxiaoxi>"]
 edition = "2021"
@@ -24,6 +24,7 @@ thiserror = "2"
 zip = "0.6"
 sevenz-rust = "0.6"
 regex = "1"
+include_dir = "0.7"
 dirs = "5"
 reqwest = { version = "0.12", features = ["blocking"] }
 sha2 = "0.10"

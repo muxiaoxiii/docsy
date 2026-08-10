@@ -2,6 +2,17 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.7-beta8] - 2026-08-10
+
+### 新增
+- **预定义 CMap 资源**：内置 Adobe/PDF.js 预定义 CMap，支持通过 Encoding 与 CIDSystemInfo 严格组合 CID 到 Unicode 的映射。
+- **Glyph Name 回退**：嵌入字体没有可用 cmap 表时，使用 Adobe Glyph List 解析标准字形名；无法确认的字形继续判定为不可可靠编辑。
+- **PDF 解码可靠性测试**：覆盖 Adobe GB1、GB-EUC 预定义映射、变长 CMap、Glyph Name 和不完整映射拒绝场景。
+
+### 变更
+- **字体解码优先级**：显式 ToUnicode 优先，其次是满足结构条件的嵌入字体映射，最后才使用匹配 CIDSystemInfo 的预定义 CMap；不再使用 CID 直通 Unicode 或 Latin-1 猜测。
+- **内置资源打包**：预定义 CMap 随 Docsy 一起打包，离线处理不依赖外部 CMap 文件。
+
 ## [0.9.7-beta7] - 2026-08-10
 
 ### 新增

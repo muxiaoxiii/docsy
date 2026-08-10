@@ -161,6 +161,20 @@ Docsy 所有处理都在本地完成，不联网、不上传、不收集任何�
 
 ---
 
+## 🙏 开源项目致谢
+
+Docsy 使用并感谢以下开源项目及其贡献者：
+
+- [Tauri](https://github.com/tauri-apps/tauri)、[Vue](https://github.com/vuejs/core)
+- [qpdf](https://github.com/qpdf/qpdf)、[Poppler](https://poppler.freedesktop.org/)、[PDF.js](https://github.com/mozilla/pdf.js)
+- [lopdf](https://github.com/J-F-Liu/lopdf)、[pdf-inspector](https://github.com/firecrawl/pdf-inspector)
+- [quick-xml](https://github.com/tafia/quick-xml)、[docx-rs](https://github.com/bokuweb/docx-rs)、[printpdf](https://github.com/fschutt/printpdf)
+- [image](https://github.com/image-rs/image)、[FFmpeg](https://ffmpeg.org/)
+
+项目中使用的第三方组件分别遵循其各自的开源协议；随 PDF 资源一并保留的许可证文件位于 `src-tauri/external/bcmaps/LICENSE`。
+
+---
+
 <div align="center">
 
 **如果觉得有用，点个 ⭐ Star 支持一下吧～**

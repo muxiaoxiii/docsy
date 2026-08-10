@@ -7,6 +7,7 @@ pub mod content_text;
 pub mod detection;
 pub mod evidence;
 pub mod evidence_session;
+mod glyph_names;
 pub mod header_footer;
 pub mod normalize;
 pub mod overlay;
