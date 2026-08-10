@@ -91,6 +91,16 @@ lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normali
 
 ---
 
+## 四、Markdown ↔ docx（Unreleased 新增功能的已知边界）
+
+- **版式保真是 Markdown 的格式天花板**：合并单元格、图片精确位置/大小/文字环绕、文本框、分栏等版式信息经过 Markdown 必然丢失（pandoc 同理）。如用户场景要求版式不丢，应改走 docx↔HTML 路线，需另行设计。
+- **undoc 备选评估**：`undoc` crate（Office→Markdown 提取，单向）可作为 docx→md 方向边缘 case（脚注/批注/文本框）的备选或对照实现；2026-08 评估时 v0.8.0 发版仅数天，暂不引入，持续观察。
+- docx→md 引用块无法还原为 `>`（写入侧只做缩进）；有序列表起始号反向一律从 1 重编；单元格内嵌套表格压平；远程/缺失图片输出占位文本。
+- MD→docx 的样式目前固定（Times New Roman/宋体 docDefaults），如用户需要模板化样式（红头文件格式等）再立项。
+- README.md:68 仍有「## 🔧 PDF 工具」章节标题，下次更新 README 时同步为「文档工具」。
+
+---
+
 ## 存档：beta12 已完成条目
 
 - ✅ **5. 重复工具代码 / 临时文件泄漏**：新建 `util/fs.rs` 收敛 `same_path`/`temp_named_path`/`safe_file_stem`/`unique_output_path`/`TempPathGuard`/`set_private_permissions`；顺带修复 header_footer 旧版撞名超限会覆盖原文件的隐患。

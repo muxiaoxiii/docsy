@@ -5,6 +5,7 @@ mod error;
 mod external;
 mod ffmpeg;
 mod image_paddler;
+mod markdown;
 mod operations;
 mod pdf;
 mod services;

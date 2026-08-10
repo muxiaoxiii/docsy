@@ -1503,7 +1503,11 @@ mod tests {
         archive.by_name("word/styles.xml").unwrap();
         archive.by_name("word/settings.xml").unwrap();
         archive.by_name("word/fontTable.xml").unwrap();
-        archive.by_name("word/media/rIdImage1.png").unwrap();
+        // docx-rs 的图片 rid 来自进程级全局计数器，并行测试下序号不固定，
+        // 只断言存在一张 rIdImage*.png
+        assert!(archive
+            .file_names()
+            .any(|n| n.starts_with("word/media/rIdImage") && n.ends_with(".png")));
 
         let mut document_xml = String::new();
         archive

@@ -1,7 +1,7 @@
 <template>
   <div class="pdf-tools-view" :class="{ 'is-file-dragging': pdfDragging }">
     <div v-if="pdfDragging" class="pdf-drop-overlay">
-      <div class="pdf-drop-message">松开以添加 PDF 文件</div>
+      <div class="pdf-drop-message">{{ activeTab === 'markdown' ? '松开以添加 Markdown / Word 文件' : '松开以添加 PDF 文件' }}</div>
     </div>
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
       <el-tab-pane label="解锁" name="unlock" lazy>
@@ -309,6 +309,32 @@
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
+
+      <el-tab-pane label="Markdown 互转" name="markdown" lazy>
+        <ToolWorkspaceShell
+          title="Markdown 互转"
+          description="Markdown 与 Word 文档互转，拖入文件即可转换，输出保存在原文件旁。"
+        >
+          <template #toolbar>
+            <el-button type="primary" @click="selectMarkdownFile">选择文件</el-button>
+            <el-button :disabled="!markdownFile" @click="selectMarkdownOutputDir">输出文件夹</el-button>
+          </template>
+          <div v-if="markdownFile" class="path-line">{{ markdownFile }}</div>
+          <div v-if="markdownFile" class="path-line">转换方向：{{ markdownDirectionText }}</div>
+          <div v-if="markdownOutputDir" class="path-line">{{ markdownOutputDir }}</div>
+          <el-empty v-if="!markdownFile" description="选择或拖入 Markdown / Word 文件" />
+          <template #actions>
+            <el-button
+              type="success"
+              :loading="markdownConverting"
+              :disabled="!markdownFile"
+              @click="doConvertMarkdown"
+            >
+              开始转换
+            </el-button>
+          </template>
+        </ToolWorkspaceShell>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -322,7 +348,7 @@ import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import { splitRangeWarnings } from '../../../shared/pdf-tools/composables/usePdfSplitRanges.js'
-import { sizeSavingText } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
+import { sizeSavingText, formatFileSize } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
 import { getPdfPageCount, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
@@ -494,6 +520,58 @@ const antiOcrProcessing = ref(false)
 const antiCopyMethod = ref('cmap_scramble')
 const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => !f.hasAntiOcr).length)
 const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr).length)
+
+// Markdown 互转
+const markdownFile = ref('')
+const markdownOutputDir = ref('')
+const markdownConverting = ref(false)
+const markdownDirectionText = computed(() => {
+  const path = String(markdownFile.value || '')
+  if (/\.(md|markdown)$/i.test(path)) return 'Markdown → Word'
+  if (/\.doc$/i.test(path)) return 'Word(旧格式)→ Markdown'
+  if (/\.docx$/i.test(path)) return 'Word → Markdown'
+  return ''
+})
+
+function isMarkdownConvertiblePath(path) {
+  return /\.(md|markdown|docx|doc)$/i.test(String(path || ''))
+}
+
+async function selectMarkdownFile() {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'Markdown / Word', extensions: ['md', 'markdown', 'docx', 'doc'] }],
+  })
+  if (!selected) return
+  markdownFile.value = normalizeSelectedPath(selected)
+  markdownOutputDir.value = ''
+}
+
+async function selectMarkdownOutputDir() {
+  const selected = await open({ directory: true })
+  if (selected) markdownOutputDir.value = normalizeSelectedPath(selected)
+}
+
+async function doConvertMarkdown() {
+  if (!markdownFile.value) return
+  markdownConverting.value = true
+  const result = await tauriCallSafe('convert_markdown', {
+    input: markdownFile.value,
+    output_dir: markdownOutputDir.value || null,
+  })
+  markdownConverting.value = false
+  if (result.ok) {
+    const data = result.data || {}
+    ElNotification({
+      type: 'success',
+      title: `转换完成：${markdownDirectionText.value}`,
+      message: `${formatFileSize(data.input_size)} → ${formatFileSize(data.output_size)}${data.output_path ? `，输出：${data.output_path}` : ''}`,
+      duration: 6000,
+    })
+  } else {
+    ElMessage.error(userFacingError(result.error, 'Markdown 互转失败，请确认文件未损坏且未被其他程序占用'))
+  }
+}
 
 function addAntiOcrFiles(paths) {
   const existing = new Set(antiOcrFiles.value.map((f) => f.path))
@@ -788,6 +866,17 @@ function isPdfPath(path) {
 }
 
 async function handleDroppedPdfPaths(paths) {
+  if (activeTab.value === 'markdown') {
+    const docPaths = [...new Set((paths || []).filter(isMarkdownConvertiblePath))]
+    if (!docPaths.length) {
+      ElMessage.warning('请拖入 Markdown 或 Word 文件（.md / .docx / .doc）')
+      return
+    }
+    if (docPaths.length > 1) ElMessage.info('Markdown 互转一次处理一个文件，已使用第一个文件')
+    markdownFile.value = docPaths[0]
+    markdownOutputDir.value = ''
+    return
+  }
   const pdfPaths = [...new Set((paths || []).filter(isPdfPath))]
   if (!pdfPaths.length) {
     ElMessage.warning('请拖入 PDF 文件')

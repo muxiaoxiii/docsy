@@ -1,4 +1,5 @@
 pub mod image_paddler;
+pub mod markdown;
 pub mod pdf;
 pub mod settings;
 pub mod system;
@@ -102,6 +103,8 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         video::probe_video,
         video::extract_frames,
         video::list_output_frames,
+        // markdown
+        markdown::convert_markdown,
         // settings
         settings::get_app_settings,
         settings::set_app_settings,

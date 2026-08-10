@@ -10,6 +10,7 @@ const operationLabels = {
   merge_pdfs: 'Doclet 正在合并 PDF…',
   compress_pdf: 'Doclet 正在压缩 PDF…',
   optimize_pdf_lossless: 'Doclet 正在无损优化 PDF…',
+  convert_markdown: 'Doclet 正在转换文档…',
   extract_pdf_pages: 'Doclet 正在提取页面…',
   detect_pdf_header_footer: 'Doclet 正在检测页眉页脚…',
   preview_pdf_header_footer: 'Doclet 正在生成真实预览…',
