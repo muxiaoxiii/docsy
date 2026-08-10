@@ -1211,7 +1211,13 @@ fn build_candidates(
             } else {
                 (first.text.clone(), first.normalized_text.clone())
             };
-            let labels = labels_for(&effective_normalized);
+            let mut labels = labels_for(&effective_normalized);
+            // First-page evidence labels such as "证据1" / "对比文件3" appear
+            // only once per document, so they can never prove themselves by
+            // repetition; tag them so they survive the repetition gate below.
+            if page_start == 1 && is_evidence_label_text(&effective_normalized) {
+                labels.push("evidence-label".to_string());
+            }
             let is_page_number = labels.iter().any(|label| label == "page-number");
             let position_spread = normalized_position_spread(&lines);
             let position_stable = position_spread <= 0.025;
@@ -1300,8 +1306,15 @@ fn build_candidates(
     // Page content is only promoted to an existing header/footer/page-number
     // candidate when repetition or a stable sequence proves that it is not an
     // incidental body line. Structural Artifact candidates are merged later
-    // and are not subject to this heuristic gate.
-    candidates.retain(|candidate| candidate.repeating);
+    // and are not subject to this heuristic gate. First-page evidence labels
+    // ("证据1", "对比文件3") are exempt: they legitimately occur only once.
+    candidates.retain(|candidate| {
+        candidate.repeating
+            || candidate
+                .labels
+                .iter()
+                .any(|label| label == "evidence-label")
+    });
 
     candidates.sort_by(|a, b| {
         b.confidence
@@ -1643,6 +1656,16 @@ fn is_noise(text: &str, normalized_text: &str) -> bool {
     let value = text.trim();
     let char_count = value.chars().count();
     !(2..=120).contains(&char_count)
+}
+
+/// Match first-page evidence label text such as "证据1"、"对比文件3"、"证据一".
+/// Digits may be Arabic or Chinese numerals; anything may follow the number
+/// (e.g. "证据1（合同）").
+fn is_evidence_label_text(normalized_text: &str) -> bool {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(证据|对比文件)\s*[0-9一二三四五六七八九十百千]+").unwrap()
+    });
+    RE.is_match(normalized_text.trim())
 }
 
 fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSuggestionItem> {
@@ -2133,9 +2156,11 @@ mod tests {
 
     #[test]
     fn candidate_repetition_counts_distinct_pages() {
+        // Use genuinely ordinary text here: "证据一" on page 1 is an evidence
+        // label and is promoted without repetition by design.
         let line = |page: u32| TextLineDetection {
-            text: "证据一".to_string(),
-            normalized_text: "证据一".to_string(),
+            text: "附 页".to_string(),
+            normalized_text: "附 页".to_string(),
             bbox: BBox {
                 x0: 500.0,
                 y0: 20.0,
@@ -2702,6 +2727,93 @@ mod tests {
             .all(|c| !(c.page_range.start <= 3 && c.page_range.end >= 5)));
     }
     #[test]
+    fn first_page_evidence_label_survives_repetition_gate() {
+        let line = |page: u32, text: &str, normalized: &str| TextLineDetection {
+            text: text.to_string(),
+            normalized_text: normalized.to_string(),
+            bbox: BBox {
+                x0: 260.0,
+                y0: 20.0,
+                x1: 290.0,
+                y1: 32.0,
+                page,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+        };
+        let mk = |page: u32, headers: Vec<TextLineDetection>| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers,
+            footers: vec![],
+        };
+        // "证据１" (fullwidth digit) appears only on page 1, like the stamped
+        // evidence labels in real merged-evidence PDFs.
+        let pages = vec![
+            mk(1, vec![line(1, "证据１", "证据1")]),
+            mk(2, vec![]),
+            mk(3, vec![]),
+            mk(4, vec![]),
+            mk(5, vec![]),
+        ];
+        let candidates = build_candidates(&pages, "header", 5);
+        let evidence = candidates
+            .iter()
+            .find(|candidate| candidate.normalized_text == "证据1")
+            .expect("first-page evidence label must remain a candidate");
+        assert!(evidence
+            .labels
+            .iter()
+            .any(|label| label == "evidence-label"));
+        assert_eq!(evidence.count, 1);
+        assert!(!evidence.repeating, "a single occurrence is not repetition");
+    }
+
+    #[test]
+    fn evidence_label_not_on_first_page_is_not_promoted() {
+        let line = |page: u32| TextLineDetection {
+            text: "证据3".to_string(),
+            normalized_text: "证据3".to_string(),
+            bbox: BBox {
+                x0: 260.0,
+                y0: 20.0,
+                x1: 290.0,
+                y1: 32.0,
+                page,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+        };
+        let mk = |page: u32, headers: Vec<TextLineDetection>| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers,
+            footers: vec![],
+        };
+        // A single "证据3" first appearing on page 2 is more likely body text
+        // than a stamped label; without repetition it is not a candidate.
+        let pages = vec![mk(1, vec![]), mk(2, vec![line(2)]), mk(3, vec![])];
+        let candidates = build_candidates(&pages, "header", 3);
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn evidence_label_text_matches_expected_shapes() {
+        assert!(is_evidence_label_text("证据1"));
+        assert!(is_evidence_label_text("证据 12"));
+        assert!(is_evidence_label_text("对比文件3"));
+        assert!(is_evidence_label_text("证据一"));
+        assert!(is_evidence_label_text("证据1（合同）"));
+        assert!(!is_evidence_label_text("证据"));
+        assert!(!is_evidence_label_text("该证据1"));
+        assert!(!is_evidence_label_text("证据目录"));
+    }
+
+    #[test]
     #[ignore = "requires the real patent PDF and pdftotext"]
     fn detect_evidence9_header_candidates() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2777,6 +2889,14 @@ mod tests {
                 .chain(result.footer_candidates.iter())
                 .filter(|candidate| candidate.source == "content-text")
             {
+                // First-page evidence labels legitimately occur only once.
+                if candidate
+                    .labels
+                    .iter()
+                    .any(|label| label == "evidence-label")
+                {
+                    continue;
+                }
                 assert!(candidate.repeating, "{}: {candidate:?}", path.display());
                 assert!(
                     candidate.position_stable,
@@ -2801,3 +2921,4 @@ mod tests {
         }
     }
 }
+

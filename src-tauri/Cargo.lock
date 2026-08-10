@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "docsy"
-version = "0.9.7-beta9"
+version = "0.9.7-beta10"
 dependencies = [
  "allsorts",
  "anyhow",

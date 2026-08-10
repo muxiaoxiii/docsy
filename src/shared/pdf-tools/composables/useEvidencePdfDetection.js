@@ -18,6 +18,19 @@ export function candidateKey(candidate) {
   return candidateIdentity(candidate)
 }
 
+/** Check if a candidate is a first-page evidence label (e.g. "证据1" / "对比文件3"
+ *  stamped on page 1 only). Backend tags these with the "evidence-label" label;
+ *  the text pattern is kept as a fallback for older detection payloads. */
+export function isFirstPageEvidenceCandidate(candidate) {
+  if (!candidate) return false
+  const range = candidate?.pageRange || {}
+  const pageStart = Number(range.start || candidate?.bbox?.page || 1)
+  if (pageStart !== 1) return false
+  if (candidate?.labels?.includes?.('evidence-label')) return true
+  const texts = [candidate?.normalizedText, candidate?.text].filter(Boolean)
+  return texts.some((t) => /^(证据|对比文件)\s*[0-9一二三四五六七八九十百千]+/.test(String(t).trim()))
+}
+
 export function useEvidencePdfDetection({
   overlayRows,
   detectingAllHeaderFooter,
@@ -265,6 +278,7 @@ export function useEvidencePdfDetection({
    * in the header/footer zone (Bug 2: evidence 9 over-detection).
    *
    * - Artifact candidates: always reliable (structural PDF metadata)
+   * - First-page evidence labels: always reliable ("证据1" on page 1)
    * - Content-text repeating candidates: require minimum confidence (0.25)
    *   to filter body text that barely meets the repeat threshold
    */
@@ -273,6 +287,8 @@ export function useEvidencePdfDetection({
     // PDF structure is authoritative. Page text still needs repetition and
     // stable placement; its wording does not receive a special exception.
     if (candidate?.source === 'artifact') return true
+    // First-page evidence labels occur once by nature, not by accident.
+    if (isFirstPageEvidenceCandidate(candidate)) return true
     // For content-text candidates, require a minimum confidence
     const confidence = Number(candidate?.confidence || 0)
     if (confidence < 0.25) return false
@@ -285,7 +301,8 @@ export function useEvidencePdfDetection({
       candidates.find(
         (candidate) =>
           candidate?.source === 'artifact' ||
-          (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 3),
+          (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 3) ||
+          isFirstPageEvidenceCandidate(candidate),
       ) || null
     )
   }
@@ -347,7 +364,8 @@ export function useEvidencePdfDetection({
     if (!candidate || isPageNumberCandidate(candidate)) return false
     return (
       candidate?.source === 'artifact' ||
-      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 3)
+      (candidate?.repeating && candidate?.positionStable !== false && Number(candidate?.count || 0) >= 3) ||
+      isFirstPageEvidenceCandidate(candidate)
     )
   }
 
@@ -561,6 +579,7 @@ export function useEvidencePdfDetection({
     detectFileHeaderFooter,
     applyDetectionResultToFile,
     isPageNumberCandidate,
+    isFirstPageEvidenceCandidate,
     bestReliableHeaderCandidate,
     bestPageNumberCandidate,
     bestReliablePageNumberCandidate,
