@@ -94,6 +94,51 @@ impl ToUnicodeCMap {
     }
 }
 
+/// Build a deterministic CID -> Unicode map from an embedded TrueType cmap.
+///
+/// This is only valid for Identity-H/Identity-V Type0 fonts whose descendant
+/// CIDFontType2 uses CIDToGIDMap=Identity.  In that narrow case a content
+/// stream CID is the TrueType glyph id.  We do not expose a generic
+/// "CID-as-Unicode" fallback because that would silently corrupt legal text.
+fn build_identity_cid_cmap(font_data: &[u8]) -> Option<ToUnicodeCMap> {
+    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+    let cmap_table = face.tables().cmap?;
+    let mut gid_to_unicode = BTreeMap::<u16, char>::new();
+    for subtable in cmap_table.subtables {
+        let is_windows_symbol =
+            subtable.platform_id == ttf_parser::PlatformId::Windows && subtable.encoding_id == 0;
+        if !subtable.is_unicode() && !is_windows_symbol {
+            continue;
+        }
+        subtable.codepoints(|codepoint| {
+            let Some(gid) = subtable.glyph_index(codepoint) else {
+                return;
+            };
+            let Some(character) = char::from_u32(codepoint) else {
+                return;
+            };
+            // Prefer the first mapping. Duplicate Unicode aliases are normal
+            // in fonts and do not provide a better answer for a CID.
+            gid_to_unicode.entry(gid.0).or_insert(character);
+        });
+    }
+    if gid_to_unicode.is_empty() {
+        return None;
+    }
+
+    let mappings = gid_to_unicode
+        .into_iter()
+        .map(|(gid, character)| (gid.to_be_bytes().to_vec(), character.to_string()))
+        .collect();
+    Some(ToUnicodeCMap {
+        code_spaces: vec![CodeSpaceRange {
+            start: vec![0, 0],
+            end: vec![u8::MAX, u8::MAX],
+        }],
+        mappings,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token {
     Hex(Vec<u8>),
@@ -350,10 +395,15 @@ pub(crate) fn load_font_cmaps(
 ) -> Result<BTreeMap<String, ToUnicodeCMap>> {
     let font_refs = index.font_references();
     let cmap_refs = index.to_unicode_stream_references(&font_refs);
-    if cmap_refs.is_empty() {
+    let embedded_font_refs = index.identity_cid_font_stream_references(&font_refs);
+    if cmap_refs.is_empty() && embedded_font_refs.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let stream_refs = cmap_refs.values().cloned().collect::<BTreeSet<_>>();
+    let stream_refs = cmap_refs
+        .values()
+        .chain(embedded_font_refs.values())
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let streams = qpdf_stream::load_raw_streams(
         input,
         &stream_refs.into_iter().collect::<Vec<_>>(),
@@ -371,6 +421,25 @@ pub(crate) fn load_font_cmaps(
             Err(error) => {
                 log::debug!("跳过无法解析的 ToUnicode CMap {}: {}", cmap_ref, error);
             }
+        }
+    }
+
+    // Only use the embedded-font fallback when the PDF did not yield a
+    // usable ToUnicode map.  A valid ToUnicode map remains authoritative.
+    for (font_ref, stream_ref) in embedded_font_refs {
+        if maps.contains_key(&font_ref) {
+            continue;
+        }
+        let Some(font_data) = streams.get(&stream_ref) else {
+            continue;
+        };
+        if let Some(cmap) = build_identity_cid_cmap(font_data) {
+            log::debug!(
+                "从嵌入 TrueType cmap 建立 Identity CID 映射 font={} entries={}",
+                font_ref,
+                cmap.mappings.len()
+            );
+            maps.insert(font_ref, cmap);
         }
     }
     Ok(maps)
@@ -439,5 +508,27 @@ mod tests {
         .unwrap();
         assert_eq!(cmap.decode(&[0x01, 0x02]), None);
         assert_eq!(cmap.decode(&[0x01]), Some("A".to_string()));
+    }
+
+    #[test]
+    fn builds_identity_cid_map_with_two_byte_codes() {
+        let mappings = [(1_u16, '中'), (2_u16, '文')]
+            .into_iter()
+            .map(|(gid, character)| (gid.to_be_bytes().to_vec(), character.to_string()))
+            .collect();
+        let cmap = ToUnicodeCMap {
+            code_spaces: vec![CodeSpaceRange {
+                start: vec![0, 0],
+                end: vec![u8::MAX, u8::MAX],
+            }],
+            mappings,
+        };
+        assert_eq!(cmap.decode(&[0, 1, 0, 2]), Some("中文".to_string()));
+        assert_eq!(cmap.decode(&[0, 3]), None);
+    }
+
+    #[test]
+    fn invalid_embedded_font_is_not_guessed() {
+        assert!(build_identity_cid_cmap(b"not-a-font").is_none());
     }
 }

@@ -2,6 +2,16 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.7-beta7] - 2026-08-10
+
+### 新增
+- **CID 字体解码增强**：对满足严格结构条件的 Identity-H/Identity-V Type0 TrueType 字体，读取嵌入字体 cmap 建立 CID 到 Unicode 的确定性映射。
+- **字体资源索引**：补充 PDF 字体描述符、CIDFontType2、CIDToGIDMap 和嵌入字体流的索引能力。
+
+### 修复
+- **页眉页脚识别**：改进缺少 ToUnicode 但嵌入 TrueType 字体仍可确定解码的文本识别能力。
+- **安全回退**：已有 ToUnicode 映射优先；无法验证 CID/GID 对应关系的字体不进行猜测，继续使用保守处理路径。
+
 ## [0.9.7-beta6] - 2026-08-10
 
 ### 修复

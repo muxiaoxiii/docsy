@@ -164,6 +164,54 @@ impl QpdfObjectIndex {
             .collect()
     }
 
+    /// Return embedded font streams that can safely provide a CID -> GID map.
+    ///
+    /// This is intentionally limited to Type0 fonts using Identity-H/V and a
+    /// CIDFontType2 descendant with an identity CIDToGIDMap.  Under those
+    /// conditions the CID in the content stream is the TrueType GID, so the
+    /// embedded font cmap can be used as a deterministic fallback when the
+    /// PDF omitted ToUnicode.
+    pub(crate) fn identity_cid_font_stream_references(
+        &self,
+        font_refs: &BTreeSet<String>,
+    ) -> BTreeMap<String, String> {
+        font_refs
+            .iter()
+            .filter_map(|font_ref| {
+                let font = self.object_dictionary(font_ref)?;
+                if font.get("/Subtype").and_then(Value::as_str) != Some("/Type0") {
+                    return None;
+                }
+                if !matches!(
+                    font.get("/Encoding").and_then(Value::as_str),
+                    Some("/Identity-H") | Some("/Identity-V")
+                ) {
+                    return None;
+                }
+                if font.get("/ToUnicode").is_some() {
+                    return None;
+                }
+                let descendants = self.resolve_array(font.get("/DescendantFonts")?)?;
+                let descendant_ref = descendants.first()?.as_str()?;
+                let descendant = self.object_dictionary(descendant_ref)?;
+                if descendant.get("/Subtype").and_then(Value::as_str) != Some("/CIDFontType2") {
+                    return None;
+                }
+                if let Some(cid_to_gid_map) = descendant.get("/CIDToGIDMap") {
+                    if cid_to_gid_map.as_str() != Some("/Identity") {
+                        return None;
+                    }
+                }
+                let descriptor = self.resolve_dictionary(descendant.get("/FontDescriptor")?)?;
+                let font_file = descriptor
+                    .get("/FontFile2")
+                    .or_else(|| descriptor.get("/FontFile3"))
+                    .and_then(Value::as_str)?;
+                Some((font_ref.clone(), font_file.to_string()))
+            })
+            .collect()
+    }
+
     pub(crate) fn form_properties(&self, object_ref: &str) -> Dictionary {
         let resources = self
             .object_dictionary(object_ref)
@@ -195,6 +243,14 @@ impl QpdfObjectIndex {
         match value {
             Value::Object(dict) => Some(dict),
             Value::String(reference) => self.object_dictionary(reference),
+            _ => None,
+        }
+    }
+
+    fn resolve_array<'a>(&'a self, value: &'a Value) -> Option<&'a Vec<Value>> {
+        match value {
+            Value::Array(values) => Some(values),
+            Value::String(reference) => self.objects.get(reference)?.as_array(),
             _ => None,
         }
     }
