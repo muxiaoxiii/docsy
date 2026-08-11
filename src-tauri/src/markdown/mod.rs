@@ -2,8 +2,10 @@
 //!
 //! - `.md` / `.markdown` → `.docx`（pulldown-cmark 解析，docx-rs 写入）
 //! - `.docx` → `.md`（docx-rs reader 读取）
-//! - `.doc` → office_oxide 转临时 `.docx`（仅纯文本，表格/图片/样式丢失，
-//!   结果带 warning，前端转换前需用户确认）再转 `.md`
+//! - `.doc` → 两条引擎，由前端让用户选择：
+//!   - `word`：本机 Word/WPS 自动化另存临时 `.docx`（高保真），失败报错提示手动另存；
+//!   - `extract`（默认）：office_oxide 转临时 `.docx`，仅纯文本（表格/图片/样式丢失，
+//!     结果带 warning，前端转换前需用户确认）。
 
 mod docx_to_md;
 mod md_to_docx;
@@ -31,6 +33,22 @@ pub struct ConvertResult {
     /// 降级转换时的用户提示（如 .doc 走了 office_oxide 纯文本兜底）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+}
+
+/// .doc 转换引擎：`extract` = office_oxide 纯文本（有损）；`word` = 本机
+/// Word/WPS 自动化另存 docx（高保真，需安装了 Word 或 WPS）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocEngine {
+    Extract,
+    Word,
+}
+
+fn parse_doc_engine(value: Option<&str>) -> Result<DocEngine> {
+    match value.unwrap_or("extract") {
+        "extract" => Ok(DocEngine::Extract),
+        "word" => Ok(DocEngine::Word),
+        other => anyhow::bail!("未知的 .doc 转换引擎: {other}"),
+    }
 }
 
 /// 按扩展名判定转换方向；不支持的类型报错。
@@ -93,12 +111,124 @@ fn convert_doc_to_temp_docx(input: &Path) -> Result<(TempPathGuard, Option<Strin
     ))
 }
 
-pub fn convert(input: &str, output_dir: Option<&str>) -> Result<ConvertResult> {
+/// 旧版 .doc → 临时 .docx，走本机 Word/WPS 自动化（高保真）。
+/// 用户显式选择此引擎，失败直接报错（提示手动另存），不回退纯文本。
+fn convert_doc_to_temp_docx_with_word(input: &Path) -> Result<TempPathGuard> {
+    let guard_path = crate::util::fs::temp_named_path("docsy-doc2docx-word", "docx");
+    word_save_as_docx(input, &guard_path).with_context(|| {
+        format!(
+            "Word/WPS 自动转换失败: {}。可以改用纯文本转换，或用 Word/WPS 手动另存为 .docx 后再转换。",
+            input.display()
+        )
+    })?;
+    if !guard_path.is_file() {
+        anyhow::bail!(
+            "Word/WPS 未生成预期输出: {}。可以改用纯文本转换，或手动另存为 .docx 后再转换。",
+            guard_path.display()
+        );
+    }
+    Ok(TempPathGuard::new(guard_path))
+}
+
+/// Windows：COM 自动化，先 Word.Application，失败再 KWPS.Application（WPS 文字）。
+/// FileFormat 16 = wdFormatXMLDocument (.docx)。
+#[cfg(windows)]
+fn word_save_as_docx(input: &Path, output: &Path) -> Result<()> {
+    let escape = |p: &Path| p.display().to_string().replace('\'', "''");
+    let script = format!(
+        "$ErrorActionPreference='Stop';\
+         $app=$null;$doc=$null;\
+         try {{\
+           try {{ $app=New-Object -ComObject Word.Application }} catch {{ $app=New-Object -ComObject KWPS.Application }};\
+           $app.Visible=$false;\
+           try {{ $app.DisplayAlerts=0 }} catch {{ }};\
+           $doc=$app.Documents.Open('{input}', $false, $true);\
+           try {{ $doc.SaveAs2('{output}', 16) }} catch {{ $doc.SaveAs('{output}', 16) }};\
+         }} finally {{\
+           if ($doc -ne $null) {{ try {{ $doc.Close([ref]$false) | Out-Null }} catch {{ }} }};\
+           if ($app -ne $null) {{ try {{ $app.Quit() | Out-Null }} catch {{ }} }};\
+           [System.GC]::Collect();\
+           [System.GC]::WaitForPendingFinalizers();\
+         }}",
+        input = escape(input),
+        output = escape(output),
+    );
+    let mut cmd = crate::external::hidden_command("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &script,
+    ]);
+    let result = crate::external::command_output_with_timeout(&mut cmd, std::time::Duration::from_secs(120))
+        .context("执行 Word/WPS 转换进程失败")?;
+    if !result.status.success() {
+        anyhow::bail!(
+            "Word/WPS 进程返回错误: {}",
+            crate::external::command_failure_detail(&result)
+        );
+    }
+    Ok(())
+}
+
+/// macOS：AppleScript 驱动 Microsoft Word 另存（format document default = .docx）。
+/// WPS for Mac 不支持 AppleScript，与证据模块的 doc→pdf 保持一致只走 Word。
+#[cfg(target_os = "macos")]
+fn word_save_as_docx(input: &Path, output: &Path) -> Result<()> {
+    let input = std::fs::canonicalize(input).context("读取 .doc 文件失败")?;
+    let script = r#"
+on run argv
+  set inputPath to item 1 of argv
+  set outputPath to item 2 of argv
+  set inputHfsPath to POSIX file inputPath as text
+  set outputFile to POSIX file outputPath
+  set docRef to missing value
+  tell application "Microsoft Word"
+    set visible to false
+    try
+      open file inputHfsPath
+      set docRef to active document
+      save as docRef file name outputFile file format format document default
+    on error errMsg number errNum
+      try
+        if docRef is not missing value then close docRef saving no
+      end try
+      error errMsg number errNum
+    end try
+    close docRef saving no
+  end tell
+end run
+"#;
+    let mut command = crate::external::hidden_command("osascript");
+    command
+        .arg("-e")
+        .arg(script)
+        .arg(input.display().to_string())
+        .arg(output.display().to_string());
+    let result = crate::external::command_output_with_timeout(&mut command, std::time::Duration::from_secs(120))
+        .context("执行 Microsoft Word 转换进程失败")?;
+    if !result.status.success() {
+        anyhow::bail!(
+            "Microsoft Word 进程返回错误: {}",
+            crate::external::command_failure_detail(&result)
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn word_save_as_docx(_input: &Path, _output: &Path) -> Result<()> {
+    anyhow::bail!("当前平台不支持 Word/WPS 自动转换，请手动另存为 .docx")
+}
+
+pub fn convert(input: &str, output_dir: Option<&str>, doc_engine: Option<&str>) -> Result<ConvertResult> {
     let input_path = PathBuf::from(input);
     if !input_path.is_file() {
         anyhow::bail!("输入文件不存在: {input}");
     }
     let direction = detect_direction(&input_path)?;
+    let doc_engine = parse_doc_engine(doc_engine)?;
     let output_path = output_path_for(&input_path, output_dir, direction)?;
     let input_size = std::fs::metadata(&input_path)
         .with_context(|| format!("无法读取输入文件信息: {input}"))?
@@ -117,7 +247,10 @@ pub fn convert(input: &str, output_dir: Option<&str>) -> Result<ConvertResult> {
                 .unwrap_or_default();
             if ext == "doc" {
                 // 先转临时 docx，守卫在作用域结束时自动删除
-                let (guard, doc_warning) = convert_doc_to_temp_docx(&input_path)?;
+                let (guard, doc_warning) = match doc_engine {
+                    DocEngine::Word => (convert_doc_to_temp_docx_with_word(&input_path)?, None),
+                    DocEngine::Extract => convert_doc_to_temp_docx(&input_path)?,
+                };
                 warning = doc_warning;
                 docx_to_md::convert(guard.path(), &output_path)?;
             } else {
@@ -197,8 +330,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_doc_engine_values() {
+        assert_eq!(parse_doc_engine(None).unwrap(), DocEngine::Extract);
+        assert_eq!(parse_doc_engine(Some("extract")).unwrap(), DocEngine::Extract);
+        assert_eq!(parse_doc_engine(Some("word")).unwrap(), DocEngine::Word);
+        assert!(parse_doc_engine(Some("libreoffice")).is_err());
+    }
+
+    #[test]
     fn convert_rejects_missing_input() {
-        assert!(convert("/tmp/docsy-nonexistent-file-xyz.md", None).is_err());
+        assert!(convert("/tmp/docsy-nonexistent-file-xyz.md", None, None).is_err());
     }
 
     #[test]
@@ -208,7 +349,7 @@ mod tests {
         let input = dir.join("测试.md");
         std::fs::write(&input, "# 标题\n\n正文 **加粗**\n").unwrap();
 
-        let result = convert(input.to_str().unwrap(), None).unwrap();
+        let result = convert(input.to_str().unwrap(), None, None).unwrap();
         assert_eq!(result.direction, Direction::MdToDocx);
         assert!(result.output_path.ends_with("测试.docx"));
         assert!(result.input_size > 0 && result.output_size > 0);
@@ -220,7 +361,7 @@ mod tests {
         assert!(json.get("output_size").is_some());
 
         // 生成的 docx 再转回 md
-        let back = convert(&result.output_path, None).unwrap();
+        let back = convert(&result.output_path, None, None).unwrap();
         assert_eq!(back.direction, Direction::DocxToMd);
         let md = std::fs::read_to_string(&back.output_path).unwrap();
         assert!(md.contains("# 标题"), "md:\n{md}");

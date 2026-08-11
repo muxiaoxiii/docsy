@@ -559,24 +559,49 @@ async function selectMarkdownFiles() {
 }
 
 // select 与 drop 共用入口：入队并立即顺序执行；执行中新文件追加到队列尾部。
-// 含 .doc 时先弹确认（转换仅保留纯文本），取消则跳过这些 .doc，其余照常。
+// 含 .doc 时先让用户选转换方式：Word/WPS 自动转换（高保真，可选）/ 直接转换
+//（仅纯文本）/ 跳过 .doc（推荐手动另存 docx）；取消或关闭视为跳过 .doc。
 async function loadMarkdownFiles(paths) {
   const busy = new Set(
     markdownFiles.value.filter((f) => f.status === 'pending' || f.status === 'processing').map((f) => f.path),
   )
   const docPaths = [...new Set(paths)].filter((path) => !busy.has(path))
   let accepted = docPaths
+  let docEngine = 'extract'
   const legacyDocs = docPaths.filter((path) => /\.doc$/i.test(path))
   if (legacyDocs.length) {
+    const [wordStatus, wpsStatus] = await Promise.all([
+      tauriCallSafe('check_external_tool', { toolName: 'word' }),
+      tauriCallSafe('check_external_tool', { toolName: 'wps' }),
+    ])
+    const wordAvailable =
+      Boolean(wordStatus.ok && wordStatus.data?.available) || Boolean(wpsStatus.ok && wpsStatus.data?.available)
     try {
       await ElMessageBox.confirm(
-        `${legacyDocs.length} 个旧版 .doc 文件转换后仅保留纯文本（表格、图片和样式会丢失）。建议先用 Word/WPS 另存为 .docx 再转换。仍要转换这些 .doc 吗？`,
-        '旧版 .doc 格式损失确认',
-        { confirmButtonText: '仍要转换', cancelButtonText: '跳过 .doc', type: 'warning' },
+        `${legacyDocs.length} 个旧版 .doc 文件：推荐先用 Word/WPS 打开另存为 .docx 再拖入转换，内容最完整。` +
+          (wordAvailable
+            ? '也可以尝试用本机 Word/WPS 自动转换（保留格式），或直接转换（仅保留纯文本，表格、图片和样式会丢失）。'
+            : '未检测到本机 Word/WPS，直接转换仅保留纯文本（表格、图片和样式会丢失）。'),
+        '旧版 .doc 转换方式',
+        {
+          distinguishCancelAndClose: true,
+          confirmButtonText: wordAvailable ? '尝试 Word/WPS 转换' : '直接转换（仅文本）',
+          cancelButtonText: wordAvailable ? '直接转换（仅文本）' : '跳过 .doc',
+          type: 'warning',
+        },
       )
-    } catch {
-      accepted = docPaths.filter((path) => !/\.doc$/i.test(path))
-      if (accepted.length) ElMessage.info('已跳过 .doc 文件，其余文件照常转换')
+      docEngine = wordAvailable ? 'word' : 'extract'
+    } catch (action) {
+      // cancel 按钮：有 Word/WPS 时是「直接转换（仅文本）」，否则是「跳过 .doc」；
+      // close（X/ESC）一律跳过 .doc
+      if (action === 'cancel' && wordAvailable) {
+        docEngine = 'extract'
+      } else {
+        accepted = docPaths.filter((path) => !/\.doc$/i.test(path))
+        if (accepted.length && accepted.length !== docPaths.length) {
+          ElMessage.info('已跳过 .doc 文件，其余文件照常转换')
+        }
+      }
     }
   }
   const items = accepted
@@ -584,6 +609,7 @@ async function loadMarkdownFiles(paths) {
       path,
       name: fileName(path),
       directionTag: markdownDirectionTag(path),
+      docEngine: /\.doc$/i.test(path) ? docEngine : null,
       status: 'pending',
       statusText: '等待中',
       statusType: 'info',
@@ -617,7 +643,11 @@ async function runMarkdownQueue() {
       item.status = 'processing'
       item.statusText = '转换中'
       item.statusType = 'warning'
-      const result = await tauriCallSafe('convert_markdown', { input: item.path, output_dir: null })
+      const result = await tauriCallSafe('convert_markdown', {
+        input: item.path,
+        output_dir: null,
+        doc_engine: item.docEngine || null,
+      })
       if (result.ok) {
         const data = result.data || {}
         item.status = 'done'
