@@ -941,7 +941,7 @@ let overlayProgressTimer = null
 const quickCleanupRunning = ref(false)
 const evidenceDragging = ref(false)
 const AUTO_OPTIMIZE_ON_IMPORT_KEY = 'docsy.evidencePdf.autoOptimizeOnImport'
-const autoOptimizeOnImport = ref(window.localStorage.getItem(AUTO_OPTIMIZE_ON_IMPORT_KEY) !== '0')
+const autoOptimizeOnImport = ref(window.localStorage.getItem(AUTO_OPTIMIZE_ON_IMPORT_KEY) === '1')
 watch(autoOptimizeOnImport, (value) => {
   window.localStorage.setItem(AUTO_OPTIMIZE_ON_IMPORT_KEY, value ? '1' : '0')
 })
