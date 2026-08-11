@@ -186,6 +186,7 @@ async function cancelCurrentOperation() {
 
 let unlistenConversionTimeout = null
 let unlistenDownloadProgress = null
+let unlistenOperationProgress = null
 
 onMounted(() => {
   // Platform detection for OS-specific CSS (backdrop-filter on macOS only)
@@ -225,6 +226,16 @@ onMounted(() => {
   }).then((unlisten) => {
     unlistenDownloadProgress = unlisten
   })
+
+  // Long PDF compression reports phases from Rust without changing the
+  // operation lifetime. Keep the global Doclet panel informative while a
+  // large file is being analyzed or written.
+  listen('docsy-operation-progress', (event) => {
+    const label = event.payload?.label
+    if (label) operationMessage.value = label
+  }).then((unlisten) => {
+    unlistenOperationProgress = unlisten
+  })
 })
 
 onBeforeUnmount(() => {
@@ -237,6 +248,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('docsy-operation-update', updateOperation)
   if (unlistenConversionTimeout) unlistenConversionTimeout()
   if (unlistenDownloadProgress) unlistenDownloadProgress()
+  if (unlistenOperationProgress) unlistenOperationProgress()
 })
 </script>
 

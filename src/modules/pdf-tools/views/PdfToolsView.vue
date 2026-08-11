@@ -85,7 +85,7 @@
       <el-tab-pane label="压缩" name="compress" lazy>
         <ToolWorkspaceShell
           title="PDF 压缩整理"
-          description="无损整理结构，仅对超出清晰度需要的图片降采样，扫描件默认保持原画质。"
+          description="默认只做无损结构整理；需要进一步压缩图片时再单独开启，扫描件不会被默认重编码。"
         >
           <template #toolbar>
             <el-button type="primary" @click="selectCompressFiles">选择 PDF 文件</el-button>
@@ -105,13 +105,18 @@
           </FileQueuePanel>
           <div v-if="compressSummary" class="path-line">{{ compressSummary }}</div>
           <template #actions>
-            <div class="compress-level-row">
-              <span class="compress-level-label">压缩级别：</span>
-              <el-radio-group v-model="compressLevel" size="default">
-                <el-radio-button :value="1">清晰优先(推荐)</el-radio-button>
-                <el-radio-button :value="2">均衡</el-radio-button>
-                <el-radio-button :value="3">体积最小</el-radio-button>
-              </el-radio-group>
+            <div class="compress-options">
+              <el-checkbox v-model="compressImageReencode">
+                进一步压缩图片（可能耗时较长）
+              </el-checkbox>
+              <div v-if="compressImageReencode" class="compress-level-row">
+                <span class="compress-level-label">图片压缩级别：</span>
+                <el-radio-group v-model="compressLevel" size="default">
+                  <el-radio-button :value="1">清晰优先</el-radio-button>
+                  <el-radio-button :value="2">均衡</el-radio-button>
+                  <el-radio-button :value="3">体积最小</el-radio-button>
+                </el-radio-group>
+              </div>
             </div>
           </template>
         </ToolWorkspaceShell>
@@ -509,6 +514,7 @@ const extractingPages = ref(false)
 const compressFiles = ref([])
 const compressSummary = ref('')
 const compressing = ref(false)
+const compressImageReencode = ref(false)
 const compressLevel = ref(1)
 const splitFile = ref('')
 const splitOutputDir = ref('')
@@ -935,7 +941,7 @@ function removeCompressFile(index) {
 }
 
 // 队列全部结束后切换级别：重新入队并重跑全部；执行中切换只影响下一批（级别在批次开始时捕获）
-watch(compressLevel, () => {
+watch([compressLevel, compressImageReencode], () => {
   if (compressing.value) return
   const items = compressFiles.value
   if (!items.length || items.some((f) => f.status === 'pending' || f.status === 'processing')) return
@@ -954,6 +960,7 @@ async function runCompressQueue() {
   if (compressing.value) return
   compressing.value = true
   const level = compressLevel.value
+  const imageReencode = compressImageReencode.value
   const processed = []
   try {
     for (;;) {
@@ -962,7 +969,11 @@ async function runCompressQueue() {
       item.status = 'processing'
       item.statusText = '压缩中'
       item.statusType = 'warning'
-      const result = await tauriCallSafe('compress_pdf', { input: item.path, output_dir: null, level })
+      const result = await tauriCallSafe('compress_pdf', {
+        input: item.path,
+        output_dir: null,
+        level: imageReencode ? level : null,
+      })
       if (result.ok) {
         const data = result.data || {}
         item.status = 'done'

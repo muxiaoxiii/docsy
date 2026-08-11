@@ -4,6 +4,52 @@ use lopdf::{content::Content, Document, Object, ObjectId};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// 图片压缩阶段进度。total 为 0 表示阶段没有可计数的子项。
+#[derive(Debug, Clone)]
+pub struct CompressProgress {
+    pub phase: &'static str,
+    pub current: usize,
+    pub total: usize,
+    pub detail: Option<String>,
+}
+
+impl CompressProgress {
+    pub fn phase(label: &'static str) -> Self {
+        Self {
+            phase: label,
+            current: 0,
+            total: 0,
+            detail: None,
+        }
+    }
+
+    pub fn item(label: &'static str, current: usize, total: usize) -> Self {
+        Self {
+            phase: label,
+            current,
+            total,
+            detail: None,
+        }
+    }
+
+    pub fn done() -> Self {
+        Self {
+            phase: "压缩完成",
+            current: 1,
+            total: 1,
+            detail: None,
+        }
+    }
+
+    pub fn label(&self) -> String {
+        match (self.total, self.current, self.detail.as_deref()) {
+            (total, current, _) if total > 0 => format!("{}（{}/{}）", self.phase, current, total),
+            (_, _, Some(detail)) if !detail.is_empty() => format!("{}：{}", self.phase, detail),
+            _ => format!("{}…", self.phase),
+        }
+    }
+}
+
 /// 压缩选项
 pub struct CompressOptions {
     /// JPEG 质量 1-100
@@ -38,34 +84,42 @@ impl CompressOptions {
 ///
 /// 流程：lopdf 读取 → 解析内容流计算每张图片的有效 DPI → 遍历 Image XObject
 /// → 按策略决定跳过/降采样/转码 → 写回 → 保存。
-pub fn compress_pdf(input: &Path, output: &Path, options: &CompressOptions) -> Result<()> {
+pub fn compress_pdf_with_progress(
+    input: &Path,
+    output: &Path,
+    options: &CompressOptions,
+    progress: &mut dyn FnMut(CompressProgress),
+) -> Result<()> {
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
 
     let image_ids = collect_image_xobjects(&doc);
-    let effective_dpi = collect_effective_dpi(&doc);
+    progress(CompressProgress::item("分析页面图像", 0, image_ids.len()));
+    let effective_dpi = collect_effective_dpi(&doc, &image_ids, progress);
     let mut compressed_count = 0u32;
     let mut saved_bytes: u64 = 0;
 
-    for obj_id in image_ids {
+    let image_total = image_ids.len();
+    for (index, obj_id) in image_ids.into_iter().enumerate() {
         let original_size = stream_data_size(&doc, obj_id);
         let max_dpi = effective_dpi.get(&obj_id).copied();
         if let Err(e) = recompress_image(&mut doc, obj_id, options, max_dpi) {
             // 跳过无法处理的图片，不中断整个压缩流程
             log::warn!("跳过图片 {:?}: {} ({}KB)", obj_id, e, original_size / 1024);
-            continue;
+        } else {
+            let new_size = stream_data_size(&doc, obj_id);
+            if new_size < original_size {
+                compressed_count += 1;
+                saved_bytes += (original_size - new_size) as u64;
+                log::info!(
+                    "压缩图片 {:?}: {}KB → {}KB (节省 {}KB)",
+                    obj_id,
+                    original_size / 1024,
+                    new_size / 1024,
+                    (original_size - new_size) / 1024
+                );
+            }
         }
-        let new_size = stream_data_size(&doc, obj_id);
-        if new_size < original_size {
-            compressed_count += 1;
-            saved_bytes += (original_size - new_size) as u64;
-            log::info!(
-                "压缩图片 {:?}: {}KB → {}KB (节省 {}KB)",
-                obj_id,
-                original_size / 1024,
-                new_size / 1024,
-                (original_size - new_size) / 1024
-            );
-        }
+        progress(CompressProgress::item("处理图片", index + 1, image_total));
     }
 
     log::info!(
@@ -75,6 +129,7 @@ pub fn compress_pdf(input: &Path, output: &Path, options: &CompressOptions) -> R
     );
 
     doc.compress();
+    progress(CompressProgress::phase("保存压缩 PDF"));
     doc.save(output).context("保存压缩 PDF 失败")?;
     Ok(())
 }
@@ -140,9 +195,23 @@ fn placement_dpi(pixel_w: u32, pixel_h: u32, ctm: &Matrix) -> Option<f64> {
 
 /// 解析每页内容流，跟踪 q/Q/cm 维护 CTM，统计每张图片被放置时的最大有效 DPI。
 /// 解析失败的页/表单直接跳过（保守起见不降采样）。
-fn collect_effective_dpi(doc: &Document) -> HashMap<ObjectId, f64> {
+fn collect_effective_dpi(
+    doc: &Document,
+    image_ids: &[ObjectId],
+    progress: &mut dyn FnMut(CompressProgress),
+) -> HashMap<ObjectId, f64> {
     let mut dpi_map: HashMap<ObjectId, f64> = HashMap::new();
-    for (_, page_id) in doc.get_pages() {
+    if image_ids.is_empty() {
+        return dpi_map;
+    }
+    let pages = doc.get_pages();
+    let page_total = pages.len();
+    for (page_index, (_, page_id)) in pages.into_iter().enumerate() {
+        progress(CompressProgress::item(
+            "分析页面图像",
+            page_index + 1,
+            page_total,
+        ));
         let Ok(content_bytes) = doc.get_page_content(page_id) else {
             continue;
         };
@@ -153,7 +222,14 @@ fn collect_effective_dpi(doc: &Document) -> HashMap<ObjectId, f64> {
             .get_page_resources(page_id)
             .ok()
             .and_then(|(dict, _)| dict);
-        scan_content_stream(doc, &content.operations, resources, IDENTITY, &mut dpi_map, 0);
+        scan_content_stream(
+            doc,
+            &content.operations,
+            resources,
+            IDENTITY,
+            &mut dpi_map,
+            0,
+        );
     }
     dpi_map
 }
@@ -242,7 +318,14 @@ fn recurse_form_xobject(
     let Ok(content) = Content::decode(&content_bytes) else {
         return;
     };
-    scan_content_stream(doc, &content.operations, form_resources, form_ctm, dpi_map, depth + 1);
+    scan_content_stream(
+        doc,
+        &content.operations,
+        form_resources,
+        form_ctm,
+        dpi_map,
+        depth + 1,
+    );
 }
 
 /// 从资源字典解析 Do 算子引用的 XObject 对象。
@@ -251,11 +334,7 @@ fn resolve_xobject<'a>(
     resources: Option<&'a lopdf::Dictionary>,
     name: &[u8],
 ) -> Option<&'a Object> {
-    let xobjects = resources?
-        .get_deref(b"XObject", doc)
-        .ok()?
-        .as_dict()
-        .ok()?;
+    let xobjects = resources?.get_deref(b"XObject", doc).ok()?.as_dict().ok()?;
     xobjects.get_deref(name, doc).ok()
 }
 
@@ -415,6 +494,16 @@ fn recompress_image(
             _ => (false, false),
         };
         is_gray = gray;
+
+        // These images can never be safely handled by the JPEG path. Do this
+        // metadata-only check before inflating Flate streams; scanned PDFs
+        // commonly contain many 1-bit masks and transparent overlays.
+        let supported_filter = filter.is_none()
+            || filter.as_deref() == Some(b"FlateDecode".as_slice())
+            || filter.as_deref() == Some(b"DCTDecode".as_slice());
+        if bpc == 1 || image_mask || has_smask || !color_ok || !supported_filter {
+            return Ok(());
+        }
 
         // FlateDecode / 无 Filter 需要先解压拿到原始像素数据长度
         let needs_plain = filter.is_none() || filter.as_deref() == Some(b"FlateDecode".as_slice());
@@ -653,7 +742,18 @@ mod tests {
         let o = opts(1);
         // bpc == 1
         assert_eq!(
-            plan_image_action(Some(b"DCTDecode"), 1, false, false, true, 100, 100, 99999, None, &o),
+            plan_image_action(
+                Some(b"DCTDecode"),
+                1,
+                false,
+                false,
+                true,
+                100,
+                100,
+                99999,
+                None,
+                &o
+            ),
             ImagePlan::Skip
         );
         // ImageMask
@@ -663,21 +763,65 @@ mod tests {
         );
         // 带 SMask
         assert_eq!(
-            plan_image_action(Some(b"DCTDecode"), 8, false, true, true, 100, 100, 99999, None, &o),
+            plan_image_action(
+                Some(b"DCTDecode"),
+                8,
+                false,
+                true,
+                true,
+                100,
+                100,
+                99999,
+                None,
+                &o
+            ),
             ImagePlan::Skip
         );
         // 非 DeviceRGB/DeviceGray（ICCBased 等）
         assert_eq!(
-            plan_image_action(Some(b"DCTDecode"), 8, false, false, false, 100, 100, 99999, None, &o),
+            plan_image_action(
+                Some(b"DCTDecode"),
+                8,
+                false,
+                false,
+                false,
+                100,
+                100,
+                99999,
+                None,
+                &o
+            ),
             ImagePlan::Skip
         );
         // CCITTFaxDecode / JPXDecode
         assert_eq!(
-            plan_image_action(Some(b"CCITTFaxDecode"), 8, false, false, true, 100, 100, 99999, None, &o),
+            plan_image_action(
+                Some(b"CCITTFaxDecode"),
+                8,
+                false,
+                false,
+                true,
+                100,
+                100,
+                99999,
+                None,
+                &o
+            ),
             ImagePlan::Skip
         );
         assert_eq!(
-            plan_image_action(Some(b"JPXDecode"), 8, false, false, true, 100, 100, 99999, None, &o),
+            plan_image_action(
+                Some(b"JPXDecode"),
+                8,
+                false,
+                false,
+                true,
+                100,
+                100,
+                99999,
+                None,
+                &o
+            ),
             ImagePlan::Skip
         );
     }
@@ -687,11 +831,33 @@ mod tests {
         let o = opts(1);
         // DCT + DPI 不超标（或未找到放置）：原样保留
         assert_eq!(
-            plan_image_action(Some(b"DCTDecode"), 8, false, false, true, 1651, 2335, 99999, Some(200.0), &o),
+            plan_image_action(
+                Some(b"DCTDecode"),
+                8,
+                false,
+                false,
+                true,
+                1651,
+                2335,
+                99999,
+                Some(200.0),
+                &o
+            ),
             ImagePlan::Skip
         );
         assert_eq!(
-            plan_image_action(Some(b"DCTDecode"), 8, false, false, true, 1651, 2335, 99999, None, &o),
+            plan_image_action(
+                Some(b"DCTDecode"),
+                8,
+                false,
+                false,
+                true,
+                1651,
+                2335,
+                99999,
+                None,
+                &o
+            ),
             ImagePlan::Skip
         );
     }
@@ -729,25 +895,89 @@ mod tests {
 
         // 小图（<= 64KB）不处理
         assert_eq!(
-            plan_image_action(Some(b"FlateDecode"), 8, false, false, true, 100, 100, 64 * 1024, None, &l1),
+            plan_image_action(
+                Some(b"FlateDecode"),
+                8,
+                false,
+                false,
+                true,
+                100,
+                100,
+                64 * 1024,
+                None,
+                &l1
+            ),
             ImagePlan::Skip
         );
         // 大图转 JPEG，不降尺寸时质量 = min(95, q+3)
         assert_eq!(
-            plan_image_action(Some(b"FlateDecode"), 8, false, false, true, 1000, 1000, 100 * 1024, None, &l1),
-            ImagePlan::ReencodeJpeg { quality: 95, downsample_to: None }
+            plan_image_action(
+                Some(b"FlateDecode"),
+                8,
+                false,
+                false,
+                true,
+                1000,
+                1000,
+                100 * 1024,
+                None,
+                &l1
+            ),
+            ImagePlan::ReencodeJpeg {
+                quality: 95,
+                downsample_to: None
+            }
         );
         assert_eq!(
-            plan_image_action(None, 8, false, false, true, 1000, 1000, 100 * 1024, None, &l2),
-            ImagePlan::ReencodeJpeg { quality: 88, downsample_to: None }
+            plan_image_action(
+                None,
+                8,
+                false,
+                false,
+                true,
+                1000,
+                1000,
+                100 * 1024,
+                None,
+                &l2
+            ),
+            ImagePlan::ReencodeJpeg {
+                quality: 88,
+                downsample_to: None
+            }
         );
         assert_eq!(
-            plan_image_action(Some(b"FlateDecode"), 8, false, false, true, 1000, 1000, 100 * 1024, None, &l3),
-            ImagePlan::ReencodeJpeg { quality: 78, downsample_to: None }
+            plan_image_action(
+                Some(b"FlateDecode"),
+                8,
+                false,
+                false,
+                true,
+                1000,
+                1000,
+                100 * 1024,
+                None,
+                &l3
+            ),
+            ImagePlan::ReencodeJpeg {
+                quality: 78,
+                downsample_to: None
+            }
         );
         // 大图且 DPI 超标：降采样 + jpeg_quality
         assert_eq!(
-            plan_image_action(Some(b"FlateDecode"), 8, false, false, true, 1000, 1000, 100 * 1024, Some(600.0), &l2),
+            plan_image_action(
+                Some(b"FlateDecode"),
+                8,
+                false,
+                false,
+                true,
+                1000,
+                1000,
+                100 * 1024,
+                Some(600.0),
+                &l2
+            ),
             ImagePlan::ReencodeJpeg {
                 quality: 85,
                 downsample_to: Some((333, 333))
@@ -758,8 +988,8 @@ mod tests {
     #[test]
     #[ignore = "requires local evidence PDFs; run explicitly for manual compression QA"]
     fn test_evidence_fixtures() {
-        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../test-pdf/4W122724 I D1-D14");
+        let base =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-pdf/4W122724 I D1-D14");
         let evidence3 = base.join("03 证据 3. 中国发明专利申请公开文本 CN105829563A.pdf");
         let notice =
             base.join("Notification of Acceptance of Request for Invalidation-4W122724.pdf");
@@ -771,7 +1001,7 @@ mod tests {
         // 1) 无损优化：38MB 中 90% 是不可达垃圾对象，应被剥离到 10MB 以内，页数不变
         let evidence3_str = evidence3.to_string_lossy().to_string();
         let input_pages = crate::pdf::qpdf::page_count(&evidence3_str).unwrap();
-        let result = crate::pdf::qpdf::optimize_lossless(&evidence3_str).unwrap();
+        let result = crate::pdf::qpdf::optimize_lossless_to_dir(&evidence3_str, None).unwrap();
         assert!(result.changed, "优化应产生更小输出");
         assert!(
             result.output_size < 10 * 1024 * 1024,
@@ -794,7 +1024,7 @@ mod tests {
         .unwrap();
         let split_path = std::path::PathBuf::from(&split.output_path);
         let output = tmp.join("compressed-l1.pdf");
-        compress_pdf(&split_path, &output, &opts(1)).unwrap();
+        compress_pdf_with_progress(&split_path, &output, &opts(1), &mut |_| {}).unwrap();
 
         let doc = Document::load(&output).unwrap();
         let mut max_width = 0u32;

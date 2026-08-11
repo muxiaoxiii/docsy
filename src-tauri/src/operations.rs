@@ -42,6 +42,14 @@ pub struct OperationFinishedEvent {
     pub elapsed_ms: u64,
 }
 
+/// 长任务阶段更新事件。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationProgressEvent {
+    pub operation_id: String,
+    pub label: String,
+}
+
 /// 操作结束原因。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -204,6 +212,30 @@ impl OperationManager {
                         },
                     );
                 }
+            }
+        }
+    }
+
+    /// 更新前端显示的阶段文字，不改变操作生命周期。
+    pub fn update(&self, operation_id: &str, label: impl Into<String>) {
+        let label = label.into();
+        let exists = if let Ok(map) = self.operations.lock() {
+            map.contains_key(operation_id)
+        } else {
+            false
+        };
+        if !exists {
+            return;
+        }
+        if let Ok(h) = self.app_handle.lock() {
+            if let Some(app) = h.as_ref() {
+                let _ = app.emit(
+                    "docsy-operation-progress",
+                    OperationProgressEvent {
+                        operation_id: operation_id.to_string(),
+                        label,
+                    },
+                );
             }
         }
     }

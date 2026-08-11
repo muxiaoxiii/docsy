@@ -511,14 +511,18 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       footerTextGroup = inheritIfDefault(footerTextGroup, ['fontFamily'])
       pageNumberGroup = inheritIfDefault(pageNumberGroup, ['fontFamily'])
     }
+    // `headerMode` is the current effective mode edited by the UI. The stored
+    // group can still contain a stale `mode: none` after switching the global
+    // rule to per-file/custom, so checking group.mode here would suppress the
+    // header while page-number overlays continue to render.
+    const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
     const headerInsertEnabled = rules._globalApply
-      ? (rules.headerInsertEnabled !== false && headerGroup && headerGroup.enabled !== false && headerGroup.mode !== 'none')
+      ? (rules.headerInsertEnabled !== false && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none')
       : rules.headerInsertEnabled !== false
     const footerInsertEnabled = rules._globalApply
       ? (rules.footerInsertEnabled !== false && footerTextGroup && footerTextGroup.enabled !== false && Boolean(footerTextGroup.text || rules.footerTextContent))
       : rules.footerInsertEnabled !== false
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
-    const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
     const header =
       headerInsertEnabled && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none'
         ? buildHeaderTextForGroup(file, index, { ...headerGroup, mode: headerModeValue }, rules)

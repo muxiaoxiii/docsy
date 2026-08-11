@@ -728,6 +728,26 @@ describe('Evidence PDF session helpers', () => {
     expect(legacyItems[0].header.text).toBe('证据1')
   })
 
+  it('uses the effective global header mode when the stored group is stale', () => {
+    const file = createEvidenceFile('/case/合同.pdf')
+    file.pages = 1
+    const staleGroup = { ...createDefaultHeaderGroup(), mode: 'none' }
+    const items = buildHeaderFooterItems(
+      [file],
+      {
+        ...baseRules,
+        _globalApply: true,
+        _globalHeaderGroup: staleGroup,
+        headerInsertEnabled: true,
+        headerMode: 'per_file',
+        footerEnabled: false,
+      },
+      '/out',
+    )
+
+    expect(items[0].header?.text).toBe('证据1')
+  })
+
   it('page number content row carries the effective sequence from rules', () => {
     // Global apply + per-file numbering: the file's own group stays 'continuous'
     // (default), but the generated output follows rules.pageNumberSequence.

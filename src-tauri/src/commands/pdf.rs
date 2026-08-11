@@ -153,13 +153,18 @@ pub async fn extract_pdf_pages(
 
 #[tauri::command]
 pub async fn compress_pdf(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     input: String,
     output_dir: Option<String>,
     level: Option<u8>,
 ) -> Result<PdfOutputResult, String> {
-    let result =
-        run_blocking(move || crate::pdf::qpdf::compress(&input, output_dir.as_deref(), level))
-            .await?;
+    let progress_manager = manager.inner().clone();
+    let result = run_managed(&manager, "compress_pdf", None, move |_token| {
+        crate::pdf::qpdf::compress_with_progress(&input, output_dir.as_deref(), level, |progress| {
+            progress_manager.update("compress_pdf:auto", progress.label());
+        })
+    })
+    .await?;
     Ok(PdfOutputResult {
         output_path: result.output_path,
         input_size: result.input_size,
@@ -168,8 +173,17 @@ pub async fn compress_pdf(
 }
 
 #[tauri::command]
-pub async fn optimize_pdf_lossless(input: String) -> Result<OptimizeResult, String> {
-    let result = run_blocking(move || crate::pdf::qpdf::optimize_lossless(&input)).await?;
+pub async fn optimize_pdf_lossless(
+    input: String,
+    output_dir: Option<String>,
+) -> Result<OptimizeResult, String> {
+    let result = run_blocking(move || {
+        crate::pdf::qpdf::optimize_lossless_to_dir(
+            &input,
+            output_dir.as_deref().map(std::path::Path::new),
+        )
+    })
+    .await?;
     Ok(OptimizeResult {
         output_path: result.output_path,
         input_size: result.input_size,

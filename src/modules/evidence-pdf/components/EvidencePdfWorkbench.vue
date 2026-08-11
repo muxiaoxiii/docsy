@@ -872,6 +872,7 @@ import {
   optimizeImportsLossless,
   summarizeOptimizedImports,
 } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
+import { formatProcessingWarningSummary } from '../../../shared/pdf-tools/processingWarnings.js'
 import { elementIdentity } from '../../../shared/pdf-tools/composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import { openPath, tauriCallSafe, tauriCallQuiet, userFacingError } from '../../../core/tauriBridge.js'
@@ -1875,7 +1876,8 @@ async function optimizePayloadInputsLossless(payload) {
   if (!optimizeSizeEnabled.value || !payload?.items?.length) return noop
   const originals = [...new Set(payload.items.map((item) => item.inputPath).filter(Boolean))]
   if (!originals.length) return noop
-  const decisions = await optimizeImportsLossless(originals)
+  const outputDir = payload.session?.outputRule?.outputDir || parentDir(payload.items[0]?.outputPath || '')
+  const decisions = await optimizeImportsLossless(originals, outputDir)
   const originalToCopy = new Map()
   const copyToOriginal = new Map()
   decisions.forEach((decision, index) => {
@@ -1886,7 +1888,7 @@ async function optimizePayloadInputsLossless(payload) {
   const summary = summarizeOptimizedImports(decisions)
   if (summary.count > 0) {
     ElMessage.success(
-      `处理前已优化 ${summary.count} 个文件(共 ${formatFileSize(summary.inputSize)} → ${formatFileSize(summary.outputSize)});原件未修改,优化副本保存在原文件旁`,
+      `处理前已优化 ${summary.count} 个文件(共 ${formatFileSize(summary.inputSize)} → ${formatFileSize(summary.outputSize)});原件未修改,优化副本保存在输出文件夹`,
     )
   }
   if (originalToCopy.size) {
@@ -2169,7 +2171,7 @@ async function applySplitHeaderFooterReplacement() {
         file.outputPath = success.outputPath
         file.name = fileName(success.outputPath)
         const warnings = success.warnings || []
-        file.statusDetail = warnings.join('；')
+        file.statusDetail = formatProcessingWarningSummary([{ inputPath: file.path, warnings }]).join('；')
         file.statusText = warnings.length ? '已替换，需注意' : '已替换'
         file.statusType = warnings.length ? 'warning' : 'success'
       } else if (failed) {
@@ -2255,7 +2257,7 @@ async function applyHeaderFooter() {
       if (success) {
         file.outputPath = success.outputPath
         const warnings = success.warnings || []
-        file.statusDetail = warnings.join('；')
+        file.statusDetail = formatProcessingWarningSummary([{ inputPath: file.path, warnings }]).join('；')
         file.statusText = warnings.length ? '完成，需注意' : '完成'
         file.statusType = warnings.length ? 'warning' : 'success'
       } else if (failed) {
@@ -2290,12 +2292,7 @@ async function applyHeaderFooter() {
       },
     })
     // 收集所有有 warning 的文件的具体提示
-    const warningDetails = (result.data.results || [])
-      .filter(r => r.warnings?.length)
-      .map(r => {
-        const name = r.inputPath?.split(/[/\\]/).pop() || '未知文件'
-        return `${name}：${r.warnings.join('；')}`
-      })
+    const warningDetails = formatProcessingWarningSummary(result.data.results || [])
 
     if (merge?.status === 'done') {
       const cleanupText =
@@ -2304,7 +2301,7 @@ async function applyHeaderFooter() {
       ElNotification({ title: '处理完成', message: msg, type: 'success', duration: 0 })
       if (warningDetails.length) {
         ElNotification({
-          title: `${warningDetails.length} 个文件有处理提示`,
+          title: '处理提示（已汇总）',
           message: warningDetails.join('\n'),
           type: 'warning',
           duration: 0,
@@ -2314,7 +2311,7 @@ async function applyHeaderFooter() {
       ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个`)
     } else if (warningDetails.length) {
       ElNotification({
-        title: `已完成 ${successCount} 个 PDF`,
+        title: `已完成 ${successCount} 个 PDF（提示已汇总）`,
         message: warningDetails.join('\n'),
         type: 'warning',
         duration: 0,
@@ -2458,7 +2455,9 @@ async function finishQuickCleanupPipeline() {
         file.outputPath = success.outputPath
         file.statusText = '已完成'
         file.statusType = 'success'
-        file.statusDetail = (success.warnings || []).join('；')
+        file.statusDetail = formatProcessingWarningSummary([
+          { inputPath: file.path, warnings: success.warnings || [] },
+        ]).join('；')
       } else if (failed) {
         file.statusText = '失败'
         file.statusType = 'danger'
@@ -2722,7 +2721,9 @@ async function executeImmediateDelete() {
         file.outputPath = success.outputPath
         file.statusText = '已完成'
         file.statusType = 'success'
-        file.statusDetail = (success.warnings || []).join('；')
+        file.statusDetail = formatProcessingWarningSummary([
+          { inputPath: file.path, warnings: success.warnings || [] },
+        ]).join('；')
       } else if (failed) {
         file.statusText = '失败'
         file.statusType = 'danger'

@@ -652,6 +652,32 @@ fn process_job(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     }
 
     let extra_overlays = combined_extra_overlays(args, &semantic_rebuild_overlays);
+    crate::app_log::info(
+        "pdf.header_footer",
+        "overlay plan",
+        serde_json::json!({
+            "file": &file_name,
+            "header": args.header.as_ref().map(|config| serde_json::json!({
+                "text": &config.text,
+                "region": config.region,
+                "pageStart": config.page_start,
+                "pageEnd": config.page_end,
+            })),
+            "footer": args.footer.as_ref().map(|config| serde_json::json!({
+                "text": &config.text,
+                "region": config.region,
+                "pageStart": config.page_start,
+                "pageEnd": config.page_end,
+            })),
+            "extraCount": extra_overlays.len(),
+            "extra": extra_overlays.iter().take(8).map(|config| serde_json::json!({
+                "text": &config.text,
+                "region": config.region,
+                "pageStart": config.page_start,
+                "pageEnd": config.page_end,
+            })).collect::<Vec<_>>(),
+        }),
+    );
     let t3 = std::time::Instant::now();
     let (overlay_pdf, mut overlay_warnings) = build_overlay_pdf(
         args.header.as_ref(),
@@ -2145,6 +2171,53 @@ mod tests {
                 .first(),
             Some(Object::Reference(_))
         ));
+    }
+
+    #[test]
+    fn overlapping_overlays_warn_but_are_both_written() {
+        let pages = vec![PageSize {
+            width_pt: 595.0,
+            height_pt: 842.0,
+            raw_width_pt: 595.0,
+            raw_height_pt: 842.0,
+            rotate: 0,
+        }];
+        let config = |text: &str| OverlayTextConfig {
+            text: text.to_string(),
+            region: "header".to_string(),
+            font_family: "auto".to_string(),
+            font_size: 10.0,
+            margin_mm: 10.0,
+            align: "right".to_string(),
+            offset_x_mm: 0.0,
+            color: "#000000".to_string(),
+            page_start: None,
+            page_end: None,
+            number_style: String::new(),
+            number_offset: 0,
+            number_total: None,
+            artifact_kind: "HeaderText".to_string(),
+        };
+        let header = config("主页眉");
+        let extra = config("页码");
+        let (bytes, warnings) = build_overlay_pdf(Some(&header), None, &[extra], &pages, 1, 1)
+            .expect("overlay PDF should be generated");
+
+        assert_eq!(warnings.len(), 1);
+        let document = Document::load_mem(&bytes).expect("overlay PDF should be readable");
+        let page_id = document.get_pages().into_values().next().unwrap();
+        let content = document.get_and_decode_page_content(page_id).unwrap();
+        let texts = content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "BDC")
+            .filter_map(|operation| operation.operands.get(1))
+            .filter_map(|object| object.as_dict().ok())
+            .filter_map(|dict| dict.get(b"ActualText").ok())
+            .filter_map(artifacts::decode_pdf_string)
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(|text| text == "主页眉"));
+        assert!(texts.iter().any(|text| text == "页码"));
     }
 
     #[test]

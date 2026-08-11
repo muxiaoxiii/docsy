@@ -157,33 +157,62 @@ pub fn optimize_to(input: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn compress(
+/// 压缩 PDF，并通过回调报告阶段。回调只用于 UI 反馈，不改变处理策略。
+pub fn compress_with_progress<F>(
     input: &str,
     output_dir: Option<&str>,
     level: Option<u8>,
-) -> Result<PdfOutputResult> {
+    mut progress: F,
+) -> Result<PdfOutputResult>
+where
+    F: FnMut(super::compress::CompressProgress),
+{
     let input_path = Path::new(input);
     if !input_path.exists() {
         anyhow::bail!("PDF 文件不存在: {}", input);
     }
 
-    let level = level.unwrap_or(1);
-    let options = super::compress::CompressOptions::from_level(level);
-
     let input_size = std::fs::metadata(input_path)?.len();
+
+    // 默认只做无损结构整理。图片解码/重编码必须由用户明确开启，
+    // 否则大扫描件会进入很长的图片处理流程，和证据处理的快速无损路径不一致。
+    let Some(level) = level else {
+        progress(super::compress::CompressProgress::phase("按页重建 PDF"));
+        let output_path = unique_output_path_in_dir(input_path, output_dir, "_compressed");
+        // Keep the standalone default identical to the evidence workflow.
+        // A plain qpdf rewrite only recompresses reachable streams; rebuilding
+        // the page tree also drops otherwise unreachable objects left by common
+        // scanners and PDF editors, which is where large evidence files often
+        // gain most of their size back.
+        rebuild_pages(input_path, &output_path)?;
+        let output_size = std::fs::metadata(&output_path)?.len();
+        progress(super::compress::CompressProgress::done());
+        return Ok(PdfOutputResult {
+            output_path: output_path.display().to_string(),
+            input_size,
+            output_size,
+        });
+    };
+
+    let options = super::compress::CompressOptions::from_level(level);
 
     // Step 1: 图片重编码压缩
     let temp_path = unique_output_path_in_dir(input_path, output_dir, "_imgtmp");
-    super::compress::compress_pdf(input_path, &temp_path, &options)?;
+    progress(super::compress::CompressProgress::phase(
+        "读取 PDF 并分析图片",
+    ));
+    super::compress::compress_pdf_with_progress(input_path, &temp_path, &options, &mut progress)?;
 
-    // Step 2: qpdf 结构优化
+    // Step 2: qpdf 按页重建 + 结构优化（丢弃不可达对象，收益通常大于单纯重写）
     let output_path = unique_output_path_in_dir(input_path, output_dir, "_compressed");
-    optimize_to(&temp_path, &output_path)?;
+    progress(super::compress::CompressProgress::phase("按页重建并整理结构"));
+    rebuild_pages(&temp_path, &output_path)?;
 
     // 清理临时文件
     let _ = std::fs::remove_file(&temp_path);
 
     let output_size = std::fs::metadata(&output_path)?.len();
+    progress(super::compress::CompressProgress::done());
     Ok(PdfOutputResult {
         output_path: output_path.display().to_string(),
         input_size,
@@ -243,22 +272,28 @@ pub fn extract_pages(
     })
 }
 
-/// 无损结构优化：按页重建（--empty --pages 1-z）丢弃页树不可达的垃圾对象。
-/// 输出 sibling 文件「<stem>（已优化）.pdf」（后缀形式，不破坏文件名开头的证据编号解析与排序）；
-/// 若无收益则删除输出并返回 changed=false。
-pub fn optimize_lossless(input: &str) -> Result<OptimizeResult> {
+/// Create a losslessly rebuilt copy in `output_dir` when supplied. Evidence
+/// processing uses this before applying overlays so temporary working copies
+/// remain alongside the eventual output instead of next to the source PDF.
+pub fn optimize_lossless_to_dir(input: &str, output_dir: Option<&Path>) -> Result<OptimizeResult> {
     let input_path = Path::new(input);
     if !input_path.exists() {
         anyhow::bail!("PDF 文件不存在: {}", input);
     }
     let input_size = std::fs::metadata(input_path)?.len();
 
-    let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
+    let parent =
+        output_dir.unwrap_or_else(|| input_path.parent().unwrap_or_else(|| Path::new(".")));
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("创建优化输出目录失败: {}", parent.display()))?;
     let stem = input_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
-    let ext = input_path.extension().and_then(|e| e.to_str()).unwrap_or("pdf");
+    let ext = input_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("pdf");
     let output_path =
         crate::util::fs::unique_output_path(parent, &format!("{stem}（已优化）"), ext);
 

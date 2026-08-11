@@ -74,10 +74,13 @@ export function summarizeOptimizedImports(decisions) {
 }
 
 /** 逐个无损优化待导入的 PDF；失败或无收益静默回退原路径，绝不阻断导入。 */
-export async function optimizeImportsLossless(paths) {
+export async function optimizeImportsLossless(paths, outputDir = '') {
   const decisions = []
   for (const path of paths) {
-    const result = await tauriCallSafe('optimize_pdf_lossless', { input: path })
+    const result = await tauriCallSafe('optimize_pdf_lossless', {
+      input: path,
+      output_dir: outputDir || null,
+    })
     if (!result.ok) {
       console.warn('[pdfLosslessOptimize] 无损优化失败，回退原路径:', path, result.error)
     }
