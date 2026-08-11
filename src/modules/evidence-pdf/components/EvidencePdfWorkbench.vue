@@ -159,7 +159,9 @@
             <el-switch v-model="removeAnnotations" active-text="启用" inactive-text="关闭" />
           </div>
           <div class="rule-item">
-            <el-checkbox v-model="autoOptimizeOnImport">导入时自动优化体积(无损,不动原件)</el-checkbox>
+            <label>优化体积</label>
+            <el-switch v-model="optimizeSizeEnabled" active-text="启用" inactive-text="关闭" />
+            <span class="field-hint">无损重建：导入先优化加快处理，导出结果就地收尾；原件不动</span>
           </div>
         </div>
       </div>
@@ -866,6 +868,7 @@ import { useEvidencePdfExistingEditing } from '../../../shared/pdf-tools/composa
 import { renderPageNumberTemplate } from '../../../shared/pdf-tools/composables/pdfPageNumberRules.js'
 import {
   formatFileSize,
+  sizeSavingText,
   optimizeImportsLossless,
   summarizeOptimizedImports,
 } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
@@ -940,10 +943,10 @@ const overlayProgressText = ref('')
 let overlayProgressTimer = null
 const quickCleanupRunning = ref(false)
 const evidenceDragging = ref(false)
-const AUTO_OPTIMIZE_ON_IMPORT_KEY = 'docsy.evidencePdf.autoOptimizeOnImport'
-const autoOptimizeOnImport = ref(window.localStorage.getItem(AUTO_OPTIMIZE_ON_IMPORT_KEY) === '1')
-watch(autoOptimizeOnImport, (value) => {
-  window.localStorage.setItem(AUTO_OPTIMIZE_ON_IMPORT_KEY, value ? '1' : '0')
+const OPTIMIZE_SIZE_KEY = 'docsy.evidencePdf.optimizeSize'
+const optimizeSizeEnabled = ref(window.localStorage.getItem(OPTIMIZE_SIZE_KEY) !== '0')
+watch(optimizeSizeEnabled, (value) => {
+  window.localStorage.setItem(OPTIMIZE_SIZE_KEY, value ? '1' : '0')
 })
 let quickCleanupPipeline = false
 const importingMergedPdf = ref(false)
@@ -1860,7 +1863,7 @@ async function handleEvidenceDrop(paths) {
 async function loadEvidenceFiles(paths) {
   mergedImportPlan.value = null
   let importPaths = paths
-  if (autoOptimizeOnImport.value) {
+  if (optimizeSizeEnabled.value) {
     const decisions = await optimizeImportsLossless(paths)
     importPaths = decisions.map((d) => d.path)
     const summary = summarizeOptimizedImports(decisions)
@@ -1874,6 +1877,15 @@ async function loadEvidenceFiles(paths) {
   selectedOverlayIndex.value = 0
   await refreshOverlayPageCounts()
   await checkExistingBookmarks()
+}
+
+// 导出结果就地优化的体积收益汇报（后端返回的 optimize 汇总）
+function notifyExportOptimizeSummary(data) {
+  const opt = data?.optimize
+  if (!opt || !opt.count) return
+  ElMessage.success(
+    `导出结果已就地优化 ${opt.count} 个文件：共 ${sizeSavingText(opt.inputSize, opt.outputSize)}`,
+  )
 }
 
 async function checkExistingBookmarks() {
@@ -2097,6 +2109,7 @@ async function applySplitHeaderFooterReplacement() {
     let payload = buildEvidencePdfRulePayload(overlayRows.value, rules, outputDir)
     payload = await resolveSuffixConflicts(payload)
     if (!payload) { overlaying.value = false; return }
+    payload.optimizeOutput = optimizeSizeEnabled.value
     overlayRows.value.forEach((file) => {
       file.statusText = '替换中'
       file.statusType = 'warning'
@@ -2112,6 +2125,7 @@ async function applySplitHeaderFooterReplacement() {
       })
       return
     }
+    notifyExportOptimizeSummary(result.data)
 
     const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
     const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
@@ -2164,6 +2178,7 @@ async function applyHeaderFooter() {
     let payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
     payload = await resolveSuffixConflicts(payload)
     if (!payload) { overlaying.value = false; return }
+    payload.optimizeOutput = optimizeSizeEnabled.value
 
     overlayFiles.value.forEach((file) => {
       file.statusText = '处理中…'
@@ -2196,6 +2211,7 @@ async function applyHeaderFooter() {
       })
       return
     }
+    notifyExportOptimizeSummary(result.data)
 
     const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
     const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
@@ -2379,6 +2395,7 @@ async function finishQuickCleanupPipeline() {
       cleanupFooterHeightMm: cleanupFooterHeightMm.value,
     }
     const payload = buildEvidencePdfRulePayload(overlayRows.value, cleanupRules, outputDir)
+    payload.optimizeOutput = optimizeSizeEnabled.value
     overlayRows.value.forEach((file) => {
       file.statusText = '处理中'
       file.statusType = 'warning'
@@ -2394,6 +2411,7 @@ async function finishQuickCleanupPipeline() {
       })
       return
     }
+    notifyExportOptimizeSummary(result.data)
 
     const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
     const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))
@@ -2639,6 +2657,7 @@ async function executeImmediateDelete() {
       cleanupFooterHeightMm: cleanupFooterHeightMm.value,
     }
     const payload = buildEvidencePdfRulePayload(overlayRows.value, cleanupRules, outputDir)
+    payload.optimizeOutput = optimizeSizeEnabled.value
     overlayRows.value.forEach((file) => {
       file.statusText = '处理中'
       file.statusType = 'warning'
@@ -2654,6 +2673,7 @@ async function executeImmediateDelete() {
       })
       return
     }
+    notifyExportOptimizeSummary(result.data)
 
     const successByInput = new Map((result.data.results || []).map((item) => [item.inputPath, item]))
     const failedByInput = new Map((result.data.failed || []).map((item) => [item.path, item]))

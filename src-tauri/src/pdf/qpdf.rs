@@ -262,27 +262,7 @@ pub fn optimize_lossless(input: &str) -> Result<OptimizeResult> {
     let output_path =
         crate::util::fs::unique_output_path(parent, &format!("{stem}（已优化）"), ext);
 
-    let qpdf = crate::external::QpdfTool;
-    let bin = qpdf.binary_path()?;
-    let mut cmd = crate::external::hidden_command(&bin);
-    add_optimization_args(&mut cmd);
-    cmd.arg("--empty")
-        .arg("--pages")
-        .arg(input_path)
-        .arg("1-z")
-        .arg("--")
-        .arg(&output_path);
-    let output = run_cancellable("无损优化", cmd)?;
-    if !status_is_success(&output.status) {
-        anyhow::bail!(
-            "qpdf 无损优化失败（{}）：{}",
-            bin.display(),
-            crate::external::command_failure_detail(&output)
-        );
-    }
-    if !output_path.exists() {
-        anyhow::bail!("qpdf 未生成无损优化输出文件");
-    }
+    rebuild_pages(input_path, &output_path)?;
 
     let output_size = std::fs::metadata(&output_path)?.len();
     if output_size >= input_size {
@@ -302,6 +282,101 @@ pub fn optimize_lossless(input: &str) -> Result<OptimizeResult> {
         output_size,
         changed: true,
     })
+}
+
+/// 就地无损优化：重建到同目录临时文件，有收益则替换原文件（同一路径），
+/// 无收益或失败则保持原文件不动。用于导出结果收尾，不产生副本文件。
+pub fn optimize_in_place(input: &str) -> Result<OptimizeResult> {
+    let input_path = Path::new(input);
+    if !input_path.exists() {
+        anyhow::bail!("PDF 文件不存在: {}", input);
+    }
+    let input_size = std::fs::metadata(input_path)?.len();
+
+    // 临时文件必须与原文件同目录：std::fs::rename 不能跨卷/跨盘移动。
+    // 名称带纳秒时间戳避免同进程并发任务撞名。
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
+    let temp_path = crate::util::fs::unique_output_path(
+        parent,
+        &format!(".docsy-optimizing-{}-{stamp}", std::process::id()),
+        "pdf",
+    );
+    let guard = crate::util::fs::TempPathGuard::new(temp_path.clone());
+    rebuild_pages(input_path, guard.path())?;
+
+    let output_size = std::fs::metadata(guard.path())?.len();
+    if output_size >= input_size {
+        return Ok(OptimizeResult {
+            output_path: input.to_string(),
+            input_size,
+            output_size: input_size,
+            changed: false,
+        });
+    }
+
+    replace_file(guard.path(), input_path)?;
+    Ok(OptimizeResult {
+        output_path: input.to_string(),
+        input_size,
+        output_size,
+        changed: true,
+    })
+}
+
+/// 用 `from` 的内容替换 `to`：先在同目录改名备份原文件，替换成功后删除备份，
+/// 任一失败尽量恢复现场（Windows 上 rename 不允许目标已存在，也不能跨盘）。
+fn replace_file(from: &Path, to: &Path) -> Result<()> {
+    let parent = to.parent().unwrap_or_else(|| Path::new("."));
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let backup = crate::util::fs::unique_output_path(
+        parent,
+        &format!(".docsy-optimize-backup-{}-{stamp}", std::process::id()),
+        "pdf",
+    );
+    std::fs::rename(to, &backup).context("备份待优化文件失败")?;
+    match std::fs::rename(from, to) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&backup);
+            Ok(())
+        }
+        Err(err) => {
+            let _ = std::fs::rename(&backup, to);
+            Err(err).context("替换优化后的文件失败")
+        }
+    }
+}
+
+/// qpdf 按页重建：--empty --pages <input> 1-z，丢弃页树不可达对象并施加优化参数。
+fn rebuild_pages(input_path: &Path, output_path: &Path) -> Result<()> {
+    let qpdf = crate::external::QpdfTool;
+    let bin = qpdf.binary_path()?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    add_optimization_args(&mut cmd);
+    cmd.arg("--empty")
+        .arg("--pages")
+        .arg(input_path)
+        .arg("1-z")
+        .arg("--")
+        .arg(output_path);
+    let output = run_cancellable("无损优化", cmd)?;
+    if !status_is_success(&output.status) {
+        anyhow::bail!(
+            "qpdf 无损优化失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&output)
+        );
+    }
+    if !output_path.exists() {
+        anyhow::bail!("qpdf 未生成无损优化输出文件");
+    }
+    Ok(())
 }
 
 pub(crate) fn add_optimization_args(command: &mut std::process::Command) {

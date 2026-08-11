@@ -50,7 +50,7 @@ fn apply_rules_inner(
             }
         }
     };
-    let results = restore_original_inputs(
+    let mut results = restore_original_inputs(
         batch_result
             .get("results")
             .and_then(Value::as_array)
@@ -67,6 +67,14 @@ fn apply_rules_inner(
     if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
         cleanup_temp_paths(temp_paths);
         anyhow::bail!("操作已取消");
+    }
+    let mut optimize_summary = Value::Null;
+    if extract_optimize_output(args) {
+        optimize_summary = optimize_result_outputs(&mut results, token);
+        if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+            cleanup_temp_paths(temp_paths);
+            anyhow::bail!("操作已取消");
+        }
     }
     let merge_result = match apply_merge_if_requested(&merge, &prepared_items, &results, &failed) {
         Ok(value) => value,
@@ -86,8 +94,68 @@ fn apply_rules_inner(
             "total": results.len() + failed.len(),
             "success": results.len(),
             "failed": failed.len()
-        }
+        },
+        "optimize": optimize_summary
     }))
+}
+
+/// 读取导出优化开关：前端在 payload 根级传 `optimizeOutput: true`。
+fn extract_optimize_output(args: &Value) -> bool {
+    args.get("optimizeOutput")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// 对每个成功结果的输出文件就地无损优化（丢弃页树不可达对象）。
+/// 优化失败不阻断导出，只在该结果的 warnings 里追加提示。
+/// 返回 { count, inputSize, outputSize } 汇总，供前端展示体积收益。
+fn optimize_result_outputs(
+    results: &mut [Value],
+    token: Option<&tokio_util::sync::CancellationToken>,
+) -> Value {
+    let mut count = 0_u64;
+    let mut input_size = 0_u64;
+    let mut output_size = 0_u64;
+    for item in results.iter_mut() {
+        if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+            break;
+        }
+        let Some(output_path) = item
+            .get("outputPath")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+        else {
+            continue;
+        };
+        match qpdf::optimize_in_place(&output_path) {
+            Ok(result) if result.changed => {
+                count += 1;
+                input_size += result.input_size;
+                output_size += result.output_size;
+                item["optimize"] = json!({
+                    "changed": true,
+                    "inputSize": result.input_size,
+                    "outputSize": result.output_size,
+                });
+            }
+            Ok(_) => {}
+            Err(err) => {
+                let warnings = item
+                    .get("warnings")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut warnings = warnings;
+                warnings.push(json!(format!("体积优化失败，已保留未优化结果: {err}")));
+                item["warnings"] = Value::Array(warnings);
+            }
+        }
+    }
+    json!({
+        "count": count,
+        "inputSize": input_size,
+        "outputSize": output_size,
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -368,6 +436,13 @@ fn cleanup_temp_paths(paths: Vec<PathBuf>) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn extracts_optimize_output_flag() {
+        assert!(extract_optimize_output(&json!({ "optimizeOutput": true })));
+        assert!(!extract_optimize_output(&json!({ "optimizeOutput": false })));
+        assert!(!extract_optimize_output(&json!({})));
+    }
 
     #[test]
     fn extracts_items_from_business_payload() {
