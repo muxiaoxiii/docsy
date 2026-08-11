@@ -44,8 +44,8 @@ defineProps({
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 22px 24px 24px;
-  background: var(--docsy-surface);
+  padding: 20px;
+  background: var(--docsy-canvas);
 }
 
 .workspace-header {
@@ -53,8 +53,12 @@ defineProps({
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--docsy-border-subtle);
+  min-height: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-panel-radius);
+  background: var(--docsy-surface-elevated);
+  box-shadow: var(--docsy-shadow-soft);
 }
 
 .workspace-heading {
@@ -64,13 +68,21 @@ defineProps({
 .workspace-heading h2 {
   margin: 0;
   color: var(--docsy-text-strong);
-  font-size: 18px;
-  font-weight: 650;
+  font-family:
+    ui-rounded,
+    'SF Pro Rounded',
+    -apple-system,
+    'PingFang SC',
+    sans-serif;
+  font-size: 20px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
   line-height: 1.35;
 }
 
 .workspace-heading p {
-  margin: 6px 0 0;
+  max-width: 680px;
+  margin: 7px 0 0;
   color: var(--docsy-text-muted);
   font-size: 13px;
   line-height: 1.5;
@@ -86,12 +98,18 @@ defineProps({
 
 .workspace-toolbar {
   flex-wrap: wrap;
-  padding: 14px 0;
+  min-height: 52px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: color-mix(in srgb, var(--docsy-surface-muted) 68%, var(--docsy-surface-elevated));
 }
 
 .workspace-content {
   flex: 1;
   min-height: 0;
+  margin-top: 12px;
   overflow: auto;
 }
 
@@ -99,8 +117,12 @@ defineProps({
   flex-shrink: 0;
   flex-wrap: wrap;
   gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid var(--docsy-border-subtle);
+  min-height: 58px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-panel-radius);
+  background: var(--docsy-surface-elevated);
 }
 
 @media (max-width: 760px) {

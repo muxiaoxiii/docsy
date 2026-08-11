@@ -229,7 +229,7 @@ watch([pageSize, () => props.items.length], () => {
   overflow: auto;
   padding: 8px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
 }
 .reorder-image-grid {
@@ -244,7 +244,7 @@ watch([pageSize, () => props.items.length], () => {
   text-align: center;
   background: var(--docsy-surface-elevated);
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
 }
 .reorder-image-card.is-reorder-dragging {
   opacity: 0.55;
@@ -288,7 +288,7 @@ watch([pageSize, () => props.items.length], () => {
   margin: 0 auto 4px;
   place-items: center;
   overflow: hidden;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
 }
 .reorder-image-thumb {

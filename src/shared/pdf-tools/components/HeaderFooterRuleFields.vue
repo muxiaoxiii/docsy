@@ -890,7 +890,7 @@ function removePageNumberGroup(id) {
   align-items: center;
   justify-content: space-between;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   cursor: pointer;
   font-size: 13px;
   color: var(--docsy-text-muted);
@@ -915,7 +915,7 @@ function removePageNumberGroup(id) {
   font-size: 13px;
   color: var(--docsy-text-strong);
   background: var(--docsy-surface-muted);
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
 }
 .template-presets { margin-bottom: 4px; }
 .template-custom-input { margin-top: 4px; }
@@ -964,7 +964,7 @@ function removePageNumberGroup(id) {
 .template-help code {
   background: rgba(255, 255, 255, 0.1);
   padding: 0 3px;
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   font-size: 11px;
 }
 </style>

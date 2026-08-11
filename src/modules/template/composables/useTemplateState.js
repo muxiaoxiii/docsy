@@ -19,7 +19,7 @@ import {
 import { useTemplateSettings } from './useTemplateSettings.js'
 import { useBatchFill } from './useBatchFill.js'
 import { markToRow, normalizeFieldRows, autoMergeMarks, inferFieldFromText, validateFieldRowsBeforeSave, buildFields } from './useFieldNormalization.js'
-import { ensureExtension, splitPartyLabelSegments, fieldFormKey, sliceChars, referenceSourceKey, formatDateValue, parseReferenceSourceKey, syncReferenceSourceFromKey, partyItemsToValues, inputValueForField, resolveReferenceValueFromSource } from './fieldRowUtils.js'
+import { ensureExtension, splitPartyLabelSegments, fieldFormKey, sliceChars, charLength, referenceSourceKey, formatDateValue, parseReferenceSourceKey, syncReferenceSourceFromKey, partyItemsToValues, inputValueForField, resolveReferenceValueFromSource } from './fieldRowUtils.js'
 import { usePreviewSelection } from './usePreviewSelection.js'
 import { registerSnapshotProvider } from '../../../shared/diagnostics.js'
 
@@ -129,33 +129,36 @@ export function useTemplateState() {
   const historyRunsLoading = ref(false)
   const renderableTemplateFields = computed(() => {
     const rawFields = (templateManifest.value?.fields || []).filter(isRenderableField)
-    // Mark duplicate fields (same name appearing more than once)
-    // Use shallow copies to avoid mutating the original manifest objects
-    const nameCount = new Map()
+    // 同名去重规则（浅拷贝避免改动 manifest 原对象）：
+    // - 同名同类型：视为同一字段的多处出现，首个为主字段，其余标记
+    //   _isDuplicate 并自动转为 reference 跟随主字段（与 buildFields 的
+    //   合并语义一致）；
+    // - 同名异类型：是各自独立的字段（id 含类型、表单值按 id 存取，互不
+    //   串扰），全部保留，不做去重或类型改写。
+    const byName = new Map()
     for (const field of rawFields) {
-      nameCount.set(field.name, (nameCount.get(field.name) || 0) + 1)
+      if (!byName.has(field.name)) byName.set(field.name, [])
+      byName.get(field.name).push(field)
     }
     const seenNames = new Set()
     const fields = []
     for (const field of rawFields) {
+      const group = byName.get(field.name)
+      const mixedTypes = group.some((item) => item.type !== group[0].type)
       const copy = { ...field }
-      if ((nameCount.get(field.name) || 0) > 1) {
-        if (seenNames.has(field.name)) {
-          copy._isDuplicate = true
-          copy._primaryFieldName = field.name
-          // Auto-set reference type for duplicate follower fields (matches buildFields behavior)
-          if (copy.type !== 'reference' && !['marker', 'prefix', 'suffix', 'delete_text', 'ignore'].includes(copy.type)) {
-            copy.type = 'reference'
-            if (!copy.reference) {
-              copy.reference = { sourceMode: 'field', sourceField: field.name, sourceSemanticKey: '', sourceIndex: null }
-            }
-          }
-        } else {
-          copy._isDuplicate = false
-          seenNames.add(field.name)
-        }
-      } else {
+      if (mixedTypes || !seenNames.has(field.name)) {
         copy._isDuplicate = false
+        seenNames.add(field.name)
+      } else {
+        copy._isDuplicate = true
+        copy._primaryFieldName = field.name
+        // Auto-set reference type for duplicate follower fields (matches buildFields behavior)
+        if (copy.type !== 'reference' && !['marker', 'prefix', 'suffix', 'delete_text', 'ignore'].includes(copy.type)) {
+          copy.type = 'reference'
+          if (!copy.reference) {
+            copy.reference = { sourceMode: 'field', sourceField: field.name, sourceSemanticKey: '', sourceIndex: null }
+          }
+        }
       }
       fields.push(copy)
     }
@@ -300,6 +303,8 @@ export function useTemplateState() {
   let cachedSemanticSuggestions = null
   let templateOpenRequestSeq = 0
   let historyContextRequestSeq = 0
+  let inspectSourceRequestSeq = 0
+  let editTemplateRequestSeq = 0
 
   const groupedHistoryRuns = computed(() => groupHistoryRuns(historyRuns.value))
   const templatePreview = computed(() =>
@@ -744,11 +749,14 @@ export function useTemplateState() {
 
   async function inspectSourceDocx() {
     if (!sourceDocx.value) return
+    // 请求序号守卫：连续触发时旧响应直接丢弃，避免覆盖新文档的状态。
+    const requestSeq = ++inspectSourceRequestSeq
     scanning.value = true
     // New source document: drop undo history from the previous context so old
     // fieldRows can never be restored onto the new document.
     undoStack.value = []
     const result = await tauriCallSafe('inspect_docx_template', { path: sourceDocx.value })
+    if (requestSeq !== inspectSourceRequestSeq) return
     scanning.value = false
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, 'Word 文档读取失败，请确认文件未损坏且不是加密文件'))
@@ -1576,6 +1584,9 @@ export function useTemplateState() {
       semanticKey: field.semanticKey,
       dateFormat: field.type === 'date' ? (field.dateFormat || 'iso') : '',
       _nameManuallySet: Boolean(field.name && field.label && field.name !== field.label),
+      // 从既有模板回读的行：同名同类型本就是一个字段的多处位置，
+      // 保存时允许 buildFields 合并回去（不走自动加序号）。
+      _allowSameNameMerge: true,
       required: field.required,
       optionalWhenEmpty: false,
       optionalScope: 'position',
@@ -1650,9 +1661,12 @@ export function useTemplateState() {
 
   async function editTemplateFromLibrary(item) {
     if (!item?.path) return
+    // 请求序号守卫：连续点击编辑时旧响应直接丢弃，避免覆盖新模板的状态。
+    const requestSeq = ++editTemplateRequestSeq
     // Editing another template: drop undo history from the previous context.
     undoStack.value = []
     const result = await tauriCallSafe('inspect_docsytpl', { path: item.path })
+    if (requestSeq !== editTemplateRequestSeq) return
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, '读取模板失败'))
       return
@@ -1675,6 +1689,7 @@ export function useTemplateState() {
 
     // Load document content so full-text and preview buttons work
     const contentResult = await tauriCallSafe('inspect_docsytpl_content', { path: item.path })
+    if (requestSeq !== editTemplateRequestSeq) return
     if (contentResult.ok) {
       documentText.value = contentResult.data.documentText || ''
       documentRuns.value = contentResult.data.documentRuns || []
@@ -1687,8 +1702,9 @@ export function useTemplateState() {
     clearPreviewSampleValues()
 
     // Convert manifest fields back to editable fieldRows. Same-name same-type
-    // rows intentionally keep their type: buildFields merges them back into a
-    // single fillAllPositions field (no self-reference conversion).
+    // rows intentionally keep their type: 行上带 _allowSameNameMerge 标记，
+    // buildFields 会把它们合并回单个 fillAllPositions 字段（不做自动加序号、
+    // 也不转成自引用）。
     fieldRows.value = manifestToFieldRows(manifest)
 
     editingLibraryTemplatePath.value = item.path
@@ -1821,7 +1837,9 @@ export function useTemplateState() {
         overlays.push({
           runId: run.id,
           start: 0,
-          end: run.text?.length || 0,
+          // 字符长度统一按码点统计（与 charLength/sliceChars 一致），
+          // 不要用 .length 的码元数，否则 emoji 等非 BMP 字符会错位。
+          end: charLength(run.text),
           label: displayValue,
           type: field.type || 'text',
           filled: isFilled,

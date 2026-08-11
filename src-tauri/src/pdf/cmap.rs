@@ -513,7 +513,6 @@ fn load_builtin_tounicode_cmap(name: &str) -> Option<ToUnicodeCMap> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EncodingCMap {
     mappings: BTreeMap<Vec<u8>, Vec<u8>>,
-    code_byte_length: usize,
 }
 
 fn load_builtin_encoding_cmap(name: &str) -> Option<EncodingCMap> {
@@ -523,26 +522,49 @@ fn load_builtin_encoding_cmap(name: &str) -> Option<EncodingCMap> {
 
 /// 将编码 CMap（code → CID）与 ToUnicode CMap（CID → Unicode）按 CID 合成。
 ///
-/// 已知覆盖缺口：合成结果只有单一 codespace（固定 `code_byte_length` 宽度），
-/// 不支持混合宽度编码。例如 90ms-RKSJ-H 中 1 字节的半角片假名（0xA1–0xDF）
-/// 会匹配不到 codespace，这些字符退化为按 bbox 提取。
+/// codespace 按编码中实际出现的码长与码值分段，以支持混合宽度编码，
+/// 例如 90ms-RKSJ-H 中 1 字节的半角片假名（0xA1–0xDF）。码值连续的
+/// 同长码合并为一个 range，避免全宽 range 让长码吞掉短码前缀。
+/// CID 在 ToUnicode 侧缺失时仅跳过该条映射，而不是放弃整个字体映射。
 fn compose_encoding_and_unicode(
     encoding: EncodingCMap,
     cid_to_unicode: ToUnicodeCMap,
 ) -> Option<ToUnicodeCMap> {
-    let mut mappings = BTreeMap::new();
+    let mut mappings = BTreeMap::<Vec<u8>, String>::new();
     for (code, cid_bytes) in encoding.mappings {
-        let unicode = cid_to_unicode.decode(&cid_bytes)?;
+        let Some(unicode) = cid_to_unicode.decode(&cid_bytes) else {
+            log::debug!("合成预定义 CMap 时跳过缺失 CID 的映射 code={code:02x?}");
+            continue;
+        };
         mappings.insert(code, unicode);
     }
     if mappings.is_empty() {
         return None;
     }
+    // 按码长分组（BTreeMap 的键本身有序），把相邻码值合并为 codespace 段；
+    // decode 时长码段在前，长码优先可避免短码吞掉长码的前缀。
+    let mut code_spaces = Vec::<CodeSpaceRange>::new();
+    for code in mappings.keys() {
+        let mut merged = false;
+        if let Some(range) = code_spaces.last_mut() {
+            if range.start.len() == code.len() {
+                let mut next = range.end.clone();
+                if increment_bytes(&mut next).is_ok() && next == *code {
+                    range.end = code.clone();
+                    merged = true;
+                }
+            }
+        }
+        if !merged {
+            code_spaces.push(CodeSpaceRange {
+                start: code.clone(),
+                end: code.clone(),
+            });
+        }
+    }
+    code_spaces.sort_by_key(|range| std::cmp::Reverse(range.start.len()));
     Some(ToUnicodeCMap {
-        code_spaces: vec![CodeSpaceRange {
-            start: vec![0; encoding.code_byte_length],
-            end: vec![u8::MAX; encoding.code_byte_length],
-        }],
+        code_spaces,
         mappings,
     })
 }
@@ -690,7 +712,6 @@ fn parse_binary_encoding_cmap(data: &[u8]) -> Result<EncodingCMap> {
     let mut stream = BinaryCMapStream::new(data);
     stream.read_byte().context("bcmap 缺少头部")?;
     let mut mappings = BTreeMap::new();
-    let mut code_byte_length = 1_usize;
     let mut use_cmap = None;
     while let Some(command) = stream.read_byte() {
         if command >> 5 == 7 {
@@ -706,7 +727,6 @@ fn parse_binary_encoding_cmap(data: &[u8]) -> Result<EncodingCMap> {
         let kind = command >> 5;
         let sequence = command & 0x10 != 0;
         let data_size = usize::from(command & 0x0f);
-        code_byte_length = code_byte_length.max(data_size + 1);
         let count = stream.read_number()? as usize;
         match kind {
             2 => {
@@ -766,19 +786,13 @@ fn parse_binary_encoding_cmap(data: &[u8]) -> Result<EncodingCMap> {
         if let Some(base) = load_builtin_encoding_cmap(&name) {
             let mut merged = base.mappings;
             merged.extend(mappings);
-            return Ok(EncodingCMap {
-                mappings: merged,
-                code_byte_length: code_byte_length.max(base.code_byte_length),
-            });
+            return Ok(EncodingCMap { mappings: merged });
         }
     }
     if mappings.is_empty() {
         anyhow::bail!("bcmap 编码映射为空")
     }
-    Ok(EncodingCMap {
-        mappings,
-        code_byte_length,
-    })
+    Ok(EncodingCMap { mappings })
 }
 
 fn add_binary_cid_range(
@@ -1035,6 +1049,91 @@ mod tests {
             build_predefined_font_cmap(&Some("GB-EUC-H".to_string()), &Some("GB1".to_string()))
                 .unwrap();
         assert!(cmap.mapping_count() > 100);
+    }
+
+    #[test]
+    fn composes_mixed_width_codespaces() {
+        // 模拟 90ms-RKSJ-H 这类混合宽度编码：1 字节码与 2 字节码并存。
+        let encoding = EncodingCMap {
+            mappings: [
+                (vec![0xA1], encode_number(1, 2)),
+                (vec![0x82, 0xA0], encode_number(2, 2)),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let cid_to_unicode = ToUnicodeCMap {
+            code_spaces: vec![CodeSpaceRange {
+                start: vec![0, 0],
+                end: vec![u8::MAX, u8::MAX],
+            }],
+            mappings: [
+                (vec![0, 1], "ｱ".to_string()),
+                (vec![0, 2], "あ".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let cmap = compose_encoding_and_unicode(encoding, cid_to_unicode).unwrap();
+        // 1 字节段与 2 字节段各一个 codespace，长码在前。
+        assert_eq!(
+            cmap.code_spaces,
+            vec![
+                CodeSpaceRange {
+                    start: vec![0x82, 0xA0],
+                    end: vec![0x82, 0xA0],
+                },
+                CodeSpaceRange {
+                    start: vec![0xA1],
+                    end: vec![0xA1],
+                },
+            ]
+        );
+        assert_eq!(
+            cmap.decode(&[0xA1, 0x82, 0xA0]),
+            Some("ｱあ".to_string())
+        );
+    }
+
+    #[test]
+    fn compose_skips_cids_missing_from_unicode_map() {
+        let encoding = EncodingCMap {
+            mappings: [
+                (vec![0x01], encode_number(1, 2)),
+                (vec![0x02], encode_number(9, 2)),
+                (vec![0x03], encode_number(2, 2)),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let cid_to_unicode = ToUnicodeCMap {
+            code_spaces: vec![CodeSpaceRange {
+                start: vec![0, 0],
+                end: vec![u8::MAX, u8::MAX],
+            }],
+            mappings: [
+                (vec![0, 1], "甲".to_string()),
+                (vec![0, 2], "乙".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        // CID 9 缺失时仅跳过该条映射，其余映射不受影响。
+        let cmap = compose_encoding_and_unicode(encoding, cid_to_unicode).unwrap();
+        assert_eq!(cmap.mapping_count(), 2);
+        assert_eq!(cmap.decode(&[0x01, 0x03]), Some("甲乙".to_string()));
+        assert_eq!(cmap.decode(&[0x02]), None);
+    }
+
+    #[test]
+    fn decodes_halfwidth_katakana_from_90ms_rksj() {
+        // 真实回归用例：90ms-RKSJ-H 中 1 字节的半角片假名 0xA1 → U+FF61。
+        let cmap = build_predefined_font_cmap(
+            &Some("90ms-RKSJ-H".to_string()),
+            &Some("Japan1".to_string()),
+        )
+        .unwrap();
+        assert_eq!(cmap.decode(&[0xA1]), Some("｡".to_string()));
     }
 
     #[test]

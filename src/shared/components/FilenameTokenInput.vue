@@ -259,7 +259,7 @@ function toChinese(n) {
 .fn-block {
   display: inline-block;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
@@ -289,7 +289,7 @@ function toChinese(n) {
   height: 22px;
   padding: 0 5px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   font-size: 11px;
   background: var(--docsy-surface-elevated);
   color: var(--docsy-text-strong);
@@ -308,7 +308,7 @@ function toChinese(n) {
   z-index: 10;
   background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   max-height: 200px;
   overflow-y: auto;
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
@@ -332,7 +332,7 @@ function toChinese(n) {
   align-items: center;
   justify-content: center;
   height: 20px;
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   font-size: 11px;
   cursor: pointer;
   border: 1px solid transparent;
@@ -375,7 +375,7 @@ function toChinese(n) {
   z-index: 20;
   background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
   min-width: 100px;
   padding: 2px 0;

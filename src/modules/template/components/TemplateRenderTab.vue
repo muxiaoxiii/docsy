@@ -147,7 +147,7 @@
                   size="small"
                   placeholder="名称"
                   :fetch-suggestions="(query, cb) => $emit('complete-field', field, query, cb)"
-                  @input="$emit('schedule-history-refresh')"
+                  @input="commitPartyTempRow(field); $emit('schedule-history-refresh')"
                 />
                 <el-select
                   v-if="partyFieldUsesSuffix(field)"
@@ -157,7 +157,7 @@
                   allow-create
                   default-first-option
                   placeholder="后缀"
-                  @change="$emit('schedule-history-refresh')"
+                  @change="commitPartyTempRow(field); $emit('schedule-history-refresh')"
                 >
                   <el-option
                     v-for="suffix in partySuffixOptions(field)"
@@ -390,6 +390,10 @@ import {
   parseReferenceSourceKey,
   partyItemsToValues,
   fieldFormKey,
+  fieldSlotKey,
+  referenceSelectionFor,
+  createPartyTempRowStore,
+  filenamePreviewText,
 } from '../composables/fieldRowUtils.js'
 
 const props = defineProps({
@@ -462,9 +466,7 @@ function effectiveFieldType(field) {
 }
 
 function slotKeyFor(field) {
-  const base = field?.id || field?.name || ''
-  const pos = field?.posIndex ?? 0
-  return pos > 0 ? `${base}#${pos}` : base
+  return fieldSlotKey(field)
 }
 
 // A follower made independent by a type change or a custom reference source
@@ -473,28 +475,14 @@ function hasSlotTypeOverride(field) {
   return Boolean(props.typeOverrides[slotKeyFor(field)])
 }
 
-// Filename preview
-const filenamePreview = computed(() => {
-  if (!props.filenameTokens.length) return ''
-  const parts = props.filenameTokens.map((t) => {
-    if (t.type === 'literal') return t.value
-    if (t.type === 'field') {
-      const val = props.formValues[t.value]
-      return val || `[${t.value}]`
-    }
-    if (t.type === 'preset') {
-      if (t.value === '日期') {
-        const d = new Date()
-        return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
-      }
-      if (t.value === '模板名') return props.templateManifest?.name || '模板'
-      if (t.value === '序号') return '1'
-      return t.value
-    }
-    return t.value || ''
-  })
-  return parts.join('') + '.docx'
-})
+// Filename preview: 按当前命名规则实时预览（field token 按字段名解析填写值）
+const filenamePreview = computed(() =>
+  filenamePreviewText(props.filenameTokens, {
+    formValues: props.formValues,
+    fields: props.renderableTemplateFields,
+    manifestName: props.templateManifest?.template?.name || props.templateManifest?.name || '',
+  }),
+)
 
 // Types offered in the fill-page "…" menu (fillable types only; the structural
 // link/action types belong to the build page).
@@ -560,8 +548,7 @@ function isReferenceablePosition(field) {
 }
 
 function getSavedReferenceKey(field) {
-  const ref = props.referenceSelections[`${field.id}#${field.posIndex ?? 0}`]
-  return ref || ''
+  return referenceSelectionFor(props.referenceSelections, field)
 }
 
 function followerReferenceLabel(field) {
@@ -597,24 +584,17 @@ function getFormValueByPrimary(field) {
 }
 
 function getReferenceSelection(field) {
-  const slotKey = slotKeyFor(field)
-  return props.referenceSelections[slotKey] || props.referenceSelections[fieldFormKey(field)]
+  return referenceSelectionFor(props.referenceSelections, field)
 }
 
 // Determine the reference source for a field: checks slot-level saved reference,
 // field-level reference selection, and template-level reference config.
 function resolveReferenceSource(field) {
-  const slotKey = slotKeyFor(field)
-  const slotRef = props.referenceSelections[slotKey]
-  if (slotRef) {
-    const parsed = parseReferenceSourceKey(slotRef)
-    if (parsed.mode !== 'auto' && (parsed.sourceField || parsed.sourceSemanticKey)) {
-      return { fixed: true, ...parsed }
-    }
-  }
-  const fieldRef = props.referenceSelections[fieldFormKey(field)]
-  if (fieldRef) {
-    const parsed = parseReferenceSourceKey(fieldRef)
+  // referenceSelections 的 key 有 id 与 id#0 两种历史写法，统一走
+  // referenceSelectionFor（slot 级优先于字段级）。
+  const ref = referenceSelectionFor(props.referenceSelections, field)
+  if (ref) {
+    const parsed = parseReferenceSourceKey(ref)
     if (parsed.mode !== 'auto' && (parsed.sourceField || parsed.sourceSemanticKey)) {
       return { fixed: true, ...parsed }
     }
@@ -659,16 +639,16 @@ function referenceFixedDisplayLabel(field) {
   return '引用'
 }
 
+// party_list 空数组时的临时编辑行：缓存住并在首次输入时提交为正式值，
+// 否则重渲染或「添加一项」会把正在输入的临时行冲掉。
+const partyTempRows = createPartyTempRowStore((key, rows) => emit('update-form-value', key, rows))
+
 function getPartyListRows(field) {
-  const key = fieldFormKey(field)
-  const current = props.formValues[key]
-  if (!Array.isArray(current)) {
-    return []
-  }
-  if (!current.length) {
-    return [{ text: '', suffix: '' }]
-  }
-  return current
+  return partyTempRows.rowsFor(fieldFormKey(field), props.formValues[fieldFormKey(field)])
+}
+
+function commitPartyTempRow(field) {
+  partyTempRows.commit(fieldFormKey(field), props.formValues[fieldFormKey(field)])
 }
 
 function getStructureOverride(field) {
@@ -817,7 +797,7 @@ function structureEditorTitle(field) {
 
 .panel {
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   padding: 14px;
   background: var(--docsy-surface-elevated);
   box-shadow: 0 3px 14px rgba(54, 45, 36, 0.035);
@@ -868,7 +848,7 @@ p {
   gap: 5px;
   padding: 12px;
   border: 1px solid var(--docsy-border-strong);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   color: var(--docsy-text-strong);
   text-align: left;
@@ -904,7 +884,7 @@ p {
   padding: 12px 34px 12px 12px;
   border: 1px solid var(--docsy-border-subtle);
   border-left: 3px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   overflow-wrap: break-word;
   word-break: break-word;
@@ -961,7 +941,7 @@ p {
 .fill-field-header span,
 .fill-field-header em {
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text-muted);
   font-size: 12px;
@@ -988,7 +968,7 @@ p {
 
 .fill-structure-hint code {
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text);
   font-family: inherit;
@@ -1018,7 +998,7 @@ p {
 
 .reference-fixed-value {
   padding: 5px 11px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text-muted);
   font-size: 13px;
@@ -1082,7 +1062,7 @@ p {
   align-items: center;
   min-height: 24px;
   padding: 0 8px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text);
   font-size: 12px;
@@ -1146,7 +1126,7 @@ p {
   margin: 0;
   padding: 12px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text-strong);
   font-family: inherit;

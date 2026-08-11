@@ -76,21 +76,19 @@
         <div class="block-title-row">
           <div class="block-title">原页眉页脚</div>
           <div class="block-actions">
-            <el-button size="small" @click="keepAllExistingElements"
-              >一键保留</el-button
-            >
-            <el-button size="small" @click="ignoreAllExistingElements"
-              >一键忽略</el-button
-            >
+            <el-button size="small" @click="keepAllExistingElements">一键保留</el-button>
+            <el-button size="small" @click="ignoreAllExistingElements">一键忽略</el-button>
             <el-button size="small" :disabled="!hasDetectedExistingHeaderFooter" @click="markRemoveExistingHeaderFooter"
               >标记删除</el-button
             >
-            <el-button size="small" type="danger" :loading="quickCleanupRunning" @click="immediateDeleteExistingHeaderFooter"
+            <el-button
+              size="small"
+              type="danger"
+              :loading="quickCleanupRunning"
+              @click="immediateDeleteExistingHeaderFooter"
               >立即删除</el-button
             >
-            <el-button size="small" :loading="deepDetecting" @click="deepDetectAllHeaderFooter"
-              >元素检测</el-button
-            >
+            <el-button size="small" :loading="deepDetecting" @click="deepDetectAllHeaderFooter">元素检测</el-button>
           </div>
         </div>
         <div class="existing-summary-grid">
@@ -171,10 +169,10 @@
           <div class="block-title">插入新页眉、页脚文字和页码</div>
           <el-checkbox v-model="globalApplyEnabled" size="small">全局应用</el-checkbox>
           <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
-          </div>
-          <HeaderFooterRuleFields
-            v-if="insertHeaderFooterEnabled"
-            ref="inlineHfFieldsRef"
+        </div>
+        <HeaderFooterRuleFields
+          v-if="insertHeaderFooterEnabled"
+          ref="inlineHfFieldsRef"
           v-model:header-groups="headerGroupsModel"
           v-model:selected-header-group-id="selectedHeaderGroupId"
           v-model:header-mode="headerMode"
@@ -467,13 +465,12 @@
       <el-table
         v-if="overlayFiles.length"
         :data="overlayRows"
-        :row-key="row => row.path"
+        :row-key="(row) => row.path"
         size="small"
         border
         ref="overlayTableRef"
         class="overlay-table"
         highlight-current-row
-
         @row-click="selectPreviewRow"
         @sort-change="sortOverlayFiles"
         @expand-change="handleExpandChange"
@@ -485,16 +482,12 @@
                 v-for="contentRows in [buildFileContentRows(row, $index, currentRules)]"
                 :key="`${row.path}:${contentRows.length}`"
               >
-                <el-table
-                  :data="contentRows"
-                  size="small"
-                  border
-                  class="content-subtable"
-                  @click.stop
-                >
+                <el-table :data="contentRows" size="small" border class="content-subtable" @click.stop>
                   <el-table-column label="类型" width="80">
                     <template #default="{ row: cr }">
-                      <span class="content-kind-tag" :class="`source-${cr.source}`">{{ contentKindLabel(cr.kind) }}</span>
+                      <span class="content-kind-tag" :class="`source-${cr.source}`">{{
+                        contentKindLabel(cr.kind)
+                      }}</span>
                     </template>
                   </el-table-column>
                   <el-table-column label="文本" min-width="200">
@@ -514,10 +507,9 @@
                         :show-after="300"
                         :disabled="!displayContentRowText(row, $index, cr)"
                       >
-                        <span
-                          class="editable-text"
-                          @dblclick.stop="startContentRowEdit(row, cr)"
-                        >{{ displayContentRowText(row, $index, cr) || '-' }}</span>
+                        <span class="editable-text" @dblclick.stop="startContentRowEdit(row, cr)">{{
+                          displayContentRowText(row, $index, cr) || '-'
+                        }}</span>
                       </el-tooltip>
                     </template>
                   </el-table-column>
@@ -559,7 +551,6 @@
                     </template>
                   </el-table-column>
                 </el-table>
-
               </template>
             </div>
           </template>
@@ -583,14 +574,26 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="文件" prop="name" sortable="custom" min-width="180" show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
+        <el-table-column
+          label="文件"
+          prop="name"
+          sortable="custom"
+          min-width="180"
+          show-overflow-tooltip
+          :tooltip-props="{ placement: 'right' }"
+        >
           <template #default="{ row, $index }">
             <button class="file-link" type="button" :data-reorder-index="$index" @click.stop="openEvidenceFile(row)">
               {{ row.name }}
             </button>
           </template>
         </el-table-column>
-        <el-table-column label="页眉/页脚文本" min-width="200" show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
+        <el-table-column
+          label="页眉/页脚文本"
+          min-width="200"
+          show-overflow-tooltip
+          :tooltip-props="{ placement: 'right' }"
+        >
           <template #default="{ row, $index }">
             <el-input
               v-if="editingContentRowId && editingContentRowId.startsWith(`${row.path}|`)"
@@ -610,12 +613,7 @@
         </el-table-column>
         <el-table-column label="状态" prop="statusText" sortable="custom" width="100">
           <template #default="{ row }">
-            <el-tooltip
-              v-if="row.statusDetail"
-              :content="row.statusDetail"
-              placement="right"
-              :show-after="300"
-            >
+            <el-tooltip v-if="row.statusDetail" :content="row.statusDetail" placement="right" :show-after="300">
               <el-tag :type="row.statusType || 'info'" size="small">
                 {{ row.statusText || '待处理' }}
               </el-tag>
@@ -1010,9 +1008,7 @@ const pageNumberGroups = computed(() =>
 )
 // Writable models so HeaderFooterRuleFields can add/remove groups per file
 const headerGroupsModel = computed({
-  get: () => globalApplyEnabled.value
-    ? [globalHeaderGroup.value]
-    : selectedOverlayFile.value?.headerGroups || [],
+  get: () => (globalApplyEnabled.value ? [globalHeaderGroup.value] : selectedOverlayFile.value?.headerGroups || []),
   set: (v) => {
     if (globalApplyEnabled.value) {
       globalHeaderGroup.value = v[0] || createDefaultHeaderGroup()
@@ -1022,9 +1018,8 @@ const headerGroupsModel = computed({
   },
 })
 const footerTextGroupsModel = computed({
-  get: () => globalApplyEnabled.value
-    ? [globalFooterTextGroup.value]
-    : selectedOverlayFile.value?.footerTextGroups || [],
+  get: () =>
+    globalApplyEnabled.value ? [globalFooterTextGroup.value] : selectedOverlayFile.value?.footerTextGroups || [],
   set: (v) => {
     if (globalApplyEnabled.value) {
       globalFooterTextGroup.value = v[0] || createDefaultFooterTextGroup()
@@ -1034,9 +1029,8 @@ const footerTextGroupsModel = computed({
   },
 })
 const pageNumberGroupsModel = computed({
-  get: () => globalApplyEnabled.value
-    ? [globalPageNumberGroup.value]
-    : selectedOverlayFile.value?.pageNumberGroups || [],
+  get: () =>
+    globalApplyEnabled.value ? [globalPageNumberGroup.value] : selectedOverlayFile.value?.pageNumberGroups || [],
   set: (v) => {
     if (globalApplyEnabled.value) {
       globalPageNumberGroup.value = v[0] || createDefaultPageNumberGroup()
@@ -1047,7 +1041,9 @@ const pageNumberGroupsModel = computed({
 })
 const pageNumberTemplate = computed({
   get: () => selectedPageNumberGroup.value.template || '{page}/{total}',
-  set: (v) => { selectedPageNumberGroup.value.template = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.template = v
+  },
 })
 const selectedHeaderGroup = computed(() =>
   globalApplyEnabled.value
@@ -1066,25 +1062,26 @@ const selectedPageNumberGroup = computed(() =>
 )
 // Per-file selected group ids (bind to HeaderFooterRuleFields v-model)
 const selectedHeaderGroupId = computed({
-  get: () => globalApplyEnabled.value
-    ? globalHeaderGroup.value.id
-    : selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
+  get: () =>
+    globalApplyEnabled.value ? globalHeaderGroup.value.id : selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
   set: (v) => {
     if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'header', v)
   },
 })
 const selectedFooterTextGroupId = computed({
-  get: () => globalApplyEnabled.value
-    ? globalFooterTextGroup.value.id
-    : selectedOverlayFile.value?.selectedFooterTextGroupId || 'ft1',
+  get: () =>
+    globalApplyEnabled.value
+      ? globalFooterTextGroup.value.id
+      : selectedOverlayFile.value?.selectedFooterTextGroupId || 'ft1',
   set: (v) => {
     if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'footerText', v)
   },
 })
 const selectedPageNumberGroupId = computed({
-  get: () => globalApplyEnabled.value
-    ? globalPageNumberGroup.value.id
-    : selectedOverlayFile.value?.selectedPageNumberGroupId || 'pn1',
+  get: () =>
+    globalApplyEnabled.value
+      ? globalPageNumberGroup.value.id
+      : selectedOverlayFile.value?.selectedPageNumberGroupId || 'pn1',
   set: (v) => {
     if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'pageNumber', v)
   },
@@ -1092,111 +1089,165 @@ const selectedPageNumberGroupId = computed({
 // Legacy compat refs pointing at selected file/group. Setters update the file's group.
 const headerMode = computed({
   get: () => selectedHeaderGroup.value.mode,
-  set: (v) => { selectedHeaderGroup.value.mode = v },
+  set: (v) => {
+    selectedHeaderGroup.value.mode = v
+  },
 })
 const headerText = computed({
   get: () => selectedHeaderGroup.value.text,
-  set: (v) => { selectedHeaderGroup.value.text = v },
+  set: (v) => {
+    selectedHeaderGroup.value.text = v
+  },
 })
 const headerPrefix = computed({
   get: () => selectedHeaderGroup.value.prefix,
-  set: (v) => { selectedHeaderGroup.value.prefix = v },
+  set: (v) => {
+    selectedHeaderGroup.value.prefix = v
+  },
 })
 const headerSuffix = computed({
   get: () => selectedHeaderGroup.value.suffix,
-  set: (v) => { selectedHeaderGroup.value.suffix = v },
+  set: (v) => {
+    selectedHeaderGroup.value.suffix = v
+  },
 })
 const headerAlign = computed({
   get: () => selectedHeaderGroup.value.align,
-  set: (v) => { selectedHeaderGroup.value.align = v },
+  set: (v) => {
+    selectedHeaderGroup.value.align = v
+  },
 })
 const headerFontSize = computed({
   get: () => selectedHeaderGroup.value.fontSize,
-  set: (v) => { selectedHeaderGroup.value.fontSize = v },
+  set: (v) => {
+    selectedHeaderGroup.value.fontSize = v
+  },
 })
 const headerFontFamily = computed({
   get: () => selectedHeaderGroup.value.fontFamily,
-  set: (v) => { selectedHeaderGroup.value.fontFamily = v },
+  set: (v) => {
+    selectedHeaderGroup.value.fontFamily = v
+  },
 })
 const headerMarginMm = computed({
   get: () => selectedHeaderGroup.value.marginMm,
-  set: (v) => { selectedHeaderGroup.value.marginMm = v },
+  set: (v) => {
+    selectedHeaderGroup.value.marginMm = v
+  },
 })
 const headerOffsetXMm = computed({
   get: () => selectedHeaderGroup.value.offsetXMm,
-  set: (v) => { selectedHeaderGroup.value.offsetXMm = v },
+  set: (v) => {
+    selectedHeaderGroup.value.offsetXMm = v
+  },
 })
 const headerColor = computed({
   get: () => selectedHeaderGroup.value.color,
-  set: (v) => { selectedHeaderGroup.value.color = v },
+  set: (v) => {
+    selectedHeaderGroup.value.color = v
+  },
 })
 const headerPerFilePrefix = computed({
   get: () => selectedHeaderGroup.value.perFilePrefix ?? '证据',
-  set: (v) => { selectedHeaderGroup.value.perFilePrefix = v },
+  set: (v) => {
+    selectedHeaderGroup.value.perFilePrefix = v
+  },
 })
 const headerPerFileSeqType = computed({
   get: () => selectedHeaderGroup.value.perFileSeqType || 'numeric',
-  set: (v) => { selectedHeaderGroup.value.perFileSeqType = v },
+  set: (v) => {
+    selectedHeaderGroup.value.perFileSeqType = v
+  },
 })
 const headerPerFileSeqStart = computed({
   get: () => selectedHeaderGroup.value.perFileSeqStart ?? 1,
-  set: (v) => { selectedHeaderGroup.value.perFileSeqStart = v },
+  set: (v) => {
+    selectedHeaderGroup.value.perFileSeqStart = v
+  },
 })
 const headerPageStart = computed({
   get: () => selectedHeaderGroup.value.pageStart || 1,
-  set: (v) => { selectedHeaderGroup.value.pageStart = v },
+  set: (v) => {
+    selectedHeaderGroup.value.pageStart = v
+  },
 })
 const headerPageEnd = computed({
   get: () => selectedHeaderGroup.value.pageEnd || 0,
-  set: (v) => { selectedHeaderGroup.value.pageEnd = v },
+  set: (v) => {
+    selectedHeaderGroup.value.pageEnd = v
+  },
 })
 const footerTextContent = computed({
   get: () => selectedFooterTextGroup.value.text,
-  set: (v) => { selectedFooterTextGroup.value.text = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.text = v
+  },
 })
 const footerTextAlign = computed({
   get: () => selectedFooterTextGroup.value.align,
-  set: (v) => { selectedFooterTextGroup.value.align = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.align = v
+  },
 })
 const footerTextFontSize = computed({
   get: () => selectedFooterTextGroup.value.fontSize,
-  set: (v) => { selectedFooterTextGroup.value.fontSize = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.fontSize = v
+  },
 })
 const footerTextFontFamily = computed({
   get: () => selectedFooterTextGroup.value.fontFamily,
-  set: (v) => { selectedFooterTextGroup.value.fontFamily = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.fontFamily = v
+  },
 })
 const footerTextMarginMm = computed({
   get: () => selectedFooterTextGroup.value.marginMm,
-  set: (v) => { selectedFooterTextGroup.value.marginMm = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.marginMm = v
+  },
 })
 const footerTextOffsetXMm = computed({
   get: () => selectedFooterTextGroup.value.offsetXMm,
-  set: (v) => { selectedFooterTextGroup.value.offsetXMm = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.offsetXMm = v
+  },
 })
 const footerTextColor = computed({
   get: () => selectedFooterTextGroup.value.color,
-  set: (v) => { selectedFooterTextGroup.value.color = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.color = v
+  },
 })
 const footerTextPageStart = computed({
   get: () => selectedFooterTextGroup.value.pageStart || 1,
-  set: (v) => { selectedFooterTextGroup.value.pageStart = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.pageStart = v
+  },
 })
 const footerTextPageEnd = computed({
   get: () => selectedFooterTextGroup.value.pageEnd || 0,
-  set: (v) => { selectedFooterTextGroup.value.pageEnd = v },
+  set: (v) => {
+    selectedFooterTextGroup.value.pageEnd = v
+  },
 })
 const pageNumberSequence = computed({
   get: () => selectedPageNumberGroup.value.sequence,
-  set: (v) => { selectedPageNumberGroup.value.sequence = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.sequence = v
+  },
 })
 const pageNumberStyle = computed({
   get: () => selectedPageNumberGroup.value.style,
-  set: (v) => { selectedPageNumberGroup.value.style = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.style = v
+  },
 })
 const pageNumberRegion = computed({
   get: () => selectedPageNumberGroup.value.region,
-  set: (v) => { selectedPageNumberGroup.value.region = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.region = v
+  },
 })
 const HORIZONTAL_OFFSET_LIMIT_MM = 120
 const insertHeaderFooterEnabled = ref(true)
@@ -1226,27 +1277,39 @@ const pageNumberRulesVisible = ref(false)
 // footerAlign..footerColor are page number placement, backed by selectedPageNumberGroup
 const footerAlign = computed({
   get: () => selectedPageNumberGroup.value.align,
-  set: (v) => { selectedPageNumberGroup.value.align = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.align = v
+  },
 })
 const footerFontSize = computed({
   get: () => selectedPageNumberGroup.value.fontSize,
-  set: (v) => { selectedPageNumberGroup.value.fontSize = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.fontSize = v
+  },
 })
 const footerFontFamily = computed({
   get: () => selectedPageNumberGroup.value.fontFamily,
-  set: (v) => { selectedPageNumberGroup.value.fontFamily = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.fontFamily = v
+  },
 })
 const footerMarginMm = computed({
   get: () => selectedPageNumberGroup.value.marginMm,
-  set: (v) => { selectedPageNumberGroup.value.marginMm = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.marginMm = v
+  },
 })
 const footerOffsetXMm = computed({
   get: () => selectedPageNumberGroup.value.offsetXMm,
-  set: (v) => { selectedPageNumberGroup.value.offsetXMm = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.offsetXMm = v
+  },
 })
 const footerColor = computed({
   get: () => selectedPageNumberGroup.value.color,
-  set: (v) => { selectedPageNumberGroup.value.color = v },
+  set: (v) => {
+    selectedPageNumberGroup.value.color = v
+  },
 })
 // footerTextContent..footerTextColor are computed from selectedFooterTextGroup above
 const outputMode = ref('files_and_merge')
@@ -1292,14 +1355,14 @@ function undoEdit() {
   const snap = editUndoStack.value.pop()
   if (!snap) return false
   editRedoStack.value.push(snap)
-  const file = overlayFiles.value.find(f => f.path === snap.filePath)
+  const file = overlayFiles.value.find((f) => f.path === snap.filePath)
   if (!file) return true
   if (snap.type === 'group') {
     const groups = groupsFor(file, snap.kind)
-    const group = groups.find(g => g.id === snap.groupId)
+    const group = groups.find((g) => g.id === snap.groupId)
     if (group) group.text = snap.oldValue
   } else if (snap.type === 'element') {
-    const el = (file.existingElements || []).find(e => e.id === snap.elementId)
+    const el = (file.existingElements || []).find((e) => e.id === snap.elementId)
     if (el) {
       el.editedText = snap.oldValue
       el.decision = snap.oldDecision
@@ -1314,14 +1377,14 @@ function redoEdit() {
   const snap = editRedoStack.value.pop()
   if (!snap) return false
   editUndoStack.value.push(snap)
-  const file = overlayFiles.value.find(f => f.path === snap.filePath)
+  const file = overlayFiles.value.find((f) => f.path === snap.filePath)
   if (!file) return true
   if (snap.type === 'group') {
     const groups = groupsFor(file, snap.kind)
-    const group = groups.find(g => g.id === snap.groupId)
+    const group = groups.find((g) => g.id === snap.groupId)
     if (group) group.text = snap.newValue
   } else if (snap.type === 'element') {
-    const el = (file.existingElements || []).find(e => e.id === snap.elementId)
+    const el = (file.existingElements || []).find((e) => e.id === snap.elementId)
     if (el) {
       el.editedText = snap.newValue
       el.decision = snap.newDecision
@@ -1437,20 +1500,19 @@ const firstHeaderPreview = computed(() => {
 const firstFooterPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
-  const pnGroup = globalApplyEnabled.value
-    ? globalPageNumberGroup.value
-    : selectedGroupFor(first, 'pageNumber')
+  const pnGroup = globalApplyEnabled.value ? globalPageNumberGroup.value : selectedGroupFor(first, 'pageNumber')
   if (!first || !footerEnabled.value || !pnGroup || !totalOverlayPages.value) return ''
   const continuous = (pnGroup.sequence || 'continuous') !== 'per-file'
   let tpl = pnGroup.template || '{page}/{total}'
-  if (!pageNumberShowTotal.value) tpl = tpl
-    .replace(/共\s*\{total\}\s*页/g, '')
-    .replace(/\bof\s*\{total\}/gi, '')
-    .replaceAll('{total}', '')
-    .replace(/[，,]\s*$/, '')
-    .replace(/\s+$/, '')
-    .replaceAll('//', '/')
-    .replace(/\/+$/, '')
+  if (!pageNumberShowTotal.value)
+    tpl = tpl
+      .replace(/共\s*\{total\}\s*页/g, '')
+      .replace(/\bof\s*\{total\}/gi, '')
+      .replaceAll('{total}', '')
+      .replace(/[，,]\s*$/, '')
+      .replace(/\s+$/, '')
+      .replaceAll('//', '/')
+      .replace(/\/+$/, '')
   return renderPageNumberTemplate(
     tpl,
     continuous ? first.pageStart || 1 : 1,
@@ -1507,9 +1569,7 @@ const splitReplacementOutputDirValue = computed(
   () => splitReplacementOutputDir.value || defaultSplitReplacementOutputDir(),
 )
 const processButtonText = computed(() => (workflowMode.value === 'merge' ? '执行分项证据处理' : '执行合并证据处理'))
-const autoCleanupHeaderEnabled = computed(() =>
-  overlayFiles.value.some((file) => file.removeExistingHeader),
-)
+const autoCleanupHeaderEnabled = computed(() => overlayFiles.value.some((file) => file.removeExistingHeader))
 const autoCleanupFooterEnabled = computed(() =>
   overlayFiles.value.some((file) => file.removeExistingFooter || file.removeExistingPageNumber),
 )
@@ -1849,7 +1909,7 @@ function syncGroupParamsFromSource(source, target) {
     if (!srcGroup || !tgtGroup) continue
     const defaults = DEFAULTS[kind]
     // Only sync if target group still has all default values
-    const isDefault = STYLE_KEYS.every(k => tgtGroup[k] === defaults[k] || tgtGroup[k] == null)
+    const isDefault = STYLE_KEYS.every((k) => tgtGroup[k] === defaults[k] || tgtGroup[k] == null)
     if (!isDefault) continue
     // Copy style params from source
     for (const k of STYLE_KEYS) {
@@ -1948,9 +2008,7 @@ async function optimizePayloadInputsLossless(payload) {
 function notifyExportOptimizeSummary(data) {
   const opt = data?.optimize
   if (!opt || !opt.count) return
-  ElMessage.success(
-    `导出结果已就地优化 ${opt.count} 个文件：共 ${sizeSavingText(opt.inputSize, opt.outputSize)}`,
-  )
+  ElMessage.success(`导出结果已就地优化 ${opt.count} 个文件：共 ${sizeSavingText(opt.inputSize, opt.outputSize)}`)
 }
 
 async function checkExistingBookmarks() {
@@ -1990,8 +2048,12 @@ async function clearExistingBookmarks() {
 }
 
 useWindowFileDrop({
-  onEnter: () => { evidenceDragging.value = true },
-  onLeave: () => { evidenceDragging.value = false },
+  onEnter: () => {
+    evidenceDragging.value = true
+  },
+  onLeave: () => {
+    evidenceDragging.value = false
+  },
   onDrop: handleEvidenceDrop,
 })
 
@@ -2120,16 +2182,12 @@ async function resolveSuffixConflicts(payload) {
 
   let action
   try {
-    await ElMessageBox.confirm(
-      `${conflicts.length} 个输出文件已存在同名文件。`,
-      '文件名冲突',
-      {
-        confirmButtonText: '覆盖已有文件',
-        cancelButtonText: '共存（自动加序号）',
-        distinguishCancelAndClose: true,
-        type: 'warning',
-      },
-    )
+    await ElMessageBox.confirm(`${conflicts.length} 个输出文件已存在同名文件。`, '文件名冲突', {
+      confirmButtonText: '覆盖已有文件',
+      cancelButtonText: '共存（自动加序号）',
+      distinguishCancelAndClose: true,
+      type: 'warning',
+    })
     action = 'overwrite'
   } catch (e) {
     action = e === 'cancel' ? 'coexist' : null
@@ -2173,7 +2231,10 @@ async function applySplitHeaderFooterReplacement() {
     }
     let payload = buildEvidencePdfRulePayload(overlayRows.value, rules, outputDir)
     payload = await resolveSuffixConflicts(payload)
-    if (!payload) { overlaying.value = false; return }
+    if (!payload) {
+      overlaying.value = false
+      return
+    }
     payload.optimizeOutput = optimizeSizeEnabled.value
     const restoreInputs = await optimizePayloadInputsLossless(payload)
     overlayRows.value.forEach((file) => {
@@ -2244,7 +2305,10 @@ async function applyHeaderFooter() {
     overlayRows.value.forEach((file) => syncLegacyExistingElementState(file))
     let payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
     payload = await resolveSuffixConflicts(payload)
-    if (!payload) { overlaying.value = false; return }
+    if (!payload) {
+      overlaying.value = false
+      return
+    }
     payload.optimizeOutput = optimizeSizeEnabled.value
     const restoreInputs = await optimizePayloadInputsLossless(payload)
 
@@ -2306,24 +2370,30 @@ async function applyHeaderFooter() {
     const merge = result.data.merge
 
     // 诊断日志：记录处理结果
-    diagLog.info('processing.result', `处理完成 ${successCount}/${successCount + failedCount} (${(elapsedMs / 1000).toFixed(1)}s)`, {
-      elapsedMs,
-      successCount, failedCount, warningCount,
-      results: (result.data.results || []).map(r => ({
-        file: r.inputPath?.split(/[/\\]/).pop(),
-        warnings: r.warnings,
-      })),
-      failed: (result.data.failed || []).map(f => ({
-        file: f.path?.split(/[/\\]/).pop(),
-        error: f.message?.slice(0, 100),
-      })),
-      rules: {
-        cleanupHeaderEnabled: currentRules.value.cleanupHeaderEnabled,
-        cleanupFooterEnabled: currentRules.value.cleanupFooterEnabled,
-        headerMode: currentRules.value.headerMode,
-        headerInsertEnabled: currentRules.value.headerInsertEnabled,
+    diagLog.info(
+      'processing.result',
+      `处理完成 ${successCount}/${successCount + failedCount} (${(elapsedMs / 1000).toFixed(1)}s)`,
+      {
+        elapsedMs,
+        successCount,
+        failedCount,
+        warningCount,
+        results: (result.data.results || []).map((r) => ({
+          file: r.inputPath?.split(/[/\\]/).pop(),
+          warnings: r.warnings,
+        })),
+        failed: (result.data.failed || []).map((f) => ({
+          file: f.path?.split(/[/\\]/).pop(),
+          error: f.message?.slice(0, 100),
+        })),
+        rules: {
+          cleanupHeaderEnabled: currentRules.value.cleanupHeaderEnabled,
+          cleanupFooterEnabled: currentRules.value.cleanupFooterEnabled,
+          headerMode: currentRules.value.headerMode,
+          headerInsertEnabled: currentRules.value.headerInsertEnabled,
+        },
       },
-    })
+    )
     // 收集所有有 warning 的文件的具体提示
     const warningDetails = formatProcessingWarningSummary(result.data.results || [])
 
@@ -2368,11 +2438,7 @@ async function applyHeaderFooter() {
   }
 }
 
-const {
-  rowHeaderPreview,
-  displayRowHeader,
-  displayRowFooter,
-} = useEvidencePdfExistingEditing({
+const { rowHeaderPreview, displayRowHeader, displayRowFooter } = useEvidencePdfExistingEditing({
   editingHeaderPath,
   editingFooterPath,
   editingExistingHeaderPath,
@@ -2438,11 +2504,13 @@ async function finishQuickCleanupPipeline() {
   quickCleanupRunning.value = true
   overlaying.value = true
   try {
-    const hasHeaderDelete = overlayFiles.value.some(f =>
-      (f.existingElements || []).some(e => e.kind === 'header' && e.decision === 'delete'),
+    const hasHeaderDelete = overlayFiles.value.some((f) =>
+      (f.existingElements || []).some((e) => e.kind === 'header' && e.decision === 'delete'),
     )
-    const hasFooterDelete = overlayFiles.value.some(f =>
-      (f.existingElements || []).some(e => (e.kind === 'footerText' || e.kind === 'pageNumber') && e.decision === 'delete'),
+    const hasFooterDelete = overlayFiles.value.some((f) =>
+      (f.existingElements || []).some(
+        (e) => (e.kind === 'footerText' || e.kind === 'pageNumber') && e.decision === 'delete',
+      ),
     )
     const cleanupRules = {
       headerMode: 'none',
@@ -2630,9 +2698,7 @@ async function immediateDeleteExistingHeaderFooter() {
     return
   }
   // Check if any elements have been decided
-  const hasDecision = overlayFiles.value.some((file) =>
-    (file.existingElements || []).some((el) => el.decision),
-  )
+  const hasDecision = overlayFiles.value.some((file) => (file.existingElements || []).some((el) => el.decision))
   if (!hasDecision) {
     // No decisions yet — prompt user to decide first
     try {
@@ -2651,16 +2717,12 @@ async function immediateDeleteExistingHeaderFooter() {
   // Has decisions — ask user what to do
   let action
   try {
-    action = await ElMessageBox.confirm(
-      '请选择操作方式：',
-      '删除已确认的页眉页脚',
-      {
-        confirmButtonText: '立即删除',
-        cancelButtonText: '标记删除',
-        distinguishCancelAndClose: true,
-        type: 'warning',
-      },
-    )
+    action = await ElMessageBox.confirm('请选择操作方式：', '删除已确认的页眉页脚', {
+      confirmButtonText: '立即删除',
+      cancelButtonText: '标记删除',
+      distinguishCancelAndClose: true,
+      type: 'warning',
+    })
     action = 'immediate'
   } catch (e) {
     action = e === 'cancel' ? 'mark' : null
@@ -2708,7 +2770,9 @@ async function executeImmediateDelete() {
       (f.existingElements || []).some((e) => e.kind === 'header' && e.decision === 'delete'),
     )
     const hasFooterDelete = overlayFiles.value.some((f) =>
-      (f.existingElements || []).some((e) => (e.kind === 'footerText' || e.kind === 'pageNumber') && e.decision === 'delete'),
+      (f.existingElements || []).some(
+        (e) => (e.kind === 'footerText' || e.kind === 'pageNumber') && e.decision === 'delete',
+      ),
     )
     const cleanupRules = {
       headerMode: 'none',
@@ -2836,7 +2900,6 @@ async function markRemoveExistingHeaderFooter() {
   refreshPreview()
 }
 
-
 function sourceRangeText(row) {
   if (!row.sourcePageStart || !row.sourcePageEnd) return '-'
   return `${row.sourcePageStart}-${row.sourcePageEnd}`
@@ -2885,7 +2948,10 @@ function reorderOverlayFiles(from, to) {
   items.splice(to, 0, item)
   overlayFiles.value = items
   selectedOverlayIndex.value = selectedPath
-    ? Math.max(0, items.findIndex((file) => file.path === selectedPath))
+    ? Math.max(
+        0,
+        items.findIndex((file) => file.path === selectedPath),
+      )
     : to
   truePreview.value = null
   refreshPreview()
@@ -2970,7 +3036,7 @@ function mainColumnContentText(file, index) {
   // Show add-range info for new header rows with a custom page range
   const cr = rows[0]
   if (cr.source === 'new' && cr.pageStart > 1) {
-    const end = cr.pageEnd && cr.pageEnd > 0 ? cr.pageEnd : (file.pages || '?')
+    const end = cr.pageEnd && cr.pageEnd > 0 ? cr.pageEnd : file.pages || '?'
     return `${text}  [${cr.pageStart}-${end}页]`
   }
   if (cr.source === 'new' && cr.pageEnd && cr.pageEnd > 0) {
@@ -3057,7 +3123,7 @@ function finishNewContentRowEdit(row, cr, value) {
     }
   }
   // Record old value for undo
-  const oldValue = cr.kind === 'pageNumber' ? (group.template || '{page}/{total}') : (group.text || '')
+  const oldValue = cr.kind === 'pageNumber' ? group.template || '{page}/{total}' : group.text || ''
   if (cr.kind === 'header') {
     group.text = value
     if (group.mode === 'filename' || group.mode === 'seq' || group.mode === 'seq_cn') {
@@ -3162,11 +3228,11 @@ async function removeContentRowExisting(row, cr) {
   const element = cr.element
   if (!element) return
   try {
-    await ElMessageBox.confirm(
-      '确认删除该条已检测到的内容？',
-      '删除确认',
-      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
-    )
+    await ElMessageBox.confirm('确认删除该条已检测到的内容？', '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
   } catch {
     return
   }
@@ -3215,10 +3281,10 @@ onUnmounted(() => {
 .hf-workbench {
   display: flex;
   flex-direction: row;
-  gap: 0;
+  gap: 16px;
   height: 100%;
   min-height: 0;
-  padding: 18px 20px;
+  padding: 20px;
   overflow: hidden;
   background: var(--docsy-canvas);
 }
@@ -3235,7 +3301,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   cursor: pointer;
   font-size: 13px;
   color: var(--docsy-text-muted);
@@ -3259,7 +3325,7 @@ onUnmounted(() => {
   display: inline-block;
   min-width: 52px;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   font-size: 12px;
   text-align: center;
   background: var(--docsy-surface-muted);
@@ -3289,7 +3355,11 @@ onUnmounted(() => {
   max-width: 55%;
   overflow: auto;
   scrollbar-gutter: stable;
-  padding-right: 8px;
+  padding: 18px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface);
+  box-shadow: var(--docsy-shadow-panel);
 }
 
 .preview-panel {
@@ -3297,8 +3367,11 @@ onUnmounted(() => {
   min-width: 320px;
   overflow: auto;
   scrollbar-gutter: stable;
-  padding-left: 14px;
-  border-left: 1px solid var(--docsy-border-subtle);
+  padding: 18px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface);
+  box-shadow: var(--docsy-shadow-panel);
   resize: horizontal;
 }
 
@@ -3326,7 +3399,7 @@ onUnmounted(() => {
   margin-bottom: 12px;
   padding: 12px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-primary-soft);
   color: var(--docsy-text-strong);
   min-height: 60px;
@@ -3338,10 +3411,17 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
-
 h3 {
   margin: 0 0 6px;
   color: var(--docsy-text-strong);
+  font-family:
+    ui-rounded,
+    'SF Pro Rounded',
+    -apple-system,
+    'PingFang SC',
+    sans-serif;
+  font-size: 18px;
+  letter-spacing: -0.02em;
 }
 
 .hint {
@@ -3352,9 +3432,9 @@ h3 {
 
 .rule-block {
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
-  padding: 12px;
-  margin-bottom: 12px;
+  border-radius: var(--docsy-radius);
+  padding: 14px;
+  margin-bottom: 14px;
   background: var(--docsy-surface-muted);
 }
 
@@ -3367,9 +3447,9 @@ h3 {
 
 .summary-item {
   min-width: 0;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
 }
 
@@ -3383,7 +3463,7 @@ h3 {
 .summary-item strong {
   display: block;
   color: var(--docsy-text-strong);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3434,7 +3514,7 @@ h3 {
   min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   color: inherit;
   cursor: pointer;
@@ -3532,7 +3612,7 @@ h3 {
   margin-bottom: 10px;
   padding: 8px 10px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
 }
 
@@ -3544,7 +3624,7 @@ h3 {
 .detection-plan,
 .merged-import-plan {
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   margin: 12px 0;
   padding: 10px;
@@ -3708,7 +3788,7 @@ h3 {
   display: inline-block;
   min-width: 52px;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   font-size: 12px;
   text-align: center;
   background: var(--docsy-surface-muted);
@@ -3730,7 +3810,7 @@ h3 {
   margin-bottom: 10px;
   padding: 10px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
 }
 
@@ -3751,7 +3831,7 @@ h3 {
   align-items: center;
   padding: 6px 8px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
 }
 
@@ -3790,10 +3870,10 @@ h3 {
 .preview-stage {
   display: flex;
   justify-content: center;
-  padding: 12px;
-  background: var(--docsy-surface-muted);
+  padding: 18px;
+  background: #e8e6df;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   min-height: 520px;
 }
 
@@ -3801,10 +3881,10 @@ h3 {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: 12px;
-  background: var(--docsy-surface-muted);
+  padding: 18px;
+  background: #e8e6df;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   min-height: 520px;
 }
 
@@ -3845,7 +3925,7 @@ h3 {
 
 .preview-text.with-delete-background {
   padding: 2px 5px;
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   background: rgba(255, 255, 255, 0.94);
 }
 
@@ -3857,7 +3937,7 @@ h3 {
   min-height: 16px;
   padding: 1px 4px;
   border: 1px dashed var(--docsy-danger);
-  border-radius: 2px;
+  border-radius: var(--docsy-radius);
   background: rgba(255, 255, 255, 0.9);
   color: var(--el-color-danger);
   font-size: 11px;
@@ -3890,7 +3970,7 @@ h3 {
   min-height: 16px;
   padding: 1px 4px;
   border: 2px solid var(--docsy-info);
-  border-radius: 2px;
+  border-radius: var(--docsy-radius);
   background: rgba(219, 234, 254, 0.42);
   color: var(--el-color-primary);
   font-size: 11px;
@@ -3911,9 +3991,8 @@ h3 {
   color: var(--el-color-danger);
   background: var(--docsy-danger-soft);
   border: 1px solid var(--docsy-danger-border);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
 }
-
 
 .evidence-drop-overlay {
   position: fixed;
@@ -3924,17 +4003,38 @@ h3 {
   justify-content: center;
   background: rgba(37, 99, 235, 0.08);
   border: 2px dashed var(--docsy-primary, #2563eb);
-  border-radius: 12px;
+  border-radius: var(--docsy-radius);
   pointer-events: none;
 }
 
 .evidence-drop-message {
   padding: 16px 32px;
   background: var(--docsy-surface-elevated, #fff);
-  border-radius: 8px;
+  border-radius: var(--docsy-radius);
   font-size: 15px;
   font-weight: 500;
   color: var(--docsy-primary, #2563eb);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+@media (max-width: 1180px) {
+  .hf-workbench {
+    display: block;
+    height: auto;
+    overflow: auto;
+  }
+
+  .hf-panel,
+  .preview-panel {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    overflow: visible;
+    resize: none;
+  }
+
+  .preview-panel {
+    margin-top: 16px;
+  }
 }
 </style>

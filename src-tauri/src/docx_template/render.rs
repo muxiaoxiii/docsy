@@ -215,42 +215,71 @@ fn try_expand_table_row(
         return Ok(None);
     }
 
-    // Find the first party_list field with >1 items
-    let sdt_tags = collect_sdt_tags_in_tree_simple(&children[idx]);
-    for tag in sdt_tags {
+    // 行内所有条目数 > 1 的 party_list 都参与展开（笛卡尔积），
+    // 不再只处理第一个而让其余退化为单行内联文本
+    let expanded = expand_party_rows(row_node, tag_map, values, 0)?;
+    if expanded.len() <= 1 {
+        return Ok(None);
+    }
+    let mut new_rows = Vec::with_capacity(expanded.len());
+    for (mut row_clone, item_values) in expanded {
+        // Clone the row subtree directly instead of a serialize →
+        // parse round-trip per item.
+        render_tree(
+            &mut row_clone,
+            tag_map,
+            &item_values,
+            overrides,
+            item_separator,
+        )?;
+        new_rows.push(row_clone);
+    }
+    Ok(Some(new_rows))
+}
+
+/// 递归展开行内 party_list：每次取第一个仍可展开的字段，按条目克隆行并
+/// 替换该字段的值后递归，直至行内不再有条目数 > 1 的 party_list。
+/// 同一行出现多个 party_list 时得到笛卡尔积组合。
+fn expand_party_rows(
+    row: &XmlNode,
+    tag_map: &TagMap<'_>,
+    values: &HashMap<String, Value>,
+    depth: usize,
+) -> Result<Vec<(XmlNode, HashMap<String, Value>)>> {
+    // 防御性上限：字段数有限，正常不会触达；防止异常数据导致组合爆炸
+    const MAX_EXPAND_DEPTH: usize = 16;
+    const MAX_EXPANDED_ROWS: usize = 512;
+    if depth > MAX_EXPAND_DEPTH {
+        anyhow::bail!("表格行内 party_list 展开层级过多，已中止渲染");
+    }
+    for tag in collect_sdt_tags_in_tree_simple(row) {
         let Some((field, _)) = tag_map.get(&tag) else {
             continue;
         };
-        if field.field_type == "party_list" {
-            let value = value_for_field(values, field, None)
-                .cloned()
-                .unwrap_or(Value::Null);
-            let items = party_items(&value);
-            if items.len() > 1 {
-                let mut new_rows = Vec::with_capacity(items.len());
-                for item in &items {
-                    let mut item_values = values.clone();
-                    item_values.insert(
-                        field.id.clone(),
-                        serde_json::json!({ "text": item.text, "suffix": item.suffix }),
-                    );
-                    // Clone the row subtree directly instead of a serialize →
-                    // parse round-trip per item.
-                    let mut row_clone = children[idx].clone();
-                    render_tree(
-                        &mut row_clone,
-                        tag_map,
-                        &item_values,
-                        overrides,
-                        item_separator,
-                    )?;
-                    new_rows.push(row_clone);
+        if field.field_type != "party_list" {
+            continue;
+        }
+        let value = value_for_field(values, field, None)
+            .cloned()
+            .unwrap_or(Value::Null);
+        let items = party_items(&value);
+        if items.len() > 1 {
+            let mut out = Vec::new();
+            for item in &items {
+                let mut item_values = values.clone();
+                item_values.insert(
+                    field.id.clone(),
+                    serde_json::json!({ "text": item.text, "suffix": item.suffix }),
+                );
+                out.extend(expand_party_rows(row, tag_map, &item_values, depth + 1)?);
+                if out.len() > MAX_EXPANDED_ROWS {
+                    anyhow::bail!("表格行 party_list 展开行数超过限制，已中止渲染");
                 }
-                return Ok(Some(new_rows));
             }
+            return Ok(out);
         }
     }
-    Ok(None)
+    Ok(vec![(row.clone(), values.clone())])
 }
 
 fn collect_sdt_tags_in_tree_simple(node: &XmlNode) -> Vec<String> {
@@ -609,15 +638,44 @@ fn unwrap_sdt_content(sdt: XmlNode) -> Vec<XmlNode> {
 }
 
 fn strip_party_separator_before(siblings: &mut [XmlNode], at: usize) {
+    strip_separator_before(siblings, at, &['、']);
+}
+
+/// 剥离 at 之前最近一个非空兄弟节点尾部的分隔符。
+/// 分隔符不一定独占一个节点：与其它文字合并进同一 run（跨 run）时，
+/// 只剥掉末尾的分隔符字符，保留前面的文字；剥空后整节点移除。
+fn strip_separator_before(siblings: &mut [XmlNode], at: usize, separators: &[char]) {
     for index in (0..at).rev() {
-        let text = collect_text_from_element(&siblings[index]);
-        if text.is_empty() {
+        if collect_text_from_element(&siblings[index]).is_empty() {
             continue;
         }
-        if text.trim() == "、" {
+        strip_trailing_separator(&mut siblings[index], separators);
+        if collect_text_from_element(&siblings[index]).is_empty() {
             siblings[index] = XmlNode::Text(String::new());
         }
         return;
+    }
+}
+
+/// 递归找到节点内最后一个文本节点，剥掉其尾部（忽略尾随空白后）的分隔符字符。
+fn strip_trailing_separator(node: &mut XmlNode, separators: &[char]) -> bool {
+    match node {
+        XmlNode::Text(text) => {
+            let trimmed = text.trim_end();
+            let Some(last) = trimmed.chars().last() else {
+                return false;
+            };
+            if separators.contains(&last) {
+                *text = trimmed[..trimmed.len() - last.len_utf8()].to_string();
+                true
+            } else {
+                false
+            }
+        }
+        XmlNode::Element { children, .. } => children
+            .iter_mut()
+            .rev()
+            .any(|child| strip_trailing_separator(child, separators)),
     }
 }
 
@@ -629,16 +687,7 @@ fn is_party_role_prefix(prefix: &str) -> bool {
 }
 
 fn strip_role_separator_before(siblings: &mut [XmlNode], at: usize) {
-    for index in (0..at).rev() {
-        let text = collect_text_from_element(&siblings[index]);
-        if text.is_empty() {
-            continue;
-        }
-        if matches!(text.trim(), "，" | ",") {
-            siblings[index] = XmlNode::Text(String::new());
-        }
-        return;
-    }
+    strip_separator_before(siblings, at, &['，', ',']);
 }
 
 fn marker_text_for_tag(field: &TemplateField, tag: &str, value: &Value) -> String {

@@ -1,6 +1,6 @@
 [package]
 name = "docsy"
-version = "0.9.7-beta13"
+version = "0.9.7-beta14"
 description = "Docsy - 轻量文档处理工具箱"
 authors = ["木小樨 <muxiaoxi>"]
 edition = "2021"
@@ -33,7 +33,7 @@ chrono = { version = "0.4", features = ["serde"] }
 image = { version = "=0.25.5", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff"] }
 printpdf = { version = "0.9.1", features = ["images"] }
 docx-rs = { version = "0.4.20", default-features = false }
-pulldown-cmark = { version = "0.13", default-features = false }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 lopdf = { version = "0.39.0", default-features = false }
 ttf-parser = "0.25.1"
 base64 = "0.22"

@@ -298,6 +298,8 @@ pub fn validate_imported_xlsx(
         }
     }
     let mut valid_rows = 0;
+    // total_rows 只统计真正参与导入的数据行：剔除样例行与完全空白行
+    let mut total_data_rows = 0;
 
     // Build field lookup for validation
     let field_by_id: HashMap<&str, &TemplateField> =
@@ -356,12 +358,14 @@ pub fn validate_imported_xlsx(
             !cell_to_string(&cell).trim().is_empty()
         });
 
-        if has_data && row_valid {
-            valid_rows += 1;
+        if has_data {
+            total_data_rows += 1;
+            if row_valid {
+                valid_rows += 1;
+            }
         }
     }
 
-    let total_data_rows = rows.len().saturating_sub(2);
     Ok(BatchValidationResult {
         // ID mismatch is a warning (matched by name); only errors block import
         valid: errors.is_empty(),
@@ -379,17 +383,40 @@ fn is_valid_date_text(text: &str) -> bool {
     if t.is_empty() {
         return true;
     }
-    static DATE_RE1: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"^\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?$").unwrap()
+    // 与 parse_date_parts 可识别的写法对齐：8 位紧凑数字、
+    // 分隔符日期（- / . 前后一致）、中文日期（允许段间空白）；
+    // 同时校验月/日的取值范围，拒绝“2026-13-40”这类伪日期。
+    static COMPACT_RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"^(\d{4})(\d{2})(\d{2})$").unwrap());
+    // rust regex 不支持反向引用，分隔符日期用交替分组保证前后分隔符一致，
+    // 捕获组固定为 (年, 月, 日)。
+    static SEP_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"^(\d{4})(?:-(\d{1,2})-(\d{1,2})|/(\d{1,2})/(\d{1,2})|\.(\d{1,2})\.(\d{1,2}))$",
+        )
+        .unwrap()
     });
-    static DATE_RE2: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"^\d{4}年\d{1,2}月\d{1,2}日$").unwrap());
-    if DATE_RE1.is_match(t) || DATE_RE2.is_match(t) {
-        return true;
+    static CN_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?$").unwrap()
+    });
+    if let Some(caps) = SEP_RE.captures(t) {
+        // 交替分组里只有一组 (月, 日) 非空，取第一个非空对
+        for i in [2usize, 4, 6] {
+            if let (Some(m), Some(d)) = (caps.get(i), caps.get(i + 1)) {
+                let month: u32 = m.as_str().parse().unwrap_or(0);
+                let day: u32 = d.as_str().parse().unwrap_or(0);
+                return (1..=12).contains(&month) && (1..=31).contains(&day);
+            }
+        }
+        return false;
     }
-    // Chinese date with blanks
-    if t.contains('年') && t.contains('月') {
-        return true;
+    for re in [&COMPACT_RE, &CN_RE] {
+        if let Some(caps) = re.captures(t) {
+            // 捕获组固定为 (年, 月, 日)，取最后两组做范围校验
+            let month: u32 = caps[caps.len() - 2].parse().unwrap_or(0);
+            let day: u32 = caps[caps.len() - 1].parse().unwrap_or(0);
+            return (1..=12).contains(&month) && (1..=31).contains(&day);
+        }
     }
     false
 }

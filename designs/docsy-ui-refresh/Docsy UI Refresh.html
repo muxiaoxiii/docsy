@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Docsy UI Refresh</title>
+    <style>
+      :root {
+        --ink: #1f2e2a;
+        --ink-muted: #64706b;
+        --forest: #3b6b60;
+        --forest-deep: #2d5149;
+        --forest-soft: #dce9e4;
+        --paper: #f5efe5;
+        --paper-light: #fbf7ef;
+        --paper-white: #fffdf8;
+        --line: #ded4c5;
+        --line-dark: rgba(255, 255, 255, 0.13);
+        --rust: #b6653b;
+        --shadow: 0 20px 60px rgba(48, 41, 32, 0.1);
+        --ease: cubic-bezier(0.23, 1, 0.32, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        color: var(--ink);
+        background: #d8d0c4;
+        font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Noto Sans SC', sans-serif;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: 236px minmax(0, 1fr);
+        width: 100%;
+        height: 100%;
+        background: var(--paper);
+      }
+
+      .sidebar {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        color: rgba(255, 255, 255, 0.76);
+        background: var(--forest-deep);
+        border-right: 1px solid rgba(0, 0, 0, 0.18);
+      }
+
+      .sidebar::after {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        content: '';
+        opacity: 0.15;
+        background-image: linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+        background-size: 100% 32px;
+        mask-image: linear-gradient(to bottom, black, transparent 70%);
+      }
+
+      .brand {
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        min-height: 76px;
+        padding: 17px 18px;
+        gap: 12px;
+        border-bottom: 1px solid var(--line-dark);
+      }
+
+      .brand img {
+        width: 38px;
+        height: 38px;
+        object-fit: contain;
+        filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.15));
+        transition: transform 260ms var(--ease);
+      }
+
+      .brand:hover img {
+        transform: translateY(-2px) rotate(-5deg);
+      }
+
+      .brand-copy {
+        display: grid;
+        gap: 2px;
+      }
+
+      .brand-name {
+        color: #fffdf8;
+        font-family:
+          ui-rounded,
+          'SF Pro Rounded',
+          -apple-system,
+          'PingFang SC',
+          sans-serif;
+        font-size: 19px;
+        font-weight: 760;
+        letter-spacing: 0.01em;
+      }
+
+      .brand-caption {
+        color: rgba(255, 255, 255, 0.46);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .nav-label {
+        z-index: 1;
+        padding: 23px 20px 9px;
+        color: rgba(255, 255, 255, 0.36);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+      }
+
+      .nav {
+        z-index: 1;
+        display: grid;
+        padding: 0 10px;
+        gap: 3px;
+      }
+
+      .nav-item {
+        position: relative;
+        display: grid;
+        grid-template-columns: 30px 1fr auto;
+        align-items: center;
+        min-height: 46px;
+        padding: 0 12px;
+        color: rgba(255, 255, 255, 0.66);
+        background: transparent;
+        border: 0;
+        border-radius: 7px;
+        cursor: pointer;
+        text-align: left;
+        transition:
+          color 160ms var(--ease),
+          background 160ms var(--ease),
+          transform 120ms var(--ease);
+      }
+
+      .nav-item:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.07);
+      }
+
+      .nav-item:active {
+        transform: scale(0.985);
+      }
+
+      .nav-item.active {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.11);
+      }
+
+      .nav-item.active::before {
+        position: absolute;
+        top: 10px;
+        bottom: 10px;
+        left: -10px;
+        width: 3px;
+        content: '';
+        background: #d79265;
+        border-radius: 0 3px 3px 0;
+      }
+
+      .nav-index {
+        color: rgba(255, 255, 255, 0.34);
+        font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+        font-size: 10px;
+      }
+
+      .nav-item.active .nav-index {
+        color: #e6ad88;
+      }
+
+      .nav-name {
+        font-size: 13px;
+        font-weight: 560;
+      }
+
+      .nav-arrow {
+        color: rgba(255, 255, 255, 0.22);
+        font-size: 14px;
+        transform: translateX(-3px);
+        opacity: 0;
+        transition:
+          opacity 150ms,
+          transform 150ms var(--ease);
+      }
+
+      .nav-item:hover .nav-arrow,
+      .nav-item.active .nav-arrow {
+        transform: translateX(0);
+        opacity: 1;
+      }
+
+      .sidebar-footer {
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        margin-top: auto;
+        border-top: 1px solid var(--line-dark);
+      }
+
+      .sidebar-footer button {
+        height: 52px;
+        color: rgba(255, 255, 255, 0.5);
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .sidebar-footer button + button {
+        border-left: 1px solid var(--line-dark);
+      }
+
+      .sidebar-footer button:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .shell {
+        display: grid;
+        grid-template-rows: 76px minmax(0, 1fr);
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 30px;
+        background: rgba(251, 247, 239, 0.94);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .page-heading {
+        display: flex;
+        align-items: baseline;
+        gap: 11px;
+      }
+
+      .page-heading strong {
+        font-family:
+          ui-rounded,
+          'SF Pro Rounded',
+          -apple-system,
+          'PingFang SC',
+          sans-serif;
+        font-size: 15px;
+        font-weight: 720;
+      }
+
+      .page-heading span {
+        color: var(--ink-muted);
+        font-size: 11px;
+      }
+
+      .version {
+        padding: 6px 9px;
+        color: var(--ink-muted);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+        font-size: 10px;
+      }
+
+      .main {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        background-color: var(--paper);
+        background-image:
+          linear-gradient(rgba(79, 65, 48, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(79, 65, 48, 0.035) 1px, transparent 1px);
+        background-size: 28px 28px;
+      }
+
+      .home {
+        width: min(1120px, calc(100% - 64px));
+        margin: 0 auto;
+        padding: 46px 0 54px;
+      }
+
+      .hero {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+        min-height: 300px;
+        overflow: hidden;
+        background: var(--paper-light);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-copy {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 48px 54px;
+      }
+
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 22px;
+        color: var(--rust);
+        font-size: 10px;
+        font-weight: 760;
+        letter-spacing: 0.17em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        width: 28px;
+        height: 1px;
+        content: '';
+        background: currentColor;
+      }
+
+      .hero h1 {
+        max-width: 600px;
+        margin: 0;
+        font-family:
+          ui-rounded,
+          'SF Pro Rounded',
+          -apple-system,
+          'PingFang SC',
+          sans-serif;
+        font-size: clamp(32px, 4vw, 54px);
+        font-weight: 760;
+        letter-spacing: -0.045em;
+        line-height: 1.08;
+        text-wrap: balance;
+      }
+
+      .hero p {
+        max-width: 520px;
+        margin: 18px 0 0;
+        color: var(--ink-muted);
+        font-size: 14px;
+        line-height: 1.75;
+      }
+
+      .hero-art {
+        position: relative;
+        display: grid;
+        place-items: center;
+        min-height: 300px;
+        background: var(--forest-soft);
+        border-left: 1px solid #cadbd4;
+      }
+
+      .hero-art::before,
+      .hero-art::after {
+        position: absolute;
+        content: '';
+        border: 1px solid rgba(36, 76, 68, 0.15);
+        border-radius: 50%;
+      }
+
+      .hero-art::before {
+        width: 230px;
+        height: 230px;
+      }
+
+      .hero-art::after {
+        width: 280px;
+        height: 280px;
+        animation: doclet-ring 5s var(--ease) infinite;
+      }
+
+      .doclet-stage {
+        z-index: 1;
+        width: min(240px, 78%);
+        animation: doclet-idle 4.8s ease-in-out 700ms infinite;
+        transform-origin: 50% 88%;
+      }
+
+      .hero-art img {
+        display: block;
+        width: 100%;
+        max-height: 270px;
+        object-fit: contain;
+        filter: drop-shadow(0 20px 28px rgba(32, 65, 59, 0.18));
+        animation: settle 700ms var(--ease) both;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        margin: 34px 0 14px;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 720;
+      }
+
+      .section-head span {
+        color: var(--ink-muted);
+        font-size: 11px;
+      }
+
+      .tools {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        background: var(--paper-white);
+        border-top: 1px solid var(--line);
+        border-left: 1px solid var(--line);
+        box-shadow: 0 14px 36px rgba(48, 41, 32, 0.06);
+      }
+
+      .tool {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        min-height: 148px;
+        padding: 22px 22px 20px;
+        color: var(--ink);
+        background: transparent;
+        border: 0;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        cursor: pointer;
+        text-align: left;
+        transition:
+          color 180ms var(--ease),
+          background 180ms var(--ease),
+          transform 140ms var(--ease);
+      }
+
+      .tool:nth-child(1),
+      .tool:nth-child(2) {
+        grid-column: span 6;
+      }
+
+      .tool:nth-child(n + 3) {
+        grid-column: span 4;
+      }
+
+      .tool:hover {
+        z-index: 1;
+        color: var(--paper-white);
+        background: var(--forest);
+        transform: translateY(-2px);
+        box-shadow: 0 16px 30px rgba(30, 61, 55, 0.18);
+      }
+
+      .tool:active {
+        transform: translateY(0) scale(0.99);
+      }
+
+      .tool-index {
+        margin-bottom: auto;
+        color: var(--rust);
+        font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+
+      .tool:hover .tool-index {
+        color: #e4aa83;
+      }
+
+      .tool-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 18px;
+        font-size: 15px;
+        font-weight: 720;
+      }
+
+      .tool-arrow {
+        font-size: 18px;
+        font-weight: 400;
+        transition: transform 180ms var(--ease);
+      }
+
+      .tool:hover .tool-arrow {
+        transform: translateX(4px);
+      }
+
+      .tool-desc {
+        margin: 6px 0 0;
+        color: var(--ink-muted);
+        font-size: 11px;
+        line-height: 1.6;
+      }
+
+      .tool:hover .tool-desc {
+        color: rgba(255, 255, 255, 0.62);
+      }
+
+      .toast {
+        position: fixed;
+        right: 28px;
+        bottom: 28px;
+        padding: 11px 15px;
+        color: #fff;
+        background: var(--forest-deep);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 7px;
+        box-shadow: 0 16px 40px rgba(20, 42, 37, 0.26);
+        font-size: 12px;
+        transform: translateY(12px);
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 180ms var(--ease),
+          transform 180ms var(--ease);
+      }
+
+      .toast.show {
+        transform: translateY(0);
+        opacity: 1;
+      }
+
+      @keyframes settle {
+        from {
+          transform: translateY(16px) scale(0.96);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0) scale(1);
+          opacity: 1;
+        }
+      }
+
+      @keyframes doclet-idle {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0deg);
+        }
+        45% {
+          transform: translateY(-7px) rotate(-1deg);
+        }
+        55% {
+          transform: translateY(-7px) rotate(1deg);
+        }
+      }
+
+      @keyframes doclet-ring {
+        0%,
+        100% {
+          opacity: 0.45;
+          transform: scale(0.96);
+        }
+        50% {
+          opacity: 0.9;
+          transform: scale(1.02);
+        }
+      }
+
+      @media (max-width: 900px) {
+        .app {
+          grid-template-columns: 196px minmax(0, 1fr);
+        }
+
+        .home {
+          width: min(100% - 36px, 760px);
+          padding-top: 28px;
+        }
+
+        .hero {
+          grid-template-columns: 1fr 230px;
+        }
+
+        .hero-copy {
+          padding: 34px;
+        }
+
+        .tool:nth-child(n) {
+          grid-column: span 6;
+        }
+      }
+
+      @media (max-width: 680px) {
+        .app {
+          grid-template-columns: 76px minmax(0, 1fr);
+        }
+
+        .brand {
+          justify-content: center;
+          padding-inline: 10px;
+        }
+
+        .brand-copy,
+        .nav-label,
+        .nav-name,
+        .nav-arrow,
+        .sidebar-footer button {
+          font-size: 0;
+        }
+
+        .nav-item {
+          grid-template-columns: 1fr;
+          justify-items: center;
+          padding: 0;
+        }
+
+        .nav-item.active::before {
+          left: -10px;
+        }
+
+        .nav-index {
+          font-size: 11px;
+        }
+
+        .sidebar-footer button::after {
+          content: '·';
+          font-size: 18px;
+        }
+
+        .home {
+          width: min(100% - 28px, 560px);
+        }
+
+        .hero {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-art {
+          min-height: 210px;
+          border-top: 1px solid #cadbd4;
+          border-left: 0;
+        }
+
+        .tool:nth-child(n) {
+          grid-column: span 12;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app" data-screen-label="Docsy 首页升级方案">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="assets/docsy-logo.png" alt="Docsy" />
+          <div class="brand-copy">
+            <strong class="brand-name">Docsy</strong>
+            <span class="brand-caption">Local Toolkit</span>
+          </div>
+        </div>
+        <div class="nav-label">工作空间</div>
+        <nav class="nav" aria-label="主要工具">
+          <button class="nav-item active" data-title="证据处理" type="button">
+            <span class="nav-index">01</span><span class="nav-name">证据处理</span><span class="nav-arrow">›</span>
+          </button>
+          <button class="nav-item" data-title="文档工具" type="button">
+            <span class="nav-index">02</span><span class="nav-name">文档工具</span><span class="nav-arrow">›</span>
+          </button>
+          <button class="nav-item" data-title="图片排版" type="button">
+            <span class="nav-index">03</span><span class="nav-name">图片排版</span><span class="nav-arrow">›</span>
+          </button>
+          <button class="nav-item" data-title="视频抽帧" type="button">
+            <span class="nav-index">04</span><span class="nav-name">视频抽帧</span><span class="nav-arrow">›</span>
+          </button>
+          <button class="nav-item" data-title="文书模板" type="button">
+            <span class="nav-index">05</span><span class="nav-name">文书模板</span><span class="nav-arrow">›</span>
+          </button>
+        </nav>
+        <div class="sidebar-footer">
+          <button type="button">关于</button>
+          <button type="button">设置</button>
+        </div>
+      </aside>
+
+      <section class="shell">
+        <header class="topbar">
+          <div class="page-heading"><strong id="page-title">首页</strong><span>本地文档处理工作台</span></div>
+          <span class="version">v0.9.7-beta13</span>
+        </header>
+        <div class="main">
+          <div class="home">
+            <section class="hero">
+              <div class="hero-copy">
+                <span class="eyebrow">Docsy Workspace</span>
+                <h1>让文档处理，<br />安静地完成。</h1>
+                <p>在本地整理证据、转换文档、排版图片和生成文书。文件不离开设备，常用工具始终触手可及。</p>
+              </div>
+              <div class="hero-art">
+                <div class="doclet-stage">
+                  <img src="assets/doclet-mascot-transparent.png" alt="Doclet" />
+                </div>
+              </div>
+            </section>
+
+            <div class="section-head">
+              <h2>开始处理</h2>
+              <span>选择一个工作空间</span>
+            </div>
+            <section class="tools" aria-label="快捷入口">
+              <button class="tool" data-title="证据处理" type="button">
+                <span class="tool-index">01 / EVIDENCE</span>
+                <span class="tool-title">证据处理 <span class="tool-arrow">→</span></span>
+                <span class="tool-desc">分项处理、合并处理与证据扫描</span>
+              </button>
+              <button class="tool" data-title="文档工具" type="button">
+                <span class="tool-index">02 / DOCUMENT</span>
+                <span class="tool-title">文档工具 <span class="tool-arrow">→</span></span>
+                <span class="tool-desc">解锁、合并、拆分与 Markdown 互转</span>
+              </button>
+              <button class="tool" data-title="图片排版" type="button">
+                <span class="tool-index">03 / IMAGE</span>
+                <span class="tool-title">图片排版 <span class="tool-arrow">→</span></span>
+                <span class="tool-desc">批量排版为 A4 文档</span>
+              </button>
+              <button class="tool" data-title="视频抽帧" type="button">
+                <span class="tool-index">04 / VIDEO</span>
+                <span class="tool-title">视频抽帧 <span class="tool-arrow">→</span></span>
+                <span class="tool-desc">按时间或频率导出视频帧</span>
+              </button>
+              <button class="tool" data-title="文书模板" type="button">
+                <span class="tool-index">05 / TEMPLATE</span>
+                <span class="tool-title">文书模板 <span class="tool-arrow">→</span></span>
+                <span class="tool-desc">识别 Word 字段并批量生成文书</span>
+              </button>
+            </section>
+          </div>
+        </div>
+      </section>
+      <div class="toast" role="status">已切换工作空间</div>
+    </main>
+    <script>
+      const navItems = [...document.querySelectorAll('.nav-item')]
+      const tools = [...document.querySelectorAll('.tool')]
+      const pageTitle = document.querySelector('#page-title')
+      const toast = document.querySelector('.toast')
+      let toastTimer
+
+      function activate(title) {
+        navItems.forEach((item) => item.classList.toggle('active', item.dataset.title === title))
+        pageTitle.textContent = title
+        toast.textContent = `已选择：${title}`
+        toast.classList.add('show')
+        window.clearTimeout(toastTimer)
+        toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1200)
+      }
+
+      navItems.forEach((item) => item.addEventListener('click', () => activate(item.dataset.title)))
+      tools.forEach((item) => item.addEventListener('click', () => activate(item.dataset.title)))
+    </script>
+  </body>
+</html>

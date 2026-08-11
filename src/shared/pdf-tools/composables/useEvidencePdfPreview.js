@@ -58,6 +58,22 @@ export function useEvidencePdfPreview({
   let truePreviewRequestSeq = 0
   const showRulePreviewOverlays = computed(() => !mergedImportPlan.value)
 
+  // 页眉/页脚 overlay 定位用的页面尺寸（pt），回退顺序：
+  // 1. 预览组件上报的当前页真实尺寸（previewData，含异形页/逐页尺寸）；
+  // 2. 当前选中文件检测结果里随 bbox 保存的页宽/页高（bbox.width/height 即页面 pt 尺寸）；
+  // 3. 都没有时传 null，由 textOverlayStyle 回退 A4 兜底（比例可能失真，仅兜底）。
+  const previewPageInfo = computed(() => {
+    const data = previewData.value
+    if (data?.widthPt && data?.heightPt) return data
+    const file = selectedOverlayFile.value
+    const bbox =
+      file?.existingHeaderBBox || file?.existingFooterBBox || file?.existingPageNumberBBox
+    if (bbox?.width && bbox?.height) {
+      return { widthPt: bbox.width, heightPt: bbox.height }
+    }
+    return null
+  })
+
   const previewHeaderText = computed(() => {
     if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
     if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
@@ -98,7 +114,7 @@ export function useEvidencePdfPreview({
   })
 
   const previewHeaderStyle = computed(() =>
-    textOverlayStyle('header', previewData.value, {
+    textOverlayStyle('header', previewPageInfo.value, {
       align: headerAlign.value,
       marginMm: headerMarginMm.value,
       fontSize: headerFontSize.value,
@@ -110,7 +126,7 @@ export function useEvidencePdfPreview({
 
   const previewFooterStyle = computed(() => {
     const g = selectedFooterTextGroup.value || {}
-    return textOverlayStyle('footer', previewData.value, {
+    return textOverlayStyle('footer', previewPageInfo.value, {
       align: g.align || 'left',
       marginMm: g.marginMm || 10,
       fontSize: g.fontSize || 9,
@@ -235,7 +251,7 @@ export function useEvidencePdfPreview({
         text: pageNumberOverlay
           ? renderPageNumberTemplate(overlay.text, page, total, overlay.numberStyle || pageNumberStyle.value)
           : expandPlaceholders(overlay.text, page, total, selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value),
-        style: textOverlayStyle(region, previewData.value, {
+        style: textOverlayStyle(region, previewPageInfo.value, {
           align: overlay.align,
           marginMm: overlay.marginMm,
           fontSize: overlay.fontSize,
@@ -249,7 +265,7 @@ export function useEvidencePdfPreview({
 
   const headerFooterOverflowWarnings = computed(() => {
     const warnings = []
-    const widthPt = previewData.value?.widthPt || 595.28
+    const widthPt = previewPageInfo.value?.widthPt || 595.28
     if (
       previewHeaderText.value &&
       estimateTextWidthPt(previewHeaderText.value, headerFontSize.value) > widthPt * 0.92
@@ -410,6 +426,7 @@ export function useEvidencePdfPreview({
 
   return {
     showRulePreviewOverlays,
+    previewPageInfo,
     previewHeaderText,
     previewFooterText,
     previewHeaderStyle,

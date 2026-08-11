@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 
+use crate::docx_template::ooxml::{XmlNode, XmlTree};
 use crate::docx_template::package;
 use crate::pdf::fnv1a_hash;
 use crate::util::fs::TempPathGuard;
@@ -121,6 +122,7 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
             out_pkg.insert(name.clone(), data.clone());
         }
     }
+    prune_dangling_package_refs(&mut out_pkg);
 
     package::write_docsytpl_package(&output, &manifest, &out_pkg)?;
     drop(converted_guard);
@@ -236,6 +238,7 @@ pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
             out_pkg.insert(name.clone(), data.clone());
         }
     }
+    prune_dangling_package_refs(&mut out_pkg);
 
     package::write_docx_package(&output_path, &out_pkg)?;
 
@@ -256,6 +259,58 @@ pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
 
 fn copy_template_package_entry(name: &str) -> bool {
     !name.starts_with("docProps/")
+}
+
+/// docProps 等部件会被剔除（见 copy_template_package_entry），但
+/// [Content_Types].xml 的 Override 与 _rels/.rels 的 Relationship 仍指向它们，
+/// 会在输出包里形成悬空关系。这里把指向缺失部件的条目一并剔除。
+fn prune_dangling_package_refs(pkg: &mut HashMap<String, Vec<u8>>) {
+    // [Content_Types].xml：剔除 Override 指向缺失部件的条目
+    if let Some(data) = pkg.get("[Content_Types].xml").cloned() {
+        if let Ok(mut tree) = XmlTree::parse(&data) {
+            if let XmlNode::Element { children, .. } = &mut tree.root {
+                children.retain(|child| match child {
+                    XmlNode::Element { name, attrs, .. } if name == "Override" => attrs
+                        .iter()
+                        .find(|(k, _)| k == "PartName")
+                        .map(|(_, v)| pkg.contains_key(v.trim_start_matches('/')))
+                        .unwrap_or(true),
+                    _ => true,
+                });
+            }
+            if let Ok(xml) = tree.to_xml() {
+                pkg.insert("[Content_Types].xml".to_string(), xml.into_bytes());
+            }
+        }
+    }
+    // _rels/.rels：剔除 Target 指向缺失部件的关系（外部引用保留）
+    if let Some(data) = pkg.get("_rels/.rels").cloned() {
+        if let Ok(mut tree) = XmlTree::parse(&data) {
+            if let XmlNode::Element { children, .. } = &mut tree.root {
+                children.retain(|child| match child {
+                    XmlNode::Element { name, attrs, .. } if name == "Relationship" => {
+                        let get = |key: &str| {
+                            attrs
+                                .iter()
+                                .find(|(k, _)| k == key)
+                                .map(|(_, v)| v.as_str())
+                        };
+                        if get("TargetMode") == Some("External") {
+                            return true;
+                        }
+                        match get("Target") {
+                            Some(target) => pkg.contains_key(target.trim_start_matches('/')),
+                            None => true,
+                        }
+                    }
+                    _ => true,
+                });
+            }
+            if let Ok(xml) = tree.to_xml() {
+                pkg.insert("_rels/.rels".to_string(), xml.into_bytes());
+            }
+        }
+    }
 }
 
 fn ensure_template_package_safe(pkg: &HashMap<String, Vec<u8>>) -> Result<()> {

@@ -115,15 +115,7 @@ fn parse_children<R: std::io::BufRead>(
                 let name = std::str::from_utf8(e.name().as_ref())
                     .context("XML 标签名无效")?
                     .to_string();
-                let attrs = e
-                    .attributes()
-                    .filter_map(|attr| {
-                        let attr = attr.ok()?;
-                        let key = std::str::from_utf8(attr.key.as_ref()).ok()?.to_string();
-                        let value = attr.decode_and_unescape_value(reader.decoder()).ok();
-                        Some((key, value.unwrap_or_default().to_string()))
-                    })
-                    .collect::<Vec<_>>();
+                let attrs = parse_attributes(&e, reader.decoder());
                 let sub_children = parse_children(reader, buf, depth + 1)?;
                 children.push(XmlNode::Element {
                     name,
@@ -137,6 +129,14 @@ fn parse_children<R: std::io::BufRead>(
                     children.push(XmlNode::Text(text));
                 }
             }
+            Ok(Event::CData(e)) => {
+                // CDATA 内容不再静默丢弃：按文本节点保留（写出时重新转义，
+                // 与原文等价）。输入已是 &str，必为合法 UTF-8。
+                let text = String::from_utf8_lossy(e.as_ref()).into_owned();
+                if !text.is_empty() {
+                    children.push(XmlNode::Text(text));
+                }
+            }
             Ok(Event::End(_)) | Ok(Event::Eof) => {
                 return Ok(children);
             }
@@ -144,15 +144,7 @@ fn parse_children<R: std::io::BufRead>(
                 let name = std::str::from_utf8(e.name().as_ref())
                     .context("XML 标签名无效")?
                     .to_string();
-                let attrs = e
-                    .attributes()
-                    .filter_map(|attr| {
-                        let attr = attr.ok()?;
-                        let key = std::str::from_utf8(attr.key.as_ref()).ok()?.to_string();
-                        let value = attr.decode_and_unescape_value(reader.decoder()).ok();
-                        Some((key, value.unwrap_or_default().to_string()))
-                    })
-                    .collect();
+                let attrs = parse_attributes(&e, reader.decoder());
                 children.push(XmlNode::Element {
                     name,
                     attrs,
@@ -163,6 +155,36 @@ fn parse_children<R: std::io::BufRead>(
             _ => {}
         }
     }
+}
+
+/// 解析元素属性。畸形属性不再静默丢弃：记录告警日志后跳过该属性；
+/// 值反转义失败时按空值处理并告警。
+fn parse_attributes(e: &BytesStart, decoder: quick_xml::encoding::Decoder) -> Vec<(String, String)> {
+    e.attributes()
+        .filter_map(|attr| {
+            let attr = match attr {
+                Ok(attr) => attr,
+                Err(err) => {
+                    log::warn!("XML 属性解析失败，已跳过该属性: {err}");
+                    return None;
+                }
+            };
+            let key = match std::str::from_utf8(attr.key.as_ref()) {
+                Ok(key) => key.to_string(),
+                Err(_) => {
+                    log::warn!("XML 属性名不是合法 UTF-8，已跳过该属性");
+                    return None;
+                }
+            };
+            match attr.decode_and_unescape_value(decoder) {
+                Ok(value) => Some((key, value.to_string())),
+                Err(err) => {
+                    log::warn!("XML 属性 {key} 的值反转义失败，按空值处理: {err}");
+                    Some((key, String::new()))
+                }
+            }
+        })
+        .collect()
 }
 
 fn write_node(writer: &mut Writer<Cursor<Vec<u8>>>, node: &XmlNode) -> Result<()> {

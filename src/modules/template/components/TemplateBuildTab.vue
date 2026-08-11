@@ -15,6 +15,14 @@
           {{ marks.length }} 个标黄片段，{{ checkboxLikeCount }} 个疑似勾选符号
         </el-descriptions-item>
       </el-descriptions>
+      <WorkspaceEmptyState
+        v-else
+        compact
+        class="template-empty-state"
+        :icon-url="templateIconUrl"
+        title="等待导入 Word"
+        description="把需要替换的文字或勾选符号标黄后导入，Docsy 会自动识别成模板字段。"
+      />
     </div>
 
     <div v-if="fieldRows.length" class="panel filename-panel">
@@ -22,7 +30,10 @@
         <div>
           <h3>
             输出文件名
-            <el-tooltip content="左侧预览最终文件名（点击色块删除），中间输入规则，右侧按钮添加成分。字段用 [[名称]]，预设用 [日期] 等。" placement="right">
+            <el-tooltip
+              content="左侧预览最终文件名（点击色块删除），中间输入规则，右侧按钮添加成分。字段用 [[名称]]，预设用 [日期] 等。"
+              placement="right"
+            >
               <el-icon class="help-icon"><QuestionFilled /></el-icon>
             </el-tooltip>
           </h3>
@@ -42,7 +53,10 @@
         <div>
           <h3>
             确认字段
-            <el-tooltip content="同名字段会共用一个值；空值处理是字段属性，可以设为全部同名共用或仅当前位置生效。" placement="right">
+            <el-tooltip
+              content="同名字段会共用一个值；空值处理是字段属性，可以设为全部同名共用或仅当前位置生效。"
+              placement="right"
+            >
               <el-icon class="help-icon"><QuestionFilled /></el-icon>
             </el-tooltip>
           </h3>
@@ -63,7 +77,8 @@
                   <span>{{ item.description }}</span>
                   <div v-if="item.subTypes" class="type-help-sub">
                     <div v-for="sub in item.subTypes" :key="sub.value" class="type-help-sub-item">
-                      <strong>{{ sub.label }}</strong>：{{ sub.description }}
+                      <strong>{{ sub.label }}</strong
+                      >：{{ sub.description }}
                     </div>
                   </div>
                 </div>
@@ -133,7 +148,12 @@
         border
         row-key="rowId"
         :row-class-name="buildFieldRowClassName"
-        @selection-change="$emit('selection-change', $event.filter((row) => !row.displayOnly))"
+        @selection-change="
+          $emit(
+            'selection-change',
+            $event.filter((row) => !row.displayOnly),
+          )
+        "
         @wheel="$emit('field-table-wheel', $event)"
       >
         <el-table-column type="selection" width="38" :selectable="(row) => !row.displayOnly" />
@@ -143,10 +163,7 @@
               link
               type="primary"
               :disabled="
-                row.displayOnly ||
-                rowUsage(row) !== 'field' ||
-                isMarkerType(row.type) ||
-                row.type === 'party_list'
+                row.displayOnly || rowUsage(row) !== 'field' || isMarkerType(row.type) || row.type === 'party_list'
               "
               @click="$emit('open-split-dialog', row)"
             >
@@ -183,12 +200,7 @@
                 class="type-group-select"
                 @update:model-value="(group) => onTypeGroupChange(row, group)"
               >
-                <el-option
-                  v-for="item in typeGroupOptions"
-                  :key="item.value"
-                  :label="item.label"
-                  :value="item.value"
-                />
+                <el-option v-for="item in typeGroupOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
               <el-select
                 v-if="typeGroupSubOptions(row.type)"
@@ -256,26 +268,21 @@
           <template #default="{ row }">
             <el-tag v-if="row.virtualPartyGroup" size="small" type="success">当事人列表</el-tag>
             <el-tag v-else-if="row.displayOnly" size="small" type="success">列表项</el-tag>
-            <el-tag v-else-if="rowUsage(row) === 'prefix'" size="small" type="info">{{
-              relationSummary(row)
-            }}</el-tag>
-            <el-tag v-else-if="rowUsage(row) === 'suffix'" size="small" type="info">{{
-              relationSummary(row)
-            }}</el-tag>
+            <el-tag v-else-if="rowUsage(row) === 'prefix'" size="small" type="info">{{ relationSummary(row) }}</el-tag>
+            <el-tag v-else-if="rowUsage(row) === 'suffix'" size="small" type="info">{{ relationSummary(row) }}</el-tag>
             <el-tag v-else-if="rowUsage(row) === 'delete_text'" size="small" type="danger">删除文本</el-tag>
             <el-tag v-else-if="row.type === 'reference'" size="small" type="warning">
               引用 {{ referenceSourceLabel(row) || '未指定' }}
             </el-tag>
-            <el-tag v-else-if="isGroupedField(row)" size="small" type="success">{{
-              groupedFieldSummary(row)
-            }}</el-tag>
+            <el-tag v-else-if="isGroupedField(row)" size="small" type="success">{{ groupedFieldSummary(row) }}</el-tag>
             <el-button
               v-else-if="referenceSuggestion(row)"
               size="small"
               type="primary"
               link
               @click="$emit('apply-reference-suggestion', row)"
-            >改成引用</el-button>
+              >改成引用</el-button
+            >
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
@@ -285,12 +292,7 @@
             <template v-else>
               <el-popover placement="left-start" trigger="click" width="420">
                 <template #reference>
-                  <el-badge
-                    v-if="hasUnseenReferenceSuggestion(row)"
-                    value="!"
-                    type="danger"
-                    class="settings-badge"
-                  >
+                  <el-badge v-if="hasUnseenReferenceSuggestion(row)" value="!" type="danger" class="settings-badge">
                     <el-button size="small" circle @click="row.referenceHintSeen = true">⋯</el-button>
                   </el-badge>
                   <el-button v-else size="small" circle @click="row.referenceHintSeen = true">⋯</el-button>
@@ -301,9 +303,7 @@
 
                   <div v-if="referenceSuggestion(row)" class="reference-suggestion">
                     <p>
-                      字段内容与前面的"{{
-                        referenceSuggestion(row).targetLabel
-                      }}"相同，建议改成引用，共用同一个填写值。
+                      字段内容与前面的"{{ referenceSuggestion(row).targetLabel }}"相同，建议改成引用，共用同一个填写值。
                       <span v-if="referenceSuggestion(row).targetKind === 'party_item'">
                         这是当事人列表中的单个成员。
                       </span>
@@ -339,10 +339,7 @@
                       <el-input v-model="row.label" @input="onLabelInput(row)" />
                     </el-form-item>
                     <el-form-item label="通用字段名" v-if="rowUsage(row) === 'field'">
-                      <el-input
-                        v-model="row.semanticKey"
-                        :placeholder="`默认跟随字段名：${row.name || '未命名'}`"
-                      />
+                      <el-input v-model="row.semanticKey" :placeholder="`默认跟随字段名：${row.name || '未命名'}`" />
                     </el-form-item>
                     <el-form-item label="日期格式" v-if="rowUsage(row) === 'field' && row.type === 'date'">
                       <el-select v-model="row.dateFormat" size="small">
@@ -378,13 +375,8 @@
                       />
                     </template>
 
-                    <template
-                      v-if="rowUsage(row) === 'field' && !isMarkerType(row.type) && row.type !== 'reference'"
-                    >
-                      <el-form-item
-                        v-if="row.type === 'party_list' && row.partyItems?.length > 1"
-                        label="列表成员"
-                      >
+                    <template v-if="rowUsage(row) === 'field' && !isMarkerType(row.type) && row.type !== 'reference'">
+                      <el-form-item v-if="row.type === 'party_list' && row.partyItems?.length > 1" label="列表成员">
                         <div class="party-detected-items">
                           <el-tag v-for="item in row.partyItems" :key="item" size="small">{{ item }}</el-tag>
                         </div>
@@ -415,22 +407,12 @@
                       </el-form-item>
                       <el-form-item label="选中符号">
                         <el-select v-model="row.checkedText" allow-create filterable>
-                          <el-option
-                            v-for="item in checkedSymbolOptions"
-                            :key="item"
-                            :label="item"
-                            :value="item"
-                          />
+                          <el-option v-for="item in checkedSymbolOptions" :key="item" :label="item" :value="item" />
                         </el-select>
                       </el-form-item>
                       <el-form-item label="未选符号">
                         <el-select v-model="row.uncheckedText" allow-create filterable>
-                          <el-option
-                            v-for="item in uncheckedSymbolOptions"
-                            :key="item"
-                            :label="item"
-                            :value="item"
-                          />
+                          <el-option v-for="item in uncheckedSymbolOptions" :key="item" :label="item" :value="item" />
                         </el-select>
                       </el-form-item>
                       <el-form-item label="批量符号">
@@ -458,11 +440,7 @@
                     <template v-if="rowUsage(row) === 'field' && row.type === 'select'">
                       <el-form-item label="下拉选项">
                         <div class="select-options-editor">
-                          <div
-                            v-for="(opt, optIdx) in row.selectOptions || []"
-                            :key="optIdx"
-                            class="select-option-row"
-                          >
+                          <div v-for="(opt, optIdx) in row.selectOptions || []" :key="optIdx" class="select-option-row">
                             <el-input
                               v-model="opt.label"
                               size="small"
@@ -555,7 +533,6 @@
         >
           {{ editingLibraryTemplatePath ? '另存为' : '保存模板' }}
         </el-button>
-
       </div>
 
       <div v-if="showDocumentText" class="preview-panel">
@@ -672,6 +649,8 @@
 import { computed, ref } from 'vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import FilenameTokenInput from '../../../shared/components/FilenameTokenInput.vue'
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
+import templateIconUrl from '../../../assets/icons/template.svg?url'
 import {
   rowUsage,
   isMarkerType,
@@ -767,7 +746,6 @@ const emit = defineEmits([
   'focus-preview-row',
   'trigger-preview-selection-add',
   'set-preview-sample-value',
-
 ])
 
 // Computed properties that depend on fieldRows
@@ -795,7 +773,9 @@ const checkboxLikeCount = computed(() => props.marks.filter((mark) => mark.check
 const filenameAvailableFields = computed(() => {
   const seen = new Set()
   return props.fieldRows
-    .filter((row) => row.name?.trim() && rowUsage(row) === 'field' && !seen.has(row.name.trim()) && seen.add(row.name.trim()))
+    .filter(
+      (row) => row.name?.trim() && rowUsage(row) === 'field' && !seen.has(row.name.trim()) && seen.add(row.name.trim()),
+    )
     .map((row) => ({ name: row.name.trim(), label: row.label || row.name.trim() }))
 })
 const fieldTableRows = computed(() => buildFieldTableRows(props.fieldRows))
@@ -875,10 +855,14 @@ defineExpose({ fieldTableRef, sourcePreviewRef, documentPreviewRef })
 
 .panel {
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   padding: 14px;
   background: var(--docsy-surface-elevated);
-  box-shadow: 0 3px 14px rgba(54, 45, 36, 0.035);
+  box-shadow: var(--docsy-shadow-soft);
+}
+
+.template-empty-state {
+  margin-top: 4px;
 }
 
 .panel-header {
@@ -951,7 +935,7 @@ p {
   margin: 0;
   padding: 10px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text-strong);
   font-family: inherit;
@@ -969,7 +953,7 @@ p {
   margin-bottom: 10px;
   padding: 8px 10px;
   border: 1px solid var(--docsy-token-green-border);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-primary-soft);
 }
 
@@ -985,7 +969,7 @@ p {
   margin-bottom: 10px;
   padding: 10px;
   border: 1px solid var(--docsy-token-green-border);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-success-soft);
 }
 
@@ -1133,7 +1117,7 @@ p {
   overflow: auto;
   padding: 10px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text-strong);
   font-size: 13px;
@@ -1167,7 +1151,7 @@ p {
   margin: 0 1px;
   padding: 1px 3px;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   font: inherit;
   line-height: inherit;
   cursor: pointer;
@@ -1257,7 +1241,7 @@ p {
   max-width: 360px;
   padding: 3px 8px;
   border: 1px solid var(--docsy-border-strong);
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   color: var(--docsy-text);
   font-size: 12px;
   overflow: hidden;
@@ -1279,7 +1263,7 @@ p {
 
 .legend-token {
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   font-size: 12px;
 }
 
@@ -1293,7 +1277,7 @@ p {
   margin-bottom: 12px;
   padding: 10px;
   border: 1px solid var(--docsy-danger-border);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-danger-soft);
   color: var(--docsy-text);
 }

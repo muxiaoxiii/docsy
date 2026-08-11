@@ -232,6 +232,29 @@ export function fieldFormKey(field) {
   return field.id || field.name
 }
 
+// 跟随位置（fillAllPositions slot > 0）的独立取值/覆盖以此 key 存储；
+// 主位置直接用字段 id，不带 "#0"。
+export function fieldSlotKey(field) {
+  const base = field?.id || field?.name || ''
+  const pos = field?.posIndex ?? 0
+  return pos > 0 ? `${base}#${pos}` : base
+}
+
+// 引用来源选择的存储 key 存在两种历史写法：主位置/普通字段用 fieldFormKey，
+// 「保存引用来源」路径统一写成 `id#pos`（主位置即 `id#0`）。读取时两种都查，
+// 避免 id vs id#0 不一致导致下拉回显/解析错位。slot 级优先于字段级。
+export function referenceSelectionFor(referenceSelections, field) {
+  const keys = [fieldSlotKey(field), `${field?.id || field?.name || ''}#${field?.posIndex ?? 0}`, fieldFormKey(field)]
+  const seen = new Set()
+  for (const key of keys) {
+    if (seen.has(key)) continue
+    seen.add(key)
+    const value = referenceSelections?.[key]
+    if (value) return value
+  }
+  return ''
+}
+
 export function displayValue(value) {
   if (value == null) return ''
   if (typeof value === 'string') return value
@@ -762,6 +785,9 @@ export function formatDateValue(value, format) {
     return `${yStr} ${monthLong} ${dOrd}`.replace(/\s+/g, ' ').trim()
   }
   // iso default: 2026-08-05 (zero parts stay blank segments)
+  // 全部留空时 iso 没有「年月日」这类骨架字符，输出 "-  -" 既难看也与其它
+  // 字段的空值表现不一致；返回空串（需要手写占位请用 blank 格式）。
+  if (!y && !m && !d) return ''
   return `${yStr}-${mStr}-${dStr}`.trim()
 }
 
@@ -866,6 +892,56 @@ export function splitPartyInput(value) {
     .split(/[、\n]/)
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+// party_list 值为空数组时，编辑界面需要一行临时行供输入。临时行按字段缓存，
+// 首次输入内容时通过 commit 提交为正式值，否则重渲染或「添加一项」会把
+// 正在输入的临时行冲掉（临时行丢失）。
+export function createPartyTempRowStore(commit) {
+  const cache = new Map()
+  return {
+    // 返回该字段当前应展示的行：有正式值用正式值，空数组用缓存的临时行
+    rowsFor(key, value) {
+      if (!Array.isArray(value)) return []
+      if (value.length) return value
+      if (!cache.has(key)) cache.set(key, { text: '', suffix: '' })
+      return [cache.get(key)]
+    },
+    // 临时行有内容时提交为正式值；仍为空则不提交（避免写入空行）
+    commit(key, value) {
+      if (!Array.isArray(value) || value.length) return
+      const temp = cache.get(key)
+      if (!temp || (!String(temp.text).trim() && !String(temp.suffix).trim())) return
+      cache.delete(key)
+      commit(key, [{ text: temp.text, suffix: temp.suffix }])
+    },
+  }
+}
+
+// 输出文件名预览：与后端 generate_filename 的 token 解析保持一致——field
+// token 的值是字段名，先按名找到字段再取填写值，取不到时显示占位符。
+export function filenamePreviewText(tokens, { formValues = {}, fields = [], manifestName = '' } = {}) {
+  if (!tokens?.length) return ''
+  const parts = tokens.map((token) => {
+    if (token.type === 'literal') return token.value
+    if (token.type === 'field') {
+      const field = fields.find((f) => f.name === token.value)
+      const value = field ? formValues[fieldFormKey(field)] : formValues[token.value]
+      const text = displayValue(value).trim()
+      return text || `[${token.value}]`
+    }
+    if (token.type === 'preset') {
+      if (token.value === '日期') {
+        const d = new Date()
+        return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+      }
+      if (token.value === '模板名') return manifestName || '模板'
+      if (token.value === '序号') return '1'
+      return token.value
+    }
+    return token.value || ''
+  })
+  return `${parts.join('')}.docx`
 }
 
 export function parsePartyItem(value) {

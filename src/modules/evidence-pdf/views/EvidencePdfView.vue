@@ -33,7 +33,16 @@
               />
             </div>
           </div>
-          <el-empty v-else :description="evidenceFolder ? '尚未扫描到证据分组' : '先选择需要扫描的证据文件夹'" />
+          <WorkspaceEmptyState
+            v-else
+            :icon-url="evidenceIconUrl"
+            :title="evidenceFolder ? '尚未发现证据分组' : '等待选择证据文件夹'"
+            :description="
+              evidenceFolder
+                ? '当前文件夹中还没有可整理的证据文件。'
+                : '选择文件夹后，Docsy 会按目录自动识别并整理证据。'
+            "
+          />
           <el-alert
             v-if="conversionFailures.length"
             class="conversion-alert"
@@ -68,6 +77,8 @@ import { open } from '@tauri-apps/plugin-dialog'
 import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
+import evidenceIconUrl from '../../../assets/icons/evidence.svg?url'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 
@@ -131,7 +142,7 @@ async function buildEvidence() {
 
 .evidence-pdf-view {
   overflow: hidden;
-  background: var(--docsy-surface);
+  background: var(--docsy-canvas);
 }
 
 :deep(.evidence-tabs > .el-tabs__content),
@@ -143,9 +154,9 @@ async function buildEvidence() {
 }
 
 .evidence-info {
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 5px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   font-size: 13px;
   color: var(--docsy-text);
@@ -163,14 +174,17 @@ async function buildEvidence() {
 
 .evidence-groups {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
 }
 
 .group-item {
-  padding: 12px;
+  min-width: 0;
+  padding: 14px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 5px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
+  box-shadow: var(--docsy-shadow-soft);
 }
 
 .group-head {
@@ -182,7 +196,8 @@ async function buildEvidence() {
 
 .group-item h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 680;
 }
 
 .conversion-alert {

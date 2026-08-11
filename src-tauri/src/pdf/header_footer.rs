@@ -1188,6 +1188,11 @@ fn build_overlay_pdf(
             warnings.push(page_warnings.join("；"));
         }
 
+        // 注意：overlay 页按「视觉尺寸」（旋转页宽高已互换）建页即可。
+        // qpdf --overlay 会自动按 base 页的 /Rotate 对叠加内容施加逆旋转
+        // cm（实证：qpdf 12.3.2 对 Rotate=90 的 base 页自动包
+        // `q 0 1 -1 0 <raw_w> 0 cm ... Q`），因此文字算子直接按视觉坐标
+        // 书写即可落在正确位置；切勿再自行加补偿变换，否则会双重旋转。
         let content = Content { operations };
         let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode()?));
         let page_id = doc.add_object(dictionary! {
@@ -2020,6 +2025,14 @@ fn cleanup_plain_text_temp(result: Option<(PathBuf, content_text::PlainTextClean
 mod tests {
     use super::*;
 
+    fn pdf_number(object: &Object) -> f32 {
+        match object {
+            Object::Real(value) => *value,
+            Object::Integer(value) => *value as f32,
+            other => panic!("expected PDF number, got {other:?}"),
+        }
+    }
+
     #[test]
     fn expands_global_page_placeholders() {
         assert_eq!(
@@ -2097,6 +2110,119 @@ mod tests {
         config.align = "right".to_string();
         let expected = 200.0 - mm_to_pt(10.0) - estimate_text_width("abc", false, 10.0);
         assert!((compute_x(&config, "abc", false, 200.0) - expected).abs() < 0.01);
+    }
+
+    /// 构造一个走内建 Helvetica 字体的英文页眉配置，避免测试依赖系统字体文件。
+    fn plain_header_config() -> OverlayTextConfig {
+        OverlayTextConfig {
+            text: "Header".to_string(),
+            region: "header".to_string(),
+            font_family: "auto".to_string(),
+            font_size: 10.0,
+            margin_mm: 10.0,
+            align: "center".to_string(),
+            offset_x_mm: 0.0,
+            color: "#000000".to_string(),
+            page_start: None,
+            page_end: None,
+            number_style: String::new(),
+            number_offset: 0,
+            number_total: None,
+            artifact_kind: String::new(),
+        }
+    }
+
+    /// 未旋转的 A4 纵向页。
+    fn unrotated_page_size() -> PageSize {
+        PageSize {
+            width_pt: 595.0,
+            height_pt: 842.0,
+            raw_width_pt: 595.0,
+            raw_height_pt: 842.0,
+            rotate: 0,
+        }
+    }
+
+    /// Rotate=90 的页：未旋转 595×842，视觉 842×595。
+    fn rotated_page_size(rotate: i32) -> PageSize {
+        let mut size = unrotated_page_size();
+        size.rotate = rotate;
+        if rotate == 90 || rotate == 270 {
+            size.width_pt = 842.0;
+            size.height_pt = 595.0;
+        }
+        size
+    }
+
+    /// 回归测试（旋转页 overlay 坐标）：qpdf --overlay 会自动按 base 页的
+    /// /Rotate 对叠加内容施加逆旋转 cm（实证见 deferred-issues.md 旋转页条目），
+    /// 因此旋转页的 overlay 页必须按「视觉尺寸」建 MediaBox，且内容流不得再
+    /// 自行叠加任何补偿 cm——否则会被 qpdf 的自动补偿双重旋转。
+    #[test]
+    fn rotated_page_overlay_uses_visual_mediabox_without_extra_cm() {
+        let header = plain_header_config();
+        let pages = vec![rotated_page_size(90)];
+        let (bytes, warnings) = build_overlay_pdf(Some(&header), None, &[], &pages, 1, 1).unwrap();
+        assert!(warnings.is_empty());
+
+        let document = Document::load_mem(&bytes).unwrap();
+        let page_id = document.get_pages().into_values().next().unwrap();
+        let page_dict = document.get_dictionary(page_id).unwrap();
+        // overlay 页 MediaBox 是视觉尺寸（宽高已互换），与 base 页显示尺寸一致，
+        // qpdf 叠加时据此 1:1 对齐并自动处理旋转
+        let media_box: Vec<f32> = page_dict
+            .get(b"MediaBox")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(pdf_number)
+            .collect();
+        assert_eq!(media_box, vec![0.0, 0.0, 842.0, 595.0]);
+
+        let content = document.get_and_decode_page_content(page_id).unwrap();
+        // 不得出现任何额外 cm 补偿（文字算子直接按视觉坐标书写）
+        assert!(content
+            .operations
+            .iter()
+            .all(|op| op.operator != "cm"));
+
+        // 页眉 y 基于视觉高 595 减去上边距，即视觉页顶部
+        let tm = content
+            .operations
+            .iter()
+            .find(|op| op.operator == "Tm")
+            .unwrap();
+        let y = pdf_number(&tm.operands[5]);
+        let expected_y = 595.0 - mm_to_pt(10.0);
+        assert!((y - expected_y).abs() < 0.01, "y={y}, expected={expected_y}");
+    }
+
+    #[test]
+    fn unrotated_page_overlay_has_no_compensation_cm() {
+        let header = plain_header_config();
+        let pages = vec![unrotated_page_size()];
+        let (bytes, _) = build_overlay_pdf(Some(&header), None, &[], &pages, 1, 1).unwrap();
+
+        let document = Document::load_mem(&bytes).unwrap();
+        let page_id = document.get_pages().into_values().next().unwrap();
+        let page_dict = document.get_dictionary(page_id).unwrap();
+        let media_box: Vec<f32> = page_dict
+            .get(b"MediaBox")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(pdf_number)
+            .collect();
+        assert_eq!(media_box, vec![0.0, 0.0, 595.0, 842.0]);
+
+        let content = document.get_and_decode_page_content(page_id).unwrap();
+        // 未旋转页不应出现任何 cm 算子
+        assert!(content
+            .operations
+            .iter()
+            .all(|op| op.operator != "cm"));
     }
 
     #[test]

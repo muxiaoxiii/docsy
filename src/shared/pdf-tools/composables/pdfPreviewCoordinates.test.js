@@ -36,10 +36,21 @@ describe('PDF preview coordinate helpers', () => {
 
     expect(header.left).toBe('calc(50% + 0%)')
     expect(header.top).toBe(`${mmToPercent(10, 800)}%`)
-    expect(header.fontSize).toBe('15px')
+    // 字号用 cqw 随页宽缩放：10pt / 600pt * 100 = 1.6667cqw，保留下限 8px
+    expect(header.fontSize).toBe('max(8px, 1.6667cqw)')
     // 水平边距与后端一致：使用 marginMm(10mm) 而非固定 36pt
     expect(footer.right).toBe(`${mmToPercent(10, 600)}%`)
     expect(footer.top).toBe(`${100 - mmToPercent(10, 800)}%`)
+    expect(footer.fontSize).toBe('max(8px, 1.5cqw)')
+  })
+
+  it('scales overlay font size with the actual page width (异形页)', () => {
+    // 异形宽页：同样的 12pt 字号在 1200pt 宽页面上占 1cqw
+    const wide = textOverlayStyle('header', { widthPt: 1200, heightPt: 600 }, { fontSize: 12 })
+    expect(wide.fontSize).toBe('max(8px, 1cqw)')
+    // pageInfo 缺省时回退 A4 兜底（595.28pt 宽）
+    const fallback = textOverlayStyle('header', null, { fontSize: 12 })
+    expect(fallback.fontSize).toBe(`max(8px, ${Number(((12 / 595.28) * 100).toFixed(4))}cqw)`)
   })
 
   it('maps detected text bbox to page-relative overlay style', () => {

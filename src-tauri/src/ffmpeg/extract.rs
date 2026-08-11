@@ -14,7 +14,6 @@ pub fn extract(
 ) -> Result<serde_json::Value> {
     let started = Instant::now();
     let ffmpeg = crate::external::FfmpegTool;
-    let bin = ffmpeg.binary_path()?;
 
     let input = args
         .get("input")
@@ -40,11 +39,18 @@ pub fn extract(
     }
     let time_range = time_range_args(args)?;
 
+    let drawtext = drawtext_filter(args);
+    let bin = if drawtext.is_some() {
+        ffmpeg.binary_path_with_drawtext().map_err(|error| {
+            anyhow::anyhow!(
+                "当前 FFmpeg 不支持 drawtext，无法添加时间戳水印。请关闭水印或安装支持 drawtext 的 FFmpeg：{error}"
+            )
+        })?
+    } else {
+        ffmpeg.binary_path()?
+    };
     let mut filters = vec![format!("fps={fps}")];
-    if let Some(drawtext) = drawtext_filter(args) {
-        if !crate::ffmpeg::detect::has_drawtext()? {
-            anyhow::bail!("当前 FFmpeg 不支持 drawtext，无法添加时间戳水印。请关闭水印或更换支持 drawtext 的 FFmpeg");
-        }
+    if let Some(drawtext) = drawtext {
         filters.push(drawtext);
     }
 

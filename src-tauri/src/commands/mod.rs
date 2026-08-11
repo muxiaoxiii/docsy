@@ -104,6 +104,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         video::list_output_frames,
         // markdown
         markdown::convert_markdown,
+        markdown::convert_markdown_text,
         // settings
         settings::get_app_settings,
         settings::set_app_settings,

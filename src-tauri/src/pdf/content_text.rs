@@ -65,6 +65,49 @@ enum TextRegion {
     Footer,
 }
 
+/// 2D 变换矩阵 [a b c d e f]，对应 PDF 的六位矩阵（约定与 compress.rs 一致）。
+type Matrix = [f64; 6];
+
+/// 单位矩阵：页面内容流入口处的初始 CTM。
+const IDENTITY_MATRIX: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+/// 矩阵复合：先应用 m2，再应用 m1（PDF 的 cm / Form Matrix 均为左乘）。
+fn mat_mul(m1: Matrix, m2: Matrix) -> Matrix {
+    [
+        m1[0] * m2[0] + m1[2] * m2[1],
+        m1[1] * m2[0] + m1[3] * m2[1],
+        m1[0] * m2[2] + m1[2] * m2[3],
+        m1[1] * m2[2] + m1[3] * m2[3],
+        m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+        m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+    ]
+}
+
+/// 用 CTM 把流内局部坐标 (x, y) 变换到页面坐标。
+fn transform_point(m: &Matrix, x: f32, y: f32) -> (f32, f32) {
+    let (x, y) = (f64::from(x), f64::from(y));
+    (
+        (m[0] * x + m[2] * y + m[4]) as f32,
+        (m[1] * x + m[3] * y + m[5]) as f32,
+    )
+}
+
+/// 从 cm 算子的 6 个操作数解析矩阵。
+fn operands_to_matrix(operands: &[Object]) -> Option<Matrix> {
+    if operands.len() != 6 {
+        return None;
+    }
+    let mut m = [0.0f64; 6];
+    for (i, operand) in operands.iter().enumerate() {
+        m[i] = match operand {
+            Object::Integer(value) => *value as f64,
+            Object::Real(value) => f64::from(*value),
+            _ => return None,
+        };
+    }
+    Some(m)
+}
+
 #[derive(Debug, Clone, Default)]
 struct TextState {
     in_text: bool,
@@ -159,6 +202,7 @@ fn delete_plain_header_footer_file(
                 page_box,
                 fonts: page.fonts.clone(),
                 xobjects: page.xobjects.clone(),
+                ctm: IDENTITY_MATRIX,
                 depth: 0,
             });
         }
@@ -200,38 +244,53 @@ fn delete_plain_header_footer_file(
                 page: seed.page,
                 page_box: seed.page_box,
                 fonts: seed.fonts.clone(),
+                ctm: seed.ctm,
             });
-        for operation in stream
-            .operations
-            .iter()
-            .filter(|operation| operation.operator == "Do")
-        {
-            let Some(name) = operation
-                .operands
-                .first()
-                .and_then(|object| object.as_name().ok())
-                .and_then(|name| std::str::from_utf8(name).ok())
-            else {
-                continue;
-            };
-            let Some(form_ref) = seed
-                .xobjects
-                .get(name)
-                .filter(|reference| index.is_form(reference))
-            else {
-                continue;
-            };
-            seeds.push(QpdfStreamUsageSeed {
-                object_ref: form_ref.clone(),
-                page: seed.page,
-                page_box: index
-                    .form_box(form_ref)
-                    .map(qpdf_box_to_page_box)
-                    .or(seed.page_box),
-                fonts: index.form_fonts(form_ref),
-                xobjects: index.form_xobjects(form_ref),
-                depth: seed.depth + 1,
-            });
+        // 扫描 Do 算子时同步跟踪 q/Q/cm 维护 CTM：进入 Form 前用其 /Matrix
+        // 左乘当前 CTM，使嵌套 Form（含页内 cm 平移/缩放）内的文本坐标能
+        // 正确换算回页面坐标，bbox 兜底匹配才不会丢失。
+        let mut ctm = seed.ctm;
+        let mut ctm_stack: Vec<Matrix> = Vec::new();
+        for operation in &stream.operations {
+            match operation.operator.as_str() {
+                "q" => ctm_stack.push(ctm),
+                "Q" => ctm = ctm_stack.pop().unwrap_or(seed.ctm),
+                "cm" => {
+                    if let Some(m) = operands_to_matrix(&operation.operands) {
+                        ctm = mat_mul(m, ctm);
+                    }
+                }
+                "Do" => {
+                    let Some(name) = operation
+                        .operands
+                        .first()
+                        .and_then(|object| object.as_name().ok())
+                        .and_then(|name| std::str::from_utf8(name).ok())
+                    else {
+                        continue;
+                    };
+                    let Some(form_ref) = seed
+                        .xobjects
+                        .get(name)
+                        .filter(|reference| index.is_form(reference))
+                    else {
+                        continue;
+                    };
+                    let form_matrix = index.form_matrix(form_ref).unwrap_or(IDENTITY_MATRIX);
+                    seeds.push(QpdfStreamUsageSeed {
+                        object_ref: form_ref.clone(),
+                        page: seed.page,
+                        // 坐标经 CTM 换算到页面空间后，比较用的页面范围也应沿用
+                        // 页面自身的 box，而不是 Form 的 BBox。
+                        page_box: seed.page_box,
+                        fonts: index.form_fonts(form_ref),
+                        xobjects: index.form_xobjects(form_ref),
+                        ctm: mat_mul(form_matrix, ctm),
+                        depth: seed.depth + 1,
+                    });
+                }
+                _ => {}
+            }
         }
     }
 
@@ -267,6 +326,7 @@ fn delete_plain_header_footer_file(
                 &page_plan,
                 usage.page,
                 &local_cmaps,
+                &usage.ctm,
             );
             let bytes = encoded_operations(&filtered)?;
             if let Some(expected) = desired_bytes.as_ref() {
@@ -307,6 +367,9 @@ struct QpdfStreamUsageSeed {
     page_box: Option<PageBox>,
     fonts: BTreeMap<String, String>,
     xobjects: BTreeMap<String, String>,
+    /// 该流入口处累积的 CTM（含外层 cm 与 Form /Matrix），用于把流内
+    /// 文本坐标换算回页面坐标。
+    ctm: Matrix,
     depth: usize,
 }
 
@@ -315,6 +378,7 @@ struct QpdfStreamUsage {
     page: u32,
     page_box: Option<PageBox>,
     fonts: BTreeMap<String, String>,
+    ctm: Matrix,
 }
 
 fn local_font_cmaps(
@@ -413,7 +477,13 @@ fn filter_page_operations(
     plan: &PagePlainTextPlan,
     page_number: u32,
 ) -> (Vec<Operation>, PlainTextCleanupResult) {
-    filter_page_operations_with_cmaps(operations, plan, page_number, &BTreeMap::new())
+    filter_page_operations_with_cmaps(
+        operations,
+        plan,
+        page_number,
+        &BTreeMap::new(),
+        &IDENTITY_MATRIX,
+    )
 }
 
 fn filter_page_operations_with_cmaps(
@@ -421,6 +491,7 @@ fn filter_page_operations_with_cmaps(
     plan: &PagePlainTextPlan,
     _page_number: u32,
     font_cmaps: &BTreeMap<String, ToUnicodeCMap>,
+    ctm: &Matrix,
 ) -> (Vec<Operation>, PlainTextCleanupResult) {
     let mut output = Vec::with_capacity(operations.len());
     let mut result = PlainTextCleanupResult::default();
@@ -429,11 +500,19 @@ fn filter_page_operations_with_cmaps(
     for operation in operations {
         update_text_state_before_show(&mut state, operation);
         let shown_text = shown_text_with_cmaps(operation, &state, font_cmaps);
+        // 文本位置先经 CTM 换算到页面坐标，再做 zone / bbox 比较；嵌套 Form
+        // （含 cm 变换）内的文本坐标是 Form 局部坐标，不换算永远匹配不上。
+        let (page_x, page_y) = transform_point(ctm, state.x, state.y);
+        let page_state = TextState {
+            x: page_x,
+            y: page_y,
+            ..state.clone()
+        };
         let mut remove_region = None;
         if let Some(text) = shown_text.as_deref() {
             // 文本匹配：必须在 zone 内 + 文本内容匹配
-            let in_header_zone = is_in_header_zone(state.y, plan);
-            let in_footer_zone = is_in_footer_zone(state.y, plan);
+            let in_header_zone = is_in_header_zone(page_state.y, plan);
+            let in_footer_zone = is_in_footer_zone(page_state.y, plan);
             if in_header_zone && matches_any_target_by_text(text, &plan.header_targets) {
                 remove_region = Some(TextRegion::Header);
             } else if in_footer_zone && matches_any_target_by_text(text, &plan.footer_targets) {
@@ -443,7 +522,7 @@ fn filter_page_operations_with_cmaps(
             if _page_number <= 2 && !plan.header_targets.is_empty() {
                 log::info!(
                     "plain_delete.match page={} y={:.1} in_header={} in_footer={} text={:?} matched={:?}",
-                    _page_number, state.y, in_header_zone, in_footer_zone,
+                    _page_number, page_state.y, in_header_zone, in_footer_zone,
                     text.chars().take(20).collect::<String>(),
                     remove_region
                 );
@@ -455,9 +534,10 @@ fn filter_page_operations_with_cmaps(
             && matches!(operation.operator.as_str(), "Tj" | "TJ" | "'" | "\"")
         {
             let page_h = plan.page_box.max_y;
-            let header_by_bbox = matches_any_target_by_bbox(&state, &plan.header_targets, page_h);
-            let footer_by_bbox =
-                !header_by_bbox && matches_any_target_by_bbox(&state, &plan.footer_targets, page_h);
+            let header_by_bbox =
+                matches_any_target_by_bbox(&page_state, &plan.header_targets, page_h);
+            let footer_by_bbox = !header_by_bbox
+                && matches_any_target_by_bbox(&page_state, &plan.footer_targets, page_h);
             if header_by_bbox {
                 remove_region = Some(TextRegion::Header);
                 result.diagnostics.push(DeleteDiagnostic {
@@ -902,8 +982,13 @@ mod tests {
         )
         .unwrap();
         let font_cmaps = BTreeMap::from([(String::from("FCID"), cmap)]);
-        let (filtered, result) =
-            filter_page_operations_with_cmaps(&operations, &plan, 1, &font_cmaps);
+        let (filtered, result) = filter_page_operations_with_cmaps(
+            &operations,
+            &plan,
+            1,
+            &font_cmaps,
+            &IDENTITY_MATRIX,
+        );
         assert_eq!(result.removed_header, 1);
         assert!(filtered.iter().all(|operation| operation.operator != "Tj"));
     }
@@ -1015,6 +1100,208 @@ mod tests {
         }));
         let _ = std::fs::remove_file(input);
         let _ = std::fs::remove_file(output);
+    }
+
+    #[test]
+    fn matches_bbox_with_ctm_from_nested_form() {
+        // 模拟嵌套 Form：文本在 Form 局部坐标 (460, 112)，外层 CTM 平移
+        // (0, 700) 后页面坐标为 (460, 812)，bbox 兜底应命中页眉目标。
+        let ctm: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 700.0];
+        let operations = vec![
+            Operation::new("BT", vec![]),
+            Operation::new(
+                "Tm",
+                vec![
+                    1.into(),
+                    0.into(),
+                    0.into(),
+                    1.into(),
+                    460.into(),
+                    112.into(),
+                ],
+            ),
+            Operation::new("Tj", vec![Object::string_literal("encoded-glyphs")]),
+            Operation::new("ET", vec![]),
+        ];
+        let target = PlainTextTarget {
+            text: "嵌套页眉".to_string(),
+            normalized_text: "嵌套页眉".to_string(),
+            page_start: 1,
+            page_end: 1,
+            bbox: Some(PlainTextTargetBBox {
+                x0: 440.0,
+                y0: 20.0,
+                x1: 520.0,
+                y1: 40.0,
+                page: 1,
+                width: 595.0,
+                height: 842.0,
+            }),
+        };
+        let plan = PagePlainTextPlan {
+            header_targets: vec![&target],
+            footer_targets: vec![],
+            header_zone_pt: 60.0,
+            footer_zone_pt: 60.0,
+            page_box: PageBox {
+                width: 595.0,
+                min_y: 0.0,
+                max_y: 842.0,
+            },
+        };
+        let (filtered, result) =
+            filter_page_operations_with_cmaps(&operations, &plan, 1, &BTreeMap::new(), &ctm);
+        assert_eq!(result.removed_header, 1);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|d| d.reason == DeleteSkipReason::FontUndecodable));
+        assert!(filtered.iter().all(|operation| operation.operator != "Tj"));
+    }
+
+    #[test]
+    fn deletes_header_by_bbox_inside_nested_form_with_cm() {
+        // 回归：页内 cm 平移 400pt -> 中间 Form 的 /Matrix 平移 300pt ->
+        // 内层 Form 局部坐标 (460, 112)，合成页面坐标 (460, 812)。
+        // 修复前 CTM 未组合，bbox 兜底匹配不上，文本被保守跳过。
+        let input = temp_named_path("docsy_plain_nested_form_input", "pdf");
+        let output = temp_named_path("docsy_plain_nested_form_output", "pdf");
+        create_nested_form_cm_test_pdf(&input);
+        let plan = PlainTextCleanupPlan {
+            header_targets: vec![PlainTextTarget {
+                text: "嵌套页眉".to_string(),
+                normalized_text: "嵌套页眉".to_string(),
+                page_start: 1,
+                page_end: 1,
+                bbox: Some(PlainTextTargetBBox {
+                    x0: 440.0,
+                    y0: 20.0,
+                    x1: 520.0,
+                    y1: 40.0,
+                    page: 1,
+                    width: 595.0,
+                    height: 842.0,
+                }),
+            }],
+            header_zone_mm: 25.0,
+            footer_zone_mm: 25.0,
+            ..Default::default()
+        };
+
+        let result =
+            delete_plain_header_footer_file(&input.to_string_lossy(), &output, &plan).unwrap();
+
+        assert_eq!(result.removed_header, 1);
+        let document = Document::load(&output).unwrap();
+        assert!(document.objects.values().all(|object| {
+            object
+                .as_stream()
+                .ok()
+                .and_then(|stream| stream.get_plain_content().ok())
+                .map(|content| {
+                    !String::from_utf8_lossy(&content).contains("Nested Form Header")
+                })
+                .unwrap_or(true)
+        }));
+        let _ = std::fs::remove_file(input);
+        let _ = std::fs::remove_file(output);
+    }
+
+    fn create_nested_form_cm_test_pdf(path: &Path) {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        // 最内层 Form：局部坐标 (460, 112) 处的文本。
+        let inner_form_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            },
+            Content {
+                operations: vec![
+                    Operation::new("BT", vec![]),
+                    Operation::new(
+                        "Tm",
+                        vec![
+                            1.into(),
+                            0.into(),
+                            0.into(),
+                            1.into(),
+                            460.into(),
+                            112.into(),
+                        ],
+                    ),
+                    Operation::new("Tj", vec![Object::string_literal("Nested Form Header")]),
+                    Operation::new("ET", vec![]),
+                ],
+            }
+            .encode()
+            .unwrap(),
+        ));
+        // 中间 Form：/Matrix 平移 300pt，再引用内层 Form。
+        let middle_form_id = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+                "BBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+                "Matrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 300.into()],
+                "Resources" => dictionary! {
+                    "XObject" => dictionary! { "Fx2" => inner_form_id },
+                },
+            },
+            Content {
+                operations: vec![Operation::new("Do", vec![Object::Name(b"Fx2".to_vec())])],
+            }
+            .encode()
+            .unwrap(),
+        ));
+        let resources_id = doc.add_object(dictionary! {
+            "XObject" => dictionary! { "Fx1" => middle_form_id },
+        });
+        // 页面内容：q + cm 平移 400pt 后 Do 中间 Form，Q 恢复。
+        let page_content = Content {
+            operations: vec![
+                Operation::new("q", vec![]),
+                Operation::new(
+                    "cm",
+                    vec![
+                        1.into(),
+                        0.into(),
+                        0.into(),
+                        1.into(),
+                        0.into(),
+                        400.into(),
+                    ],
+                ),
+                Operation::new("Do", vec![Object::Name(b"Fx1".to_vec())]),
+                Operation::new("Q", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(
+            Dictionary::new(),
+            page_content.encode().unwrap(),
+        ));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.save(path).unwrap();
     }
 
     fn create_plain_text_test_pdf(path: &Path) {

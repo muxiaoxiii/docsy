@@ -5,27 +5,32 @@
 }
 
 :root {
-  --docsy-canvas: #f6efe6;
-  --docsy-surface: #fcf5ea;
-  --docsy-surface-elevated: #fff9f0;
-  --docsy-surface-muted: #f3eadf;
-  --docsy-sidebar: #f1e8dc;
-  --docsy-sidebar-hover: #e8ddd0;
-  --docsy-border-subtle: #e2d6c7;
-  --docsy-border-strong: #d3c3b1;
+  --docsy-canvas: #f5efe5;
+  --docsy-surface: #fbf7ef;
+  --docsy-surface-elevated: #fffdf8;
+  --docsy-surface-muted: #f0e9de;
+  --docsy-sidebar: #2d5149;
+  --docsy-sidebar-hover: #e5ddd1;
+  --docsy-border-subtle: #ded4c5;
+  --docsy-border-strong: #cfc1b0;
   --docsy-preview-paper: #ffffff;
-  --docsy-text-strong: #26332f;
-  --docsy-text: #46514d;
-  --docsy-text-muted: #7a817d;
-  --docsy-primary: #3f7167;
-  --docsy-primary-hover: #315d55;
-  --docsy-primary-soft: #e7f0ec;
-  --docsy-accent: #c77847;
+  --docsy-text-strong: #1f2e2a;
+  --docsy-text: #46534e;
+  --docsy-text-muted: #6f7974;
+  --docsy-primary: #47776c;
+  --docsy-primary-hover: #365f56;
+  --docsy-primary-soft: #dce9e4;
+  --docsy-accent: #b6653b;
+  --docsy-accent-light: #dda47f;
   --docsy-accent-soft: #f7e8dc;
   --docsy-success: #4f7d5a;
   --docsy-warning: #b77934;
   --docsy-danger: #b5524b;
-  --docsy-shadow: 0 10px 30px rgba(54, 45, 36, 0.08);
+  --docsy-shadow: 0 18px 50px rgba(48, 41, 32, 0.1);
+  --docsy-shadow-panel: 0 8px 24px rgba(48, 41, 32, 0.045);
+  --docsy-shadow-soft: 0 4px 14px rgba(48, 41, 32, 0.032);
+  --docsy-radius: 8px;
+  --docsy-panel-radius: var(--docsy-radius);
 
   /* Soft semantic colours for backgrounds and borders */
   --docsy-danger-soft: #fcebeb;
@@ -94,8 +99,8 @@
   --el-bg-color: var(--docsy-surface-elevated);
   --el-bg-color-overlay: var(--docsy-surface-elevated);
   --el-bg-color-page: var(--docsy-canvas);
-  --el-border-radius-base: 5px;
-  --el-border-radius-small: 4px;
+  --el-border-radius-base: var(--docsy-radius);
+  --el-border-radius-small: var(--docsy-radius);
   --el-box-shadow-light: var(--docsy-shadow);
 
   /* Custom easing curves (emil-design-eng) */
@@ -107,9 +112,7 @@ body,
 #app {
   height: 100%;
   overflow: hidden;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+  font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   color: var(--docsy-text-strong);
   background: var(--docsy-canvas);
 }
@@ -119,6 +122,28 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+/* Unified rectangular geometry. Pills and true circles keep their own shape. */
+:where(
+  .el-card,
+  .el-alert,
+  .el-dialog,
+  .el-message-box,
+  .el-notification,
+  .el-table,
+  .el-upload-dragger,
+  .el-input__wrapper,
+  .el-select__wrapper,
+  .el-textarea__inner,
+  .el-input-number
+) {
+  border-radius: var(--docsy-radius);
+}
+
+.el-button:not(.is-circle, .is-round),
+.el-tag:not(.el-tag--round) {
+  border-radius: var(--docsy-radius);
 }
 
 .el-card,
@@ -187,11 +212,11 @@ select {
 }
 
 .el-tabs--left > .el-tabs__header.is-left {
-  width: 124px;
+  width: 142px;
   margin-right: 0;
-  padding: 14px 10px;
+  padding: 18px 10px;
   border-right: 1px solid var(--docsy-border-subtle);
-  background: var(--docsy-surface-muted);
+  background: #eee6da;
 }
 
 .el-tabs--left > .el-tabs__header .el-tabs__nav-wrap::after {
@@ -203,10 +228,12 @@ select {
 }
 
 .el-tabs--left > .el-tabs__header .el-tabs__item.is-left {
-  height: 38px;
-  margin: 2px 0;
-  padding: 0 12px;
-  border-radius: 5px;
+  height: 42px;
+  margin: 3px 0;
+  padding: 0 13px;
+  border-radius: var(--docsy-radius);
+  color: var(--docsy-text-muted);
+  font-size: 13px;
   text-align: left;
 }
 
@@ -215,7 +242,11 @@ select {
 }
 
 .el-tabs--left > .el-tabs__header .el-tabs__item.is-left.is-active {
-  background: var(--docsy-primary-soft);
+  color: var(--docsy-primary-hover);
+  background: var(--docsy-surface-elevated);
+  box-shadow:
+    inset 0 0 0 1px rgba(53, 95, 86, 0.08),
+    0 3px 9px rgba(48, 41, 32, 0.045);
   font-weight: 600;
 }
 
@@ -225,7 +256,11 @@ select {
 
 /* ===== UI-1: Button active feedback (emil-design-eng) ===== */
 .el-button {
-  transition: transform 120ms var(--ease-out), background-color 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    transform 120ms var(--ease-out),
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
 }
 
 .el-button:active {
@@ -237,22 +272,22 @@ select {
   background: rgba(241, 232, 220, 0.92);
 }
 
-[data-os="macos"] .el-tabs--left > .el-tabs__header.is-left {
+[data-os='macos'] .el-tabs--left > .el-tabs__header.is-left {
   background: rgba(241, 232, 220, 0.7);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 
-[data-os="macos"] .el-dialog,
-[data-os="macos"] .el-message-box {
+[data-os='macos'] .el-dialog,
+[data-os='macos'] .el-message-box {
   background: rgba(255, 249, 240, 0.82);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
 }
 
-[data-os="macos"] .el-popper:not(.is-dark),
-[data-os="macos"] .el-select__popper,
-[data-os="macos"] .el-dropdown__popper {
+[data-os='macos'] .el-popper:not(.is-dark),
+[data-os='macos'] .el-select__popper,
+[data-os='macos'] .el-dropdown__popper {
   background: rgba(255, 249, 240, 0.85);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -303,4 +338,3 @@ select {
 .el-dropdown__popper {
   transform-origin: var(--el-popper-transform-origin, center);
 }
-

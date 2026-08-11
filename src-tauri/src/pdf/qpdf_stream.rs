@@ -260,10 +260,23 @@ impl QpdfObjectIndex {
         self.properties_from_resources(resources)
     }
 
-    pub(crate) fn form_box(&self, object_ref: &str) -> Option<QpdfBox> {
-        self.object_dictionary(object_ref)
-            .and_then(|dict| dict.get("/BBox"))
-            .and_then(|value| self.parse_box_value(value))
+    /// 读取 Form XObject 的 /Matrix（六位矩阵 [a b c d e f]），缺失时返回 None
+    /// （调用方按 PDF 规范视为单位矩阵）。约定与 compress.rs 的 CTM 跟踪一致。
+    pub(crate) fn form_matrix(&self, object_ref: &str) -> Option<[f64; 6]> {
+        let value = self.object_dictionary(object_ref)?.get("/Matrix")?;
+        let values = match value {
+            Value::Array(values) => values,
+            Value::String(reference) => self.objects.get(reference)?.as_array()?,
+            _ => return None,
+        };
+        if values.len() != 6 {
+            return None;
+        }
+        let mut matrix = [0.0f64; 6];
+        for (i, value) in values.iter().enumerate() {
+            matrix[i] = f64::from(json_number(value)?);
+        }
+        Some(matrix)
     }
 
     fn parse_box_value(&self, value: &Value) -> Option<QpdfBox> {

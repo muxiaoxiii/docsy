@@ -11,7 +11,9 @@
 
       <button type="button" class="about-github" @click="openGitHub">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor">
-          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+          <path
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+          />
         </svg>
         github.com/muxiaoxiii/docsy
       </button>
@@ -47,24 +49,38 @@ function openGitHub() {
 .about-view {
   display: flex;
   justify-content: center;
-  padding: 60px 24px;
+  align-items: flex-start;
+  padding: 56px 32px;
   min-height: 100%;
 }
 
 .about-content {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 220px;
+  grid-template-areas:
+    'brand qr'
+    'desc qr'
+    'github qr'
+    'divider divider'
+    'legal legal';
   align-items: center;
-  max-width: 400px;
+  max-width: 720px;
   width: 100%;
+  padding: 42px 46px 30px;
+  column-gap: 54px;
+  background: var(--docsy-surface-elevated);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  box-shadow: var(--docsy-shadow-panel);
 }
 
 .about-brand {
+  grid-area: brand;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  justify-self: start;
+  gap: 14px;
+  margin: 0 0 10px;
 }
 
 .about-logo {
@@ -74,36 +90,52 @@ function openGitHub() {
 }
 
 .about-title {
-  font-size: 28px;
-  font-weight: 700;
+  font-family:
+    ui-rounded,
+    'SF Pro Rounded',
+    -apple-system,
+    'PingFang SC',
+    sans-serif;
+  font-size: 34px;
+  font-weight: 760;
   color: var(--docsy-text-strong);
   margin: 0;
 }
 
 .about-version {
+  align-self: flex-end;
+  margin-bottom: 6px;
+  padding: 4px 7px;
   font-size: 13px;
   color: var(--docsy-text-muted);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 999px;
 }
 
 .about-desc {
+  grid-area: desc;
   font-size: 15px;
   color: var(--docsy-text);
-  margin: 0 0 28px;
+  margin: 0 0 24px;
 }
 
 .about-github {
+  grid-area: github;
+  justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 8px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   color: var(--docsy-text-strong);
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 
 .about-github:hover {
@@ -112,18 +144,19 @@ function openGitHub() {
 }
 
 .about-qr {
+  grid-area: qr;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  margin-top: 28px;
+  margin: 0;
 }
 
 .about-qr-img {
   width: 160px;
   height: 160px;
   object-fit: contain;
-  border-radius: 10px;
+  border-radius: var(--docsy-radius);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
 
@@ -133,7 +166,13 @@ function openGitHub() {
 }
 
 .about-legal {
+  grid-area: legal;
   text-align: center;
+}
+
+.about-content :deep(.el-divider) {
+  grid-area: divider;
+  margin: 30px 0 22px;
 }
 
 .about-license {
@@ -153,5 +192,33 @@ function openGitHub() {
   color: var(--docsy-text-muted);
   margin: 0;
   opacity: 0.8;
+}
+
+@media (max-width: 700px) {
+  .about-content {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'brand'
+      'desc'
+      'github'
+      'qr'
+      'divider'
+      'legal';
+    justify-items: center;
+    padding: 34px 28px 26px;
+  }
+
+  .about-brand,
+  .about-github {
+    justify-self: center;
+  }
+
+  .about-desc {
+    text-align: center;
+  }
+
+  .about-qr {
+    margin-top: 28px;
+  }
 }
 </style>

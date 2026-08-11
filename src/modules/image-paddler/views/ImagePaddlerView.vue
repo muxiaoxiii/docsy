@@ -138,8 +138,16 @@
             </div>
           </el-form-item>
 
-          <el-form-item>
-            <el-button type="success" @click="run" :loading="generating" :disabled="!analysis"> 生成文档 </el-button>
+          <el-form-item class="workspace-action-row">
+            <el-button
+              class="primary-workspace-action"
+              type="success"
+              @click="run"
+              :loading="generating"
+              :disabled="!analysis"
+            >
+              生成文档
+            </el-button>
             <span v-if="analyzing" class="analyze-hint">正在分析...</span>
           </el-form-item>
         </el-form>
@@ -245,7 +253,15 @@
             />
           </div>
         </template>
-        <el-empty v-else :description="analyzing ? '正在分析图片...' : '选择文件夹后自动分析'" />
+        <WorkspaceEmptyState
+          v-else
+          class="result-empty-state"
+          :icon-url="imageLayoutIconUrl"
+          :title="analyzing ? '正在分析图片' : '等待选择图片文件夹'"
+          :description="
+            analyzing ? '正在读取图片尺寸与分组信息。' : '选择文件夹后，Docsy 会自动分析并生成第一页排版预览。'
+          "
+        />
       </div>
     </div>
   </ToolWorkspaceShell>
@@ -254,20 +270,48 @@
 <script setup>
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
+import imageLayoutIconUrl from '../../../assets/icons/image-layout.svg?url'
 import { useImagePaddlerState } from '../composables/useImagePaddlerState.js'
 
 const {
-  folders, analyzing, generating, analysis, generatedResult,
-  pageZoom, settings, layoutGrid, resolvedOrientation,
-  resolvedOrientationLabel, orderedImages, previewImages, previewSlots,
-  generatedOutputPaths, previewPageStyle, previewGridStyle, previewCellStyle,
-  previewImageAreaStyle, previewNameStyle,
-  selectFolder, run, reorderLayoutImages, openGeneratedOutput,
-  imageSrc, fileName, fileNameLines, previewImageStyle,
-  imageItemName, imageItemMeta,
-  addFilenameRule, removeFilenameRule, rulePlaceholder,
-  applyRecommendedSettings, adjustPageZoom,
-  orientationLabel, layoutLabel, scaleModeLabel,
+  folders,
+  analyzing,
+  generating,
+  analysis,
+  generatedResult,
+  pageZoom,
+  settings,
+  layoutGrid,
+  resolvedOrientation,
+  resolvedOrientationLabel,
+  orderedImages,
+  previewImages,
+  previewSlots,
+  generatedOutputPaths,
+  previewPageStyle,
+  previewGridStyle,
+  previewCellStyle,
+  previewImageAreaStyle,
+  previewNameStyle,
+  selectFolder,
+  run,
+  reorderLayoutImages,
+  openGeneratedOutput,
+  imageSrc,
+  fileName,
+  fileNameLines,
+  previewImageStyle,
+  imageItemName,
+  imageItemMeta,
+  addFilenameRule,
+  removeFilenameRule,
+  rulePlaceholder,
+  applyRecommendedSettings,
+  adjustPageZoom,
+  orientationLabel,
+  layoutLabel,
+  scaleModeLabel,
 } = useImagePaddlerState()
 </script>
 
@@ -278,17 +322,21 @@ const {
 
 .paddler-layout {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-columns: 382px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-panel-radius);
+  box-shadow: var(--docsy-shadow-panel);
 }
 
 .settings-panel {
   min-width: 0;
   overflow-y: auto;
-  padding: 20px;
+  padding: 22px 24px 28px;
   border-right: 1px solid var(--docsy-border-subtle);
-  background: var(--docsy-surface);
+  background: var(--docsy-surface-elevated);
 }
 
 .folder-path {
@@ -352,8 +400,24 @@ const {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 20px;
-  background: var(--docsy-canvas);
+  padding: 24px;
+  background: color-mix(in srgb, var(--docsy-surface-muted) 82%, var(--docsy-canvas));
+}
+
+.result-empty-state {
+  height: 100%;
+  min-height: 420px;
+  box-sizing: border-box;
+}
+
+.workspace-action-row {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--docsy-border-subtle);
+}
+
+.primary-workspace-action {
+  width: 100%;
 }
 
 .analysis-summary {
@@ -366,10 +430,10 @@ const {
   justify-content: space-between;
   gap: 12px;
   margin-top: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--docsy-border-subtle);
   background: var(--docsy-primary-soft);
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   color: var(--docsy-text);
   font-size: 12px;
 }
@@ -382,14 +446,15 @@ const {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   font-size: 12px;
   color: var(--docsy-text-muted);
 }
 
 .section-head h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 680;
   color: var(--docsy-text-strong);
 }
 
@@ -416,17 +481,17 @@ const {
 
 .page-preview-shell {
   display: block;
-  padding: 12px;
-  background: var(--docsy-surface-muted);
+  padding: 20px;
+  background: #deddd8;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   overflow: auto;
 }
 
 .page-preview {
   background: #fff;
   border: 1px solid var(--docsy-border-strong);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 16px 38px rgba(42, 39, 34, 0.14);
   margin: 0 auto;
 }
 
@@ -496,11 +561,12 @@ const {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 12px 14px;
   margin-bottom: 12px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
-  background: var(--docsy-surface-muted);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+  box-shadow: 0 8px 24px rgba(48, 41, 32, 0.05);
   font-size: 13px;
 }
 
@@ -553,6 +619,7 @@ const {
   .paddler-layout {
     display: block;
     height: auto;
+    overflow: visible;
   }
 
   .settings-panel,

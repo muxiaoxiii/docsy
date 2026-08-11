@@ -111,7 +111,7 @@ function visibleGroupRuns(group) {
 
 .panel {
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   padding: 14px;
   background: var(--docsy-surface-elevated);
   box-shadow: 0 3px 14px rgba(54, 45, 36, 0.035);
@@ -147,7 +147,7 @@ p {
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
 }
 
@@ -180,7 +180,7 @@ p {
   justify-content: space-between;
   padding: 10px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   cursor: pointer;
 }

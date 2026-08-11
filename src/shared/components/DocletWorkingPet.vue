@@ -31,7 +31,7 @@ defineProps({
   min-height: 156px;
   padding: 8px 14px;
   border: 1px solid #dbeafe;
-  border-radius: 14px;
+  border-radius: var(--docsy-radius);
   background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%);
   color: var(--el-text-color-regular);
 }

@@ -15,7 +15,8 @@
       </template>
       <p class="section-desc">
         qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；Word 文件转 PDF 会优先使用 Microsoft
-        Word，失败后使用 LibreOffice。如果某个工具出现问题（如 qpdf 处理失败），可以清除托管版本后重新下载安装，或手动下载新版本放到 Docsy 工具目录。
+        Word，失败后使用 LibreOffice。如果某个工具出现问题（如 qpdf
+        处理失败），可以清除托管版本后重新下载安装，或手动下载新版本放到 Docsy 工具目录。
       </p>
       <div v-if="managedToolsDir" class="managed-dir">{{ managedToolsDir }}</div>
       <div class="tool-list">
@@ -209,7 +210,8 @@ const tools = reactive([
     removing: false,
     autoInstall: true,
     downloadUrl: 'https://github.com/BtbN/FFmpeg-Builds/releases',
-    downloadGuide: 'Windows：选择 ffmpeg-master-latest-win64-gpl.zip（GPL 版，含 drawtext）；macOS：建议直接用 brew install ffmpeg',
+    downloadGuide:
+      'Windows：选择 ffmpeg-master-latest-win64-gpl.zip（GPL 版，含 drawtext）；macOS：需要时间戳水印时建议 brew install ffmpeg-full',
   },
   {
     name: 'word',
@@ -529,20 +531,40 @@ onMounted(() => {
 
 <style scoped>
 .settings-view {
-  max-width: 1040px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 20px 24px 32px;
+  padding: 34px 32px 48px;
 }
 
 .settings-view h2 {
-  margin: 0 0 20px;
+  margin: 0 0 18px;
   color: var(--docsy-text-strong);
+  font-family:
+    ui-rounded,
+    'SF Pro Rounded',
+    -apple-system,
+    'PingFang SC',
+    sans-serif;
+  font-size: 22px;
+  font-weight: 720;
+  letter-spacing: -0.025em;
 }
 
 .settings-section {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
   border-color: var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+  box-shadow: var(--docsy-shadow-panel);
+}
+
+.settings-section :deep(.el-card__header) {
+  padding: 16px 18px;
+  background: color-mix(in srgb, var(--docsy-surface-muted) 72%, transparent);
+}
+
+.settings-section :deep(.el-card__body) {
+  padding: 18px;
 }
 
 .card-header {
@@ -566,21 +588,23 @@ onMounted(() => {
   color: var(--docsy-text);
   background: var(--docsy-surface-muted);
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   font-size: 12px;
   word-break: break-all;
 }
 
 .tool-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
 .tool-item {
-  padding: 12px;
+  min-width: 0;
+  padding: 14px;
   background: var(--docsy-surface-muted);
-  border-radius: 4px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
 }
 
 .tool-info {
@@ -618,8 +642,8 @@ onMounted(() => {
 }
 
 .menu-order-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -628,9 +652,10 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: var(--docsy-surface-muted);
-  border-radius: 4px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
 }
 
 .menu-order-actions {
@@ -670,6 +695,11 @@ onMounted(() => {
   .tool-item {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .tool-list,
+  .menu-order-list {
+    grid-template-columns: 1fr;
   }
 
   .menu-order-item {

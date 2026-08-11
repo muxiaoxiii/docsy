@@ -6,7 +6,12 @@
         <!-- FFmpeg Status -->
         <div class="section-block">
           <div class="section-title">FFmpeg 状态</div>
-          <div v-if="ffmpegLoading" v-loading="true" element-loading-text="检测中..." class="status-row status-loading"></div>
+          <div
+            v-if="ffmpegLoading"
+            v-loading="true"
+            element-loading-text="检测中..."
+            class="status-row status-loading"
+          ></div>
           <div v-else-if="ffmpegStatus.available" class="status-row status-ok">
             <el-icon><CircleCheckFilled /></el-icon>
             <span>可用</span>
@@ -30,11 +35,7 @@
         <!-- File Selection -->
         <div class="section-block">
           <div class="section-title">选择视频</div>
-          <div
-            class="drop-zone"
-            :class="{ 'drop-zone-active': dragging }"
-            @click="selectFile"
-          >
+          <div class="drop-zone" :class="{ 'drop-zone-active': dragging }" @click="selectFile">
             <template v-if="videoPath">
               <div class="selected-file">
                 <el-icon><VideoCamera /></el-icon>
@@ -170,14 +171,14 @@
         <!-- Extract Button -->
         <div class="section-block actions-block">
           <el-button
-            type="primary"
+            type="success"
             size="large"
+            class="primary-workspace-action"
             @click="extractFrames"
             :loading="extracting"
             :disabled="
               !videoPath || !ffmpegStatus.available || (settings.timestamp.enabled && !ffmpegStatus.has_drawtext)
             "
-            style="width: 100%"
           >
             开始抽帧
           </el-button>
@@ -206,7 +207,13 @@
           @reorder="reorderResultImages"
         />
 
-        <el-empty v-else description="选择视频并开始抽帧" :image-size="80" />
+        <WorkspaceEmptyState
+          v-else
+          class="result-empty-state"
+          :icon-url="videoFramesIconUrl"
+          title="等待抽帧结果"
+          description="选择视频并设置抽帧参数后，生成的图片会集中显示在这里。"
+        />
       </div>
     </div>
   </ToolWorkspaceShell>
@@ -220,6 +227,8 @@ import { CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@el
 import { ElMessage } from 'element-plus'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
+import videoFramesIconUrl from '../../../assets/icons/video-frames.svg?url'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { fileName } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
@@ -456,17 +465,21 @@ useWindowFileDrop({
 
 .extract-layout {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-columns: 382px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-panel-radius);
+  box-shadow: var(--docsy-shadow-panel);
 }
 
 .extract-settings {
   min-width: 0;
   overflow-y: auto;
-  padding: 20px;
+  padding: 22px 24px 28px;
   border-right: 1px solid var(--docsy-border-subtle);
-  background: var(--docsy-surface);
+  background: var(--docsy-surface-elevated);
 }
 
 .extract-results {
@@ -476,14 +489,20 @@ useWindowFileDrop({
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--docsy-canvas);
+  background: color-mix(in srgb, var(--docsy-surface-muted) 82%, var(--docsy-canvas));
+}
+
+.result-empty-state {
+  min-height: 0;
+  flex: 1;
+  margin: 18px;
 }
 
 .results-header {
-  padding: 12px 16px;
-  min-height: 52px;
+  padding: 14px 18px;
+  min-height: 56px;
   border-bottom: 1px solid var(--docsy-border-subtle);
-  background: var(--docsy-surface);
+  background: rgba(255, 253, 248, 0.9);
   font-weight: 600;
   font-size: 14px;
   color: var(--docsy-text-strong);
@@ -528,8 +547,8 @@ useWindowFileDrop({
 }
 
 .section-block {
-  margin-bottom: 18px;
-  padding-bottom: 18px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
   border-bottom: 1px solid var(--docsy-border-subtle);
 }
 
@@ -538,8 +557,8 @@ useWindowFileDrop({
 }
 
 .section-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 680;
   color: var(--docsy-text-strong);
   margin-bottom: 10px;
 }
@@ -564,8 +583,9 @@ useWindowFileDrop({
 
 .drop-zone {
   border: 1px dashed var(--docsy-border-strong);
-  border-radius: 6px;
-  padding: 24px 16px;
+  border-radius: var(--docsy-radius);
+  padding: 28px 16px;
+  background: var(--docsy-surface-muted);
   text-align: center;
   cursor: pointer;
   transition:
@@ -579,6 +599,7 @@ useWindowFileDrop({
 .drop-zone-active {
   border-color: var(--docsy-primary);
   background: var(--docsy-primary-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--docsy-primary) 30%, transparent);
 }
 
 .drop-icon {
@@ -611,7 +632,11 @@ useWindowFileDrop({
 .info-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-muted);
 }
 
 .info-label {
@@ -627,6 +652,10 @@ useWindowFileDrop({
 
 .actions-block {
   padding-top: 8px;
+}
+
+.primary-workspace-action {
+  width: 100%;
 }
 
 .path-picker {
@@ -659,6 +688,7 @@ useWindowFileDrop({
   .extract-layout {
     display: block;
     height: auto;
+    overflow: visible;
   }
 
   .extract-settings {

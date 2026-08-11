@@ -259,7 +259,7 @@ async function executeMerge() {
 
 .panel {
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   padding: 14px;
   background: var(--docsy-surface-elevated);
   box-shadow: 0 3px 14px rgba(54, 45, 36, 0.035);
@@ -326,7 +326,7 @@ p {
 
 .trash-list-container {
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   overflow: hidden;
 }
 

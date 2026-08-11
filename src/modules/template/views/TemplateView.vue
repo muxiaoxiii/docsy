@@ -149,10 +149,21 @@
         <el-button size="small" @click="invertBatchSaveSelection">反选</el-button>
         <span class="batch-save-count">已选 {{ batchSaveSelected.length }} / {{ batchSaveRows.length }} 行</span>
       </div>
-      <el-table :data="batchSaveRows" size="small" border max-height="52vh" row-key="key" @row-click="(row) => toggleBatchSaveRow(row.key)">
+      <el-table
+        :data="batchSaveRows"
+        size="small"
+        border
+        max-height="52vh"
+        row-key="key"
+        @row-click="(row) => toggleBatchSaveRow(row.key)"
+      >
         <el-table-column width="44">
           <template #default="{ row }">
-            <el-checkbox :model-value="batchSaveSelected.includes(row.key)" @click.stop @change="() => toggleBatchSaveRow(row.key)" />
+            <el-checkbox
+              :model-value="batchSaveSelected.includes(row.key)"
+              @click.stop
+              @change="() => toggleBatchSaveRow(row.key)"
+            />
           </template>
         </el-table-column>
         <el-table-column type="index" label="#" width="44" />
@@ -334,14 +345,61 @@ const {
 }
 
 .template-view {
-  padding: 20px 24px 32px;
+  padding: 20px 24px 36px;
   background: var(--docsy-canvas);
+}
+
+:deep(.template-tabs > .el-tabs__header) {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  margin: 0 0 18px;
+  padding: 6px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: rgba(255, 253, 248, 0.94);
+  box-shadow: var(--docsy-shadow-panel);
+  backdrop-filter: blur(14px);
+}
+
+:deep(.template-tabs > .el-tabs__header .el-tabs__nav-wrap::after),
+:deep(.template-tabs > .el-tabs__header .el-tabs__active-bar) {
+  display: none;
+}
+
+:deep(.template-tabs > .el-tabs__header .el-tabs__item) {
+  height: 38px;
+  padding: 0 18px;
+  border-radius: var(--docsy-radius);
+  font-size: 13px;
+}
+
+:deep(.template-tabs > .el-tabs__header .el-tabs__item.is-active) {
+  color: var(--docsy-primary-hover);
+  background: var(--docsy-primary-soft);
+  font-weight: 650;
 }
 
 :deep(.template-tabs > .el-tabs__content),
 :deep(.template-tabs > .el-tabs__content > .el-tab-pane) {
   min-width: 0;
   overflow: visible;
+}
+
+.template-view :deep(.workspace) {
+  gap: 16px;
+}
+
+.template-view :deep(.panel) {
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+  box-shadow: var(--docsy-shadow-panel);
+}
+
+.template-view :deep(.panel-header) {
+  padding-bottom: 14px;
+  border-bottom-color: var(--docsy-border-subtle);
 }
 
 .dialog-tip {

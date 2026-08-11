@@ -48,7 +48,7 @@
     </el-scrollbar>
 
     <div v-else class="queue-empty">
-      {{ emptyText }}
+      <WorkspaceEmptyState compact title="等待添加文件" :description="emptyText" />
     </div>
   </section>
 </template>
@@ -56,6 +56,7 @@
 <script setup>
 import { Rank } from '@element-plus/icons-vue'
 import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
+import WorkspaceEmptyState from './WorkspaceEmptyState.vue'
 
 const props = defineProps({
   items: {
@@ -103,20 +104,21 @@ function itemKey(item, index) {
 .file-queue-panel {
   overflow: hidden;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
-  background: var(--docsy-surface-muted);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+  box-shadow: 0 8px 24px rgba(48, 41, 32, 0.045);
 }
 
 .queue-summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 38px;
-  padding: 0 12px;
+  min-height: 42px;
+  padding: 0 14px;
   color: var(--docsy-text-muted);
   font-size: 12px;
   border-bottom: 1px solid var(--docsy-border-subtle);
-  background: var(--docsy-surface-elevated);
+  background: var(--docsy-surface-muted);
 }
 
 .queue-list {
@@ -130,8 +132,13 @@ function itemKey(item, index) {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 10px 12px;
+  padding: 11px 14px;
   background: var(--docsy-surface-elevated);
+  transition: background 150ms var(--ease-out);
+}
+
+.queue-item:hover {
+  background: color-mix(in srgb, var(--docsy-primary-soft) 44%, var(--docsy-surface-elevated));
 }
 
 .queue-item.is-reorder-dragging {
@@ -193,11 +200,6 @@ function itemKey(item, index) {
 }
 
 .queue-empty {
-  display: grid;
-  min-height: 132px;
-  place-items: center;
-  padding: 18px;
-  color: var(--docsy-text-muted);
-  font-size: 13px;
+  margin: 10px;
 }
 </style>

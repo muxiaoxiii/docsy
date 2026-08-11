@@ -346,7 +346,7 @@ function decisionTagType(decision) {
   background: var(--docsy-primary, #409eff);
   color: white;
   padding: 3px 10px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   font-size: 12px;
   pointer-events: none;
   white-space: nowrap;

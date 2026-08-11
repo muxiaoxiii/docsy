@@ -495,9 +495,19 @@ export function buildFields(fieldRows) {
         (rowUsage(row) === 'delete_text' && row.markRefs?.length)),
   )
   const byKey = new Map()
+  const assignedNames = new Set()
   for (const row of rows) {
     const type = row.type
-    const currentName = effectiveRowName(row, fieldRows)
+    const baseName = effectiveRowName(row, fieldRows)
+    // 自动推断产生的同名同类型字段不再静默合并：从 2 开始自动追加序号
+    // （日期、日期2…），让每处都能各自填值，无需用户手动改名。
+    // 用户手动改成的同名（_nameManuallySet）或从模板库回读的既有字段
+    // （_allowSameNameMerge）仍按原逻辑合并为一个 fillAllPositions 字段。
+    const currentName =
+      rowUsage(row) !== 'delete_text' && !isMarkerType(type) && !allowsSameNameMerge(row)
+        ? uniqueNumberedFieldName(baseName, type, assignedNames)
+        : baseName
+    const renamed = currentName !== baseName
     const referenceSource = row.type === 'reference' ? normalizedReferenceSource(row) : null
     const key =
       rowUsage(row) === 'delete_text'
@@ -510,7 +520,10 @@ export function buildFields(fieldRows) {
           type,
         ),
         name: rowUsage(row) === 'delete_text' ? `delete_${row.rowId}` : currentName.trim(),
-        label: manifestLabelForRow(row, currentName),
+        label:
+          renamed && String(row?.label || '').trim() === baseName.trim()
+            ? currentName.trim()
+            : manifestLabelForRow(row, currentName),
         semanticKey: rowUsage(row) === 'delete_text' ? '' : row.semanticKey.trim() || currentName.trim(),
         type,
         required: row.required,
@@ -540,6 +553,7 @@ export function buildFields(fieldRows) {
         existing.fillAllPositions = true
       }
     }
+    assignedNames.add(`${type}:${currentName.trim()}`)
     const field = byKey.get(key)
     if (row.optionalWhenEmpty && row.optionalScope === 'field' && !field.optionalRule) {
       field.optionalRule = {
@@ -593,6 +607,22 @@ export function buildFields(fieldRows) {
     }
   }
   return Array.from(byKey.values())
+}
+
+// 是否允许同名合并：用户手动指定的名字（_nameManuallySet）或模板库回读
+// 的既有字段（_allowSameNameMerge）视为有意共享同一个字段。
+function allowsSameNameMerge(row) {
+  return Boolean(row?._nameManuallySet || row?._allowSameNameMerge)
+}
+
+// 自动推断的字段名与已占用名冲突时，从 2 开始追加序号直到唯一。
+function uniqueNumberedFieldName(name, type, assignedNames) {
+  const base = name.trim()
+  if (!assignedNames.has(`${type}:${base}`)) return name
+  for (let seq = 2; ; seq += 1) {
+    const candidate = `${base}${seq}`
+    if (!assignedNames.has(`${type}:${candidate}`)) return candidate
+  }
 }
 
 function effectiveRowName(row, rows) {

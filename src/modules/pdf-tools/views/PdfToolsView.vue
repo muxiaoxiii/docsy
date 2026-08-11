@@ -1,10 +1,12 @@
 <template>
   <div class="pdf-tools-view" :class="{ 'is-file-dragging': pdfDragging }">
     <div v-if="pdfDragging" class="pdf-drop-overlay">
-      <div class="pdf-drop-message">{{ activeTab === 'markdown' ? '松开以添加 Markdown / Word 文件' : '松开以添加 PDF 文件' }}</div>
+      <div class="pdf-drop-message">
+        {{ activeTab === 'markdown' ? '松开以添加 Markdown / Word 文件' : '松开以添加 PDF 文件' }}
+      </div>
     </div>
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
-      <el-tab-pane label="解锁" name="unlock" lazy>
+      <el-tab-pane label="PDF解锁" name="unlock" lazy>
         <ToolWorkspaceShell title="PDF 解锁" description="移除 PDF 文件的密码保护，原文件旁会生成已解锁副本。">
           <template #toolbar>
             <el-button type="primary" @click="selectUnlockFiles">选择 PDF 文件</el-button>
@@ -32,7 +34,7 @@
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="合并" name="merge" lazy>
+      <el-tab-pane label="PDF合并" name="merge" lazy>
         <ToolWorkspaceShell title="PDF 合并" description="按列表顺序合并多个 PDF，输出文件由你选择保存位置。">
           <template #toolbar>
             <el-button type="primary" @click="selectMergeFiles">添加 PDF 文件</el-button>
@@ -53,9 +55,9 @@
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="提取页面" name="extract" lazy>
+      <el-tab-pane label="提取PDF页面" name="extract" lazy>
         <ToolWorkspaceShell
-          title="快速提取页面"
+          title="提取 PDF 页面"
           description="从一个 PDF 中挑选若干页导出，支持输入 3,7,12-15 这样的页码。"
         >
           <template #toolbar>
@@ -78,11 +80,15 @@
               导出选中页面
             </el-button>
           </div>
-          <el-empty v-else description="先选择需要提取页面的 PDF 文件" />
+          <WorkspaceEmptyState
+            v-else
+            title="等待选择 PDF"
+            description="选择文件后，可以输入单页或连续页码范围并导出。"
+          />
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="压缩" name="compress" lazy>
+      <el-tab-pane label="PDF压缩" name="compress" lazy>
         <ToolWorkspaceShell
           title="PDF 压缩整理"
           description="默认只做无损结构整理；需要进一步压缩图片时再单独开启，扫描件不会被默认重编码。"
@@ -106,9 +112,7 @@
           <div v-if="compressSummary" class="path-line">{{ compressSummary }}</div>
           <template #actions>
             <div class="compress-options">
-              <el-checkbox v-model="compressImageReencode">
-                进一步压缩图片（可能耗时较长）
-              </el-checkbox>
+              <el-checkbox v-model="compressImageReencode"> 进一步压缩图片（可能耗时较长） </el-checkbox>
               <div v-if="compressImageReencode" class="compress-level-row">
                 <span class="compress-level-label">图片压缩级别：</span>
                 <el-radio-group v-model="compressLevel" size="default">
@@ -122,7 +126,7 @@
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="拆分" name="split" lazy>
+      <el-tab-pane label="PDF拆分" name="split" lazy>
         <ToolWorkspaceShell title="PDF 拆分" description="翻页核对内容，按页码范围生成多个独立 PDF 文件。">
           <template #toolbar>
             <el-button type="primary" @click="selectSplitFile">选择 PDF</el-button>
@@ -276,14 +280,20 @@
               />
             </section>
           </div>
-          <div v-else class="split-empty">
-            <p>选择 PDF 后，可以翻页预览并设置每个拆分文件的起止页。</p>
-          </div>
+          <WorkspaceEmptyState
+            v-else
+            class="split-empty"
+            title="等待选择 PDF"
+            description="选择文件后，可以翻页预览并设置每个拆分文件的起止页。"
+          />
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="防复制" name="anti-ocr" lazy>
-        <ToolWorkspaceShell title="防复制处理" description="防止 PDF 文字被复制提取。保留视觉效果，干扰文字选择和复制。">
+      <el-tab-pane label="PDF防复制" name="anti-ocr" lazy>
+        <ToolWorkspaceShell
+          title="PDF 防复制"
+          description="防止 PDF 文字被复制提取。保留视觉效果，干扰文字选择和复制。"
+        >
           <template #toolbar>
             <el-button type="primary" @click="selectAntiOcrFiles">选择 PDF 文件</el-button>
           </template>
@@ -299,7 +309,7 @@
             </template>
           </FileQueuePanel>
           <template #actions>
-            <el-select v-model="antiCopyMethod" size="small" style="width:120px">
+            <el-select v-model="antiCopyMethod" size="small" style="width: 120px">
               <el-option label="CMap 篡改" value="cmap_scramble" />
               <el-option label="CMap 移除" value="cmap_remove" />
             </el-select>
@@ -311,20 +321,16 @@
             >
               添加防复制 {{ antiOcrReadyCount }} 个文件
             </el-button>
-            <el-button
-              @click="batchAntiOcrRemove"
-              :loading="antiOcrProcessing"
-              :disabled="antiOcrProtectedCount === 0"
-            >
+            <el-button @click="batchAntiOcrRemove" :loading="antiOcrProcessing" :disabled="antiOcrProtectedCount === 0">
               移除防复制 {{ antiOcrProtectedCount }} 个文件
             </el-button>
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="Markdown 互转" name="markdown" lazy>
+      <el-tab-pane label="MD↔Word" name="markdown" lazy>
         <ToolWorkspaceShell
-          title="Markdown 互转"
+          title="Markdown ↔ Word"
           description="Markdown 与 Word 文档互转，拖入文件即可转换，输出保存在原文件旁。"
         >
           <template #toolbar>
@@ -345,6 +351,41 @@
             </template>
           </FileQueuePanel>
           <div v-if="markdownSummary" class="path-line">{{ markdownSummary }}</div>
+          <!-- 粘贴即转：直接把剪贴板里的 Markdown 文本转成 docx / html -->
+          <div class="paste-convert">
+            <el-input
+              v-model="mdPasteText"
+              type="textarea"
+              :rows="5"
+              placeholder="在此粘贴 Markdown 文本，直接转换为 Word 文档或网页文件"
+            />
+            <div class="paste-convert-bar">
+              <el-radio-group v-model="mdPasteFormat" :disabled="mdPasteConverting">
+                <el-radio-button value="docx">Word 文档 (.docx)</el-radio-button>
+                <el-radio-button value="html">网页 (.html)</el-radio-button>
+              </el-radio-group>
+              <el-input
+                v-model="mdPasteFileName"
+                placeholder="文件名（可选，默认为 文档-时间戳）"
+                style="max-width: 260px"
+                :disabled="mdPasteConverting"
+              />
+              <el-button
+                type="primary"
+                :loading="mdPasteConverting"
+                :disabled="mdPasteConverting || !mdPasteText.trim()"
+                @click="runMarkdownPasteConvert"
+              >
+                转换
+              </el-button>
+            </div>
+            <div v-if="mdPasteOutputPath" class="path-line">
+              已生成：{{ mdPasteOutputPath }}
+              <el-button link type="primary" size="small" @click="openMarkdownPasteDir">
+                打开所在文件夹
+              </el-button>
+            </div>
+          </div>
         </ToolWorkspaceShell>
       </el-tab-pane>
     </el-tabs>
@@ -359,9 +400,14 @@ import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { splitRangeWarnings } from '../../../shared/pdf-tools/composables/usePdfSplitRanges.js'
-import { sizeSavingText, formatFileSize, batchSummaryText } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
-import { getPdfPageCount, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import {
+  sizeSavingText,
+  formatFileSize,
+  batchSummaryText,
+} from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
+import { getPdfPageCount, openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
@@ -610,18 +656,17 @@ async function loadMarkdownFiles(paths) {
       }
     }
   }
-  const items = accepted
-    .map((path) => ({
-      path,
-      name: fileName(path),
-      directionTag: markdownDirectionTag(path),
-      docEngine: /\.doc$/i.test(path) ? docEngine : null,
-      status: 'pending',
-      statusText: '等待中',
-      statusType: 'info',
-      inputSize: 0,
-      outputSize: 0,
-    }))
+  const items = accepted.map((path) => ({
+    path,
+    name: fileName(path),
+    directionTag: markdownDirectionTag(path),
+    docEngine: /\.doc$/i.test(path) ? docEngine : null,
+    status: 'pending',
+    statusText: '等待中',
+    statusType: 'info',
+    inputSize: 0,
+    outputSize: 0,
+  }))
   if (!items.length) return
   markdownFiles.value = [...markdownFiles.value, ...items]
   markdownSummary.value = ''
@@ -682,15 +727,54 @@ function reportMarkdownSummary(processed) {
   ElNotification({ type: hasFailed ? 'warning' : 'success', title: text, duration: 6000 })
 }
 
+// ---- 粘贴即转（Markdown 文本 → docx / html） ----
+const mdPasteText = ref('')
+const mdPasteFormat = ref('docx')
+const mdPasteFileName = ref('')
+const mdPasteConverting = ref(false)
+const mdPasteOutputPath = ref('')
+
+async function runMarkdownPasteConvert() {
+  if (mdPasteConverting.value) return
+  const text = mdPasteText.value
+  if (!text.trim()) return
+  mdPasteConverting.value = true
+  mdPasteOutputPath.value = ''
+  try {
+    const result = await tauriCallSafe('convert_markdown_text', {
+      text,
+      format: mdPasteFormat.value,
+      outputDir: null,
+      fileStem: mdPasteFileName.value.trim() || null,
+    })
+    if (result.ok) {
+      const outputPath = String(result.data?.output_path || '')
+      mdPasteOutputPath.value = outputPath
+      ElMessage.success(`转换完成：${outputPath}`)
+    } else {
+      ElMessage.error(userFacingError(result.error, '转换失败'))
+    }
+  } finally {
+    mdPasteConverting.value = false
+  }
+}
+
+async function openMarkdownPasteDir() {
+  if (!mdPasteOutputPath.value) return
+  await openPath(parentDir(mdPasteOutputPath.value))
+}
+
 function addAntiOcrFiles(paths) {
   const existing = new Set(antiOcrFiles.value.map((f) => f.path))
-  const newItems = paths.filter((p) => !existing.has(p)).map((p) => ({
-    path: p,
-    name: fileName(p),
-    statusText: '检测中',
-    statusType: 'info',
-    hasAntiOcr: null,
-  }))
+  const newItems = paths
+    .filter((p) => !existing.has(p))
+    .map((p) => ({
+      path: p,
+      name: fileName(p),
+      statusText: '检测中',
+      statusType: 'info',
+      hasAntiOcr: null,
+    }))
   antiOcrFiles.value = [...antiOcrFiles.value, ...newItems]
   const newPaths = newItems.map((i) => i.path)
   if (newPaths.length) void inspectAntiOcrFiles(newPaths)
@@ -744,8 +828,12 @@ async function selectAntiOcrFiles() {
   addAntiOcrFiles(paths)
 }
 
-function clearAntiOcrFiles() { antiOcrFiles.value = [] }
-function removeAntiOcrFile(index) { antiOcrFiles.value.splice(index, 1) }
+function clearAntiOcrFiles() {
+  antiOcrFiles.value = []
+}
+function removeAntiOcrFile(index) {
+  antiOcrFiles.value.splice(index, 1)
+}
 
 async function batchAntiOcrApply() {
   antiOcrProcessing.value = true
@@ -837,7 +925,9 @@ async function doMerge() {
       inputs: mergeFiles.value.map((file) => file.path),
       output: outputPath,
     })
-    result.ok ? ElMessage.success('合并完成') : ElMessage.error(userFacingError(result.error, 'PDF 合并失败，请确认文件未损坏且未被其他程序占用'))
+    result.ok
+      ? ElMessage.success('合并完成')
+      : ElMessage.error(userFacingError(result.error, 'PDF 合并失败，请确认文件未损坏且未被其他程序占用'))
   }
   merging.value = false
 }
@@ -1185,7 +1275,7 @@ function splitRangeStatus(row) {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background: var(--docsy-surface);
+  background: var(--docsy-canvas);
 }
 
 .pdf-drop-overlay {
@@ -1195,7 +1285,7 @@ function splitRangeStatus(row) {
   inset: 12px;
   pointer-events: none;
   border: 2px dashed var(--docsy-primary);
-  border-radius: 8px;
+  border-radius: var(--docsy-radius);
   background: color-mix(in srgb, var(--docsy-surface) 88%, transparent);
   place-items: center;
 }
@@ -1205,12 +1295,53 @@ function splitRangeStatus(row) {
   color: var(--docsy-primary);
   font-size: 14px;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-primary-soft);
 }
 
 .pdf-tabs {
   height: 100%;
+}
+
+:deep(.pdf-tabs .tool-workspace) {
+  padding: 20px;
+  background: var(--docsy-canvas);
+}
+
+:deep(.pdf-tabs .workspace-header),
+:deep(.pdf-tabs .workspace-content),
+:deep(.pdf-tabs .workspace-actions) {
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+  box-shadow: 0 6px 18px rgba(48, 41, 32, 0.035);
+}
+
+:deep(.pdf-tabs .workspace-header) {
+  min-height: 0;
+  padding: 18px 20px;
+}
+
+:deep(.pdf-tabs .workspace-toolbar) {
+  min-height: 52px;
+  margin: 12px 0;
+  padding: 9px 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: color-mix(in srgb, var(--docsy-surface-muted) 68%, var(--docsy-surface-elevated));
+}
+
+:deep(.pdf-tabs .workspace-content) {
+  margin-top: 0;
+  padding: 16px;
+  background: color-mix(in srgb, var(--docsy-surface-elevated) 82%, var(--docsy-canvas));
+}
+
+:deep(.pdf-tabs .workspace-actions) {
+  min-height: 58px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  box-shadow: none;
 }
 
 :deep(.pdf-tabs > .el-tabs__content),
@@ -1278,6 +1409,18 @@ h3 {
   margin: 6px 0;
 }
 
+.paste-convert {
+  margin-top: 12px;
+}
+
+.paste-convert-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
 .path-hint {
   color: var(--docsy-text-muted);
   font-size: 12px;
@@ -1322,9 +1465,9 @@ h3 {
   align-items: center;
   gap: 8px 14px;
   margin-bottom: 10px;
-  padding: 8px 10px;
+  padding: 11px 13px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
 }
 
@@ -1374,15 +1517,7 @@ h3 {
 }
 
 .split-empty {
-  display: flex;
-  align-items: center;
-  min-height: 280px;
-  margin-top: 16px;
-  padding: 16px;
-  border: 1px dashed var(--docsy-border-strong);
-  border-radius: 6px;
-  color: var(--docsy-text-muted);
-  background: var(--docsy-surface-muted);
+  min-height: 100%;
 }
 
 .file-item {
@@ -1390,8 +1525,10 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: var(--docsy-surface-muted);
-  border-radius: 4px;
+  background: var(--docsy-surface-elevated);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  box-shadow: 0 7px 20px rgba(48, 41, 32, 0.04);
 }
 
 .file-name {
@@ -1428,7 +1565,7 @@ h3 {
 .anti-copy-message {
   margin-top: 12px;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   font-size: 13px;
 }
 .anti-copy-message.info {

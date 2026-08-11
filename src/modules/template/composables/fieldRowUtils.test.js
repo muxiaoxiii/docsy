@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  createPartyTempRowStore,
   displayPartyValue,
+  fieldSlotKey,
+  filenamePreviewText,
   formatDateValue,
   inputValueForField,
   parseDateParts,
+  referenceSelectionFor,
   resolveReferenceValueFromSource,
 } from './fieldRowUtils.js'
 
@@ -80,5 +84,116 @@ describe('displayPartyValue', () => {
     expect(displayPartyValue({ name: '张三', suffix: '律师' })).toBe('张三律师')
     expect(displayPartyValue({ text: '张三', suffix: '律师' })).toBe('张三律师')
     expect(displayPartyValue('李四')).toBe('李四')
+  })
+})
+
+describe('formatDateValue iso 留空', () => {
+  it('全部留空时输出空串而不是 "-  -"', () => {
+    expect(formatDateValue('留空', 'iso')).toBe('')
+    expect(formatDateValue('', 'iso')).toBe('')
+  })
+
+  it('cn/blank 留空仍保留「年月日」骨架供手写', () => {
+    expect(formatDateValue('留空', 'cn')).toBe('    年  月  日')
+    expect(formatDateValue('留空', 'blank')).toBe('    年  月  日')
+  })
+
+  it('iso 正常值不受影响', () => {
+    expect(formatDateValue('2026-08-05', 'iso')).toBe('2026-8-5')
+  })
+})
+
+describe('referenceSelectionFor 引用 slot key 统一', () => {
+  const field = { id: 'fld_ref_a', name: '引用A', posIndex: 0 }
+
+  it('fieldSlotKey：主位置不带 #0，跟随位置带 #pos', () => {
+    expect(fieldSlotKey(field)).toBe('fld_ref_a')
+    expect(fieldSlotKey({ ...field, posIndex: 2 })).toBe('fld_ref_a#2')
+  })
+
+  it('主位置能读到 id#0 写法（保存引用来源路径）', () => {
+    const selections = { 'fld_ref_a#0': 'field::法院::' }
+    expect(referenceSelectionFor(selections, field)).toBe('field::法院::')
+  })
+
+  it('主位置能读到 fieldFormKey 写法（填写时选择路径）', () => {
+    const selections = { fld_ref_a: 'field::法院::' }
+    expect(referenceSelectionFor(selections, field)).toBe('field::法院::')
+  })
+
+  it('slot 级 key 优先于字段级 key', () => {
+    const follower = { ...field, posIndex: 1 }
+    const selections = { 'fld_ref_a#1': 'field::法院::', fld_ref_a: 'field::案号::' }
+    expect(referenceSelectionFor(selections, follower)).toBe('field::法院::')
+  })
+
+  it('空串（auto 未选择）视为无选择并继续回退', () => {
+    const selections = { 'fld_ref_a#0': '', fld_ref_a: 'field::法院::' }
+    expect(referenceSelectionFor(selections, field)).toBe('field::法院::')
+    expect(referenceSelectionFor({}, field)).toBe('')
+  })
+})
+
+describe('createPartyTempRowStore 临时行不丢', () => {
+  it('空数组时返回稳定的缓存临时行（重渲染不丢已输入内容）', () => {
+    const store = createPartyTempRowStore(() => {})
+    const first = store.rowsFor('f1', [])
+    first[0].text = '张三'
+    expect(store.rowsFor('f1', [])[0].text).toBe('张三')
+  })
+
+  it('首次输入后 commit 提交为正式值，之后走正式值', () => {
+    const commit = vi.fn()
+    const store = createPartyTempRowStore(commit)
+    store.rowsFor('f1', [])[0].text = '张三'
+    store.commit('f1', [])
+    expect(commit).toHaveBeenCalledWith('f1', [{ text: '张三', suffix: '' }])
+    const real = [{ text: '张三', suffix: '' }]
+    expect(store.rowsFor('f1', real)).toBe(real)
+  })
+
+  it('临时行为空时不提交（不写入空行）', () => {
+    const commit = vi.fn()
+    const store = createPartyTempRowStore(commit)
+    store.rowsFor('f1', [])
+    store.commit('f1', [])
+    expect(commit).not.toHaveBeenCalled()
+  })
+
+  it('非数组值不展示临时行，保持原行为', () => {
+    const store = createPartyTempRowStore(() => {})
+    expect(store.rowsFor('f1', undefined)).toEqual([])
+  })
+})
+
+describe('filenamePreviewText 文件名实时预览', () => {
+  const fields = [{ id: 'fld_text_fy', name: '法院', type: 'text' }]
+
+  it('field token 按字段名解析出当前填写值', () => {
+    const tokens = [
+      { type: 'field', value: '法院' },
+      { type: 'literal', value: '-裁定书' },
+    ]
+    const text = filenamePreviewText(tokens, {
+      formValues: { fld_text_fy: '北京知识产权法院' },
+      fields,
+      manifestName: '模板A',
+    })
+    expect(text).toBe('北京知识产权法院-裁定书.docx')
+  })
+
+  it('未填写时显示占位符，填了以后实时替换', () => {
+    const tokens = [{ type: 'field', value: '法院' }]
+    expect(filenamePreviewText(tokens, { formValues: {}, fields })).toBe('[法院].docx')
+  })
+
+  it('模板名 preset 用 manifest 名称', () => {
+    const tokens = [{ type: 'preset', value: '模板名' }]
+    expect(filenamePreviewText(tokens, { manifestName: '模板A' })).toBe('模板A.docx')
+    expect(filenamePreviewText(tokens, {})).toBe('模板.docx')
+  })
+
+  it('空 token 列表返回空串', () => {
+    expect(filenamePreviewText([], {})).toBe('')
   })
 })

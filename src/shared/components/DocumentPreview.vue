@@ -19,7 +19,8 @@
         :data-run-id="run.id"
         :data-start="0"
         :data-end="run.text.length"
-      >{{ run.text }}</span>
+        >{{ run.text }}</span
+      >
     </template>
   </div>
 </template>
@@ -84,10 +85,11 @@ function onOverlayClick(overlay) {
   line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-all;
-  padding: 12px;
-  background: var(--docsy-surface, #fff);
+  padding: 22px 26px;
+  background: var(--docsy-preview-paper, #fff);
   border: 1px solid var(--docsy-border-subtle, #e4e7ed);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
+  box-shadow: 0 12px 32px rgba(48, 41, 32, 0.08);
   max-height: 500px;
   overflow-y: auto;
   user-select: text;
@@ -99,7 +101,7 @@ function onOverlayClick(overlay) {
 
 .preview-overlay {
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--docsy-radius);
   cursor: pointer;
   transition: background-color 0.15s;
 }
@@ -135,7 +137,13 @@ function onOverlayClick(overlay) {
   color: var(--el-color-success);
 }
 
-.fmt-bold { font-weight: bold; }
-.fmt-italic { font-style: italic; }
-.fmt-underline { text-decoration: underline; }
+.fmt-bold {
+  font-weight: bold;
+}
+.fmt-italic {
+  font-style: italic;
+}
+.fmt-underline {
+  text-decoration: underline;
+}
 </style>

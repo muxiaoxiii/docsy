@@ -2,13 +2,14 @@ import { mmToPt, ptToMm } from '../../../core/unitConversion.js'
 
 export { mmToPt, ptToMm }
 
+// 最后的兜底页尺寸（A4）。仅在既无预览组件上报、又无文件检测页尺寸时使用，
+// 异形页下比例会失真，正常路径不应走到这里（见 useEvidencePdfPreview.previewPageInfo）。
 export const DEFAULT_PAGE_INFO = {
   widthPt: 595.28,
   heightPt: 841.89,
 }
 
 const MIN_PREVIEW_FONT_PX = 8
-const PREVIEW_FONT_SCALE = 1.5
 
 export function ptToPercent(pt, dimensionPt) {
   if (!dimensionPt) return 0
@@ -26,8 +27,8 @@ export function cleanupZoneStyle(heightMm, pageInfo = DEFAULT_PAGE_INFO) {
 }
 
 export function textOverlayStyle(kind, pageInfo = DEFAULT_PAGE_INFO, config = {}) {
-  const widthPt = pageInfo.widthPt || DEFAULT_PAGE_INFO.widthPt
-  const heightPt = pageInfo.heightPt || DEFAULT_PAGE_INFO.heightPt
+  const widthPt = pageInfo?.widthPt || DEFAULT_PAGE_INFO.widthPt
+  const heightPt = pageInfo?.heightPt || DEFAULT_PAGE_INFO.heightPt
   const align = config.align || 'center'
   const offsetPercent = mmToPercent(config.offsetXMm || 0, widthPt)
   // 与后端 compute_x 一致：水平边距用用户设置的 marginMm，不再用固定 36pt
@@ -39,10 +40,20 @@ export function textOverlayStyle(kind, pageInfo = DEFAULT_PAGE_INFO, config = {}
   return {
     ...horizontal,
     top: `${yPercent}%`,
-    fontSize: `${Math.max(MIN_PREVIEW_FONT_PX, Number(config.fontSize || 0) * PREVIEW_FONT_SCALE)}px`,
+    fontSize: previewFontSize(config.fontSize, widthPt),
     fontFamily: previewFontFamily(config.fontFamily),
     color: config.color || '#111827',
   }
+}
+
+// 字号与后端一致：后端按页宽以绝对 pt 绘制，预览 overlay 容器与实际页面同尺寸
+// 且声明了 container-type: inline-size（见 PdfJsPreview.vue .docsy-overlay），
+// 因此用 cqw（容器内联尺寸百分比）让字号随预览页宽等比缩放：
+// fontSize(pt) / widthPt * 100 cqw === 页宽占比，与缩放无关。
+// max(8px, …) 保留原来的最小可读字号下限。
+function previewFontSize(fontSize, widthPt) {
+  const cqw = Number(((Number(fontSize || 0) / widthPt) * 100).toFixed(4))
+  return `max(${MIN_PREVIEW_FONT_PX}px, ${cqw}cqw)`
 }
 
 export function bboxOverlayStyle(bbox = {}) {

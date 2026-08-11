@@ -1,15 +1,25 @@
 <template>
   <el-container class="app-container">
-    <el-aside width="220px" class="app-aside">
+    <el-aside width="236px" class="app-aside">
       <div class="brand" @click="router.push('/')">
         <img src="./assets/docsy-logo.png" alt="Docsy" class="brand-logo" />
-        <span class="brand-name">Docsy</span>
+        <span class="brand-copy">
+          <span class="brand-name">Docsy</span>
+          <span class="brand-caption">Local Toolkit</span>
+        </span>
       </div>
+      <div class="sidebar-section-label">工作空间</div>
       <el-menu :default-active="activeMenu" @select="onMenuSelect" class="sidebar-menu">
-        <template v-for="item in menuItems" :key="item.route">
+        <template v-for="(item, index) in menuItems" :key="item.route">
           <el-menu-item :index="item.route">
-            <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-            <span>{{ item.label }}</span>
+            <span class="menu-index">{{ String(index + 1).padStart(2, '0') }}</span>
+            <span
+              class="menu-icon"
+              :style="{ '--menu-icon-url': `url(${menuIconByRoute[item.route]})` }"
+              aria-hidden="true"
+            ></span>
+            <span class="menu-label">{{ item.label }}</span>
+            <span class="menu-arrow">›</span>
           </el-menu-item>
         </template>
       </el-menu>
@@ -18,27 +28,31 @@
           <el-button
             class="footer-btn"
             :class="{ active: route.name === 'about' }"
-            circle
             @click="router.push({ name: 'about' })"
           >
             <el-icon><InfoFilled /></el-icon>
+            <span>关于</span>
           </el-button>
         </el-tooltip>
         <el-tooltip content="设置" placement="right">
           <el-button
             class="footer-btn"
             :class="{ active: route.name === 'settings' }"
-            circle
             @click="router.push({ name: 'settings' })"
           >
             <el-icon><Setting /></el-icon>
+            <span>设置</span>
           </el-button>
         </el-tooltip>
       </div>
     </el-aside>
     <el-container>
       <el-header class="app-header">
-        <span class="page-title">{{ currentPageTitle }}</span>
+        <div class="page-heading">
+          <span class="page-title">{{ currentPageTitle }}</span>
+          <span class="page-context">本地文档处理工作台</span>
+        </div>
+        <span class="app-version">v{{ version }}</span>
       </el-header>
       <el-main class="app-main">
         <router-view />
@@ -46,12 +60,7 @@
       <Transition name="doclet-operation">
         <div v-if="operationVisible" class="doclet-operation-panel">
           <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed" />
-          <button
-            v-if="showCancel"
-            class="doclet-cancel-btn"
-            @click="cancelCurrentOperation"
-            title="取消当前操作"
-          >
+          <button v-if="showCancel" class="doclet-cancel-btn" @click="cancelCurrentOperation" title="取消当前操作">
             取消
           </button>
         </div>
@@ -70,15 +79,28 @@ import { listen } from '@tauri-apps/api/event'
 import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
 import { useAppStore } from './stores/app.js'
+import evidenceIconUrl from './assets/icons/evidence.svg?url'
+import documentsIconUrl from './assets/icons/documents.svg?url'
+import imageLayoutIconUrl from './assets/icons/image-layout.svg?url'
+import videoFramesIconUrl from './assets/icons/video-frames.svg?url'
+import templateIconUrl from './assets/icons/template.svg?url'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
 
 const menuItems = computed(() => getMenuItems(appStore.settings))
+const menuIconByRoute = {
+  'evidence-pdf': evidenceIconUrl,
+  'pdf-tools': documentsIconUrl,
+  'image-paddler': imageLayoutIconUrl,
+  'video-extract': videoFramesIconUrl,
+  template: templateIconUrl,
+}
 
 const activeMenu = computed(() => route.name || 'home')
 const operationVisible = ref(false)
+const version = import.meta.env.PACKAGE_VERSION || ''
 const operationMessage = ref('Doclet 正在处理…')
 const operationElapsed = ref('')
 const showCancel = ref(false)
@@ -221,7 +243,7 @@ onMounted(() => {
     const { bytes, elapsed_ms } = event.payload || {}
     if (!bytes) return
     const mb = (bytes / (1024 * 1024)).toFixed(1)
-    const speed = elapsed_ms > 0 ? ((bytes / 1024) / (elapsed_ms / 1000)).toFixed(0) : '?'
+    const speed = elapsed_ms > 0 ? (bytes / 1024 / (elapsed_ms / 1000)).toFixed(0) : '?'
     operationMessage.value = `正在下载工具… ${mb} MB (${speed} KB/s)`
   }).then((unlisten) => {
     unlistenDownloadProgress = unlisten
@@ -266,21 +288,37 @@ onBeforeUnmount(() => {
 }
 
 .app-aside {
+  position: relative;
   display: flex;
   flex-direction: column;
+  color: rgba(255, 255, 255, 0.72);
   background: var(--docsy-sidebar);
-  border-right: 1px solid var(--docsy-border-subtle);
+  border-right: 1px solid rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
 
+.app-aside::after {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+  opacity: 0.14;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 100% 32px;
+  mask-image: linear-gradient(to bottom, black, transparent 72%);
+}
+
 .brand {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
-  min-height: 60px;
-  padding: 12px 16px;
+  min-height: 76px;
+  padding: 17px 18px;
   cursor: pointer;
-  gap: 10px;
-  border-bottom: 1px solid var(--docsy-border-subtle);
+  gap: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.13);
 }
 
 .brand:hover {
@@ -289,76 +327,224 @@ onBeforeUnmount(() => {
 }
 
 .brand-logo {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   object-fit: contain;
-  flex: 0 0 34px;
+  flex: 0 0 38px;
+  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.15));
+  transition: transform 260ms var(--ease-out);
+}
+
+.brand:hover .brand-logo {
+  transform: translateY(-2px) rotate(-5deg);
+}
+
+.brand-copy {
+  display: grid;
+  gap: 1px;
 }
 
 .brand-name {
-  font-size: 20px;
+  color: #fffdf8;
+  font-family:
+    ui-rounded,
+    'SF Pro Rounded',
+    -apple-system,
+    'PingFang SC',
+    sans-serif;
+  font-size: 19px;
+  font-weight: 760;
+  letter-spacing: 0.01em;
+}
+
+.brand-caption {
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.sidebar-section-label {
+  position: relative;
+  z-index: 1;
+  padding: 23px 20px 8px;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 10px;
   font-weight: 700;
-  color: var(--docsy-text-strong);
+  letter-spacing: 0.16em;
 }
 
 .sidebar-menu {
+  position: relative;
+  z-index: 1;
   flex: 1;
   border-right: none;
   overflow-y: auto;
-  padding: 10px 8px;
+  padding: 0 10px;
   background: transparent;
 }
 
 .sidebar-menu :deep(.el-menu-item) {
-  height: 40px;
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  height: 46px;
   margin: 3px 0;
-  border-radius: 6px;
-  color: var(--docsy-text);
+  padding: 0 12px !important;
+  border-radius: var(--docsy-radius);
+  color: rgba(255, 255, 255, 0.66);
+  line-height: 46px;
 }
 
 .sidebar-menu :deep(.el-menu-item:hover) {
-  background: var(--docsy-sidebar-hover);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .sidebar-menu :deep(.el-menu-item.is-active) {
-  color: var(--docsy-primary);
-  background: var(--docsy-primary-soft);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.11);
   font-weight: 600;
 }
 
+.sidebar-menu :deep(.el-menu-item.is-active::before) {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: -10px;
+  width: 3px;
+  content: '';
+  background: var(--docsy-accent-light);
+  border-radius: 0 3px 3px 0;
+}
+
+.menu-index {
+  color: rgba(255, 255, 255, 0.34);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 10px;
+}
+
+.menu-icon {
+  display: none;
+  width: 27px;
+  height: 27px;
+  background: currentColor;
+  mask-image: var(--menu-icon-url);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-image: var(--menu-icon-url);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+.sidebar-menu :deep(.el-menu-item.is-active) .menu-index {
+  color: var(--docsy-accent-light);
+}
+
+.menu-arrow {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 15px;
+  opacity: 0;
+  transform: translateX(-3px);
+  transition:
+    opacity 150ms,
+    transform 150ms var(--ease-out);
+}
+
+.sidebar-menu :deep(.el-menu-item:hover) .menu-arrow,
+.sidebar-menu :deep(.el-menu-item.is-active) .menu-arrow {
+  opacity: 1;
+  transform: translateX(0);
+}
+
 .sidebar-footer {
+  position: relative;
+  z-index: 1;
   display: flex;
+  border-top: 1px solid rgba(255, 255, 255, 0.13);
+  background: transparent;
+}
+
+.sidebar-footer .footer-btn {
+  display: flex;
+  flex: 1;
+  align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px 0 16px;
-  border-top: 1px solid var(--docsy-border-subtle);
-  background: rgba(255, 253, 250, 0.42);
+  height: 52px;
+  margin: 0;
+  gap: 7px;
+  color: rgba(255, 255, 255, 0.48);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+}
+
+.sidebar-footer .footer-btn + .footer-btn {
+  border-left: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.sidebar-footer .footer-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .footer-btn.active {
-  color: var(--docsy-primary);
-  border-color: var(--docsy-primary);
-  background: var(--docsy-primary-soft);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .app-header {
   display: flex;
   align-items: center;
-  height: 60px;
-  padding: 0 20px;
+  justify-content: space-between;
+  height: 76px;
+  padding: 0 30px;
   border-bottom: 1px solid var(--docsy-border-subtle);
-  background: var(--docsy-surface);
+  background: rgba(251, 247, 239, 0.94);
+}
+
+.page-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
 }
 
 .page-title {
-  font-size: 16px;
-  font-weight: 600;
+  font-family:
+    ui-rounded,
+    'SF Pro Rounded',
+    -apple-system,
+    'PingFang SC',
+    sans-serif;
+  font-size: 15px;
+  font-weight: 720;
   color: var(--docsy-text-strong);
+}
+
+.page-context {
+  color: var(--docsy-text-muted);
+  font-size: 11px;
+}
+
+.app-version {
+  padding: 5px 8px;
+  color: var(--docsy-text-muted);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 999px;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 10px;
 }
 
 .app-main {
   padding: 0;
   background: var(--docsy-canvas);
+  background-image:
+    linear-gradient(rgba(79, 65, 48, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(79, 65, 48, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
   min-height: 0;
   overflow-y: auto;
 }
@@ -380,9 +566,11 @@ onBeforeUnmount(() => {
   color: var(--docsy-text-muted);
   background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .doclet-cancel-btn:hover {
@@ -401,5 +589,58 @@ onBeforeUnmount(() => {
 .doclet-operation-leave-to {
   opacity: 0;
   transform: translateY(8px);
+}
+
+@media (max-width: 900px) {
+  .app-aside {
+    width: 78px !important;
+  }
+
+  .brand {
+    justify-content: center;
+    padding-inline: 10px;
+  }
+
+  .brand-copy,
+  .sidebar-section-label,
+  .menu-label,
+  .menu-arrow,
+  .sidebar-footer .footer-btn span {
+    display: none;
+  }
+
+  .sidebar-menu {
+    padding: 14px 10px;
+  }
+
+  .sidebar-menu :deep(.el-menu-item) {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0 !important;
+  }
+
+  .sidebar-menu :deep(.el-menu-item.is-active::before) {
+    left: -10px;
+  }
+
+  .menu-index {
+    display: none;
+  }
+
+  .menu-icon {
+    display: block;
+  }
+
+  .sidebar-footer .footer-btn {
+    gap: 0;
+  }
+
+  .app-header {
+    padding: 0 18px;
+  }
+
+  .page-context {
+    display: none;
+  }
 }
 </style>

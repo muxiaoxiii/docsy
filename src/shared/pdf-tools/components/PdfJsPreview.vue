@@ -230,7 +230,7 @@ function cancelRender() {
   padding: 12px;
   background: var(--docsy-surface-muted);
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   min-height: 520px;
 }
 
@@ -255,6 +255,10 @@ function cancelRender() {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  /* overlay 与页面元素同尺寸（inset: 0 于 .page-preview 内）；
+     声明为内联尺寸容器，使页眉/页脚 overlay 字号可用 cqw 随页宽缩放，
+     与后端按绝对 pt 绘制保持一致（见 pdfPreviewCoordinates.textOverlayStyle）。 */
+  container-type: inline-size;
 }
 
 .preview-loading {
@@ -271,7 +275,7 @@ function cancelRender() {
 .preview-empty,
 .preview-error {
   padding: 12px;
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   font-size: 13px;
 }
 

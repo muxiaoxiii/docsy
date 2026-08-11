@@ -2,9 +2,19 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
-## [Unreleased]
+## [0.9.7-beta14] - 2026-08-11
+
+### 新增
+- **Markdown 粘贴即转**：Markdown 互转页签新增文本框，直接粘贴 Markdown 文本即可转出 docx 或 html（带基础排版样式的完整 HTML 骨架），可自定义文件名，默认保存到下载目录。
+- **界面视觉刷新**：全套模块图标（`src/assets/icons/`）、工作区空状态组件 `WorkspaceEmptyState`、样式与多视图视觉统一（设计稿见 `designs/docsy-ui-refresh`）。
 
 ### 修复
+- **混合宽度 CMap 解码**：合成预定义 CMap（如 `90ms-RKSJ-H`）的 codespace 原先按最大码长一刀切，1 字节半角片假名等短码永远匹配不到导致整串解码失败；现按实际码长分段合成，缺失 CID 跳过单个映射而非放弃整个字体。
+- **深层嵌套 Form 文本定位**：`content_text` 与 `qpdf_stream` 现在沿 Form XObject 嵌套累积 CTM（与 compress 一致的左乘约定），嵌套 Form 内文本的坐标与 bbox 兜底匹配在删除路径下正确命中；含回归测试。
+- **旋转页 overlay 实证结论**：qpdf `--overlay` 会按 base 页 `/Rotate` 自动施加逆旋转，叠加内容按视觉坐标书写即正确（Rotate=90/180/270 实测）；加防误改注释与回归测试锁定，勿再手工加旋转补偿。
+- **docx → Markdown 增强**：下划线还原（`<u>`）、文本框/形状内文本提取、表格合并单元格（gridSpan 横向补空列、vMerge 续格留空）。
+- **模板模块遗留项批量处理**：批量校验 total_rows 剔除样例/空白行；日期校验收紧，拒绝 `2026-13-40` 类伪日期（rust regex 不支持反向引用，分隔符一致性改用交替分组实现）；前端同名字段去重语义明确化（同类型合并为 reference 跟随、异类型各自保留）；`inspectSourceDocx`/`editTemplateFromLibrary` 加请求序号守卫消除竞态。
+- **ffmpeg 检测重写**：逐候选路径探测 drawtext 支持（10s 超时），修复 Homebrew `ffmpeg-full` 已装但设置页显示未安装的问题。
 - **Tauri 命令参数大小写静默丢弃**：Tauri v2 命令参数按 camelCase 反序列化，前端有 4 处传了 snake_case，被 serde 静默忽略——证据处理的优化副本目录（`optimize_pdf_lossless` 的 `outputDir`，导致副本写回源文件夹而非 `_docsy_pdf_processed`）、Markdown 互转的 `.doc` 引擎选择（`docEngine`，Word/WPS 高保真从未生效）、提取页面的自定义输出目录（`extract_pdf_pages` 的 `outputDir`）全部失效。已统一改 camelCase。
 - **页眉页脚文字横向溢出页面**：宽度估算把全角标点（（）《》。等）按 0.5em 计（嵌入中文字体实际 1em），right/center 对齐的 CJK 文本系统性偏右画出 CropBox 右缘被裁切（"空间够但页脚显示不完整"的根因）；left 对齐长文本同样静默溢出。现在全角标点按 1em 估算，横向溢出时自动向左收拢到页内并逐页告警（"超出页面右缘，已收拢到页面内"），y 坐标同时夹取到页面范围内。
 - **证据处理进度是假进度**：后端批量处理全程无进度上报，前端靠计时器数状态变化，恒卡"正在处理 0/N"。现在删批注/逐文件处理/导出优化/合并各阶段实时上报（"正在处理 3/5:文件名"），工作台进度条与全局操作面板同步显示。

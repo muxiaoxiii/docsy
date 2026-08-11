@@ -26,7 +26,7 @@ function makePreview({ file, index = 0, rules, footer = {} }) {
     selectedOverlayIndex: ref(index),
     previewPage: ref(footer.page ?? 1),
     previewReloadKey: ref(0),
-    previewData: ref(null),
+    previewData: ref(footer.previewData ?? null),
     truePreview: ref(null),
     truePreviewLoading: ref(false),
     previewMaxPage: ref(1),
@@ -169,5 +169,39 @@ describe('previewFooterText matches the generated footer', () => {
       footer: { insertEnabled: true, group, page: 2, continuous: false, totalPages: 6 },
     })
     expect(perFile.previewFooterText.value).toBe('2/3')
+  })
+})
+
+describe('previewPageInfo 页尺寸回退链', () => {
+  const rules = { headerMode: 'custom', headerInsertEnabled: true }
+
+  it('previewData 有真实页尺寸时优先使用（异形页）', () => {
+    const file = makeFile('宽页')
+    file.existingHeaderBBox = { x0: 10, y0: 10, x1: 200, y1: 30, width: 1000, height: 500 }
+    const preview = makePreview({
+      file,
+      rules,
+      footer: { previewData: { widthPt: 1200, heightPt: 600 } },
+    })
+    expect(preview.previewPageInfo.value).toEqual({ widthPt: 1200, heightPt: 600 })
+    // overlay 字号按真实页宽缩放：10pt / 1200pt * 100 ≈ 0.8333cqw
+    expect(preview.previewHeaderStyle.value.fontSize).toBe('max(8px, 0.8333cqw)')
+  })
+
+  it('previewData 缺失时回退到文件检测 bbox 携带的页尺寸', () => {
+    const file = makeFile('检测页')
+    file.existingHeaderBBox = { x0: 10, y0: 10, x1: 200, y1: 30, width: 1000, height: 500 }
+    const preview = makePreview({ file, rules })
+    expect(preview.previewPageInfo.value).toEqual({ widthPt: 1000, heightPt: 500 })
+    expect(preview.previewHeaderStyle.value.fontSize).toBe('max(8px, 1cqw)')
+  })
+
+  it('两者都没有时回退 null，由 textOverlayStyle 兜底 A4', () => {
+    const file = makeFile('无信息')
+    const preview = makePreview({ file, rules })
+    expect(preview.previewPageInfo.value).toBeNull()
+    expect(preview.previewHeaderStyle.value.fontSize).toBe(
+      `max(8px, ${Number(((10 / 595.28) * 100).toFixed(4))}cqw)`,
+    )
   })
 })

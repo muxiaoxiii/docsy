@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use docx_rs::{
     Docx, DocumentChild, DrawingData, Hyperlink, HyperlinkData, Paragraph, ParagraphChild, Run,
-    RunChild, Table, TableCellContent, TableChild, TableRowChild,
+    RunChild, Table, TableCellContent, TableChild, TableRowChild, TextBoxContentChild,
 };
 use std::collections::HashMap;
 use std::io::Read as _;
@@ -27,6 +27,8 @@ struct Fmt {
     italic: bool,
     strike: bool,
     code: bool,
+    /// 下划线：GFM 无原生语法，用内嵌 HTML `<u>` 表达
+    underline: bool,
 }
 
 /// 转换上下文：样式 / 超链接 / 图片 / 编号定义的只读引用 + 列表计数器。
@@ -168,7 +170,18 @@ fn run_fmt(run: &Run) -> Fmt {
         italic: flag_enabled(&run.run_property.italic),
         strike: flag_enabled(&run.run_property.strike) || flag_enabled(&run.run_property.dstrike),
         code: is_mono_font(run),
+        underline: underline_enabled(run),
     }
+}
+
+/// 下划线识别：Underline 序列化为线型字符串，val="none" 视为关闭。
+fn underline_enabled(run: &Run) -> bool {
+    run.run_property.underline.as_ref().is_some_and(|u| {
+        serde_json::to_value(u)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .is_some_and(|v| v != "none")
+    })
 }
 
 /// 普通文本的 Markdown 转义（代码段内不转义）。
@@ -210,6 +223,10 @@ fn wrap_fmt(fmt: Fmt, text: &str) -> String {
     if fmt.strike {
         out = format!("~~{out}~~");
     }
+    if fmt.underline {
+        // GFM 无下划线语法，按惯例用内嵌 HTML
+        out = format!("<u>{out}</u>");
+    }
     out
 }
 
@@ -219,6 +236,8 @@ struct InlineRenderer<'a, 'b> {
     out: String,
     cur_fmt: Fmt,
     cur_text: String,
+    /// 超链接内部：忽略下划线（链接本身已是可点击样式，不输出 <u>）
+    in_link: bool,
 }
 
 impl<'a, 'b> InlineRenderer<'a, 'b> {
@@ -228,6 +247,7 @@ impl<'a, 'b> InlineRenderer<'a, 'b> {
             out: String::new(),
             cur_fmt: Fmt::default(),
             cur_text: String::new(),
+            in_link: false,
         }
     }
 
@@ -276,7 +296,10 @@ impl<'a, 'b> InlineRenderer<'a, 'b> {
     }
 
     fn render_run(&mut self, run: &Run) {
-        let fmt = run_fmt(run);
+        let mut fmt = run_fmt(run);
+        if self.in_link {
+            fmt.underline = false;
+        }
         for child in &run.children {
             match child {
                 RunChild::Text(t) => self.push_text(fmt, &t.text),
@@ -287,17 +310,38 @@ impl<'a, 'b> InlineRenderer<'a, 'b> {
                     self.push_raw("  \n".to_string());
                 }
                 RunChild::Drawing(drawing) => {
-                    if let Some(DrawingData::Pic(pic)) = &drawing.data {
-                        // 优先引用已导出的 assets 文件，否则退化为包内路径/占位
-                        let raw = if let Some(img) = self.ctx.exported.get(pic.id.as_str()) {
-                            format!("![{}]({})", img.name, img.rel_path)
-                        } else {
-                            match self.ctx.images.get(pic.id.as_str()) {
-                                Some(path) => format!("![image]({path})"),
-                                None => "![image]".to_string(),
+                    match &drawing.data {
+                        Some(DrawingData::Pic(pic)) => {
+                            // 优先引用已导出的 assets 文件，否则退化为包内路径/占位
+                            let raw = if let Some(img) = self.ctx.exported.get(pic.id.as_str()) {
+                                format!("![{}]({})", img.name, img.rel_path)
+                            } else {
+                                match self.ctx.images.get(pic.id.as_str()) {
+                                    Some(path) => format!("![image]({path})"),
+                                    None => "![image]".to_string(),
+                                }
+                            };
+                            self.push_raw(raw);
+                        }
+                        Some(DrawingData::TextBox(text_box)) => {
+                            // 文本框/形状内文本（txbxContent）：按普通段落输出，
+                            // 多段之间以空格衔接，内嵌表格渲染为 GFM 表格
+                            for child in &text_box.children {
+                                match child {
+                                    TextBoxContentChild::Paragraph(p) => {
+                                        self.render_children(&p.children);
+                                        self.push_text(Fmt::default(), " ");
+                                    }
+                                    TextBoxContentChild::Table(t) => {
+                                        let md = render_table(t, self.ctx);
+                                        if !md.is_empty() {
+                                            self.push_raw(md);
+                                        }
+                                    }
+                                }
                             }
-                        };
-                        self.push_raw(raw);
+                        }
+                        None => {}
                     }
                 }
                 _ => {}
@@ -306,8 +350,9 @@ impl<'a, 'b> InlineRenderer<'a, 'b> {
     }
 
     fn render_hyperlink(&mut self, link: &Hyperlink) -> String {
-        // 链接文本不继承外部格式状态，独立渲染
+        // 链接文本不继承外部格式状态，独立渲染；内部忽略下划线
         let mut inner = InlineRenderer::new(&mut *self.ctx);
+        inner.in_link = true;
         inner.render_children(&link.children);
         inner.flush_segment();
         let text = inner.out;
@@ -416,18 +461,42 @@ fn strip_full_bold(s: &str) -> String {
     s.to_string()
 }
 
+/// 单元格合并属性：(gridSpan 列数, vMerge 类型)。
+/// TableCellProperty 字段私有，走 serde 序列化读取（camelCase）。
+fn cell_merge(cell: &docx_rs::TableCell) -> (usize, Option<String>) {
+    let v = serde_json::to_value(&cell.property).unwrap_or_default();
+    let span = v
+        .get("gridSpan")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1)
+        .max(1) as usize;
+    let vmerge = v
+        .get("verticalMerge")
+        .and_then(|m| m.as_str())
+        .map(str::to_string);
+    (span, vmerge)
+}
+
 fn render_table(table: &Table, ctx: &mut Ctx) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for child in &table.rows {
         let TableChild::TableRow(row) = child;
-        let cells = row
-            .cells
-            .iter()
-            .map(|c| {
-                let TableRowChild::TableCell(cell) = c;
+        let mut cells = Vec::new();
+        for c in &row.cells {
+            let TableRowChild::TableCell(cell) = c;
+            let (span, vmerge) = cell_merge(cell);
+            // 纵向合并续格（vMerge=continue）：GFM 表格没有跨行概念，续格留空
+            let text = if vmerge.as_deref() == Some("continue") {
+                String::new()
+            } else {
                 render_cell(cell, ctx)
-            })
-            .collect();
+            };
+            cells.push(text);
+            // 横向合并（gridSpan）：内容只写首格，跨出的列补空格
+            for _ in 1..span {
+                cells.push(String::new());
+            }
+        }
         rows.push(cells);
     }
     if rows.is_empty() {
@@ -873,6 +942,85 @@ mod tests {
         assert!(md.contains("| 列一 | 列二 |"), "md:\n{md}");
         assert!(md.contains("| --- | --- |"), "md:\n{md}");
         assert!(md.contains("| 第一行 第二行 | 含\\|竖线 |"), "md:\n{md}");
+    }
+
+    #[test]
+    fn extracts_underline_as_inline_html() {
+        let docx = Docx::new()
+            .add_paragraph(
+                Paragraph::new()
+                    .add_run(Run::new().add_text("普通"))
+                    .add_run(Run::new().add_text("下划线").underline("single"))
+                    .add_run(Run::new().add_text("再加下划线").underline("single")),
+            )
+            .add_paragraph(
+                Paragraph::new()
+                    .add_run(Run::new().add_text("粗下划").bold().underline("single")),
+            );
+        let md = docx_bytes_to_md(&pack(docx)).unwrap();
+        // 相邻同格式 run 合并为一个 <u> 段
+        assert!(md.contains("普通<u>下划线再加下划线</u>"), "md:\n{md}");
+        assert!(md.contains("<u>**粗下划**</u>"), "md:\n{md}");
+    }
+
+    #[test]
+    fn extracts_merged_cells() {
+        use docx_rs::VMergeType;
+        // 第一行：跨两列的合并单元格 + 普通格
+        let row1 = TableRow::new(vec![
+            TableCell::new()
+                .add_paragraph(para("横向合并"))
+                .grid_span(2),
+            TableCell::new().add_paragraph(para("列三")),
+        ]);
+        // 第二行：纵向合并起点 + 普通格
+        let row2 = TableRow::new(vec![
+            TableCell::new()
+                .add_paragraph(para("纵向起点"))
+                .vertical_merge(VMergeType::Restart),
+            TableCell::new().add_paragraph(para("占位")),
+            TableCell::new().add_paragraph(para("数据一")),
+        ]);
+        // 第三行：纵向合并续格，内容应留空
+        let row3 = TableRow::new(vec![
+            TableCell::new()
+                .add_paragraph(para("不应出现"))
+                .vertical_merge(VMergeType::Continue),
+            TableCell::new().add_paragraph(para("占位")),
+            TableCell::new().add_paragraph(para("数据二")),
+        ]);
+        let docx = Docx::new().add_table(Table::new(vec![row1, row2, row3]));
+        let md = docx_bytes_to_md(&pack(docx)).unwrap();
+        // gridSpan=2 → 首格写内容，跨出的列补空
+        assert!(md.contains("| 横向合并 |  | 列三 |"), "md:\n{md}");
+        // vMerge=continue 的格子内容留空
+        assert!(md.contains("|  | 占位 | 数据二 |"), "md:\n{md}");
+        assert!(!md.contains("不应出现"), "md:\n{md}");
+        assert!(md.contains("| 纵向起点 | 占位 | 数据一 |"), "md:\n{md}");
+    }
+
+    #[test]
+    fn extracts_textbox_content_as_paragraph_text() {
+        // docx-rs 写端不支持 TextBox 序列化（unimplemented），
+        // 直接在内存里构造 Paragraph 走 render_paragraph 验证渲染逻辑
+        let mut text_box = docx_rs::TextBox::new();
+        text_box
+            .children
+            .push(TextBoxContentChild::Paragraph(Box::new(para("框内文字"))));
+        text_box
+            .children
+            .push(TextBoxContentChild::Paragraph(Box::new(
+                Paragraph::new().add_run(Run::new().add_text("第二段").bold()),
+            )));
+        let mut run = Run::new();
+        run.children
+            .push(RunChild::Drawing(Box::new(docx_rs::Drawing::new().text_box(text_box))));
+        let p = Paragraph::new().add_run(run);
+        let docx = Docx::new();
+        let mut ctx = Ctx::new(&docx);
+        let md = render_paragraph(&p, &mut ctx).unwrap();
+        assert!(md.contains("框内文字"), "md:\n{md}");
+        assert!(md.contains("**第二段**"), "md:\n{md}");
     }
 
     #[test]

@@ -140,9 +140,10 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
       key: `${index}`,
       outputPath: row.outputPath || '',
       values: row.values || {},
-      selected: true,
     }))
-    batchSaveSelected.value = []
+    // 默认全选。勾选状态以 batchSaveSelected 为准；之前行上挂的 selected
+    // 属性从未被读取（死状态），导致对话框打开时一行未选、与预期不符。
+    batchSaveSelected.value = batchSaveRows.value.map((row) => row.key)
     batchSaveVisible.value = true
   }
 
@@ -287,6 +288,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
     batchSaveRows,
     batchSaveSelected,
     handleBatchCommand,
+    openBatchSaveDialog,
     toggleBatchSaveAll,
     invertBatchSaveSelection,
     toggleBatchSaveRow,
