@@ -79,7 +79,7 @@ export async function optimizeImportsLossless(paths, outputDir = '') {
   for (const path of paths) {
     const result = await tauriCallSafe('optimize_pdf_lossless', {
       input: path,
-      output_dir: outputDir || null,
+      outputDir: outputDir || null,
     })
     if (!result.ok) {
       console.warn('[pdfLosslessOptimize] 无损优化失败，回退原路径:', path, result.error)

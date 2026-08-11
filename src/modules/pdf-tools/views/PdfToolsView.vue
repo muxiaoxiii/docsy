@@ -651,8 +651,8 @@ async function runMarkdownQueue() {
       item.statusType = 'warning'
       const result = await tauriCallSafe('convert_markdown', {
         input: item.path,
-        output_dir: null,
-        doc_engine: item.docEngine || null,
+        outputDir: null,
+        docEngine: item.docEngine || null,
       })
       if (result.ok) {
         const data = result.data || {}
@@ -889,7 +889,7 @@ async function doExtractPages() {
   const result = await tauriCallSafe('extract_pdf_pages', {
     input: extractFile.value,
     pages,
-    output_dir: extractOutputDir.value || null,
+    outputDir: extractOutputDir.value || null,
   })
   extractingPages.value = false
   if (result.ok) {
@@ -971,7 +971,7 @@ async function runCompressQueue() {
       item.statusType = 'warning'
       const result = await tauriCallSafe('compress_pdf', {
         input: item.path,
-        output_dir: null,
+        outputDir: null,
         level: imageReencode ? level : null,
       })
       if (result.ok) {

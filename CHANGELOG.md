@@ -2,6 +2,11 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [Unreleased]
+
+### 修复
+- **Tauri 命令参数大小写静默丢弃**：Tauri v2 命令参数按 camelCase 反序列化，前端有 4 处传了 snake_case，被 serde 静默忽略——证据处理的优化副本目录（`optimize_pdf_lossless` 的 `outputDir`，导致副本写回源文件夹而非 `_docsy_pdf_processed`）、Markdown 互转的 `.doc` 引擎选择（`docEngine`，Word/WPS 高保真从未生效）、提取页面的自定义输出目录（`extract_pdf_pages` 的 `outputDir`）全部失效。已统一改 camelCase。
+
 ## [0.9.7-beta13] - 2026-08-11
 
 ### 新增
