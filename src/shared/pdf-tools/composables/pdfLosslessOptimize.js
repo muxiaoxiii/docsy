@@ -30,6 +30,23 @@ export function sizeSavingText(inputSize, outputSize) {
 }
 
 /**
+ * 批量任务汇总文案（items 为 { status, name, inputSize, outputSize }）：
+ * "压缩完成 4/5：共 190.0MB → 17.5MB(节省 91%)；失败：a.pdf"。
+ * 无体积数据（如文档互转）时省略体积部分。
+ */
+export function batchSummaryText(label, items) {
+  const list = Array.isArray(items) ? items : []
+  const done = list.filter((item) => item?.status === 'done')
+  const failed = list.filter((item) => item?.status === 'failed')
+  const inputSize = done.reduce((sum, item) => sum + (Number(item.inputSize) || 0), 0)
+  const outputSize = done.reduce((sum, item) => sum + (Number(item.outputSize) || 0), 0)
+  let text = `${label} ${done.length}/${list.length}`
+  if (done.length && inputSize > 0) text += `：共 ${sizeSavingText(inputSize, outputSize)}`
+  if (failed.length) text += `；失败：${failed.map((item) => item.name).join('、')}`
+  return text
+}
+
+/**
  * 决定导入时使用优化副本还是原件：
  * 仅当后端返回 changed=true 且给出输出路径时用副本，其余一律回退原路径。
  */

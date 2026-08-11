@@ -88,11 +88,22 @@
           description="无损整理结构，仅对超出清晰度需要的图片降采样，扫描件默认保持原画质。"
         >
           <template #toolbar>
-            <el-button type="primary" @click="selectCompressFile">选择 PDF</el-button>
+            <el-button type="primary" @click="selectCompressFiles">选择 PDF 文件</el-button>
           </template>
-          <div v-if="compressFile" class="path-line">{{ compressFile }}</div>
-          <div v-if="compressResult" class="path-line">{{ compressResult }}</div>
-          <el-empty v-if="!compressFile" description="选择或拖入 PDF，立即压缩并保存到源文件夹" />
+          <FileQueuePanel
+            :items="compressFiles"
+            empty-text="选择或拖入一个或多个 PDF，立即压缩并保存到源文件夹"
+            @clear="clearCompressFiles"
+            @remove="removeCompressFile"
+          >
+            <template #meta="{ item }">
+              <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
+              <span v-if="item.status === 'done' && item.inputSize > 0">{{
+                sizeSavingText(item.inputSize, item.outputSize)
+              }}</span>
+            </template>
+          </FileQueuePanel>
+          <div v-if="compressSummary" class="path-line">{{ compressSummary }}</div>
           <template #actions>
             <div class="compress-level-row">
               <span class="compress-level-label">压缩级别：</span>
@@ -102,9 +113,6 @@
                 <el-radio-button :value="3">体积最小</el-radio-button>
               </el-radio-group>
             </div>
-            <el-button type="success" :loading="compressing" :disabled="!compressFile" @click="doCompressPdf">
-              压缩 PDF
-            </el-button>
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
@@ -315,22 +323,23 @@
           description="Markdown 与 Word 文档互转，拖入文件即可转换，输出保存在原文件旁。"
         >
           <template #toolbar>
-            <el-button type="primary" @click="selectMarkdownFile">选择文件</el-button>
+            <el-button type="primary" @click="selectMarkdownFiles">选择文件</el-button>
           </template>
-          <div v-if="markdownFile" class="path-line">{{ markdownFile }}</div>
-          <div v-if="markdownFile" class="path-line">转换方向：{{ markdownDirectionText }}</div>
-          <div v-if="markdownResult" class="path-line">{{ markdownResult }}</div>
-          <el-empty v-if="!markdownFile" description="选择或拖入 Markdown / Word 文件，立即转换并保存到源文件夹" />
-          <template #actions>
-            <el-button
-              type="success"
-              :loading="markdownConverting"
-              :disabled="!markdownFile"
-              @click="doConvertMarkdown"
-            >
-              开始转换
-            </el-button>
-          </template>
+          <FileQueuePanel
+            :items="markdownFiles"
+            empty-text="选择或拖入 Markdown / Word 文件，立即转换并保存到源文件夹"
+            @clear="clearMarkdownFiles"
+            @remove="removeMarkdownFile"
+          >
+            <template #meta="{ item }">
+              <el-tag size="small" type="info">{{ item.directionTag }}</el-tag>
+              <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
+              <span v-if="item.status === 'done' && item.inputSize > 0">{{
+                formatFileSize(item.inputSize) + ' → ' + formatFileSize(item.outputSize)
+              }}</span>
+            </template>
+          </FileQueuePanel>
+          <div v-if="markdownSummary" class="path-line">{{ markdownSummary }}</div>
         </ToolWorkspaceShell>
       </el-tab-pane>
     </el-tabs>
@@ -346,7 +355,7 @@ import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import { splitRangeWarnings } from '../../../shared/pdf-tools/composables/usePdfSplitRanges.js'
-import { sizeSavingText, formatFileSize } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
+import { sizeSavingText, formatFileSize, batchSummaryText } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
 import { getPdfPageCount, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
@@ -497,8 +506,8 @@ const extractOutputDir = ref('')
 const extractPageText = ref('')
 const extractTotalPages = ref(0)
 const extractingPages = ref(false)
-const compressFile = ref('')
-const compressResult = ref('')
+const compressFiles = ref([])
+const compressSummary = ref('')
 const compressing = ref(false)
 const compressLevel = ref(1)
 const splitFile = ref('')
@@ -528,57 +537,98 @@ const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => !f.has
 const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr).length)
 
 // Markdown 互转
-const markdownFile = ref('')
-const markdownResult = ref('')
+const markdownFiles = ref([])
 const markdownConverting = ref(false)
-const markdownDirectionText = computed(() => {
-  const path = String(markdownFile.value || '')
-  if (/\.(md|markdown)$/i.test(path)) return 'Markdown → Word'
-  if (/\.doc$/i.test(path)) return 'Word(旧格式)→ Markdown'
-  if (/\.docx$/i.test(path)) return 'Word → Markdown'
-  return ''
-})
+const markdownSummary = ref('')
 
 function isMarkdownConvertiblePath(path) {
   return /\.(md|markdown|docx|doc)$/i.test(String(path || ''))
 }
 
-async function selectMarkdownFile() {
+function markdownDirectionTag(path) {
+  return /\.(md|markdown)$/i.test(String(path || '')) ? 'MD→Word' : 'Word→MD'
+}
+
+async function selectMarkdownFiles() {
   const selected = await open({
-    multiple: false,
+    multiple: true,
     filters: [{ name: 'Markdown / Word', extensions: ['md', 'markdown', 'docx', 'doc'] }],
   })
   if (!selected) return
-  await loadMarkdownFile(normalizeSelectedPath(selected))
+  loadMarkdownFiles(Array.isArray(selected) ? selected : [selected])
 }
 
-async function loadMarkdownFile(path) {
-  markdownFile.value = path
-  markdownResult.value = ''
-  await doConvertMarkdown()
+// select 与 drop 共用入口：入队并立即顺序执行；执行中新文件追加到队列尾部
+function loadMarkdownFiles(paths) {
+  const busy = new Set(
+    markdownFiles.value.filter((f) => f.status === 'pending' || f.status === 'processing').map((f) => f.path),
+  )
+  const items = [...new Set(paths)]
+    .filter((path) => !busy.has(path))
+    .map((path) => ({
+      path,
+      name: fileName(path),
+      directionTag: markdownDirectionTag(path),
+      status: 'pending',
+      statusText: '等待中',
+      statusType: 'info',
+      inputSize: 0,
+      outputSize: 0,
+    }))
+  if (!items.length) return
+  markdownFiles.value = [...markdownFiles.value, ...items]
+  markdownSummary.value = ''
+  void runMarkdownQueue()
 }
 
-async function doConvertMarkdown() {
-  if (!markdownFile.value || markdownConverting.value) return
+function clearMarkdownFiles() {
+  markdownFiles.value = markdownFiles.value.filter((f) => f.status === 'processing')
+  markdownSummary.value = ''
+}
+
+function removeMarkdownFile(index) {
+  const item = markdownFiles.value[index]
+  if (item && item.status !== 'processing') markdownFiles.value.splice(index, 1)
+}
+
+async function runMarkdownQueue() {
+  if (markdownConverting.value) return
   markdownConverting.value = true
-  const result = await tauriCallSafe('convert_markdown', {
-    input: markdownFile.value,
-    output_dir: null,
-  })
-  markdownConverting.value = false
-  if (result.ok) {
-    const data = result.data || {}
-    const sizeText = `${formatFileSize(data.input_size)} → ${formatFileSize(data.output_size)}`
-    markdownResult.value = `已转换（${markdownDirectionText.value}）：${sizeText}，输出：${data.output_path || ''}`
-    ElNotification({
-      type: 'success',
-      title: `转换完成：${markdownDirectionText.value}`,
-      message: `${sizeText}${data.output_path ? `，输出：${data.output_path}` : ''}`,
-      duration: 6000,
-    })
-  } else {
-    ElMessage.error(userFacingError(result.error, 'Markdown 互转失败，请确认文件未损坏且未被其他程序占用'))
+  const processed = []
+  try {
+    for (;;) {
+      const item = markdownFiles.value.find((f) => f.status === 'pending')
+      if (!item) break
+      item.status = 'processing'
+      item.statusText = '转换中'
+      item.statusType = 'warning'
+      const result = await tauriCallSafe('convert_markdown', { input: item.path, output_dir: null })
+      if (result.ok) {
+        const data = result.data || {}
+        item.status = 'done'
+        item.statusText = '完成'
+        item.statusType = 'success'
+        item.inputSize = Number(data.input_size) || 0
+        item.outputSize = Number(data.output_size) || 0
+      } else {
+        item.status = 'failed'
+        item.statusText = userFacingError(result.error, '转换失败')
+        item.statusType = 'danger'
+      }
+      processed.push(item)
+    }
+  } finally {
+    markdownConverting.value = false
   }
+  reportMarkdownSummary(processed)
+}
+
+function reportMarkdownSummary(processed) {
+  if (!processed.length) return
+  const text = batchSummaryText('转换完成', processed)
+  markdownSummary.value = text
+  const hasFailed = processed.some((item) => item.status === 'failed')
+  ElNotification({ type: hasFailed ? 'warning' : 'success', title: text, duration: 6000 })
 }
 
 function addAntiOcrFiles(paths) {
@@ -798,50 +848,102 @@ async function doExtractPages() {
   }
 }
 
-async function selectCompressFile() {
+async function selectCompressFiles() {
   const selected = await open({
-    multiple: false,
+    multiple: true,
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   })
-  if (selected) await loadCompressFile(normalizeSelectedPath(selected))
+  if (!selected) return
+  loadCompressFiles(Array.isArray(selected) ? selected : [selected])
 }
 
-async function loadCompressFile(path) {
-  compressFile.value = path
-  compressResult.value = ''
-  await doCompressPdf()
+// select 与 drop 共用入口：入队并立即顺序执行；执行中新文件追加到队列尾部
+function loadCompressFiles(paths) {
+  const busy = new Set(
+    compressFiles.value.filter((f) => f.status === 'pending' || f.status === 'processing').map((f) => f.path),
+  )
+  const items = [...new Set(paths)]
+    .filter((path) => !busy.has(path))
+    .map((path) => ({
+      path,
+      name: fileName(path),
+      status: 'pending',
+      statusText: '等待中',
+      statusType: 'info',
+      inputSize: 0,
+      outputSize: 0,
+    }))
+  if (!items.length) return
+  compressFiles.value = [...compressFiles.value, ...items]
+  compressSummary.value = ''
+  void runCompressQueue()
 }
 
-// 已选文件时切换压缩级别立即重跑
+function clearCompressFiles() {
+  compressFiles.value = compressFiles.value.filter((f) => f.status === 'processing')
+  compressSummary.value = ''
+}
+
+function removeCompressFile(index) {
+  const item = compressFiles.value[index]
+  if (item && item.status !== 'processing') compressFiles.value.splice(index, 1)
+}
+
+// 队列全部结束后切换级别：重新入队并重跑全部；执行中切换只影响下一批（级别在批次开始时捕获）
 watch(compressLevel, () => {
-  if (compressFile.value && !compressing.value) void doCompressPdf()
+  if (compressing.value) return
+  const items = compressFiles.value
+  if (!items.length || items.some((f) => f.status === 'pending' || f.status === 'processing')) return
+  for (const item of items) {
+    item.status = 'pending'
+    item.statusText = '等待中'
+    item.statusType = 'info'
+    item.inputSize = 0
+    item.outputSize = 0
+  }
+  compressSummary.value = ''
+  void runCompressQueue()
 })
 
-async function doCompressPdf() {
-  if (!compressFile.value || compressing.value) return
+async function runCompressQueue() {
+  if (compressing.value) return
   compressing.value = true
-  const result = await tauriCallSafe('compress_pdf', {
-    input: compressFile.value,
-    output_dir: null,
-    level: compressLevel.value,
-  })
-  compressing.value = false
-  if (result.ok) {
-    const data = result.data || {}
-    const hasSizes = Number(data.input_size) > 0 && Number(data.output_size) >= 0
-    const savingText = hasSizes ? sizeSavingText(data.input_size, data.output_size) : ''
-    compressResult.value = hasSizes
-      ? `已压缩：${savingText}，输出：${data.output_path || ''}`
-      : `压缩完成，输出：${data.output_path || ''}`
-    ElNotification({
-      type: 'success',
-      title: hasSizes ? `已压缩:${savingText}` : 'PDF 压缩完成',
-      message: data.output_path ? `输出:${data.output_path}` : '',
-      duration: 6000,
-    })
-  } else {
-    ElMessage.error(userFacingError(result.error, 'PDF 压缩失败，请确认文件未损坏且磁盘空间充足'))
+  const level = compressLevel.value
+  const processed = []
+  try {
+    for (;;) {
+      const item = compressFiles.value.find((f) => f.status === 'pending')
+      if (!item) break
+      item.status = 'processing'
+      item.statusText = '压缩中'
+      item.statusType = 'warning'
+      const result = await tauriCallSafe('compress_pdf', { input: item.path, output_dir: null, level })
+      if (result.ok) {
+        const data = result.data || {}
+        item.status = 'done'
+        item.statusText = '完成'
+        item.statusType = 'success'
+        item.inputSize = Number(data.input_size) || 0
+        item.outputSize = Number(data.output_size) || 0
+      } else {
+        item.status = 'failed'
+        item.statusText = userFacingError(result.error, '压缩失败')
+        item.statusType = 'danger'
+      }
+      processed.push(item)
+    }
+  } finally {
+    compressing.value = false
   }
+  reportCompressSummary(processed)
+}
+
+function reportCompressSummary(processed) {
+  if (!processed.length) return
+  const text = batchSummaryText('压缩完成', processed)
+  compressSummary.value = text
+  const hasFailed = processed.some((item) => item.status === 'failed')
+  ElNotification({ type: hasFailed ? 'warning' : 'success', title: text, duration: 6000 })
 }
 
 async function selectSplitFile() {
@@ -892,8 +994,8 @@ async function handleDroppedPdfPaths(paths) {
       ElMessage.warning('请拖入 Markdown 或 Word 文件（.md / .docx / .doc）')
       return
     }
-    if (docPaths.length > 1) ElMessage.info('Markdown 互转一次处理一个文件，已使用第一个文件')
-    await loadMarkdownFile(docPaths[0])
+    if (docPaths.length < (paths || []).length) ElMessage.warning('已忽略不支持的文件')
+    loadMarkdownFiles(docPaths)
     return
   }
   const pdfPaths = [...new Set((paths || []).filter(isPdfPath))]
@@ -909,11 +1011,12 @@ async function handleDroppedPdfPaths(paths) {
     addAntiOcrFiles(pdfPaths)
   } else if (activeTab.value === 'merge') {
     addMergeFiles(pdfPaths)
+  } else if (activeTab.value === 'compress') {
+    loadCompressFiles(pdfPaths)
   } else {
     if (pdfPaths.length > 1) ElMessage.info('当前工具一次处理一个 PDF，已使用第一个文件')
     const path = pdfPaths[0]
     if (activeTab.value === 'extract') await loadExtractFile(path)
-    if (activeTab.value === 'compress') await loadCompressFile(path)
     if (activeTab.value === 'split') await loadSplitFile(path)
   }
 }

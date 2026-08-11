@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  batchSummaryText,
   formatFileSize,
   resolveOptimizedImport,
   savedPercent,
@@ -61,5 +62,28 @@ describe('pdfLosslessOptimize', () => {
     expect(savedPercent(39845888, 3565158)).toBe(91)
     expect(savedPercent(0, 100)).toBeNull()
     expect(sizeSavingText(39845888, 3565158)).toBe('38.0MB → 3.4MB(节省 91%)')
+  })
+
+  it('builds batch summary with size saving and failed names', () => {
+    const items = [
+      { name: 'a.pdf', status: 'done', inputSize: 39845888, outputSize: 3565158 },
+      { name: 'b.pdf', status: 'done', inputSize: 2048, outputSize: 1024 },
+      { name: 'c.pdf', status: 'failed' },
+    ]
+    expect(batchSummaryText('压缩完成', items)).toBe('压缩完成 2/3：共 38.0MB → 3.4MB(节省 91%)；失败：c.pdf')
+    const allDone = [
+      { name: 'a.pdf', status: 'done', inputSize: 39845888, outputSize: 3565158 },
+      { name: 'b.pdf', status: 'done', inputSize: 2048, outputSize: 1024 },
+    ]
+    expect(batchSummaryText('压缩完成', allDone)).toBe('压缩完成 2/2：共 38.0MB → 3.4MB(节省 91%)')
+  })
+
+  it('omits the size part for batch jobs without size data', () => {
+    const items = [
+      { name: 'a.md', status: 'done' },
+      { name: 'b.docx', status: 'failed' },
+    ]
+    expect(batchSummaryText('转换完成', items)).toBe('转换完成 1/2；失败：b.docx')
+    expect(batchSummaryText('转换完成', [])).toBe('转换完成 0/0')
   })
 })
