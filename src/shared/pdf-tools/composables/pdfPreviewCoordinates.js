@@ -7,7 +7,6 @@ export const DEFAULT_PAGE_INFO = {
   heightPt: 841.89,
 }
 
-const EDGE_MARGIN_PT = 36
 const MIN_PREVIEW_FONT_PX = 8
 const PREVIEW_FONT_SCALE = 1.5
 
@@ -31,7 +30,8 @@ export function textOverlayStyle(kind, pageInfo = DEFAULT_PAGE_INFO, config = {}
   const heightPt = pageInfo.heightPt || DEFAULT_PAGE_INFO.heightPt
   const align = config.align || 'center'
   const offsetPercent = mmToPercent(config.offsetXMm || 0, widthPt)
-  const edgePercent = ptToPercent(EDGE_MARGIN_PT, widthPt)
+  // 与后端 compute_x 一致：水平边距用用户设置的 marginMm，不再用固定 36pt
+  const edgePercent = mmToPercent(config.marginMm || 0, widthPt)
   const yPercent =
     kind === 'header' ? mmToPercent(config.marginMm, heightPt) : 100 - mmToPercent(config.marginMm, heightPt)
 

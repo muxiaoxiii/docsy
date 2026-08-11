@@ -37,7 +37,8 @@ describe('PDF preview coordinate helpers', () => {
     expect(header.left).toBe('calc(50% + 0%)')
     expect(header.top).toBe(`${mmToPercent(10, 800)}%`)
     expect(header.fontSize).toBe('15px')
-    expect(footer.right).toBe('6%')
+    // 水平边距与后端一致：使用 marginMm(10mm) 而非固定 36pt
+    expect(footer.right).toBe(`${mmToPercent(10, 600)}%`)
     expect(footer.top).toBe(`${100 - mmToPercent(10, 800)}%`)
   })
 
