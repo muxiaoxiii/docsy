@@ -2,7 +2,8 @@
 //!
 //! - `.md` / `.markdown` → `.docx`（pulldown-cmark 解析，docx-rs 写入）
 //! - `.docx` → `.md`（docx-rs reader 读取）
-//! - `.doc` → 先用 office_oxide 转成临时 `.docx`，再转 `.md`
+//! - `.doc` → office_oxide 转临时 `.docx`（仅纯文本，表格/图片/样式丢失，
+//!   结果带 warning，前端转换前需用户确认）再转 `.md`
 
 mod docx_to_md;
 mod md_to_docx;
@@ -27,6 +28,9 @@ pub struct ConvertResult {
     pub direction: Direction,
     pub input_size: u64,
     pub output_size: u64,
+    /// 降级转换时的用户提示（如 .doc 走了 office_oxide 纯文本兜底）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// 按扩展名判定转换方向；不支持的类型报错。
@@ -69,14 +73,24 @@ fn output_path_for(input: &Path, output_dir: Option<&str>, direction: Direction)
     Ok(unique_output_path(&dir, stem, ext))
 }
 
-/// 旧版 .doc → 临时 .docx，临时文件由 TempPathGuard 负责清理。
-fn convert_doc_to_temp_docx(input: &Path) -> Result<TempPathGuard> {
+/// office_oxide 的 doc→IR 只走 plain_text（表格/图片/样式全丢，
+/// 标题靠全大写启发式猜测，对中文会误判），因此 .doc 转换始终带告警，
+/// 由前端在转换前向用户确认。
+const DOC_LOSSY_WARNING: &str =
+    "旧版 .doc 转换仅保留纯文本，表格、图片和样式已丢失；建议先用 Word/WPS 另存为 .docx 再转换。";
+
+/// 旧版 .doc → 临时 .docx（office_oxide），始终附带格式损失告警。
+/// 临时文件由 TempPathGuard 负责清理。
+fn convert_doc_to_temp_docx(input: &Path) -> Result<(TempPathGuard, Option<String>)> {
     let temp_path = crate::util::fs::temp_named_path("docsy-md2docx", "docx");
     let doc = office_oxide::Document::open(input.display().to_string())
         .with_context(|| format!("无法读取旧版 .doc 文件: {}", input.display()))?;
     doc.save_as(temp_path.display().to_string())
         .with_context(|| format!("转换 .doc → .docx 失败: {}", input.display()))?;
-    Ok(TempPathGuard::new(temp_path))
+    Ok((
+        TempPathGuard::new(temp_path),
+        Some(DOC_LOSSY_WARNING.to_string()),
+    ))
 }
 
 pub fn convert(input: &str, output_dir: Option<&str>) -> Result<ConvertResult> {
@@ -89,6 +103,7 @@ pub fn convert(input: &str, output_dir: Option<&str>) -> Result<ConvertResult> {
     let input_size = std::fs::metadata(&input_path)
         .with_context(|| format!("无法读取输入文件信息: {input}"))?
         .len();
+    let mut warning: Option<String> = None;
 
     match direction {
         Direction::MdToDocx => {
@@ -102,7 +117,8 @@ pub fn convert(input: &str, output_dir: Option<&str>) -> Result<ConvertResult> {
                 .unwrap_or_default();
             if ext == "doc" {
                 // 先转临时 docx，守卫在作用域结束时自动删除
-                let guard = convert_doc_to_temp_docx(&input_path)?;
+                let (guard, doc_warning) = convert_doc_to_temp_docx(&input_path)?;
+                warning = doc_warning;
                 docx_to_md::convert(guard.path(), &output_path)?;
             } else {
                 docx_to_md::convert(&input_path, &output_path)?;
@@ -118,6 +134,7 @@ pub fn convert(input: &str, output_dir: Option<&str>) -> Result<ConvertResult> {
         direction,
         input_size,
         output_size,
+        warning,
     })
 }
 

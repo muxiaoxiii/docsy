@@ -94,7 +94,8 @@ lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normali
 ## 四、Markdown ↔ docx（Unreleased 新增功能的已知边界）
 
 - **版式保真是 Markdown 的格式天花板**：合并单元格、图片精确位置/大小/文字环绕、文本框、分栏等版式信息经过 Markdown 必然丢失（pandoc 同理）。如用户场景要求版式不丢，应改走 docx↔HTML 路线，需另行设计。
-- **undoc 备选评估**：`undoc` crate（Office→Markdown 提取，单向）可作为 docx→md 方向边缘 case（脚注/批注/文本框）的备选或对照实现；2026-08 评估时 v0.8.0 发版仅数天，暂不引入，持续观察。
+- **undoc 备选评估**：`undoc` crate（仅 .docx/.xlsx/.pptx → Markdown/文本/JSON，单向，不支持 legacy .doc）docx→md 方向覆盖比自研略广（脚注/尾注、页眉页脚、合并单元格列对齐、下划线、文本框、xlsx/pptx 提取）；2026-08 评估时 v0.8.0 发版仅数天，暂不引入。若实际文档撞上上述边缘 case，可引入或照其思路补齐自研实现。
+- **.doc 高保真备选**：当前 .doc 走 office_oxide 仅纯文本（用户已知情确认）。如需高保真 .doc→docx，可复用已有 `WordTool`/`WpsTool` 集成（证据模块 doc→pdf 同款路径），无需捆绑新二进制；LibreOffice 方案因体积被用户否决，不再考虑。docx_template/engine.rs 的 .doc 路径同样只有纯文本保真度，如模板模块涉及带表格/图片的 .doc 需一并评估。
 - docx→md 引用块无法还原为 `>`（写入侧只做缩进）；有序列表起始号反向一律从 1 重编；单元格内嵌套表格压平；远程/缺失图片输出占位文本。
 - MD→docx 的样式目前固定（Times New Roman/宋体 docDefaults），如用户需要模板化样式（红头文件格式等）再立项。
 - README.md:68 仍有「## 🔧 PDF 工具」章节标题，下次更新 README 时同步为「文档工具」。

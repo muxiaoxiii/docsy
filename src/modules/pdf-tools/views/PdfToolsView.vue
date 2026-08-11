@@ -348,7 +348,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
@@ -558,13 +558,28 @@ async function selectMarkdownFiles() {
   loadMarkdownFiles(Array.isArray(selected) ? selected : [selected])
 }
 
-// select 与 drop 共用入口：入队并立即顺序执行；执行中新文件追加到队列尾部
-function loadMarkdownFiles(paths) {
+// select 与 drop 共用入口：入队并立即顺序执行；执行中新文件追加到队列尾部。
+// 含 .doc 时先弹确认（转换仅保留纯文本），取消则跳过这些 .doc，其余照常。
+async function loadMarkdownFiles(paths) {
   const busy = new Set(
     markdownFiles.value.filter((f) => f.status === 'pending' || f.status === 'processing').map((f) => f.path),
   )
-  const items = [...new Set(paths)]
-    .filter((path) => !busy.has(path))
+  const docPaths = [...new Set(paths)].filter((path) => !busy.has(path))
+  let accepted = docPaths
+  const legacyDocs = docPaths.filter((path) => /\.doc$/i.test(path))
+  if (legacyDocs.length) {
+    try {
+      await ElMessageBox.confirm(
+        `${legacyDocs.length} 个旧版 .doc 文件转换后仅保留纯文本（表格、图片和样式会丢失）。建议先用 Word/WPS 另存为 .docx 再转换。仍要转换这些 .doc 吗？`,
+        '旧版 .doc 格式损失确认',
+        { confirmButtonText: '仍要转换', cancelButtonText: '跳过 .doc', type: 'warning' },
+      )
+    } catch {
+      accepted = docPaths.filter((path) => !/\.doc$/i.test(path))
+      if (accepted.length) ElMessage.info('已跳过 .doc 文件，其余文件照常转换')
+    }
+  }
+  const items = accepted
     .map((path) => ({
       path,
       name: fileName(path),
