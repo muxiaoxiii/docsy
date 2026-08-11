@@ -175,7 +175,6 @@
           <HeaderFooterRuleFields
             v-if="insertHeaderFooterEnabled"
             ref="inlineHfFieldsRef"
-            class="rule-grid" 
           v-model:header-groups="headerGroupsModel"
           v-model:selected-header-group-id="selectedHeaderGroupId"
           v-model:header-mode="headerMode"
@@ -669,7 +668,6 @@
       </template>
       <HeaderFooterRuleFields
         v-if="insertHeaderFooterEnabled"
-        class="dialog-rule-grid"
         v-model:header-groups="headerGroupsModel"
         v-model:selected-header-group-id="selectedHeaderGroupId"
         v-model:header-mode="headerMode"
@@ -3645,12 +3643,6 @@ h3 {
 .table-drag-handle:active {
   cursor: grabbing;
   color: var(--docsy-primary);
-}
-
-.dialog-rule-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
 }
 
 .dialog-title-row {

@@ -1,5 +1,8 @@
 <template>
-  <div>
+  <!-- 根元素为普通纵向容器，不再由使用方挂 grid class；
+       每个区块独立一张网格，区块内 v-if 行增删只重排本区块，避免整体跳动 -->
+  <div class="hf-rule-fields">
+    <section class="hf-section">
     <div class="rule-item section-label">
       <strong>页眉文字</strong>
       <div class="section-actions">
@@ -52,6 +55,7 @@
         </div>
       </div>
       <!-- Settings for selected group -->
+      <div class="hf-section-grid">
       <div class="rule-item">
         <label>页眉来源</label>
         <el-select v-model="headerModeModel">
@@ -138,8 +142,11 @@
           </template>
         </div>
       </div>
+      </div>
     </template>
+    </section>
 
+    <section class="hf-section">
     <div class="rule-item section-label">
       <strong>页脚文字</strong>
       <div class="section-actions">
@@ -181,6 +188,7 @@
           </el-button>
         </div>
       </div>
+      <div class="hf-section-grid">
       <div class="rule-item">
         <label>页脚文本</label>
         <div class="text-input-with-info">
@@ -237,8 +245,11 @@
           </template>
         </div>
       </div>
+      </div>
     </template>
+    </section>
 
+    <section class="hf-section">
     <div class="rule-item section-label">
       <strong>页码</strong>
       <div class="section-actions">
@@ -280,6 +291,7 @@
           </el-button>
         </div>
       </div>
+      <div class="hf-section-grid">
       <div class="rule-item">
         <label>连续方式</label>
         <el-select v-model="pageNumberSequenceModel">
@@ -350,7 +362,9 @@
           设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
         </el-button>
       </div>
+      </div>
     </template>
+    </section>
   </div>
 </template>
 
@@ -829,8 +843,25 @@ function removePageNumberGroup(id) {
 </script>
 
 <style scoped>
+/* 根容器：纵向排列三个区块，区块间留固定间距 */
+.hf-rule-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* 单个区块：标题/整宽元素/网格纵向排列 */
+.hf-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 区块内部网格：v-if 行增删只重排本区块，不影响其它区块 */
+.hf-section-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 12px;
+}
 .section-label {
-  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -844,11 +875,9 @@ function removePageNumberGroup(id) {
   gap: 8px;
 }
 .overlap-warnings {
-  grid-column: 1 / -1;
   margin-bottom: 4px;
 }
 .header-group-list {
-  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: 2px;

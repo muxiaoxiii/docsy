@@ -88,6 +88,8 @@ lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normali
 - 事件总线靠裸字符串 CustomEvent（`docsy-operation-*`、`docsy-template-library-changed`），事件名散落多处，建议集中定义事件名常量。
 - 前端测试覆盖率低：~29.9k 行源码仅 15 个测试文件；template 模块本轮已补 3 个测试文件（21 条用例），其余模块仍待补。
 - `tauriBridge.js:4-26` 的 `operationLabels` 是硬编码命令→文案映射，新增 Rust 命令需记得回前端补文案。
+- **前端预览与后端渲染坐标不一致**（beta13 后调查确认）：`pdfPreviewCoordinates.js` 的页眉页脚预览用固定 36pt 边距（后端用 marginMm）、固定像素字号（后端绝对 pt）、无数据时回退 A4 尺寸（异形页百分比定位失真）。预览无法反映横向溢出/收拢。要对齐需把预览换算改为与 `header_footer.rs` 同一套参数。
+- **旋转页（Rotate=90/270）overlay 坐标可能错位**：`page_info.rs` 把宽高互换后写 overlay 页，但 base 页 Rotate 标志仍在，viewer 二次旋转；A4 规范化会顺带消除旋转所以规范化路径不受影响。未遇到实际案例，暂记。
 
 ---
 
@@ -120,7 +122,6 @@ lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normali
 ---
 
 ## 存档：beta12 已完成条目
-
 - ✅ **5. 重复工具代码 / 临时文件泄漏**：新建 `util/fs.rs` 收敛 `same_path`/`temp_named_path`/`safe_file_stem`/`unique_output_path`/`TempPathGuard`/`set_private_permissions`；顺带修复 header_footer 旧版撞名超限会覆盖原文件的隐患。
 - ✅ **7. 业务逻辑泄露到命令层**：`MANIFEST_CACHE` 下沉 `docx_template/mod.rs`；`AntiCopyMethod::parse` 下移。
 - ✅ **9. 小问题**：`pdf/overlay.rs` facade 已删除；`pdf/mod.rs` 15 个子模块改 `pub(crate)`；`glyph_names.rs` 标注 GENERATED；`error.rs` 加 `#[non_exhaustive]`；`glyph_to_char` 多码点 uni 名返回 None（条目 11）。
