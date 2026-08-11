@@ -86,7 +86,7 @@
 
 <script setup>
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
-import { elementDecisionText, elementKindText } from '../composables/existingPdfElements.js'
+import { compareDetectedTextRows, elementDecisionText, elementKindText } from '../composables/existingPdfElements.js'
 import { naturalCompare } from '../composables/useEvidencePdfSession.js'
 
 const props = defineProps({
@@ -151,7 +151,9 @@ const filteredRows = computed(() => {
   if (prop && order) {
     const direction = order === 'descending' ? -1 : 1
     return [...rows].sort((a, b) => {
-      const result = naturalCompare(getColumnValue(a, prop), getColumnValue(b, prop))
+      const result = prop === 'detectedText'
+        ? compareDetectedTextRows(a, b)
+        : naturalCompare(getColumnValue(a, prop), getColumnValue(b, prop))
       return result === 0 ? 0 : result * direction
     })
   }

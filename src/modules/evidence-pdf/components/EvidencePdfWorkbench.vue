@@ -1862,21 +1862,51 @@ async function handleEvidenceDrop(paths) {
 
 async function loadEvidenceFiles(paths) {
   mergedImportPlan.value = null
-  let importPaths = paths
-  if (optimizeSizeEnabled.value) {
-    const decisions = await optimizeImportsLossless(paths)
-    importPaths = decisions.map((d) => d.path)
-    const summary = summarizeOptimizedImports(decisions)
-    if (summary.count > 0) {
-      ElMessage.success(
-        `已自动优化 ${summary.count} 个文件(共 ${formatFileSize(summary.inputSize)} → ${formatFileSize(summary.outputSize)});原件未修改,优化副本保存在原文件旁`,
-      )
-    }
-  }
-  overlayFiles.value = importPaths.map(createEvidenceFile)
+  overlayFiles.value = paths.map(createEvidenceFile)
   selectedOverlayIndex.value = 0
   await refreshOverlayPageCounts()
   await checkExistingBookmarks()
+}
+
+// 点击处理后才做导入侧无损优化：payload 的 inputPath 换成本次生成的优化副本，
+// 返回一个还原函数，把结果里的副本路径换回原件路径（列表匹配、输出命名都基于原件）。
+async function optimizePayloadInputsLossless(payload) {
+  const noop = (data) => data
+  if (!optimizeSizeEnabled.value || !payload?.items?.length) return noop
+  const originals = [...new Set(payload.items.map((item) => item.inputPath).filter(Boolean))]
+  if (!originals.length) return noop
+  const decisions = await optimizeImportsLossless(originals)
+  const originalToCopy = new Map()
+  const copyToOriginal = new Map()
+  decisions.forEach((decision, index) => {
+    if (!decision.optimized) return
+    originalToCopy.set(originals[index], decision.path)
+    copyToOriginal.set(decision.path, originals[index])
+  })
+  const summary = summarizeOptimizedImports(decisions)
+  if (summary.count > 0) {
+    ElMessage.success(
+      `处理前已优化 ${summary.count} 个文件(共 ${formatFileSize(summary.inputSize)} → ${formatFileSize(summary.outputSize)});原件未修改,优化副本保存在原文件旁`,
+    )
+  }
+  if (originalToCopy.size) {
+    payload.items.forEach((item) => {
+      const copy = originalToCopy.get(item.inputPath)
+      if (copy) item.inputPath = copy
+    })
+  }
+  return (data) => {
+    if (!copyToOriginal.size || !data) return data
+    ;(data.results || []).forEach((item) => {
+      const original = copyToOriginal.get(item.inputPath)
+      if (original) item.inputPath = original
+    })
+    ;(data.failed || []).forEach((item) => {
+      const original = copyToOriginal.get(item.path)
+      if (original) item.path = original
+    })
+    return data
+  }
 }
 
 // 导出结果就地优化的体积收益汇报（后端返回的 optimize 汇总）
@@ -2110,6 +2140,7 @@ async function applySplitHeaderFooterReplacement() {
     payload = await resolveSuffixConflicts(payload)
     if (!payload) { overlaying.value = false; return }
     payload.optimizeOutput = optimizeSizeEnabled.value
+    const restoreInputs = await optimizePayloadInputsLossless(payload)
     overlayRows.value.forEach((file) => {
       file.statusText = '替换中'
       file.statusType = 'warning'
@@ -2117,6 +2148,7 @@ async function applySplitHeaderFooterReplacement() {
     })
 
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    restoreInputs(result.ok ? result.data : null)
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, '证据 PDF 处理失败'))
       overlayFiles.value.forEach((file) => {
@@ -2179,6 +2211,7 @@ async function applyHeaderFooter() {
     payload = await resolveSuffixConflicts(payload)
     if (!payload) { overlaying.value = false; return }
     payload.optimizeOutput = optimizeSizeEnabled.value
+    const restoreInputs = await optimizePayloadInputsLossless(payload)
 
     overlayFiles.value.forEach((file) => {
       file.statusText = '处理中…'
@@ -2199,6 +2232,7 @@ async function applyHeaderFooter() {
 
     const startTime = Date.now()
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    restoreInputs(result.ok ? result.data : null)
     const elapsedMs = Date.now() - startTime
     window.clearInterval(overlayProgressTimer)
     overlayProgressTimer = null
@@ -2396,6 +2430,7 @@ async function finishQuickCleanupPipeline() {
     }
     const payload = buildEvidencePdfRulePayload(overlayRows.value, cleanupRules, outputDir)
     payload.optimizeOutput = optimizeSizeEnabled.value
+    const restoreInputs = await optimizePayloadInputsLossless(payload)
     overlayRows.value.forEach((file) => {
       file.statusText = '处理中'
       file.statusType = 'warning'
@@ -2403,6 +2438,7 @@ async function finishQuickCleanupPipeline() {
     })
 
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    restoreInputs(result.ok ? result.data : null)
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, '页眉页脚删除失败'))
       overlayFiles.value.forEach((file) => {
@@ -2658,6 +2694,7 @@ async function executeImmediateDelete() {
     }
     const payload = buildEvidencePdfRulePayload(overlayRows.value, cleanupRules, outputDir)
     payload.optimizeOutput = optimizeSizeEnabled.value
+    const restoreInputs = await optimizePayloadInputsLossless(payload)
     overlayRows.value.forEach((file) => {
       file.statusText = '处理中'
       file.statusType = 'warning'
@@ -2665,6 +2702,7 @@ async function executeImmediateDelete() {
     })
 
     const result = await tauriCallSafe('apply_evidence_pdf_rules', { args: payload })
+    restoreInputs(result.ok ? result.data : null)
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, '页眉页脚删除失败'))
       overlayFiles.value.forEach((file) => {

@@ -1,3 +1,5 @@
+import { naturalCompare } from './useEvidencePdfSession.js'
+
 export const EXISTING_ELEMENT_KINDS = ['header', 'footerText', 'pageNumber']
 export const EXISTING_ELEMENT_DECISIONS = ['keep', 'ignore', 'delete', 'edit']
 
@@ -99,4 +101,20 @@ export function actionableExistingElements(file, kinds = EXISTING_ELEMENT_KINDS)
   return (file?.existingElements || []).filter(
     (element) => kinds.includes(element.kind) && ['delete', 'edit'].includes(element.decision),
   )
+}
+
+
+// 检测文字排序：拉丁字母开头的文本（专利号等）排在最前，其余按自然序；
+// 同文本再按文件名、页段稳定次序，保证“证据X / 证据X译文”这类同族文本相邻。
+export function compareDetectedTextRows(a, b) {
+  const textA = a.element?.detectedText || ''
+  const textB = b.element?.detectedText || ''
+  const groupA = /^[A-Za-z]/.test(textA) ? 0 : 1
+  const groupB = /^[A-Za-z]/.test(textB) ? 0 : 1
+  if (groupA !== groupB) return groupA - groupB
+  const byText = naturalCompare(textA, textB)
+  if (byText !== 0) return byText
+  const byFile = naturalCompare(a.fileName || '', b.fileName || '')
+  if (byFile !== 0) return byFile
+  return (a.element?.pageStart || 0) - (b.element?.pageStart || 0)
 }

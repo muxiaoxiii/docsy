@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
+import { compareDetectedTextRows, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
 
 const candidate = {
   text: '1/3',
@@ -21,5 +21,34 @@ describe('existingPdfElements', () => {
     const old = { ...detectedElementFromCandidate(candidate, 'pageNumber'), decision: 'ignore' }
     const refreshed = detectedElementFromCandidate({ ...candidate, confidence: 1 }, 'pageNumber')
     expect(mergeExistingElements([old], [refreshed])[0].decision).toBe('ignore')
+  })
+
+  it('sorts latin-led detected texts first and keeps 证据X families adjacent', () => {
+    const row = (text, fileName = 'a.pdf', pageStart = 1) => ({
+      fileName,
+      element: { detectedText: text, pageStart },
+    })
+    const sorted = [
+      row('证据2', 'b.pdf'),
+      row('CN 105829563 A', 'c.pdf'),
+      row('证据1译文', 'a.pdf'),
+      row('证据1', 'a.pdf'),
+      row('JP 2017-186663 A 2017.10.12', 'a.pdf'),
+      row('证据2译文', 'b.pdf'),
+    ].sort(compareDetectedTextRows)
+    expect(sorted.map((r) => r.element.detectedText)).toEqual([
+      'CN 105829563 A',
+      'JP 2017-186663 A 2017.10.12',
+      '证据1',
+      '证据1译文',
+      '证据2',
+      '证据2译文',
+    ])
+  })
+
+  it('orders 证据 numbers numerically rather than lexicographically', () => {
+    const row = (text) => ({ fileName: 'a.pdf', element: { detectedText: text, pageStart: 1 } })
+    const sorted = [row('证据10'), row('证据2'), row('证据1')].sort(compareDetectedTextRows)
+    expect(sorted.map((r) => r.element.detectedText)).toEqual(['证据1', '证据2', '证据10'])
   })
 })
