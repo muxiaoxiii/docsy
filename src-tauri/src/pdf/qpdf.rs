@@ -340,54 +340,6 @@ fn unique_available_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-pub fn split(input: &str, output_dir: &str) -> Result<Vec<String>> {
-    let qpdf = crate::external::QpdfTool;
-    let bin = qpdf.binary_path()?;
-    let input_path = Path::new(input);
-    std::fs::create_dir_all(output_dir)?;
-    let stem = input_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
-
-    let pages = page_count(input)?;
-    let token = unique_suffix();
-    let output_pattern = Path::new(output_dir).join(format!("{stem}-split-{token}-%d.pdf"));
-    let mut cmd = crate::external::hidden_command(&bin);
-    cmd.arg("--split-pages").arg(input).arg(&output_pattern);
-    let command_output = run_cancellable("拆分", cmd)?;
-    if !status_is_success(&command_output.status) {
-        anyhow::bail!(
-            "qpdf 拆分失败（{}）：{}",
-            bin.display(),
-            crate::external::command_failure_detail(&command_output)
-        );
-    }
-
-    let prefix = format!("{stem}-split-{token}-");
-    let mut outputs = std::fs::read_dir(output_dir)?
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".pdf"))
-        })
-        .collect::<Vec<_>>();
-    outputs.sort();
-    if outputs.len() != pages as usize {
-        anyhow::bail!(
-            "qpdf 拆分输出页数异常：预期 {pages} 个文件，实际 {} 个",
-            outputs.len()
-        );
-    }
-
-    Ok(outputs
-        .into_iter()
-        .map(|path| path.display().to_string())
-        .collect())
-}
-
 pub fn page_count(input: &str) -> Result<u32> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
@@ -430,14 +382,6 @@ fn unique_output_path_in_dir(input: &Path, output_dir: Option<&str>, suffix: &st
         .unwrap_or("output");
     let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("pdf");
     crate::util::fs::unique_output_path(&parent, &format!("{stem}{suffix}"), ext)
-}
-
-fn unique_suffix() -> String {
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    format!("{}-{millis}", std::process::id())
 }
 
 #[cfg(test)]

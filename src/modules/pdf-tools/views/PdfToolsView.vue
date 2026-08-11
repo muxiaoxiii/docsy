@@ -89,11 +89,10 @@
         >
           <template #toolbar>
             <el-button type="primary" @click="selectCompressFile">选择 PDF</el-button>
-            <el-button :disabled="!compressFile" @click="selectCompressOutputDir">输出文件夹</el-button>
           </template>
           <div v-if="compressFile" class="path-line">{{ compressFile }}</div>
-          <div v-if="compressOutputDir" class="path-line">{{ compressOutputDir }}</div>
-          <el-empty v-if="!compressFile" description="先选择需要压缩整理的 PDF 文件" />
+          <div v-if="compressResult" class="path-line">{{ compressResult }}</div>
+          <el-empty v-if="!compressFile" description="选择或拖入 PDF，立即压缩并保存到源文件夹" />
           <template #actions>
             <div class="compress-level-row">
               <span class="compress-level-label">压缩级别：</span>
@@ -317,12 +316,11 @@
         >
           <template #toolbar>
             <el-button type="primary" @click="selectMarkdownFile">选择文件</el-button>
-            <el-button :disabled="!markdownFile" @click="selectMarkdownOutputDir">输出文件夹</el-button>
           </template>
           <div v-if="markdownFile" class="path-line">{{ markdownFile }}</div>
           <div v-if="markdownFile" class="path-line">转换方向：{{ markdownDirectionText }}</div>
-          <div v-if="markdownOutputDir" class="path-line">{{ markdownOutputDir }}</div>
-          <el-empty v-if="!markdownFile" description="选择或拖入 Markdown / Word 文件" />
+          <div v-if="markdownResult" class="path-line">{{ markdownResult }}</div>
+          <el-empty v-if="!markdownFile" description="选择或拖入 Markdown / Word 文件，立即转换并保存到源文件夹" />
           <template #actions>
             <el-button
               type="success"
@@ -340,7 +338,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -397,7 +395,14 @@ function addUnlockFiles(paths, replace = false) {
     statusText: '检测中',
   }))
   unlockFiles.value = replace ? items : [...unlockFiles.value, ...items]
-  if (items.length) void inspectUnlockFiles(candidates)
+  if (items.length) void inspectUnlockFiles(candidates).then(autoUnlockReadyFiles)
+}
+
+// 检测完成后直接解锁加密文件；队列里没有加密文件时静默跳过
+async function autoUnlockReadyFiles() {
+  if (unlocking.value) return
+  if (!unlockFiles.value.some((file) => file.encrypted === true)) return
+  await batchUnlock()
 }
 
 async function inspectUnlockFiles(paths) {
@@ -452,6 +457,7 @@ function removeUnlockFile(index) {
 }
 
 async function batchUnlock() {
+  if (unlocking.value) return
   const encryptedFiles = unlockFiles.value.filter((file) => file.encrypted === true)
   if (!encryptedFiles.length) {
     ElMessage.info('所选文件均未加密，无需处理')
@@ -492,7 +498,7 @@ const extractPageText = ref('')
 const extractTotalPages = ref(0)
 const extractingPages = ref(false)
 const compressFile = ref('')
-const compressOutputDir = ref('')
+const compressResult = ref('')
 const compressing = ref(false)
 const compressLevel = ref(1)
 const splitFile = ref('')
@@ -523,7 +529,7 @@ const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.
 
 // Markdown 互转
 const markdownFile = ref('')
-const markdownOutputDir = ref('')
+const markdownResult = ref('')
 const markdownConverting = ref(false)
 const markdownDirectionText = computed(() => {
   const path = String(markdownFile.value || '')
@@ -543,29 +549,31 @@ async function selectMarkdownFile() {
     filters: [{ name: 'Markdown / Word', extensions: ['md', 'markdown', 'docx', 'doc'] }],
   })
   if (!selected) return
-  markdownFile.value = normalizeSelectedPath(selected)
-  markdownOutputDir.value = ''
+  await loadMarkdownFile(normalizeSelectedPath(selected))
 }
 
-async function selectMarkdownOutputDir() {
-  const selected = await open({ directory: true })
-  if (selected) markdownOutputDir.value = normalizeSelectedPath(selected)
+async function loadMarkdownFile(path) {
+  markdownFile.value = path
+  markdownResult.value = ''
+  await doConvertMarkdown()
 }
 
 async function doConvertMarkdown() {
-  if (!markdownFile.value) return
+  if (!markdownFile.value || markdownConverting.value) return
   markdownConverting.value = true
   const result = await tauriCallSafe('convert_markdown', {
     input: markdownFile.value,
-    output_dir: markdownOutputDir.value || null,
+    output_dir: null,
   })
   markdownConverting.value = false
   if (result.ok) {
     const data = result.data || {}
+    const sizeText = `${formatFileSize(data.input_size)} → ${formatFileSize(data.output_size)}`
+    markdownResult.value = `已转换（${markdownDirectionText.value}）：${sizeText}，输出：${data.output_path || ''}`
     ElNotification({
       type: 'success',
       title: `转换完成：${markdownDirectionText.value}`,
-      message: `${formatFileSize(data.input_size)} → ${formatFileSize(data.output_size)}${data.output_path ? `，输出：${data.output_path}` : ''}`,
+      message: `${sizeText}${data.output_path ? `，输出：${data.output_path}` : ''}`,
       duration: 6000,
     })
   } else {
@@ -755,6 +763,7 @@ async function loadExtractFile(path) {
   extractFile.value = path
   extractPageText.value = ''
   extractTotalPages.value = 0
+  extractOutputDir.value = parentDir(path)
   const pageCount = await getPdfPageCount(extractFile.value)
   if (pageCount.ok) {
     extractTotalPages.value = pageCount.data || 0
@@ -794,29 +803,39 @@ async function selectCompressFile() {
     multiple: false,
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   })
-  if (selected) compressFile.value = normalizeSelectedPath(selected)
+  if (selected) await loadCompressFile(normalizeSelectedPath(selected))
 }
 
-async function selectCompressOutputDir() {
-  const selected = await open({ directory: true })
-  if (selected) compressOutputDir.value = normalizeSelectedPath(selected)
+async function loadCompressFile(path) {
+  compressFile.value = path
+  compressResult.value = ''
+  await doCompressPdf()
 }
+
+// 已选文件时切换压缩级别立即重跑
+watch(compressLevel, () => {
+  if (compressFile.value && !compressing.value) void doCompressPdf()
+})
 
 async function doCompressPdf() {
-  if (!compressFile.value) return
+  if (!compressFile.value || compressing.value) return
   compressing.value = true
   const result = await tauriCallSafe('compress_pdf', {
     input: compressFile.value,
-    output_dir: compressOutputDir.value || null,
+    output_dir: null,
     level: compressLevel.value,
   })
   compressing.value = false
   if (result.ok) {
     const data = result.data || {}
     const hasSizes = Number(data.input_size) > 0 && Number(data.output_size) >= 0
+    const savingText = hasSizes ? sizeSavingText(data.input_size, data.output_size) : ''
+    compressResult.value = hasSizes
+      ? `已压缩：${savingText}，输出：${data.output_path || ''}`
+      : `压缩完成，输出：${data.output_path || ''}`
     ElNotification({
       type: 'success',
-      title: hasSizes ? `已压缩:${sizeSavingText(data.input_size, data.output_size)}` : 'PDF 压缩完成',
+      title: hasSizes ? `已压缩:${savingText}` : 'PDF 压缩完成',
       message: data.output_path ? `输出:${data.output_path}` : '',
       duration: 6000,
     })
@@ -838,6 +857,7 @@ async function loadSplitFile(path) {
   splitPreviewPage.value = 1
   splitTotalPages.value = 1
   splitRunWarnings.value = []
+  splitOutputDir.value = parentDir(path)
   const pageCount = await getPdfPageCount(path)
   if (pageCount.ok) {
     splitTotalPages.value = pageCount.data || 1
@@ -873,8 +893,7 @@ async function handleDroppedPdfPaths(paths) {
       return
     }
     if (docPaths.length > 1) ElMessage.info('Markdown 互转一次处理一个文件，已使用第一个文件')
-    markdownFile.value = docPaths[0]
-    markdownOutputDir.value = ''
+    await loadMarkdownFile(docPaths[0])
     return
   }
   const pdfPaths = [...new Set((paths || []).filter(isPdfPath))]
@@ -894,7 +913,7 @@ async function handleDroppedPdfPaths(paths) {
     if (pdfPaths.length > 1) ElMessage.info('当前工具一次处理一个 PDF，已使用第一个文件')
     const path = pdfPaths[0]
     if (activeTab.value === 'extract') await loadExtractFile(path)
-    if (activeTab.value === 'compress') compressFile.value = path
+    if (activeTab.value === 'compress') await loadCompressFile(path)
     if (activeTab.value === 'split') await loadSplitFile(path)
   }
 }

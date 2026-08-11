@@ -135,11 +135,6 @@ pub async fn merge_pdfs(inputs: Vec<String>, output: String) -> Result<String, S
 }
 
 #[tauri::command]
-pub async fn split_pdf(input: String, output_dir: String) -> Result<Vec<String>, String> {
-    run_blocking(move || crate::pdf::qpdf::split(&input, &output_dir)).await
-}
-
-#[tauri::command]
 pub async fn extract_pdf_pages(
     input: String,
     pages: Vec<u32>,
