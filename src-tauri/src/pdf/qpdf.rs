@@ -244,7 +244,8 @@ pub fn extract_pages(
 }
 
 /// 无损结构优化：按页重建（--empty --pages 1-z）丢弃页树不可达的垃圾对象。
-/// 输出 sibling 文件「（已优化）<stem>.pdf」；若无收益则删除输出并返回 changed=false。
+/// 输出 sibling 文件「<stem>（已优化）.pdf」（后缀形式，不破坏文件名开头的证据编号解析与排序）；
+/// 若无收益则删除输出并返回 changed=false。
 pub fn optimize_lossless(input: &str) -> Result<OptimizeResult> {
     let input_path = Path::new(input);
     if !input_path.exists() {
@@ -259,7 +260,7 @@ pub fn optimize_lossless(input: &str) -> Result<OptimizeResult> {
         .unwrap_or("output");
     let ext = input_path.extension().and_then(|e| e.to_str()).unwrap_or("pdf");
     let output_path =
-        crate::util::fs::unique_output_path(parent, &format!("（已优化）{stem}"), ext);
+        crate::util::fs::unique_output_path(parent, &format!("{stem}（已优化）"), ext);
 
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
