@@ -2,7 +2,7 @@
   <section class="workspace-empty-state" :class="{ compact }">
     <span
       class="empty-state-icon"
-      :style="{ '--empty-icon-url': `url(${iconUrl || defaultIconUrl})` }"
+      :style="{ '--empty-icon-url': `url(&quot;${iconUrl || defaultIconUrl}&quot;)` }"
       aria-hidden="true"
     ></span>
     <strong>{{ title }}</strong>

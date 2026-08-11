@@ -2,6 +2,16 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [Unreleased]
+
+### 修复
+- **工具图标显示为纯色方块（仅生产包）**：SVG 小于 vite `assetsInlineLimit` 被内联为含未转义单引号的 data URI，而无引号 `url(...)` 按 CSS 语法解析失败，整条 mask 声明失效、纯色背景整块露出；统一改为带双引号的 `url("...")`。
+- **"优化体积"进度显示**：原先逐文件触发全局操作动画（doclet 每文件闪一次）且优化阶段不发进度事件、进度栏不动；现在整个优化阶段一个统一进行中面板，文案与进度栏实时显示"正在优化体积 i/N: 文件名"。
+- **Windows 日语/韩语页眉渲染为方块**：字体选择原先只看候选是否存在，SimSun 等中文字体缺日文汉字直接画 .notdef；现在嵌入前用 allsorts cmap 检查候选字体对目标文字的字形覆盖，不覆盖顺延——Windows 候选尾部补日文字体（MS Mincho/Gothic、Yu Gothic）与韩文（Malgun、Batang），mac 补 Hiragino 系兜底。
+- **mac 仿宋/楷体嵌入失败**：新版 macOS 不再自带 STFangsong/Kaiti，探测不到时经回退链落到系统通用 CJK 字体并照常告警"已改用相近字体"，不再整体失败。
+- **部分文件预览中"删除旧页眉"标记错位**（证据2/5 等韩国专利）：artifact 候选的 supporting bbox 原先在同区域重叠候选里按出现次数取最大，首页特有"证据N"标签被错贴到每页重复的专利号页眉 bbox 上（整体偏移约 34pt）；现优先按文本精确匹配取 bbox，无匹配才回退原行为。01/04 等输出逐字节不变，附回归测试。
+- **侧边栏死代码清理**：`.menu-icon` 图标与 `@media (max-width: 900px)` 整块样式在窗口 minWidth 1100 下永不可达，已移除。
+
 ## [0.9.7-beta14] - 2026-08-11
 
 ### 新增

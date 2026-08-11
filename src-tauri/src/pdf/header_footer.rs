@@ -1356,6 +1356,11 @@ fn create_embedded_overlay_font(
         if !candidate.path.exists() {
             continue;
         }
+        // 按字形覆盖挑字体：候选字体不含文本所需字符时直接跳过
+        //（例如 SimSun 缺少日文汉字，子集嵌入出来会渲染成方块）。
+        if !font_covers_text(&candidate.path, text) {
+            continue;
+        }
         match try_create_embedded_overlay_font(doc, resource_name, &candidate.path, text) {
             Ok(font) => {
                 return Ok(EmbeddedFontChoice {
@@ -1456,6 +1461,31 @@ fn try_create_embedded_overlay_font(
         resource_name: resource_name.to_string(),
         object_id,
         char_to_gid: char_to_subset_gid,
+    })
+}
+
+/// 判断字体是否覆盖文本中的全部非控制字符（空白除外）。
+/// 字体无法解析时返回 false，让调用方继续尝试下一个候选。
+fn font_covers_text(path: &Path, text: &str) -> bool {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => return false,
+    };
+    let font_data = match ReadScope::new(&bytes).read::<FontData<'_>>() {
+        Ok(font_data) => font_data,
+        Err(_) => return false,
+    };
+    let provider = match font_data.table_provider(0) {
+        Ok(provider) => provider,
+        Err(_) => return false,
+    };
+    let mut font = match Font::new(provider) {
+        Ok(font) => font,
+        Err(_) => return false,
+    };
+    text.chars().filter(|ch| !ch.is_control()).all(|ch| {
+        let (gid, _) = font.lookup_glyph_index(ch, MatchingPresentation::NotRequired, None);
+        gid != 0 || ch.is_whitespace()
     })
 }
 
@@ -1796,6 +1826,15 @@ fn font_paths_for_family(family: &str) -> Vec<PathBuf> {
                 paths.push(PathBuf::from("/System/Library/Fonts/PingFang.ttc"));
             }
         }
+        // 通用 CJK 兜底：新版 macOS 不再预装部分华文/宋体系列字体
+        //（如 STFangsong），探测不到时用系统自带的冬青黑体/明朝补位。
+        paths.push(PathBuf::from(
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        ));
+        paths.push(PathBuf::from(
+            "/System/Library/Fonts/Hiragino Mincho ProN.ttc",
+        ));
+        paths.push(PathBuf::from("/System/Library/Fonts/Hiragino Sans.ttc"));
     }
     #[cfg(target_os = "windows")]
     {
@@ -1815,6 +1854,14 @@ fn font_paths_for_family(family: &str) -> Vec<PathBuf> {
                 paths.push(fonts.join("msyh.ttc"));
             }
         }
+        // 日文/韩文兜底：中文字体不含日文特有汉字时按字形覆盖顺延到这里，
+        // 避免缺字形渲染成方块。
+        paths.push(fonts.join("msmincho.ttc"));
+        paths.push(fonts.join("msgothic.ttc"));
+        paths.push(fonts.join("YuGothM.ttc"));
+        paths.push(fonts.join("YuGothR.ttc"));
+        paths.push(fonts.join("malgun.ttf"));
+        paths.push(fonts.join("batang.ttc"));
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
@@ -2507,6 +2554,80 @@ mod tests {
         assert!(families.iter().any(|family| family == "kaiti"));
         assert!(families.iter().any(|family| family == "heiti"));
         assert_eq!(families.first().map(String::as_str), Some("songti"));
+    }
+
+    #[test]
+    fn font_paths_include_platform_cjk_fallbacks() {
+        for family in ["songti", "heiti", "kaiti", "fangsong"] {
+            let paths = font_paths_for_family(family)
+                .into_iter()
+                .map(|path| path.to_string_lossy().to_lowercase())
+                .collect::<Vec<_>>();
+            #[cfg(target_os = "windows")]
+            {
+                // 日文/韩文字体兜底，避免中文字体缺字形渲染成方块。
+                assert!(paths.iter().any(|p| p.ends_with("msmincho.ttc")));
+                assert!(paths.iter().any(|p| p.ends_with("msgothic.ttc")));
+                assert!(paths.iter().any(|p| p.ends_with("malgun.ttf")));
+                assert!(paths.iter().any(|p| p.ends_with("batang.ttc")));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                // 新版 macOS 不再自带仿宋/楷体，需回退到冬青黑体等通用 CJK 字体。
+                assert!(paths.iter().any(|p| p.contains("hiragino sans gb")));
+                assert!(paths.iter().any(|p| p.contains("hiragino mincho pron")));
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            {
+                let _ = paths;
+            }
+        }
+    }
+
+    #[test]
+    fn font_covers_text_rejects_missing_glyphs() {
+        let Some(font_path) = font_candidate_sequence("songti")
+            .into_iter()
+            .map(|candidate| candidate.path)
+            .find(|path| path.exists())
+        else {
+            // 测试机没有任何 CJK 系统字体时跳过。
+            return;
+        };
+
+        // 系统 CJK 字体应覆盖简体中文字符。
+        assert!(font_covers_text(&font_path, "简体中文测试 Header 123"));
+        // 不存在的文件与不含任何字符映射的非字符码点应判定为不覆盖。
+        assert!(!font_covers_text(
+            Path::new("/definitely/missing/font.ttf"),
+            "测试"
+        ));
+        assert!(!font_covers_text(&font_path, "\u{10FFFE}"));
+    }
+
+    #[test]
+    fn embedded_font_choice_prefers_font_covering_text() {
+        // 测试机需至少存在一个能覆盖中文的候选字体，否则跳过。
+        let covering = font_candidate_sequence("songti")
+            .into_iter()
+            .filter(|candidate| candidate.path.exists())
+            .any(|candidate| font_covers_text(&candidate.path, "测试页眉"));
+        if !covering {
+            return;
+        }
+
+        let mut doc = Document::with_version("1.5");
+        let choice = create_embedded_overlay_font(&mut doc, "FEmbed1", "songti", "测试页眉")
+            .expect("应能选到覆盖中文的字体");
+        assert_eq!(
+            choice
+                .font
+                .char_to_gid
+                .keys()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            "测试页眉".chars().collect::<BTreeSet<_>>(),
+        );
     }
 
     #[test]

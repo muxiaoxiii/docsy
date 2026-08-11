@@ -418,13 +418,6 @@ fn build_artifact_candidates(
             } else {
                 content_footers
             };
-            let supporting = region_candidates
-                .iter()
-                .filter(|candidate| {
-                    candidate.page_range.end >= page_start && candidate.page_range.start <= page_end
-                })
-                .max_by_key(|candidate| candidate.count);
-
             // BUGFIX: 不再 fallback 到 content-text 候选，
             // 避免正文内容被错误当成页眉/页脚。
             // 没有自身文本的 artifact 直接跳过。
@@ -434,6 +427,27 @@ fn build_artifact_candidates(
                 .filter(|value| !value.trim().is_empty())?;
 
             let normalized_text = normalize_header_footer_text(&text);
+            // 优先取与 artifact 文本一致的内容候选来提供 bbox：同一页眉区可能
+            // 还有另一个重复页眉（如韩国专利每页的“등록특허 10-xxxx”），若只按
+            // count 取最大，会把那个页眉的 bbox 错贴到首页“证据N”artifact 上，
+            // 导致预览里的删除标记位置偏移（证据2/证据5）。
+            let supporting = region_candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate.page_range.end >= page_start && candidate.page_range.start <= page_end
+                })
+                .filter(|candidate| candidate.normalized_text == normalized_text)
+                .max_by_key(|candidate| candidate.count)
+                .or_else(|| {
+                    region_candidates
+                        .iter()
+                        .filter(|candidate| {
+                            candidate.page_range.end >= page_start
+                                && candidate.page_range.start <= page_end
+                        })
+                        .max_by_key(|candidate| candidate.count)
+                });
+
             let mut labels = labels_for(&normalized_text);
             if first.docsy_kind.as_deref() == Some("PageNumber")
                 && !labels.iter().any(|label| label == "page-number")
@@ -2842,6 +2856,49 @@ mod tests {
                 c.count, c.repeating, c.confidence,
                 c.page_range.start, c.page_range.end,
                 c.bbox.x0, c.bbox.y0, c.bbox.x1, c.bbox.y1, c.bbox.page,
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the local PDF fixture directory, qpdf, and pdftotext"]
+    fn evidence_label_artifact_bbox_comes_from_matching_content_line() {
+        // 回归（证据2/证据5）：首页“证据N”artifact 所在页眉区还有每页重复的
+        // 专利号页眉（如“등록특허 10-1569508”）。supporting 候选必须按文本匹配，
+        // 否则会把专利号页眉的 bbox 错贴到“证据N”上，预览删除标记错位。
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("test-pdf/4W122724 I D1-D14");
+        for name in [
+            "01 证据 1. 日本专利 JP2017186663A 及其中文译文.pdf",
+            "02 证据 2. 韩国专利 KR101569508B1 及其中文译文.pdf",
+            "05 证据5. 韩国专利 KR101858868B1 及其中文译文.pdf",
+            "04 证据 4. 中国发明专利申请公开文本 CN108431273A.pdf",
+        ] {
+            let path = dir.join(name);
+            if !path.exists() {
+                eprintln!("skipping: {} not found", path.display());
+                continue;
+            }
+            let result = detect(&serde_json::json!({
+                "inputPath": path,
+                "maxPages": 45,
+                "headerZoneMm": 25.0,
+                "footerZoneMm": 25.0,
+            }))
+            .unwrap();
+            let label = result
+                .header_candidates
+                .iter()
+                .find(|c| c.source == "artifact" && c.page_range.start == 1)
+                .unwrap_or_else(|| panic!("{name}: first-page artifact header missing"));
+            // 首页“证据N”标签绘制在页面右上约 (493,23)-(523,35)；同页的专利号
+            // 页眉在 y≈42-66。错位修复前 02/05 会得到 y0≈56.7 的 bbox。
+            assert!(
+                label.bbox.y0 < 40.0 && label.bbox.x0 > 480.0,
+                "{name}: evidence label bbox misplaced: {:?}",
+                label.bbox,
             );
         }
     }

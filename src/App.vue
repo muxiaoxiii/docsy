@@ -13,11 +13,6 @@
         <template v-for="(item, index) in menuItems" :key="item.route">
           <el-menu-item :index="item.route">
             <span class="menu-index">{{ String(index + 1).padStart(2, '0') }}</span>
-            <span
-              class="menu-icon"
-              :style="{ '--menu-icon-url': `url(${menuIconByRoute[item.route]})` }"
-              aria-hidden="true"
-            ></span>
             <span class="menu-label">{{ item.label }}</span>
             <span class="menu-arrow">›</span>
           </el-menu-item>
@@ -79,24 +74,12 @@ import { listen } from '@tauri-apps/api/event'
 import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
 import { useAppStore } from './stores/app.js'
-import evidenceIconUrl from './assets/icons/evidence.svg?url'
-import documentsIconUrl from './assets/icons/documents.svg?url'
-import imageLayoutIconUrl from './assets/icons/image-layout.svg?url'
-import videoFramesIconUrl from './assets/icons/video-frames.svg?url'
-import templateIconUrl from './assets/icons/template.svg?url'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
 
 const menuItems = computed(() => getMenuItems(appStore.settings))
-const menuIconByRoute = {
-  'evidence-pdf': evidenceIconUrl,
-  'pdf-tools': documentsIconUrl,
-  'image-paddler': imageLayoutIconUrl,
-  'video-extract': videoFramesIconUrl,
-  template: templateIconUrl,
-}
 
 const activeMenu = computed(() => route.name || 'home')
 const operationVisible = ref(false)
@@ -424,20 +407,6 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
-.menu-icon {
-  display: none;
-  width: 27px;
-  height: 27px;
-  background: currentColor;
-  mask-image: var(--menu-icon-url);
-  mask-position: center;
-  mask-repeat: no-repeat;
-  mask-size: contain;
-  -webkit-mask-image: var(--menu-icon-url);
-  -webkit-mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size: contain;
-}
 
 .sidebar-menu :deep(.el-menu-item.is-active) .menu-index {
   color: var(--docsy-accent-light);
@@ -591,56 +560,4 @@ onBeforeUnmount(() => {
   transform: translateY(8px);
 }
 
-@media (max-width: 900px) {
-  .app-aside {
-    width: 78px !important;
-  }
-
-  .brand {
-    justify-content: center;
-    padding-inline: 10px;
-  }
-
-  .brand-copy,
-  .sidebar-section-label,
-  .menu-label,
-  .menu-arrow,
-  .sidebar-footer .footer-btn span {
-    display: none;
-  }
-
-  .sidebar-menu {
-    padding: 14px 10px;
-  }
-
-  .sidebar-menu :deep(.el-menu-item) {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    padding: 0 !important;
-  }
-
-  .sidebar-menu :deep(.el-menu-item.is-active::before) {
-    left: -10px;
-  }
-
-  .menu-index {
-    display: none;
-  }
-
-  .menu-icon {
-    display: block;
-  }
-
-  .sidebar-footer .footer-btn {
-    gap: 0;
-  }
-
-  .app-header {
-    padding: 0 18px;
-  }
-
-  .page-context {
-    display: none;
-  }
-}
 </style>

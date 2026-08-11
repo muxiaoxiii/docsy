@@ -2,7 +2,7 @@
  * PDF 无损体积优化：压缩页签的体积对比文案，以及证据导入时
  * 调用后端 optimize_pdf_lossless，有收益用优化副本，否则静默回退原路径。
  */
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { tauriCallQuiet } from '../../../core/tauriBridge.js'
 
 /** 人类可读的文件体积（如 38.0MB）。 */
 export function formatFileSize(bytes) {
@@ -73,11 +73,18 @@ export function summarizeOptimizedImports(decisions) {
   }
 }
 
-/** 逐个无损优化待导入的 PDF；失败或无收益静默回退原路径，绝不阻断导入。 */
-export async function optimizeImportsLossless(paths, outputDir = '') {
+/**
+ * 逐个无损优化待导入的 PDF；失败或无收益静默回退原路径，绝不阻断导入。
+ * 批量循环内用 tauriCallQuiet，避免每个文件触发一次全局 Doclet 动画；
+ * 统一动画/进度由调用方通过 onProgress(index, total, path) 自行上报。
+ */
+export async function optimizeImportsLossless(paths, outputDir = '', onProgress = null) {
   const decisions = []
-  for (const path of paths) {
-    const result = await tauriCallSafe('optimize_pdf_lossless', {
+  const total = paths.length
+  for (let index = 0; index < total; index += 1) {
+    const path = paths[index]
+    if (typeof onProgress === 'function') onProgress(index + 1, total, path)
+    const result = await tauriCallQuiet('optimize_pdf_lossless', {
       input: path,
       outputDir: outputDir || null,
     })

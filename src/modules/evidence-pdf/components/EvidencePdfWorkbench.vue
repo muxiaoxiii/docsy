@@ -873,7 +873,7 @@ import {
 import { formatProcessingWarningSummary } from '../../../shared/pdf-tools/processingWarnings.js'
 import { elementIdentity } from '../../../shared/pdf-tools/composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
-import { openPath, tauriCallSafe, tauriCallQuiet, userFacingError } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe, tauriCallQuiet, userFacingError, showLoading, hideLoading, emitOperationUpdate } from '../../../core/tauriBridge.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
 /** Parse a page number value from detected text (e.g. "1/10 页" → 1, "第3页" → 3). */
@@ -1970,7 +1970,21 @@ async function optimizePayloadInputsLossless(payload) {
   const originals = [...new Set(payload.items.map((item) => item.inputPath).filter(Boolean))]
   if (!originals.length) return noop
   const outputDir = payload.session?.outputRule?.outputDir || parentDir(payload.items[0]?.outputPath || '')
-  const decisions = await optimizeImportsLossless(originals, outputDir)
+  // 整个优化阶段只显示一个统一的 Doclet 操作项，逐文件进度通过 update 上报；
+  // 同时把真实进度写进上方进度栏（优化阶段后端不发 docsy-operation-progress 事件）
+  const loadingId = showLoading('Doclet 正在无损优化 PDF…')
+  const reportOptimizeProgress = (index, total, path) => {
+    const label = `正在优化体积 ${index}/${total}: ${fileName(path)}`
+    emitOperationUpdate(loadingId, label)
+    overlayProgressLabel.value = label
+    if (!overlayProgressTimer) overlayProgressText.value = label
+  }
+  let decisions
+  try {
+    decisions = await optimizeImportsLossless(originals, outputDir, reportOptimizeProgress)
+  } finally {
+    hideLoading(loadingId)
+  }
   const originalToCopy = new Map()
   const copyToOriginal = new Map()
   decisions.forEach((decision, index) => {

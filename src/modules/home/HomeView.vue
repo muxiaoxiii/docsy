@@ -29,7 +29,7 @@
           <span class="card-topline">
             <span
               class="home-card-icon"
-              :style="{ '--home-icon-url': `url(${homeIconByRoute[card.route]})` }"
+              :style="{ '--home-icon-url': `url(&quot;${homeIconByRoute[card.route]}&quot;)` }"
               aria-hidden="true"
             ></span>
           </span>
