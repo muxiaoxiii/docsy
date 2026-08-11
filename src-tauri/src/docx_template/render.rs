@@ -352,7 +352,9 @@ fn rendered_base_text(
         // array); it must fill every slot of the replicated row, otherwise
         // cells beyond the first stay empty.
         if matches!(value, Value::Object(_)) && items.len() == 1 {
-            return items[0].rendered();
+            // 与段落路径同一语义：有静态后缀时这里只给正文，条目后缀交给
+            // apply_party_item_suffix 去替换静态后缀；否则内联条目后缀。
+            return render_party_item(field, slot.unwrap_or(0), &items[0], false);
         }
         return match (field.mark_refs.len(), slot) {
             (_, None) => items
@@ -1456,8 +1458,87 @@ mod tests {
     }
 
     #[test]
-    fn repeatable_party_suffix_replaces_its_template_text_once() {
-        let mut field = field("lawyers", "party_list");
+    fn table_row_replication_keeps_static_suffix_untouched_when_item_suffix_matches() {
+        // 表格行复制路径：条目后缀与静态后缀相同（source == replacement）时，
+        // 静态后缀保留一次、不重复，不出现“张三律师律师”。
+        let mut field = field("pl", "party_list");
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "pl".to_string(),
+            optional_rule: Some(OptionalFieldRule {
+                enabled: true,
+                remove_empty_prefix: String::new(),
+                remove_empty_suffix: "律师".to_string(),
+            }),
+            ..Default::default()
+        }];
+        let m = manifest(vec![field]);
+        let mut tree = parse_xml(
+            r#"<w:document><w:body>
+            <w:tbl>
+                <w:tr>
+                    <w:tc><w:p>
+                        <w:sdt><w:sdtPr><w:tag w:val="pl"/></w:sdtPr><w:sdtContent><w:r><w:t>原告方</w:t></w:r></w:sdtContent></w:sdt><w:r><w:t>律师</w:t></w:r>
+                    </w:p></w:tc>
+                </w:tr>
+            </w:tbl>
+        </w:body></w:document>"#,
+        );
+        let mut vals = HashMap::new();
+        vals.insert(
+            "pl".to_string(),
+            serde_json::json!([
+                { "name": "张三", "suffix": "律师" },
+                { "name": "李四", "suffix": "律师" }
+            ]),
+        );
+
+        render_tree(&mut tree.root, &field_map(&m), &vals, &HashMap::new(), "、").unwrap();
+        let text = compact_text(&tree.root);
+        assert_eq!(text, "张三律师李四律师", "静态后缀不重复不残留: {text}");
+    }
+
+    #[test]
+    fn table_row_replication_replaces_static_suffix_with_differing_item_suffix() {
+        // 条目后缀与静态后缀不同（source != replacement）时，
+        // 静态后缀被替换为条目后缀，不残留。
+        let mut field = field("pl", "party_list");
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "pl".to_string(),
+            optional_rule: Some(OptionalFieldRule {
+                enabled: true,
+                remove_empty_prefix: String::new(),
+                remove_empty_suffix: "律师".to_string(),
+            }),
+            ..Default::default()
+        }];
+        let m = manifest(vec![field]);
+        let mut tree = parse_xml(
+            r#"<w:document><w:body>
+            <w:tbl>
+                <w:tr>
+                    <w:tc><w:p>
+                        <w:sdt><w:sdtPr><w:tag w:val="pl"/></w:sdtPr><w:sdtContent><w:r><w:t>原告方</w:t></w:r></w:sdtContent></w:sdt><w:r><w:t>律师</w:t></w:r>
+                    </w:p></w:tc>
+                </w:tr>
+            </w:tbl>
+        </w:body></w:document>"#,
+        );
+        let mut vals = HashMap::new();
+        vals.insert(
+            "pl".to_string(),
+            serde_json::json!([
+                { "name": "张三", "suffix": "实习律师" },
+                { "name": "李四", "suffix": "" }
+            ]),
+        );
+
+        render_tree(&mut tree.root, &field_map(&m), &vals, &HashMap::new(), "、").unwrap();
+        let text = compact_text(&tree.root);
+        assert_eq!(text, "张三实习律师李四", "静态后缀被替换且不残留: {text}");
+    }
+
+    #[test]
+    fn repeatable_party_suffix_replaces_its_template_text_once() {        let mut field = field("lawyers", "party_list");
         field.mark_refs = vec![
             super::super::TemplateMarkRef {
                 tag: "lawyers.ref.1".to_string(),

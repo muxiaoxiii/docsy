@@ -86,7 +86,7 @@ lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normali
 - ~~eslint globals 白名单缺 `fetch` 等~~ ✅ beta12 已补 5 个；仍可考虑引入 `globals` 包的 `globals.browser` 彻底替代手维护。
 - `vite ^5.2.0` 偏旧（Vite 6/7 已发布），与 `@vitejs/plugin-vue ^5` 自洽，升级可作技术债记录。
 - 事件总线靠裸字符串 CustomEvent（`docsy-operation-*`、`docsy-template-library-changed`），事件名散落多处，建议集中定义事件名常量。
-- 前端测试覆盖率低：~29.9k 行源码仅 15 个测试文件，template 模块（最复杂）零测试。
+- 前端测试覆盖率低：~29.9k 行源码仅 15 个测试文件；template 模块本轮已补 3 个测试文件（21 条用例），其余模块仍待补。
 - `tauriBridge.js:4-26` 的 `operationLabels` 是硬编码命令→文案映射，新增 Rust 命令需记得回前端补文案。
 
 ---
@@ -99,6 +99,23 @@ lopdf 与 qpdf 子进程 JSON 混用，同一条流水线反复横跳：`normali
 - docx→md 引用块无法还原为 `>`（写入侧只做缩进）；有序列表起始号反向一律从 1 重编；单元格内嵌套表格压平；远程/缺失图片输出占位文本。
 - MD→docx 的样式目前固定（Times New Roman/宋体 docDefaults），如用户需要模板化样式（红头文件格式等）再立项。
 - README.md:68 仍有「## 🔧 PDF 工具」章节标题，下次更新 README 时同步为「文档工具」。
+
+---
+
+## 五、模板模块（本轮深度审查后仍未修项）
+
+> 审查/修复时间：2026-08-11；已修条目见 CHANGELOG [Unreleased]「模板模块深度修复」。以下为审查中发现、本轮未处理或未能彻底处理的问题。
+
+### 前端
+- **自动推断的同名合并需手动改名**：构建模板时两处同名字段（如两个"日期"）不做自动序号区分，需用户手动改名后才能各填各值。
+- **`renderableTemplateFields` 同名异类型去重分支语义混乱**：同名但类型不同的字段去重逻辑边界不清晰，遇到时需先梳理再动。
+- **`buildFillPreview` 读 formValues 快照**：固定来源的 reference 字段在填充预览里显示占位符而非解析值（纯显示问题，实际渲染正确）。
+- **旧模板存量自引用 reference 字段不迁移**：历史模板里已存的自引用字段实时解析后能取到值，但 UI 显示只读，不做数据迁移。
+- **批量路径未走 historyValues**：批量填充时历史记录值来源与单条渲染路径不一致。
+- 引用 slot key 不一致（`id` vs `id#0`）；DocumentPreview 不分段；`useBatchFill.js:139` 批量保存对话框死状态；`TemplateRenderTab.vue:481` 文件名预览恒占位；预览 watch 覆盖面不足；`getPartyListRows` 临时行丢失；长度单位码元/码点混用（`useTemplateState.js:1834`）；日期 iso 留空输出 "-  -"（`fieldRowUtils.js:759`）；`inspectSourceDocx`/`editTemplateFromLibrary` 无请求序号、存在竞态。
+
+### 后端
+- 日期校验过松（`batch.rs:391`）；ooxml 解析静默丢属性/CDATA（`ooxml.rs:121/163`）；同一表格行出现第二个 party_list 时退化处理（`render.rs:219`）；分隔符剥离只认整节点（`render.rs:609`）；validate 的 total_rows 计数偏大（`batch.rs:364`）；docProps 剔除可能产生悬空关系（存疑）；`to_xml` 不写 XML 声明（存疑）。
 
 ---
 

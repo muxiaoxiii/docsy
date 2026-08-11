@@ -174,7 +174,11 @@ fn write_node(writer: &mut Writer<Cursor<Vec<u8>>>, node: &XmlNode) -> Result<()
         } => {
             let mut elem = BytesStart::new(name.as_str());
             for (key, value) in attrs {
-                elem.push_attribute((key.as_str(), value.as_str()));
+                // (&str, &str) 形式的 push_attribute 内部已对值做 XML 转义
+                // （& < > ' "），此处只需剔除 XML 1.0 非法的控制字符——它们
+                // 可能来自解析端对 &#x1; 这类数值字符引用的还原。
+                let sanitized = sanitize_xml_text(value);
+                elem.push_attribute((key.as_str(), sanitized.as_str()));
             }
             if children.is_empty() {
                 writer.write_event(Event::Empty(elem))?;
@@ -187,14 +191,30 @@ fn write_node(writer: &mut Writer<Cursor<Vec<u8>>>, node: &XmlNode) -> Result<()
             }
         }
         XmlNode::Text(text) => {
-            let escaped = text
-                .replace('&', "&amp;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;");
+            // 写入前剔除 XML 1.0 非法的控制字符，再转义保留字符
+            let escaped = escape_xml_value(&sanitize_xml_text(text));
             writer.write_event(Event::Text(BytesText::from_escaped(escaped)))?;
         }
     }
     Ok(())
+}
+
+/// 转义 XML 保留字符（& < > "）。输入必须是已反转义的原始值，
+/// 本函数无条件转义，不存在二次转义问题。
+fn escape_xml_value(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// 剔除 XML 1.0 不允许的控制字符（\x00-\x08 \x0B \x0C \x0E-\x1F），
+/// 保留 \t \n \r。
+fn sanitize_xml_text(text: &str) -> String {
+    text.chars()
+        .filter(|&c| !matches!(c, '\x00'..='\x08' | '\x0B' | '\x0C' | '\x0E'..='\x1F'))
+        .collect()
 }
 
 #[cfg(test)]
@@ -261,5 +281,74 @@ mod tests {
         assert!(out.contains("Test content"));
         assert!(out.contains("<w:document"));
         assert!(out.contains("</w:document>"));
+    }
+
+    #[test]
+    fn attr_special_chars_roundtrip_stays_valid_xml() {
+        // 属性值含 & 和 " 时，往返一次后输出必须仍是合法 XML 且值不变
+        let xml = br#"<w:p><w:r><w:rPr><w:rStyle w:val="Tom &amp; Jerry &quot;Style&quot;"/></w:rPr><w:t>x</w:t></w:r></w:p>"#;
+        let tree = XmlTree::parse(xml).unwrap();
+
+        // 解析端已反转义为原始值
+        if let XmlNode::Element { children, .. } = &tree.root {
+            let run = children.iter().find_map(|c| match c {
+                XmlNode::Element { name, children, .. } if name == "w:r" => Some(children),
+                _ => None,
+            });
+            let mut found = None;
+            if let Some(run_children) = run {
+                for c in run_children {
+                    if let XmlNode::Element { name, children, .. } = c {
+                        if name == "w:rPr" {
+                            for rpr_child in children {
+                                if let XmlNode::Element { attrs, .. } = rpr_child {
+                                    found = attrs
+                                        .iter()
+                                        .find(|(k, _)| k == "w:val")
+                                        .map(|(_, v)| v.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            assert_eq!(found.as_deref(), Some("Tom & Jerry \"Style\""));
+        }
+
+        let out = tree.to_xml().unwrap();
+        // 写回时重新转义，且不能二次转义
+        assert!(out.contains("Tom &amp; Jerry &quot;Style&quot;"));
+        assert!(!out.contains("&amp;amp;"));
+        // 输出本身必须能被再次解析且值一致
+        let reparsed = XmlTree::parse(out.as_bytes()).unwrap();
+        assert_eq!(reparsed.root, tree.root);
+    }
+
+    #[test]
+    fn illegal_control_chars_are_stripped_on_write() {
+        // \x01 \x0B \x1F 在 XML 1.0 中非法，写入前剔除
+        let tree = XmlTree {
+            root: XmlNode::Element {
+                name: "w:r".to_string(),
+                attrs: Vec::new(),
+                children: vec![XmlNode::Element {
+                    name: "w:t".to_string(),
+                    attrs: Vec::new(),
+                    children: vec![XmlNode::Text("ab\x01\x0B\x1Fcd".to_string())],
+                }],
+            },
+        };
+        let out = tree.to_xml().unwrap();
+        assert!(out.contains(">abcd<"), "control chars stripped: {out}");
+        // \t \n \r 是合法字符，必须保留
+        let tree = XmlTree {
+            root: XmlNode::Element {
+                name: "w:t".to_string(),
+                attrs: Vec::new(),
+                children: vec![XmlNode::Text("a\tb\nc\rd".to_string())],
+            },
+        };
+        let out = tree.to_xml().unwrap();
+        assert!(out.contains("a\tb\nc\rd"), "legal whitespace kept: {out}");
     }
 }

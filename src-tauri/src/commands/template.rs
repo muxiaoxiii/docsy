@@ -21,11 +21,27 @@ pub async fn save_docx_template_to_library(
     mut args: crate::docx_template::SaveTemplateArgs,
 ) -> Result<crate::docx_template::SaveTemplateResult, String> {
     run_blocking(move || {
-        let file_name = crate::docx_template::safe_template_file_name(&args.template_name);
-        args.output_path = crate::docx_template::template_library_dir()
-            .join(format!("{file_name}.docsytpl"))
-            .display()
-            .to_string();
+        // 覆盖保存: when the caller passes an output_path that is an existing
+        // .docsytpl inside the template library, write to it in place instead
+        // of deriving a fresh unique name (which silently created copies).
+        let library_dir = crate::docx_template::template_library_dir();
+        let requested = std::path::Path::new(args.output_path.trim());
+        let overwrite_existing = !args.output_path.trim().is_empty()
+            && requested
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("docsytpl"))
+            && requested.parent().is_some_and(|dir| dir == library_dir)
+            && requested.exists();
+        if overwrite_existing {
+            args.output_path = requested.display().to_string();
+            args.overwrite = true;
+        } else {
+            let file_name = crate::docx_template::safe_template_file_name(&args.template_name);
+            args.output_path = library_dir
+                .join(format!("{file_name}.docsytpl"))
+                .display()
+                .to_string();
+        }
         crate::docx_template::engine::save_docx(args)
     })
     .await

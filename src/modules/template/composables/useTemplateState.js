@@ -19,7 +19,7 @@ import {
 import { useTemplateSettings } from './useTemplateSettings.js'
 import { useBatchFill } from './useBatchFill.js'
 import { markToRow, normalizeFieldRows, autoMergeMarks, inferFieldFromText, validateFieldRowsBeforeSave, buildFields } from './useFieldNormalization.js'
-import { ensureExtension, splitPartyLabelSegments, fieldFormKey, sliceChars, referenceSourceKey, formatDateValue, parseReferenceSourceKey, syncReferenceSourceFromKey, partyItemsToValues } from './fieldRowUtils.js'
+import { ensureExtension, splitPartyLabelSegments, fieldFormKey, sliceChars, referenceSourceKey, formatDateValue, parseReferenceSourceKey, syncReferenceSourceFromKey, partyItemsToValues, inputValueForField, resolveReferenceValueFromSource } from './fieldRowUtils.js'
 import { usePreviewSelection } from './usePreviewSelection.js'
 import { registerSnapshotProvider } from '../../../shared/diagnostics.js'
 
@@ -585,9 +585,17 @@ export function useTemplateState() {
   }
 
   function onReferenceSelectionChange(field, key) {
+    const formKey = fieldFormKey(field)
+    // Record the selection itself so the dropdown reflects it (回显), then
+    // snapshot the resolved value for immediate display.
+    if (key) {
+      referenceSelections[formKey] = key
+    } else {
+      delete referenceSelections[formKey]
+    }
     const source = parseReferenceFillKey(key)
     const values = normalizeValuesForReferenceSources()
-    formValues[fieldFormKey(field)] = resolveReferenceValueFromSource(source, values)
+    formValues[formKey] = resolveReferenceValueFromSource(source, values)
     scheduleHistoryRefresh()
   }
 
@@ -737,6 +745,9 @@ export function useTemplateState() {
   async function inspectSourceDocx() {
     if (!sourceDocx.value) return
     scanning.value = true
+    // New source document: drop undo history from the previous context so old
+    // fieldRows can never be restored onto the new document.
+    undoStack.value = []
     const result = await tauriCallSafe('inspect_docx_template', { path: sourceDocx.value })
     scanning.value = false
     if (!result.ok) {
@@ -1545,32 +1556,6 @@ export function useTemplateState() {
     return rows
   }
 
-  function autoSetReferenceForDuplicateRows(rows) {
-    const seen = new Map()
-    for (const row of rows) {
-      const name = row.name?.trim()
-      if (!name) continue
-      if (['reference', 'party_list', 'checkbox', 'radio_group', 'checkbox_group', 'prefix', 'suffix', 'delete_text', 'ignore'].includes(row.type)) {
-        if (!seen.has(name)) seen.set(name, true)
-        continue
-      }
-      if (seen.has(name)) {
-        row.type = 'reference'
-        row.required = false
-        row.optionalWhenEmpty = false
-        row.partyItems = []
-        row.referenceSourceMode = 'field'
-        row.referenceSourceField = name
-        row.referenceSourceSemanticKey = ''
-        row.referenceSourceIndex = null
-        row.referenceSourceKey = referenceSourceKey('field', name, null)
-      } else {
-        seen.set(name, true)
-      }
-    }
-    return rows
-  }
-
   function createSimpleFieldRow(field, options, markRef, refIndex) {
     const markId = markRef?.markId || field.marks?.[0] || ''
     const suffix = refIndex != null && refIndex > 0 ? `:ref${refIndex}` : ''
@@ -1665,6 +1650,8 @@ export function useTemplateState() {
 
   async function editTemplateFromLibrary(item) {
     if (!item?.path) return
+    // Editing another template: drop undo history from the previous context.
+    undoStack.value = []
     const result = await tauriCallSafe('inspect_docsytpl', { path: item.path })
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, '读取模板失败'))
@@ -1699,9 +1686,10 @@ export function useTemplateState() {
     sourcePreviewSelectionPayload.value = null
     clearPreviewSampleValues()
 
-    // Convert manifest fields back to editable fieldRows
-    const rows = manifestToFieldRows(manifest)
-    fieldRows.value = autoSetReferenceForDuplicateRows(rows)
+    // Convert manifest fields back to editable fieldRows. Same-name same-type
+    // rows intentionally keep their type: buildFields merges them back into a
+    // single fillAllPositions field (no self-reference conversion).
+    fieldRows.value = manifestToFieldRows(manifest)
 
     editingLibraryTemplatePath.value = item.path
     activeTab.value = 'build'
@@ -1711,6 +1699,8 @@ export function useTemplateState() {
     const requestSeq = ++templateOpenRequestSeq
     cachedFieldSuggestions = null
     cachedSemanticSuggestions = null
+    // Opening another template: drop undo history from the previous context.
+    undoStack.value = []
     const result = knownManifest ? { ok: true, data: knownManifest } : await tauriCallSafe('inspect_docsytpl', { path })
     if (requestSeq !== templateOpenRequestSeq) return false
     if (!result.ok) {
@@ -1922,13 +1912,6 @@ export function useTemplateState() {
     return value === '' || value == null
   }
 
-  function inputValueForField(field, value) {
-    if (field.type === 'party_list' && Array.isArray(value)) {
-      return value.map((item) => parsePartyItem(displayValue(item)))
-    }
-    return value
-  }
-
   // ── Template Import/Export ────────────────────────────────────────────────────
 
   async function importTemplateToLibrary() {
@@ -2021,6 +2004,9 @@ export function useTemplateState() {
         templatePath: templatePath.value,
         outputPath: finalOutputPath,
         values: normalizeValues(),
+        // History records the pre-normalization form values so a refill gets
+        // back what the user entered (e.g. 2026-08-05, not 二零二六年八月五日).
+        historyValues: rawValuesForHistory(),
         structureOverrides: normalizeStructureOverrides(),
         itemSeparator: itemSeparatorSetting.value || '、',
       },
@@ -2054,6 +2040,10 @@ export function useTemplateState() {
   } = useBatchFill(templatePath, templateManifest, normalizeValues, normalizeStructureOverrides, itemSeparatorSetting, loadTemplateHistoryRuns)
 
   function normalizeValues() {
+    // Source values are collected once, before the loop, so reference fields
+    // resolve against the source fields' CURRENT values at render time —
+    // never a stale snapshot taken when the user last touched the dropdown.
+    const sourceValues = normalizeValuesForReferenceSources()
     const values = {}
     for (const field of renderableTemplateFields.value) {
       const key = fieldFormKey(field)
@@ -2063,6 +2053,8 @@ export function useTemplateState() {
         normalizedValue = partyItemsToValues(value)
       } else if (effectiveFieldType(field) === 'date') {
         normalizedValue = formatDateValue(value, field.dateFormat)
+      } else if (effectiveFieldType(field) === 'reference') {
+        normalizedValue = resolveReferenceValueFromSource(currentReferenceSource(field), sourceValues)
       } else {
         normalizedValue = value
       }
@@ -2089,11 +2081,50 @@ export function useTemplateState() {
         values[slotKey] = formatDateValue(rawValue, baseField?.dateFormat)
       } else if (slotType === 'party_list') {
         values[slotKey] = partyItemsToValues(rawValue)
+      } else if (!slotType && referenceSelections[slotKey]) {
+        // Follower slot with a saved reference source: resolve live too.
+        values[slotKey] = resolveReferenceValueFromSource(
+          parseReferenceFillKey(referenceSelections[slotKey]),
+          sourceValues,
+        )
       } else {
         values[slotKey] = rawValue
       }
     }
     return values
+  }
+
+  // Raw (pre-normalization) values for history recording: dates stay in the
+  // entered form (YYYY-MM-DD / 留空) so a later refill doesn't have to undo
+  // the render format (cn_full etc.), reference fields store their currently
+  // resolved value.
+  function rawValuesForHistory() {
+    const sourceValues = normalizeValuesForReferenceSources()
+    const values = {}
+    for (const field of renderableTemplateFields.value) {
+      const key = fieldFormKey(field)
+      let value
+      if (effectiveFieldType(field) === 'party_list') {
+        value = partyItemsToValues(formValues[key])
+      } else if (effectiveFieldType(field) === 'reference') {
+        value = resolveReferenceValueFromSource(currentReferenceSource(field), sourceValues)
+      } else {
+        value = formValues[key]
+      }
+      values[field.id] = value
+      if (!(field.name in values)) {
+        values[field.name] = value
+      }
+    }
+    return values
+  }
+
+  // The reference source to resolve at render time: the template-fixed source
+  // when configured, otherwise the filler's current dropdown selection.
+  function currentReferenceSource(field) {
+    const fixed = fixedReferenceSource(field.reference)
+    if (fixed.mode !== 'auto') return fixed
+    return parseReferenceFillKey(referenceSelections[fieldFormKey(field)])
   }
 
   function normalizeStructureOverrides() {
@@ -2155,17 +2186,6 @@ export function useTemplateState() {
     return parsed.sourceField || parsed.sourceSemanticKey
       ? parsed
       : { mode: 'auto', sourceField: '', sourceSemanticKey: '', sourceIndex: null }
-  }
-
-  function resolveReferenceValueFromSource(source, values) {
-    if (!source || source.mode === 'auto') return ''
-    const raw = source.mode === 'semantic' ? values?.[source.sourceSemanticKey] : values?.[source.sourceField]
-    if (Array.isArray(raw)) {
-      return source.sourceIndex == null
-        ? raw.map(displayValue).filter(Boolean).join('、')
-        : displayValue(raw[source.sourceIndex] || '')
-    }
-    return source.sourceIndex == null && raw != null ? String(raw) : ''
   }
 
   function structureOverrideKey(field) {
@@ -2380,14 +2400,6 @@ export function useTemplateState() {
   function applySuggestion(field, value) {
     formValues[fieldFormKey(field)] = inputValueForField(field, value)
     scheduleHistoryRefresh()
-  }
-
-  function displayValue(value) {
-    if (value == null) return ''
-    if (typeof value === 'string') return value
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-    if (Array.isArray(value)) return value.map(displayValue).join('、')
-    return value.name || value.label || JSON.stringify(value)
   }
 
   const expandedHistoryGroups = reactive(new Set())

@@ -533,16 +533,11 @@ export function buildFields(fieldRows) {
     } else {
       const existing = byKey.get(key)
       if (existing && !isMarkerType(type) && rowUsage(row) !== 'delete_text') {
+        // Same-name same-type rows stay one field with fillAllPositions: a
+        // single input fills every position with the same value. Do NOT turn
+        // the field into a self-referencing 'reference' — that made the fill
+        // page render a static label with no input and rendered empty.
         existing.fillAllPositions = true
-        if (existing.type !== 'reference') {
-          existing.type = 'reference'
-          existing.reference = {
-            sourceMode: 'field',
-            sourceField: existing.name,
-            sourceSemanticKey: '',
-            sourceIndex: null,
-          }
-        }
       }
     }
     const field = byKey.get(key)

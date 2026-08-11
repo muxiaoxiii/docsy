@@ -55,7 +55,11 @@ pub fn save_docx(args: SaveTemplateArgs) -> Result<SaveTemplateResult> {
     } else {
         std::path::PathBuf::from(&args.source_docx)
     };
-    let output = unique_docx_output_path(std::path::Path::new(&args.output_path))?;
+    let output = if args.overwrite {
+        std::path::PathBuf::from(&args.output_path)
+    } else {
+        unique_docx_output_path(std::path::Path::new(&args.output_path))?
+    };
 
     // Editing a library template re-saves from the docsytpl package itself
     // (its embedded word/document.xml) instead of an external Word file.
@@ -243,7 +247,7 @@ pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
             &args.template_path,
             &manifest,
             &output_path_str,
-            &args.values,
+            args.history_values.as_ref().unwrap_or(&args.values),
             source,
         );
     }
@@ -507,6 +511,7 @@ mod tests {
             template_name: "E2E Test".to_string(),
             fields: fields.clone(),
             filename_template: None,
+            overwrite: false,
         };
         let saved = save_docx(save_args).unwrap();
         assert_eq!(saved.manifest.format_version, 2);
@@ -539,6 +544,7 @@ mod tests {
             template_path: saved.output_path.clone(),
             output_path: output_dir.join("output.docx").display().to_string(),
             values,
+            history_values: None,
             structure_overrides: HashMap::new(),
         };
         let output_path = render_docx(render_args, "single").unwrap();
@@ -694,6 +700,7 @@ mod tests {
             template_name: "Table E2E".to_string(),
             fields,
             filename_template: None,
+            overwrite: false,
         })
         .unwrap();
         assert_eq!(saved.manifest.format_version, 2);
@@ -718,6 +725,7 @@ mod tests {
                 template_path: saved.output_path.clone(),
                 output_path: output_dir.join("rendered.docx").display().to_string(),
                 values,
+                history_values: None,
                 structure_overrides: HashMap::new(),
                 item_separator: "、".to_string(),
             },

@@ -394,11 +394,143 @@ fn is_valid_date_text(text: &str) -> bool {
     false
 }
 
+// ── 日期格式化（与前端 fieldRowUtils.js formatDateValue 规则一致）─────────────
+
+const CN_DIGITS: &[char] = &['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+const EN_MONTHS: &[&str] = &[
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+const EN_MONTHS_SHORT: &[&str] = &[
+    "Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec.",
+];
+
+/// 解析日期输入为 (年, 月, 日)；任一部分为 0 表示"留空"。
+/// 支持 20260805、2026-08-05、2026/8/5、2026.8.5、2026年8月5日、"留空"；
+/// 无法解析返回 None（调用方原样透传，不报错）。
+fn parse_date_parts(value: &str) -> Option<(u32, u32, u32)> {
+    let s = value.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if s == "留空" {
+        return Some((0, 0, 0));
+    }
+    let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    if compact.len() == 8 && compact.chars().all(|c| c.is_ascii_digit()) {
+        let y = compact[0..4].parse().ok()?;
+        let m = compact[4..6].parse().ok()?;
+        let d = compact[6..8].parse().ok()?;
+        return Some((y, m, d));
+    }
+    let parts: Vec<&str> = compact
+        .split(['-', '/', '年', '月', '日', '.'])
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.len() >= 3 {
+        let y = parts[0].parse().ok()?;
+        let m = parts[1].parse().ok()?;
+        let d = parts[2].parse().ok()?;
+        return Some((y, m, d));
+    }
+    // 裸数字不足 8 位或段数不够：含义不明，按无法解析处理
+    None
+}
+
+fn cn_number(n: u32) -> String {
+    if n == 0 {
+        return String::new();
+    }
+    n.to_string()
+        .chars()
+        .map(|c| {
+            c.to_digit(10)
+                .and_then(|d| CN_DIGITS.get(d as usize).copied())
+                .unwrap_or(c)
+        })
+        .collect()
+}
+
+fn en_ordinal(n: u32) -> String {
+    let rem100 = n % 100;
+    if (11..=13).contains(&rem100) {
+        return format!("{n}th");
+    }
+    match n % 10 {
+        1 => format!("{n}st"),
+        2 => format!("{n}nd"),
+        3 => format!("{n}rd"),
+        _ => format!("{n}th"),
+    }
+}
+
+/// 按指定格式渲染日期值，规则与前端 formatDateValue 一致：
+/// 任一部分为 0 时该段留空（blank 即全留空，供打印后手写）。
+fn format_date_value(value: &str, format: &str) -> String {
+    let Some((y, m, d)) = parse_date_parts(value) else {
+        return value.to_string();
+    };
+    let fmt = if format.is_empty() { "iso" } else { format };
+    let y_str = if y > 0 { y.to_string() } else { "    ".to_string() };
+    let m_str = if m > 0 { m.to_string() } else { "  ".to_string() };
+    let d_str = if d > 0 { d.to_string() } else { "  ".to_string() };
+    if fmt == "cn" || fmt == "blank" {
+        return format!("{y_str}年{m_str}月{d_str}日");
+    }
+    if fmt == "cn_full" {
+        return format!(
+            "{}年{}月{}日",
+            cn_number(y),
+            if m > 0 { cn_number(m) } else { "  ".to_string() },
+            if d > 0 { cn_number(d) } else { "  ".to_string() }
+        );
+    }
+    let month_long = if (1..=12).contains(&m) {
+        EN_MONTHS[(m - 1) as usize]
+    } else {
+        " "
+    };
+    let month_short = if (1..=12).contains(&m) {
+        EN_MONTHS_SHORT[(m - 1) as usize]
+    } else {
+        " "
+    };
+    // 对应前端的 .replace(/\s+/g, ' ').trim()
+    let squash = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if fmt == "en_long" {
+        return squash(format!("{month_long} {d_str}, {y_str}"));
+    }
+    if fmt == "en_short" {
+        return squash(format!("{month_short} {d_str}, {y_str}"));
+    }
+    if fmt == "en_dmy" {
+        return squash(format!("{d_str} {month_long} {y_str}"));
+    }
+    if fmt == "en_ordinal" {
+        let d_ord = if d > 0 { en_ordinal(d) } else { String::new() };
+        return squash(format!("{y_str} {month_long} {d_ord}"));
+    }
+    // iso 默认：2026-8-5（留空部分保持空白段）
+    format!("{y_str}-{m_str}-{d_str}").trim().to_string()
+}
+
 fn cell_to_string(cell: &calamine::Data) -> String {
     match cell {
         calamine::Data::String(s) => s.clone(),
         calamine::Data::Float(f) => {
-            if f.fract() == 0.0 {
+            // 仅在 i64 可精确表示的范围内（|f| <= 2^53）按整数输出；
+            // 超出范围时 `as i64` 会静默饱和成 i64::MAX，改用原始浮点格式
+            if f.fract() == 0.0 && f.abs() <= 9_007_199_254_740_992.0 {
                 format!("{}", *f as i64)
             } else {
                 f.to_string()
@@ -575,6 +707,7 @@ pub fn batch_render(
             template_path: template_path.to_string(),
             output_path: output_path.display().to_string(),
             values,
+            history_values: None,
             structure_overrides: structure_overrides.clone(),
         };
 
@@ -623,9 +756,10 @@ fn build_row_values(
             }
             "checkbox" => {
                 let trimmed = text.trim().to_lowercase();
+                // 与 scan.rs CHECKBOX_CHARS 对齐："√" 和 "☒"（带叉勾选框）都算勾选
                 serde_json::Value::Bool(matches!(
                     trimmed.as_str(),
-                    "true" | "1" | "是" | "yes" | "☑" | "✓" | "✔"
+                    "true" | "1" | "是" | "yes" | "☑" | "☒" | "✓" | "✔" | "√"
                 ))
             }
             "radio_group" | "select" => {
@@ -657,7 +791,17 @@ fn build_row_values(
                     .collect();
                 serde_json::Value::Array(items)
             }
-            // reference, marker, prefix, suffix, text, date, and others: store as string
+            // date 字段带 date_format 时按前端 formatDateValue 同款规则格式化；
+            // 未设置或无法解析时原样透传
+            "date" => {
+                let trimmed = text.trim();
+                if field.date_format.is_empty() {
+                    serde_json::Value::String(trimmed.to_string())
+                } else {
+                    serde_json::Value::String(format_date_value(trimmed, &field.date_format))
+                }
+            }
+            // reference, marker, prefix, suffix, text, and others: store as string
             _ => serde_json::Value::String(text.trim().to_string()),
         };
 
@@ -867,4 +1011,142 @@ fn to_chinese_number(n: usize) -> String {
         result = result[3..].to_string(); // skip '一' (3 bytes in UTF-8)
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_field(id: &str, ftype: &str) -> TemplateField {
+        TemplateField {
+            id: id.to_string(),
+            name: id.to_string(),
+            label: id.to_string(),
+            field_type: ftype.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn test_manifest(fields: Vec<TemplateField>) -> TemplateManifest {
+        TemplateManifest {
+            format_version: 2,
+            template: super::super::TemplateMeta {
+                id: "t0".to_string(),
+                name: "test".to_string(),
+                created: String::new(),
+                updated: String::new(),
+            },
+            fields,
+            filename_template: None,
+        }
+    }
+
+    fn single_cell_value(field: &TemplateField, cell: calamine::Data) -> serde_json::Value {
+        let manifest = test_manifest(vec![field.clone()]);
+        let col_map: Vec<(usize, &TemplateField)> = vec![(0, &manifest.fields[0])];
+        let values = build_row_values(&[cell], &col_map, &manifest);
+        values.get(&field.id).cloned().unwrap_or(serde_json::Value::Null)
+    }
+
+    #[test]
+    fn checkbox_truth_table_includes_cn_check_marks() {
+        let field = test_field("c", "checkbox");
+        // "√" 与 "☒"（带叉勾选框）均为勾选，与 scan.rs CHECKBOX_CHARS 对齐
+        for checked in ["√", "☒", "☑", "✓", "✔", "是", "true", "1", "yes"] {
+            assert_eq!(
+                single_cell_value(&field, calamine::Data::String(checked.to_string())),
+                serde_json::Value::Bool(true),
+                "{checked} 应判定为勾选"
+            );
+        }
+        for unchecked in ["☐", "□", "否", "false", ""] {
+            assert_eq!(
+                single_cell_value(&field, calamine::Data::String(unchecked.to_string())),
+                serde_json::Value::Bool(false),
+                "{unchecked} 应判定为未勾选"
+            );
+        }
+    }
+
+    #[test]
+    fn float_cell_does_not_saturate_to_i64_max() {
+        // 超出 i64 精确范围的大浮点不得静默饱和成 i64::MAX
+        assert_eq!(
+            cell_to_string(&calamine::Data::Float(1e20)),
+            "100000000000000000000"
+        );
+        // 2^53 边界仍按整数输出（无 ".0" 后缀）
+        assert_eq!(
+            cell_to_string(&calamine::Data::Float(9_007_199_254_740_992.0)),
+            "9007199254740992"
+        );
+        assert_eq!(cell_to_string(&calamine::Data::Float(42.0)), "42");
+        assert_eq!(cell_to_string(&calamine::Data::Float(-42.0)), "-42");
+        assert_eq!(cell_to_string(&calamine::Data::Float(3.5)), "3.5");
+    }
+
+    #[test]
+    fn batch_date_values_apply_field_date_format() {
+        let mut field = test_field("d", "date");
+        field.date_format = "cn".to_string();
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("2026-08-05".to_string())),
+            serde_json::Value::String("2026年8月5日".to_string())
+        );
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("2026年8月5日".to_string())),
+            serde_json::Value::String("2026年8月5日".to_string())
+        );
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("20260805".to_string())),
+            serde_json::Value::String("2026年8月5日".to_string())
+        );
+
+        field.date_format = "cn_full".to_string();
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("2026-08-05".to_string())),
+            serde_json::Value::String("二零二六年八月五日".to_string())
+        );
+
+        field.date_format = "iso".to_string();
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("2026年8月5日".to_string())),
+            serde_json::Value::String("2026-8-5".to_string())
+        );
+
+        field.date_format = "en_long".to_string();
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("2026-08-05".to_string())),
+            serde_json::Value::String("August 5, 2026".to_string())
+        );
+
+        field.date_format = "en_ordinal".to_string();
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("2026-08-05".to_string())),
+            serde_json::Value::String("2026 August 5th".to_string())
+        );
+
+        field.date_format = "blank".to_string();
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("留空".to_string())),
+            serde_json::Value::String("    年  月  日".to_string())
+        );
+    }
+
+    #[test]
+    fn batch_date_values_passthrough_when_unparsable_or_no_format() {
+        let mut field = test_field("d", "date");
+        field.date_format = "cn".to_string();
+        // 无法解析的日期原样透传，不报错
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("待定".to_string())),
+            serde_json::Value::String("待定".to_string())
+        );
+        // 未设置 date_format 时不做格式转换
+        field.date_format = String::new();
+        assert_eq!(
+            single_cell_value(&field, calamine::Data::String("2026年8月5日".to_string())),
+            serde_json::Value::String("2026年8月5日".to_string())
+        );
+    }
 }

@@ -445,12 +445,13 @@ export function isGroupedField(row, rows) {
 
 export function groupedFieldSummary(row) {
   if (isMarkerType(row.type)) return '同一勾选组'
-  // Same-name multi-position fields are fillAllPositions: later positions
-  // reference the first one, so label them accordingly.
+  // Genuine reference rows point at another field.
   const sourceName =
     row?.referenceSourceField || row?.referenceSourceSemanticKey || ''
-  if (sourceName) return `引用：${sourceName}`
-  return '同一字段，已改成引用'
+  if (row?.type === 'reference' && sourceName) return `引用：${sourceName}`
+  // Same-name same-type rows merge into one fillAllPositions field: a single
+  // input fills every document position with the same value.
+  return '同一字段，填写一次同步到所有位置'
 }
 
 export function markerGroupMembers(row, rows) {
@@ -707,6 +708,10 @@ export function parseDateParts(value) {
       y = Number(parts[0])
       m = Number(parts[1])
       d = Number(parts[2])
+      // Non-numeric parts (e.g. rendered Chinese dates like 二零二六年八月五日
+      // coming back from history) are unparseable — bail out so callers keep
+      // the original string instead of a blank {0,0,0} date.
+      if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return null
     } else if (parts.length === 1 && /^\d+$/.test(compact)) {
       // bare digits without separators are ambiguous; treat as y-m-d only when 8 wide
       return null
@@ -874,6 +879,40 @@ export function parsePartyItem(value) {
     text: String(value || '').trim(),
     suffix: '',
   }
+}
+
+// Convert a history/suggestion value into the form-input shape for a field.
+// Party items keep their {text, suffix} object form so per-item suffixes
+// (律师/实习律师…) survive a history refill.
+export function inputValueForField(field, value) {
+  if (field?.type === 'party_list' && Array.isArray(value)) {
+    return value.map((item) => parsePartyItem(item))
+  }
+  return value
+}
+
+// Display string for a single party item, keeping its suffix (unlike
+// displayValue, which drops it): {name:'张三', suffix:'律师'} → '张三律师'.
+export function displayPartyValue(item) {
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    const name = item.name || item.label || item.text || ''
+    return `${name}${item.suffix || ''}`
+  }
+  return displayValue(item)
+}
+
+// Resolve a reference field's current value from the source values map.
+// Pure: callers pass freshly collected source values so the result always
+// reflects the source field's current input (no stale snapshots).
+export function resolveReferenceValueFromSource(source, values) {
+  if (!source || source.mode === 'auto') return ''
+  const raw = source.mode === 'semantic' ? values?.[source.sourceSemanticKey] : values?.[source.sourceField]
+  if (Array.isArray(raw)) {
+    return source.sourceIndex == null
+      ? raw.map(displayPartyValue).filter(Boolean).join('、')
+      : displayPartyValue(raw[source.sourceIndex] || '')
+  }
+  return source.sourceIndex == null && raw != null ? String(raw) : ''
 }
 
 export function partyFieldUsesSuffix(field) {

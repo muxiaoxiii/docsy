@@ -332,6 +332,18 @@ fn wrap_paragraph_runs(
     while i < children.len() {
         let is_wr = matches!(&children[i], XmlNode::Element { name, .. } if name == "w:r");
         if !is_wr {
+            // 库模板“编辑再保存”时，document.xml 里已有上次保存写入的 w:sdt。
+            // 若其中包含本次要包的目标 run，先去掉旧壳（内部 run 原样保留，
+            // 提升为兄弟节点后由主循环重新包新壳），避免嵌套 sdt 导致渲染端
+            // 只认 w:r 而丢掉字段。
+            if matches!(&children[i], XmlNode::Element { name, .. } if name == "w:sdt")
+                && sdt_hits_target(&children[i], part, p_idx, cursor.1, coord_map)
+            {
+                let sdt = std::mem::replace(&mut children[i], XmlNode::Text(String::new()));
+                let content = sdt_content_children(sdt);
+                children.splice(i..i + 1, content);
+                continue; // 不推进 i：提升上来的节点按普通兄弟节点继续处理
+            }
             // Nested containers whose runs participate in coordinates must be
             // traversed exactly like scan does (w:sdt, w:sdtContent, w:hyperlink).
             if matches!(&children[i], XmlNode::Element { name, .. } if name == "w:sdt" || name == "w:sdtContent" || name == "w:hyperlink")
@@ -390,6 +402,10 @@ fn wrap_paragraph_runs(
                     if is_delete {
                         if let (Some(s), Some(e)) = (start, end) {
                             delete_text_range(&mut children[i], s, e)?;
+                        } else if run_has_non_text_payload(&children[i]) {
+                            // 含 w:drawing/w:pict 等非文本负载的 run 不能整体
+                            // 删除——清掉 run 会把嵌入对象一起抹掉。与部分删除
+                            // （delete_text_range）的口径一致：不删，保留原样。
                         } else {
                             children[i] = XmlNode::Text(String::new());
                         }
@@ -468,6 +484,92 @@ fn find_nested_paragraphs(
         }
     }
     Ok(())
+}
+
+/// 取出 w:sdt 内 w:sdtContent 的子节点：只去外壳，内容 run 原样保留。
+fn sdt_content_children(sdt: XmlNode) -> Vec<XmlNode> {
+    if let XmlNode::Element { children, .. } = sdt {
+        for child in children {
+            if let XmlNode::Element {
+                name, children, ..
+            } = child
+            {
+                if name == "w:sdtContent" {
+                    return children;
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// 判断 sdt 子树内是否有 run 命中目标坐标。run 计数方式与 scan/wrap 完全
+/// 一致（w:sdt/w:sdtContent/w:hyperlink 透明；fldChar 与域代码区不计）。
+fn sdt_hits_target(
+    sdt: &XmlNode,
+    part: &str,
+    p_idx: usize,
+    run_idx: usize,
+    coord_map: &HashMap<(String, usize, usize), Vec<FieldTarget>>,
+) -> bool {
+    let mut idx = run_idx;
+    let mut hit = false;
+    if let XmlNode::Element { children, .. } = sdt {
+        count_target_runs(children, part, p_idx, &mut idx, coord_map, &mut hit);
+    }
+    hit
+}
+
+fn count_target_runs(
+    children: &[XmlNode],
+    part: &str,
+    p_idx: usize,
+    idx: &mut usize,
+    coord_map: &HashMap<(String, usize, usize), Vec<FieldTarget>>,
+    hit: &mut bool,
+) {
+    let mut field_depth: u32 = 0;
+    let mut in_field_code = false;
+    for child in children {
+        let XmlNode::Element {
+            name, children: sub, ..
+        } = child
+        else {
+            continue;
+        };
+        if name != "w:r" {
+            if name == "w:sdt" || name == "w:sdtContent" || name == "w:hyperlink" {
+                count_target_runs(sub, part, p_idx, idx, coord_map, hit);
+            }
+            continue;
+        }
+        if let Some(fld_type) = fldchar_type(child) {
+            match fld_type {
+                "begin" => {
+                    field_depth += 1;
+                    in_field_code = true;
+                }
+                "separate" => in_field_code = false,
+                "end" => {
+                    field_depth = field_depth.saturating_sub(1);
+                    if field_depth == 0 {
+                        in_field_code = false;
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if field_depth > 0 && in_field_code {
+            continue;
+        }
+        if run_has_text(child) {
+            if coord_map.contains_key(&(part.to_string(), p_idx, *idx)) {
+                *hit = true;
+            }
+            *idx += 1;
+        }
+    }
 }
 
 fn strip_yellow_highlight(node: &mut XmlNode) {
@@ -867,6 +969,120 @@ mod tests {
         </w:p></w:body></w:document>"#;
         let tree = XmlTree::parse(xml.as_bytes()).unwrap();
         assert!(detect_existing_sdt(&tree.root, "word/document.xml").is_ok());
+    }
+
+    #[test]
+    fn whole_run_delete_keeps_runs_with_non_text_payload() {
+        // 整 run 删除遇到含 w:drawing 的 run 时保留原样，不抹掉嵌入对象
+        let mut tree = XmlTree::parse(
+            r#"<w:p><w:r><w:t>删除我</w:t><w:drawing/></w:r><w:r><w:t>纯文本</w:t></w:r></w:p>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        let mut targets = HashMap::new();
+        targets.insert(
+            ("word/document.xml".to_string(), 0, 0),
+            vec![(
+                "__delete_d1".to_string(),
+                "delete_text".to_string(),
+                true,
+                None,
+                None,
+            )],
+        );
+        targets.insert(
+            ("word/document.xml".to_string(), 0, 1),
+            vec![(
+                "__delete_d2".to_string(),
+                "delete_text".to_string(),
+                true,
+                None,
+                None,
+            )],
+        );
+
+        wrap_runs_by_coordinates(&mut tree.root, "word/document.xml", &targets, &mut (0, 0))
+            .unwrap();
+        let xml = tree.to_xml().unwrap();
+        assert!(
+            xml.contains("<w:drawing") && xml.contains("删除我"),
+            "含非文本负载的 run 不删: {xml}"
+        );
+        assert!(!xml.contains("纯文本"), "纯文本 run 正常删除: {xml}");
+    }
+
+    #[test]
+    fn resave_unwraps_previous_sdt_instead_of_nesting() {
+        // 模拟“编辑库模板再保存”：第一次保存产物的 document.xml 已含 w:sdt，
+        // 第二次保存必须先去掉旧壳再包新壳，不能嵌套。
+        let xml = r#"<w:document><w:body><w:p>
+            <w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>张三</w:t></w:r>
+        </w:p></w:body></w:document>"#;
+        let fields = vec![TemplateField {
+            id: "name".to_string(),
+            name: "姓名".to_string(),
+            label: "姓名".to_string(),
+            field_type: "text".to_string(),
+            marks: vec!["word/document.xml-p0-r0".to_string()],
+            ..Default::default()
+        }];
+        let parts = vec![("word/document.xml".to_string(), xml.as_bytes().to_vec())];
+
+        let scan_parts: Vec<(&str, &[u8])> = parts
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
+        let index = crate::docx_template::scan::scan_package_index_to_document_index(&scan_parts)
+            .unwrap();
+        let first = build_template_docx(&parts, &fields, &index).unwrap();
+        let first_xml = String::from_utf8(first[0].1.clone()).unwrap();
+        assert!(first_xml.contains("<w:sdt>"), "first save wraps sdt");
+
+        // 第二次保存：源已是含 sdt 的上次产物（库模板编辑路径）
+        let scan_parts2: Vec<(&str, &[u8])> = first
+            .iter()
+            .map(|(n, d)| (n.as_str(), d.as_slice()))
+            .collect();
+        let index2 =
+            crate::docx_template::scan::scan_package_index_to_document_index(&scan_parts2).unwrap();
+        let second = build_template_docx(&first, &fields, &index2).unwrap();
+        let second_xml = String::from_utf8(second[0].1.clone()).unwrap();
+        assert_eq!(
+            second_xml.matches("<w:sdt>").count(),
+            1,
+            "再保存不能产生嵌套 sdt: {second_xml}"
+        );
+
+        // 渲染后字段必须有值（嵌套 sdt 时渲染端只认 w:r，字段会渲染为空）
+        let manifest = crate::docx_template::TemplateManifest {
+            format_version: 2,
+            template: crate::docx_template::TemplateMeta {
+                id: "t0".to_string(),
+                name: "test".to_string(),
+                created: String::new(),
+                updated: String::new(),
+            },
+            fields,
+            filename_template: None,
+        };
+        let mut values = HashMap::new();
+        values.insert(
+            "name".to_string(),
+            serde_json::Value::String("李四".to_string()),
+        );
+        let rendered = crate::docx_template::render::render_docx(
+            &second,
+            &manifest,
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
+        let rendered_xml = String::from_utf8(rendered[0].1.clone()).unwrap();
+        assert!(
+            rendered_xml.contains("李四"),
+            "再保存产物渲染后字段为空: {rendered_xml}"
+        );
     }
 
     #[test]

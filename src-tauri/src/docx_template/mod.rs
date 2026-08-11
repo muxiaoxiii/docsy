@@ -213,6 +213,10 @@ pub struct SaveTemplateArgs {
     pub fields: Vec<TemplateField>,
     #[serde(default)]
     pub filename_template: Option<FilenameTemplate>,
+    /// Overwrite `output_path` in place instead of deriving a unique "-N" name.
+    /// Used when re-saving (覆盖保存) an existing library template.
+    #[serde(default)]
+    pub overwrite: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -269,6 +273,10 @@ pub struct RenderTemplateArgs {
     pub output_path: String,
     #[serde(default)]
     pub values: HashMap<String, Value>,
+    /// Pre-normalization form values for history recording. When present, the
+    /// history run stores these instead of the render-formatted `values`.
+    #[serde(default)]
+    pub history_values: Option<HashMap<String, Value>>,
     #[serde(default)]
     pub structure_overrides: HashMap<String, StructureOverride>,
     /// Separator between items of multi-value (party_list) fields.
