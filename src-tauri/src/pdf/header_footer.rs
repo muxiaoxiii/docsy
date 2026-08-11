@@ -250,9 +250,12 @@ pub fn overlay_text(args: &serde_json::Value) -> Result<serde_json::Value> {
 ///
 /// 在每个 item 处理前检查 CancellationToken，
 /// 用户取消时返回已处理的部分结果（不会丢失已完成的工作）。
+/// progress 回调在每个 item 处理前触发，参数为 (当前序号, 总数, 输入路径)，
+/// 不关心进度的调用方可传空闭包。
 pub fn batch_overlay_cancellable(
     args: &serde_json::Value,
     token: &tokio_util::sync::CancellationToken,
+    progress: &dyn Fn(usize, usize, &str),
 ) -> Result<serde_json::Value> {
     let items = args
         .get("items")
@@ -262,8 +265,16 @@ pub fn batch_overlay_cancellable(
 
     let mut results = Vec::new();
     let mut failed = Vec::new();
+    let total = items.len();
 
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
+        // 逐文件上报进度，供前端展示“正在处理 i/N:文件名”
+        let input_path = item
+            .get("inputPath")
+            .or_else(|| item.get("input"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        progress(index + 1, total, input_path);
         // MDG-001: 每个 item 处理前检查取消信号
         if token.is_cancelled() {
             // 返回已处理的部分结果，不丢失已完成的工作
@@ -1158,7 +1169,7 @@ fn build_overlay_pdf(
                 ));
             }
             placed.push((region, y0, y1));
-            append_overlay_text_ops(
+            if append_overlay_text_ops(
                 &mut operations,
                 config,
                 region,
@@ -1166,7 +1177,12 @@ fn build_overlay_pdf(
                 current_page,
                 total_pages,
                 &embedded_fonts,
-            )?;
+            )? {
+                page_warnings.push(format!(
+                    "第 {local_page} 页的\"{}\"超出页面右缘，已收拢到页面内；如仍被裁切请缩短文本或调小字号",
+                    config.text.trim()
+                ));
+            }
         }
         if !page_warnings.is_empty() {
             warnings.push(page_warnings.join("；"));
@@ -1540,18 +1556,27 @@ fn append_overlay_text_ops(
     current_page: u32,
     total_pages: u32,
     embedded_fonts: &BTreeMap<String, EmbeddedOverlayFont>,
-) -> Result<()> {
+) -> Result<bool> {
     let text = expand_config_placeholders(config, current_page, total_pages);
     if text.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
-    let y = match region {
+    let mut y = match region {
         OverlayRegion::Header => size.height_pt - mm_to_pt(config.margin_mm),
         OverlayRegion::Footer => mm_to_pt(config.margin_mm),
     };
+    // 边距超过页面（或负值）时把基线收回页内，避免文字整体掉出 CropBox。
+    y = y.clamp(0.0, size.height_pt);
     let font_ref = overlay_font_ref(config, &text, embedded_fonts)?;
     let use_embedded = matches!(font_ref, OverlayFontRef::Embedded(_));
-    let x = compute_x(config, &text, use_embedded, size.width_pt);
+    let mut x = compute_x(config, &text, use_embedded, size.width_pt);
+    // 横向溢出：估算宽度超出页宽时向左收拢到页内（含 left 对齐长文本、
+    // right/center 对齐受 offset 或估算误差影响画出右缘两种情况）。
+    let text_width = estimate_text_width(&text, use_embedded, config.font_size);
+    let overflowed = x + text_width > size.width_pt + 0.5;
+    if overflowed {
+        x = (size.width_pt - text_width).max(0.0);
+    }
     ops.extend(text_ops(
         &font_ref,
         config,
@@ -1561,7 +1586,7 @@ fn append_overlay_text_ops(
         y,
         text,
     ));
-    Ok(())
+    Ok(overflowed)
 }
 
 fn overlay_font_ref<'a>(
@@ -1946,7 +1971,12 @@ fn estimate_char_width(c: char, is_builtin: bool) -> f32 {
     let cp = c as u32;
     let cjk = (0x4E00..=0x9FFF).contains(&cp)
         || (0x3400..=0x4DBF).contains(&cp)
-        || (0x20000..=0x2A6DF).contains(&cp);
+        || (0x20000..=0x2A6DF).contains(&cp)
+        // CJK 标点（。《》、（）等）与全角形式在嵌入中文字体里同样占 1em，
+        // 之前按 0.5em 估算导致 right/center 对齐系统性偏右、文本画出页外。
+        || (0x3000..=0x303F).contains(&cp)
+        || (0xFF01..=0xFF60).contains(&cp)
+        || (0xFFE0..=0xFFE6).contains(&cp);
     if cjk {
         return 1.0;
     }
@@ -2218,6 +2248,71 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.iter().any(|text| text == "主页眉"));
         assert!(texts.iter().any(|text| text == "页码"));
+    }
+
+    #[test]
+    fn fullwidth_punctuation_counts_as_one_em_in_width_estimate() {
+        // 《》（）等全角标点在嵌入中文字体里占 1em；按 0.5em 估算会让
+        // right/center 对齐的文本系统性偏右画出页外。
+        assert_eq!(estimate_text_width("（热镀锌）", true, 10.0), 50.0);
+        assert_eq!(estimate_text_width("《A4》", true, 10.0), 30.0);
+    }
+
+    #[test]
+    fn overflowing_overlay_is_pulled_back_into_page_with_warning() {
+        let pages = vec![PageSize {
+            width_pt: 400.0,
+            height_pt: 300.0,
+            raw_width_pt: 400.0,
+            raw_height_pt: 300.0,
+            rotate: 0,
+        }];
+        let footer = OverlayTextConfig {
+            text: "证据十三. 中航试金石检测科技（大厂）有限公司检测报告".to_string(),
+            region: "footer".to_string(),
+            font_family: "auto".to_string(),
+            font_size: 10.0,
+            margin_mm: 10.0,
+            align: "right".to_string(),
+            offset_x_mm: 50.0,
+            color: "#000000".to_string(),
+            page_start: None,
+            page_end: None,
+            number_style: String::new(),
+            number_offset: 0,
+            number_total: None,
+            artifact_kind: "FooterText".to_string(),
+        };
+        let (bytes, warnings) = build_overlay_pdf(None, Some(&footer), &[], &pages, 1, 1)
+            .expect("overlay PDF should be generated");
+        assert!(
+            warnings.iter().any(|w| w.contains("超出页面右缘")),
+            "overflow should produce a warning, got {warnings:?}"
+        );
+        let document = Document::load_mem(&bytes).expect("overlay PDF should be readable");
+        let page_id = document.get_pages().into_values().next().unwrap();
+        let content = document.get_and_decode_page_content(page_id).unwrap();
+        let tm_x = content
+            .operations
+            .iter()
+            .filter(|operation| operation.operator == "Tm")
+            .filter_map(|operation| operation.operands.get(4))
+            .filter_map(|object| match object {
+                Object::Real(value) => Some(*value),
+                Object::Integer(value) => Some(*value as f32),
+                _ => None,
+            })
+            .next()
+            .expect("Tm should exist");
+        let width = estimate_text_width(
+            "证据十三. 中航试金石检测科技（大厂）有限公司检测报告",
+            true,
+            10.0,
+        );
+        assert!(
+            tm_x + width <= 400.0 + 0.5,
+            "text should be pulled back into the page: x={tm_x}, width={width}"
+        );
     }
 
     #[test]

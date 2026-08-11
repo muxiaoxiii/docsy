@@ -235,8 +235,13 @@ pub async fn batch_overlay_pdf_text(
     args: BatchOverlayArgs,
 ) -> Result<serde_json::Value, String> {
     let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
+    let progress_manager = manager.inner().clone();
     run_managed(&manager, "batch_overlay_pdf_text", None, move |token| {
-        crate::pdf::header_footer::batch_overlay_cancellable(&args, &token)
+        crate::pdf::header_footer::batch_overlay_cancellable(&args, &token, &|index, total, input| {
+            let name = input.rsplit(['/', '\\']).next().unwrap_or(input);
+            progress_manager
+                .update("batch_overlay_pdf_text:auto", format!("正在处理 {index}/{total}:{name}"));
+        })
     })
     .await
 }
@@ -247,8 +252,11 @@ pub async fn apply_evidence_pdf_rules(
     args: ApplyEvidencePdfRulesArgs,
 ) -> Result<serde_json::Value, String> {
     let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
+    let progress_manager = manager.inner().clone();
     run_managed(&manager, "apply_evidence_pdf_rules", None, move |token| {
-        crate::pdf::evidence_session::apply_rules_cancellable(&args, &token)
+        crate::pdf::evidence_session::apply_rules_cancellable(&args, &token, &|label| {
+            progress_manager.update("apply_evidence_pdf_rules:auto", label);
+        })
     })
     .await
 }

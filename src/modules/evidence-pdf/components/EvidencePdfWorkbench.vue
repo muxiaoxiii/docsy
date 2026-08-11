@@ -836,6 +836,7 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Delete, Bottom, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
+import { listen } from '@tauri-apps/api/event'
 import { log as diagLog } from '../../../shared/diagnostics.js'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import HeaderFooterRuleFields from '../../../shared/pdf-tools/components/HeaderFooterRuleFields.vue'
@@ -844,6 +845,7 @@ import ExistingPdfElementsDialog from '../../../shared/pdf-tools/components/Exis
 import {
   buildEvidencePdfRulePayload,
   buildFileContentRows,
+  buildHeaderTextForGroup,
   buildMergeOutputPath,
   buildOutputDir,
   createDefaultFooterTextGroup,
@@ -941,7 +943,32 @@ const overlayOutputDir = ref('')
 const checkingOverlayPages = ref(false)
 const overlaying = ref(false)
 const overlayProgressText = ref('')
+// 后端逐文件上报的真实进度文案（docsy-operation-progress 事件），替换旧的假进度
+const overlayProgressLabel = ref('')
 let overlayProgressTimer = null
+let unlistenEvidenceProgress = null
+listen('docsy-operation-progress', (event) => {
+  // 仅在本组件的证据处理进行中接收 apply_evidence_pdf_rules 的进度
+  if (!overlaying.value) return
+  if (event.payload?.operationId !== 'apply_evidence_pdf_rules:auto') return
+  const label = event.payload?.label
+  if (!label) return
+  overlayProgressLabel.value = label
+  // 没有计时器的入口（快捷清理等）直接展示后端文案；主入口由计时器拼接耗时
+  if (!overlayProgressTimer) overlayProgressText.value = label
+}).then((unlisten) => {
+  unlistenEvidenceProgress = unlisten
+})
+// 处理结束后清空进度显示，避免残留上一次的文案
+watch(overlaying, (active) => {
+  if (active) return
+  overlayProgressLabel.value = ''
+  overlayProgressText.value = ''
+  if (overlayProgressTimer) {
+    window.clearInterval(overlayProgressTimer)
+    overlayProgressTimer = null
+  }
+})
 const quickCleanupRunning = ref(false)
 const evidenceDragging = ref(false)
 const OPTIMIZE_SIZE_KEY = 'docsy.evidencePdf.optimizeSize'
@@ -1399,7 +1426,15 @@ const plannedMergeOutputPath = computed(() =>
 const firstHeaderPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value) return ''
   const first = overlayRows.value[0]
-  return first ? rowHeaderPreview(first, 0) : ''
+  if (!first) return ''
+  if (!globalApplyEnabled.value) return rowHeaderPreview(first, 0)
+  // 全局应用时样例必须读全局页眉组和当前生效模式，
+  // 否则会显示文件自带默认组（filename 模式）的渲染结果。
+  const group = globalHeaderGroup.value
+  if (!group || group.enabled === false) return ''
+  const mode = headerMode.value ?? group.mode
+  if (mode === 'none') return ''
+  return buildHeaderTextForGroup(first, 0, { ...group, mode }, currentRules.value)
 })
 const firstFooterPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
@@ -2222,14 +2257,14 @@ async function applyHeaderFooter() {
     })
 
     const overlayStartTime = Date.now()
-    const totalFiles = overlayFiles.value.length
-    overlayProgressText.value = `正在处理 0/${totalFiles} 个文件  0:00`
+    overlayProgressLabel.value = ''
+    overlayProgressText.value = '正在准备…  0:00'
+    // 计时器只负责拼接耗时，文件进度文案来自后端 docsy-operation-progress 事件
     overlayProgressTimer = window.setInterval(() => {
       const elapsed = Math.floor((Date.now() - overlayStartTime) / 1000)
       const m = Math.floor(elapsed / 60)
       const s = String(elapsed % 60).padStart(2, '0')
-      const done = overlayFiles.value.filter(f => f.statusText !== '处理中…').length
-      overlayProgressText.value = `正在处理 ${done}/${totalFiles} 个文件  ${m}:${s}`
+      overlayProgressText.value = `${overlayProgressLabel.value || '正在处理…'}  ${m}:${s}`
     }, 1000)
 
     const startTime = Date.now()
@@ -3165,7 +3200,17 @@ function handleGlobalKeydown(e) {
 }
 
 onMounted(() => window.addEventListener('keydown', handleGlobalKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleGlobalKeydown))
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  if (unlistenEvidenceProgress) {
+    unlistenEvidenceProgress()
+    unlistenEvidenceProgress = null
+  }
+  if (overlayProgressTimer) {
+    window.clearInterval(overlayProgressTimer)
+    overlayProgressTimer = null
+  }
+})
 </script>
 
 <style scoped>
@@ -3825,6 +3870,7 @@ h3 {
   color: var(--el-color-danger);
   font-size: 11px;
   line-height: 1.2;
+  white-space: nowrap;
   text-decoration: line-through;
   pointer-events: none;
 }

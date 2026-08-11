@@ -9,13 +9,15 @@ use super::{annotations, header_footer, qpdf, same_path};
 pub fn apply_rules_cancellable(
     args: &Value,
     token: &tokio_util::sync::CancellationToken,
+    progress: &dyn Fn(String),
 ) -> Result<Value> {
-    apply_rules_inner(args, Some(token))
+    apply_rules_inner(args, Some(token), progress)
 }
 
 fn apply_rules_inner(
     args: &Value,
     token: Option<&tokio_util::sync::CancellationToken>,
+    progress: &dyn Fn(String),
 ) -> Result<Value> {
     if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
         anyhow::bail!("操作已取消");
@@ -31,14 +33,26 @@ fn apply_rules_inner(
         &mut temp_paths,
         &mut original_input_by_temp,
         &mut annotation_failed,
+        progress,
     );
     let merge = extract_merge(args);
     let batch_result = if prepared_items.is_empty() {
         json!({ "results": [], "failed": [] })
     } else {
         let batch_args = json!({ "items": prepared_items });
+        // 批注删除后输入是临时文件，进度展示时还原为原始文件名
+        let overlay_progress = |index: usize, total: usize, input: &str| {
+            let original = original_input_by_temp
+                .get(input)
+                .map(String::as_str)
+                .unwrap_or(input);
+            progress(format!(
+                "正在处理 {index}/{total}:{}",
+                file_name_of(original)
+            ));
+        };
         let batch = if let Some(token) = token {
-            header_footer::batch_overlay_cancellable(&batch_args, token)
+            header_footer::batch_overlay_cancellable(&batch_args, token, &overlay_progress)
         } else {
             header_footer::batch_overlay(&batch_args)
         };
@@ -70,11 +84,14 @@ fn apply_rules_inner(
     }
     let mut optimize_summary = Value::Null;
     if extract_optimize_output(args) {
-        optimize_summary = optimize_result_outputs(&mut results, token);
+        optimize_summary = optimize_result_outputs(&mut results, token, progress);
         if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
             cleanup_temp_paths(temp_paths);
             anyhow::bail!("操作已取消");
         }
+    }
+    if merge.enabled {
+        progress("正在合并 PDF 并写入书签".to_string());
     }
     let merge_result = match apply_merge_if_requested(&merge, &prepared_items, &results, &failed) {
         Ok(value) => value,
@@ -112,11 +129,13 @@ fn extract_optimize_output(args: &Value) -> bool {
 fn optimize_result_outputs(
     results: &mut [Value],
     token: Option<&tokio_util::sync::CancellationToken>,
+    progress: &dyn Fn(String),
 ) -> Value {
     let mut count = 0_u64;
     let mut input_size = 0_u64;
     let mut output_size = 0_u64;
-    for item in results.iter_mut() {
+    let total = results.len();
+    for (index, item) in results.iter_mut().enumerate() {
         if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
             break;
         }
@@ -127,6 +146,11 @@ fn optimize_result_outputs(
         else {
             continue;
         };
+        progress(format!(
+            "正在优化导出 {}/{total}:{}",
+            index + 1,
+            file_name_of(&output_path)
+        ));
         match qpdf::optimize_in_place(&output_path) {
             Ok(result) if result.changed => {
                 count += 1;
@@ -247,13 +271,15 @@ fn prepare_items_for_processing(
     temp_paths: &mut Vec<PathBuf>,
     original_input_by_temp: &mut BTreeMap<String, String>,
     failed: &mut Vec<Value>,
+    progress: &dyn Fn(String),
 ) -> Vec<Value> {
     if !rule.remove {
         return items;
     }
 
+    let total = items.len();
     let mut prepared = Vec::new();
-    for mut item in items {
+    for (index, mut item) in items.into_iter().enumerate() {
         let input = item
             .get("inputPath")
             .or_else(|| item.get("input"))
@@ -268,6 +294,11 @@ fn prepare_items_for_processing(
             continue;
         }
 
+        progress(format!(
+            "正在删除批注 {}/{total}:{}",
+            index + 1,
+            file_name_of(&input)
+        ));
         match annotations::delete_annotations_to_temp(&input, &rule.kinds) {
             Ok(temp_path) => {
                 let temp_path_string = temp_path.to_string_lossy().to_string();
@@ -432,10 +463,22 @@ fn cleanup_temp_paths(paths: Vec<PathBuf>) {
     }
 }
 
+/// 取路径末段作为进度展示的文件名，兼容 Windows/Unix 分隔符。
+fn file_name_of(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn file_name_of_takes_last_path_segment() {
+        assert_eq!(file_name_of("/tmp/dir/a.pdf"), "a.pdf");
+        assert_eq!(file_name_of("C:\\dir\\b.pdf"), "b.pdf");
+        assert_eq!(file_name_of("c.pdf"), "c.pdf");
+    }
 
     #[test]
     fn extracts_optimize_output_flag() {

@@ -370,6 +370,9 @@ export function useEvidencePdfPreview({
 
   function buildDeletionPreviewMarker(bbox, kind, label) {
     const style = bbox ? bboxOverlayStyle(bbox) : fallbackDeletionMarkerStyle(kind)
+    // 标签文字（如“删除旧页眉”）比多数检测 bbox 宽：去掉 bbox 的固定宽度，
+    // 配合 CSS 的 nowrap 让标记按文字展开，避免折行。
+    delete style.width
     return {
       key: `${kind}-${label}`,
       label,
