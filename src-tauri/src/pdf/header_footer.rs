@@ -1352,6 +1352,7 @@ fn create_embedded_overlay_font(
     text: &str,
 ) -> Result<EmbeddedFontChoice> {
     let mut last_error = None;
+    let mut skipped_for_coverage: Vec<String> = Vec::new();
     for candidate in font_candidate_sequence(family) {
         if !candidate.path.exists() {
             continue;
@@ -1359,6 +1360,7 @@ fn create_embedded_overlay_font(
         // 按字形覆盖挑字体：候选字体不含文本所需字符时直接跳过
         //（例如 SimSun 缺少日文汉字，子集嵌入出来会渲染成方块）。
         if !font_covers_text(&candidate.path, text) {
+            skipped_for_coverage.push(candidate.path.display().to_string());
             continue;
         }
         match try_create_embedded_overlay_font(doc, resource_name, &candidate.path, text) {
@@ -1373,6 +1375,10 @@ fn create_embedded_overlay_font(
     }
     match last_error {
         Some(err) => Err(err),
+        None if !skipped_for_coverage.is_empty() => anyhow::bail!(
+            "已安装的系统字体均缺少文本所需字符（已跳过: {}），请安装覆盖该文字的字体",
+            skipped_for_coverage.join(", ")
+        ),
         None => anyhow::bail!("未找到可用系统字体"),
     }
 }

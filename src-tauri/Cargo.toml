@@ -1,6 +1,6 @@
 [package]
 name = "docsy"
-version = "0.9.7-beta14"
+version = "0.9.7-beta15"
 description = "Docsy - 轻量文档处理工具箱"
 authors = ["木小樨 <muxiaoxi>"]
 edition = "2021"

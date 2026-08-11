@@ -3,6 +3,7 @@
  * 调用后端 optimize_pdf_lossless，有收益用优化副本，否则静默回退原路径。
  */
 import { tauriCallQuiet } from '../../../core/tauriBridge.js'
+import { logError } from '../../../services/appLogger.js'
 
 /** 人类可读的文件体积（如 38.0MB）。 */
 export function formatFileSize(bytes) {
@@ -90,6 +91,10 @@ export async function optimizeImportsLossless(paths, outputDir = '', onProgress 
     })
     if (!result.ok) {
       console.warn('[pdfLosslessOptimize] 无损优化失败，回退原路径:', path, result.error)
+      void logError('pdf.losslessOptimize', 'optimize_pdf_lossless failed', {
+        path,
+        error: result.error,
+      })
     }
     decisions.push(resolveOptimizedImport(path, result))
   }
