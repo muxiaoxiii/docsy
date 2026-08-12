@@ -51,6 +51,7 @@ import { getHomeCards } from '../../core/moduleRegistry.js'
 import { tauriCallSafe } from '../../core/tauriBridge.js'
 import evidenceIconUrl from '../../assets/icons/evidence.svg?url'
 import documentsIconUrl from '../../assets/icons/documents.svg?url'
+import markdownWordIconUrl from '../../assets/icons/markdown-word.svg?url'
 import imageLayoutIconUrl from '../../assets/icons/image-layout.svg?url'
 import videoFramesIconUrl from '../../assets/icons/video-frames.svg?url'
 import templateIconUrl from '../../assets/icons/template.svg?url'
@@ -64,6 +65,7 @@ const homeCards = computed(() => getHomeCards(settings.value))
 const homeIconByRoute = {
   'evidence-pdf': evidenceIconUrl,
   'pdf-tools': documentsIconUrl,
+  'markdown-convert': markdownWordIconUrl,
   'image-paddler': imageLayoutIconUrl,
   'video-extract': videoFramesIconUrl,
   template: templateIconUrl,
@@ -261,11 +263,6 @@ onBeforeUnmount(() => {
     background 180ms var(--ease-out),
     transform 140ms var(--ease-out),
     box-shadow 180ms var(--ease-out);
-}
-
-.home-card:nth-child(1),
-.home-card:nth-child(2) {
-  grid-column: span 6;
 }
 
 .home-card:hover {

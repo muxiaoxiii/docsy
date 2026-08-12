@@ -60,7 +60,18 @@ export function defaultMenuOrder() {
 }
 
 function orderedModules(settings = {}) {
-  const order = Array.isArray(settings.menu_order) ? settings.menu_order : []
+  const configuredOrder = Array.isArray(settings.menu_order) ? settings.menu_order : []
+  const knownIds = new Set(moduleRegistry.map((module) => module.id))
+  const order = configuredOrder.filter((id) => knownIds.has(id))
+  for (const module of moduleRegistry) {
+    if (order.includes(module.id)) continue
+    const insertAt = order.findIndex((id) => {
+      const existing = moduleRegistry.find((candidate) => candidate.id === id)
+      return (existing?.order ?? 1000) > (module.order ?? 1000)
+    })
+    if (insertAt === -1) order.push(module.id)
+    else order.splice(insertAt, 0, module.id)
+  }
   const orderIndex = new Map(order.map((id, index) => [id, index]))
   return [...moduleRegistry].sort((a, b) => {
     const aRank = orderIndex.has(a.id) ? orderIndex.get(a.id) : Number.MAX_SAFE_INTEGER

@@ -83,32 +83,54 @@
             >
             <el-button
               size="small"
+              class="stable-action-button"
               type="danger"
-              :loading="quickCleanupRunning"
+              :disabled="quickCleanupRunning"
+              :aria-busy="quickCleanupRunning"
               @click="immediateDeleteExistingHeaderFooter"
-              >立即删除</el-button
             >
-            <el-button size="small" :loading="deepDetecting" @click="deepDetectAllHeaderFooter">元素检测</el-button>
+              <span class="stable-button-content" :class="{ 'is-loading': quickCleanupRunning }">
+                <span>立即删除</span>
+                <span v-if="quickCleanupRunning" class="internal-progress-spinner" aria-hidden="true"></span>
+              </span>
+            </el-button>
+            <el-button
+              size="small"
+              class="stable-action-button"
+              :disabled="deepDetecting"
+              :aria-busy="deepDetecting"
+              @click="deepDetectAllHeaderFooter"
+            >
+              <span class="stable-button-content" :class="{ 'is-loading': deepDetecting }">
+                <span>元素检测</span>
+                <span v-if="deepDetecting" class="internal-progress-spinner" aria-hidden="true"></span>
+              </span>
+            </el-button>
           </div>
         </div>
         <div class="existing-summary-grid">
-          <button v-if="existingHeaderCount" type="button" class="summary-pill" @click="openExistingElements('header')">
+          <button
+            type="button"
+            class="summary-pill"
+            :disabled="!existingHeaderCount"
+            @click="openExistingElements('header')"
+          >
             <span>原页眉</span>
             <strong>{{ existingHeaderCount }}</strong>
           </button>
           <button
-            v-if="existingFooterCount"
             type="button"
             class="summary-pill"
+            :disabled="!existingFooterCount"
             @click="openExistingElements('footerText')"
           >
-            <span>原页脚文字</span>
+            <span>原页脚</span>
             <strong>{{ existingFooterCount }}</strong>
           </button>
           <button
-            v-if="existingPageNumberCount"
             type="button"
             class="summary-pill"
+            :disabled="!existingPageNumberCount"
             @click="openExistingElements('pageNumber')"
           >
             <span>原页码</span>
@@ -873,7 +895,15 @@ import {
 import { formatProcessingWarningSummary } from '../../../shared/pdf-tools/processingWarnings.js'
 import { elementIdentity } from '../../../shared/pdf-tools/composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
-import { openPath, tauriCallSafe, tauriCallQuiet, userFacingError, showLoading, hideLoading, emitOperationUpdate } from '../../../core/tauriBridge.js'
+import {
+  openPath,
+  tauriCallSafe,
+  tauriCallQuiet,
+  userFacingError,
+  showLoading,
+  hideLoading,
+  emitOperationUpdate,
+} from '../../../core/tauriBridge.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 
 /** Parse a page number value from detected text (e.g. "1/10 页" → 1, "第3页" → 3). */
@@ -3518,15 +3548,22 @@ h3 {
 }
 
 .existing-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .summary-pill {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
   appearance: none;
-  min-width: 0;
-  padding: 8px 10px;
+  min-width: 96px;
+  max-width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
@@ -3539,19 +3576,82 @@ h3 {
   border-color: var(--docsy-primary);
 }
 
+.summary-pill:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.summary-pill:disabled:hover {
+  border-color: var(--docsy-border-subtle);
+}
+
 .summary-pill span {
-  display: block;
   color: var(--docsy-text-muted);
   font-size: 12px;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .summary-pill strong {
-  display: block;
-  margin-top: 4px;
   color: var(--docsy-text-strong);
   font-size: 16px;
   line-height: 1;
+}
+
+.existing-hf-block .block-title-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.existing-hf-block .block-title {
+  white-space: nowrap;
+}
+
+.existing-hf-block .block-actions {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+.existing-hf-block .block-actions :deep(.el-button) {
+  min-width: 0;
+  margin-left: 0;
+  padding-inline: 7px;
+  white-space: nowrap;
+}
+
+.stable-action-button {
+  position: relative;
+}
+
+.stable-button-content {
+  position: relative;
+  display: inline-grid;
+  width: 100%;
+  place-items: center;
+}
+
+.stable-button-content.is-loading > span:first-child {
+  opacity: 0;
+}
+
+.internal-progress-spinner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: internal-progress-spin 720ms linear infinite;
+}
+
+@keyframes internal-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .summary-pill.active {

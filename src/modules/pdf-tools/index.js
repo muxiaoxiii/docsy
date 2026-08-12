@@ -21,7 +21,7 @@ export default {
   homeCards: [
     {
       title: '文档工具',
-      description: 'PDF 解锁、合并、提取、压缩、拆分与 MD↔Word',
+      description: 'PDF 解锁、合并、提取、压缩、拆分与防复制',
       route: 'pdf-tools',
       icon: 'Files',
     },

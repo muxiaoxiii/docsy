@@ -245,9 +245,7 @@ function invertSelection() {
 function handleRowClick(row, _column, event) {
   const key = row?.key
   if (!key) return
-  // Ignore clicks originating from the checkbox area to avoid double-toggle (but not when Shift is held for range select)
   const target = event?.target
-  if (!event.shiftKey && target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
 
   // Prevent text selection on row click
   event.preventDefault()
@@ -263,15 +261,21 @@ function handleRowClick(row, _column, event) {
     const selectedSet = new Set(selectedKeys.value)
     rangeKeys.forEach(k => selectedSet.add(k))
     selectedKeys.value = [...selectedSet]
+    return
+  }
+
+  // 非 shift 点击一律更新锚点（包括点勾选框），之后 shift+点击即以此为起点
+  lastClickedIndex.value = currentIndex
+
+  // 勾选框区域的点击交给 el-checkbox 自身 v-model 切换，避免双重切换
+  if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
+
+  // Normal click: toggle current row
+  const idx = selectedKeys.value.indexOf(key)
+  if (idx >= 0) {
+    selectedKeys.value = selectedKeys.value.filter(k => k !== key)
   } else {
-    // Normal click: toggle current row
-    const idx = selectedKeys.value.indexOf(key)
-    if (idx >= 0) {
-      selectedKeys.value = selectedKeys.value.filter(k => k !== key)
-    } else {
-      selectedKeys.value = [...selectedKeys.value, key]
-    }
-    lastClickedIndex.value = currentIndex
+    selectedKeys.value = [...selectedKeys.value, key]
   }
 }
 function handleMouseMove(event) {

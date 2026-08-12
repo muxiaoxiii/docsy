@@ -1,9 +1,7 @@
 <template>
   <div class="pdf-tools-view" :class="{ 'is-file-dragging': pdfDragging }">
     <div v-if="pdfDragging" class="pdf-drop-overlay">
-      <div class="pdf-drop-message">
-        {{ activeTab === 'markdown' ? '松开以添加 Markdown / Word 文件' : '松开以添加 PDF 文件' }}
-      </div>
+      <div class="pdf-drop-message">松开以添加 PDF 文件</div>
     </div>
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
       <el-tab-pane label="PDF解锁" name="unlock" lazy>
@@ -327,74 +325,13 @@
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
-
-      <el-tab-pane label="MD↔Word" name="markdown" lazy>
-        <ToolWorkspaceShell
-          title="Markdown ↔ Word"
-          description="Markdown 与 Word 文档互转，拖入文件即可转换，输出保存在原文件旁。"
-        >
-          <template #toolbar>
-            <el-button type="primary" @click="selectMarkdownFiles">选择文件</el-button>
-          </template>
-          <FileQueuePanel
-            :items="markdownFiles"
-            empty-text="选择或拖入 Markdown / Word 文件，立即转换并保存到源文件夹"
-            @clear="clearMarkdownFiles"
-            @remove="removeMarkdownFile"
-          >
-            <template #meta="{ item }">
-              <el-tag size="small" type="info">{{ item.directionTag }}</el-tag>
-              <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
-              <span v-if="item.status === 'done' && item.inputSize > 0">{{
-                formatFileSize(item.inputSize) + ' → ' + formatFileSize(item.outputSize)
-              }}</span>
-            </template>
-          </FileQueuePanel>
-          <div v-if="markdownSummary" class="path-line">{{ markdownSummary }}</div>
-          <!-- 粘贴即转：直接把剪贴板里的 Markdown 文本转成 docx / html -->
-          <div class="paste-convert">
-            <el-input
-              v-model="mdPasteText"
-              type="textarea"
-              :rows="5"
-              placeholder="在此粘贴 Markdown 文本，直接转换为 Word 文档或网页文件"
-            />
-            <div class="paste-convert-bar">
-              <el-radio-group v-model="mdPasteFormat" :disabled="mdPasteConverting">
-                <el-radio-button value="docx">Word 文档 (.docx)</el-radio-button>
-                <el-radio-button value="html">网页 (.html)</el-radio-button>
-              </el-radio-group>
-              <el-input
-                v-model="mdPasteFileName"
-                placeholder="文件名（可选，默认为 文档-时间戳）"
-                style="max-width: 260px"
-                :disabled="mdPasteConverting"
-              />
-              <el-button
-                type="primary"
-                :loading="mdPasteConverting"
-                :disabled="mdPasteConverting || !mdPasteText.trim()"
-                @click="runMarkdownPasteConvert"
-              >
-                转换
-              </el-button>
-            </div>
-            <div v-if="mdPasteOutputPath" class="path-line">
-              已生成：{{ mdPasteOutputPath }}
-              <el-button link type="primary" size="small" @click="openMarkdownPasteDir">
-                打开所在文件夹
-              </el-button>
-            </div>
-          </div>
-        </ToolWorkspaceShell>
-      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
@@ -402,12 +339,8 @@ import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { splitRangeWarnings } from '../../../shared/pdf-tools/composables/usePdfSplitRanges.js'
-import {
-  sizeSavingText,
-  formatFileSize,
-  batchSummaryText,
-} from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
-import { getPdfPageCount, openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { sizeSavingText, batchSummaryText } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
+import { getPdfPageCount, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
@@ -587,182 +520,6 @@ const antiOcrProcessing = ref(false)
 const antiCopyMethod = ref('cmap_scramble')
 const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => !f.hasAntiOcr).length)
 const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr).length)
-
-// Markdown 互转
-const markdownFiles = ref([])
-const markdownConverting = ref(false)
-const markdownSummary = ref('')
-
-function isMarkdownConvertiblePath(path) {
-  return /\.(md|markdown|docx|doc)$/i.test(String(path || ''))
-}
-
-function markdownDirectionTag(path) {
-  return /\.(md|markdown)$/i.test(String(path || '')) ? 'MD→Word' : 'Word→MD'
-}
-
-async function selectMarkdownFiles() {
-  const selected = await open({
-    multiple: true,
-    filters: [{ name: 'Markdown / Word', extensions: ['md', 'markdown', 'docx', 'doc'] }],
-  })
-  if (!selected) return
-  loadMarkdownFiles(Array.isArray(selected) ? selected : [selected])
-}
-
-// select 与 drop 共用入口：入队并立即顺序执行；执行中新文件追加到队列尾部。
-// 含 .doc 时先让用户选转换方式：Word/WPS 自动转换（高保真，可选）/ 直接转换
-//（仅纯文本）/ 跳过 .doc（推荐手动另存 docx）；取消或关闭视为跳过 .doc。
-async function loadMarkdownFiles(paths) {
-  const busy = new Set(
-    markdownFiles.value.filter((f) => f.status === 'pending' || f.status === 'processing').map((f) => f.path),
-  )
-  const docPaths = [...new Set(paths)].filter((path) => !busy.has(path))
-  let accepted = docPaths
-  let docEngine = 'extract'
-  const legacyDocs = docPaths.filter((path) => /\.doc$/i.test(path))
-  if (legacyDocs.length) {
-    const [wordStatus, wpsStatus] = await Promise.all([
-      tauriCallSafe('check_external_tool', { toolName: 'word' }),
-      tauriCallSafe('check_external_tool', { toolName: 'wps' }),
-    ])
-    const wordAvailable =
-      Boolean(wordStatus.ok && wordStatus.data?.available) || Boolean(wpsStatus.ok && wpsStatus.data?.available)
-    try {
-      await ElMessageBox.confirm(
-        `${legacyDocs.length} 个旧版 .doc 文件：推荐先用 Word/WPS 打开另存为 .docx 再拖入转换，内容最完整。` +
-          (wordAvailable
-            ? '也可以尝试用本机 Word/WPS 自动转换（保留格式），或直接转换（仅保留纯文本，表格、图片和样式会丢失）。'
-            : '未检测到本机 Word/WPS，直接转换仅保留纯文本（表格、图片和样式会丢失）。'),
-        '旧版 .doc 转换方式',
-        {
-          distinguishCancelAndClose: true,
-          confirmButtonText: wordAvailable ? '尝试 Word/WPS 转换' : '直接转换（仅文本）',
-          cancelButtonText: wordAvailable ? '直接转换（仅文本）' : '跳过 .doc',
-          type: 'warning',
-        },
-      )
-      docEngine = wordAvailable ? 'word' : 'extract'
-    } catch (action) {
-      // cancel 按钮：有 Word/WPS 时是「直接转换（仅文本）」，否则是「跳过 .doc」；
-      // close（X/ESC）一律跳过 .doc
-      if (action === 'cancel' && wordAvailable) {
-        docEngine = 'extract'
-      } else {
-        accepted = docPaths.filter((path) => !/\.doc$/i.test(path))
-        if (accepted.length && accepted.length !== docPaths.length) {
-          ElMessage.info('已跳过 .doc 文件，其余文件照常转换')
-        }
-      }
-    }
-  }
-  const items = accepted.map((path) => ({
-    path,
-    name: fileName(path),
-    directionTag: markdownDirectionTag(path),
-    docEngine: /\.doc$/i.test(path) ? docEngine : null,
-    status: 'pending',
-    statusText: '等待中',
-    statusType: 'info',
-    inputSize: 0,
-    outputSize: 0,
-  }))
-  if (!items.length) return
-  markdownFiles.value = [...markdownFiles.value, ...items]
-  markdownSummary.value = ''
-  void runMarkdownQueue()
-}
-
-function clearMarkdownFiles() {
-  markdownFiles.value = markdownFiles.value.filter((f) => f.status === 'processing')
-  markdownSummary.value = ''
-}
-
-function removeMarkdownFile(index) {
-  const item = markdownFiles.value[index]
-  if (item && item.status !== 'processing') markdownFiles.value.splice(index, 1)
-}
-
-async function runMarkdownQueue() {
-  if (markdownConverting.value) return
-  markdownConverting.value = true
-  const processed = []
-  try {
-    for (;;) {
-      const item = markdownFiles.value.find((f) => f.status === 'pending')
-      if (!item) break
-      item.status = 'processing'
-      item.statusText = '转换中'
-      item.statusType = 'warning'
-      const result = await tauriCallSafe('convert_markdown', {
-        input: item.path,
-        outputDir: null,
-        docEngine: item.docEngine || null,
-      })
-      if (result.ok) {
-        const data = result.data || {}
-        item.status = 'done'
-        item.statusText = '完成'
-        item.statusType = 'success'
-        item.inputSize = Number(data.input_size) || 0
-        item.outputSize = Number(data.output_size) || 0
-      } else {
-        item.status = 'failed'
-        item.statusText = userFacingError(result.error, '转换失败')
-        item.statusType = 'danger'
-      }
-      processed.push(item)
-    }
-  } finally {
-    markdownConverting.value = false
-  }
-  reportMarkdownSummary(processed)
-}
-
-function reportMarkdownSummary(processed) {
-  if (!processed.length) return
-  const text = batchSummaryText('转换完成', processed)
-  markdownSummary.value = text
-  const hasFailed = processed.some((item) => item.status === 'failed')
-  ElNotification({ type: hasFailed ? 'warning' : 'success', title: text, duration: 6000 })
-}
-
-// ---- 粘贴即转（Markdown 文本 → docx / html） ----
-const mdPasteText = ref('')
-const mdPasteFormat = ref('docx')
-const mdPasteFileName = ref('')
-const mdPasteConverting = ref(false)
-const mdPasteOutputPath = ref('')
-
-async function runMarkdownPasteConvert() {
-  if (mdPasteConverting.value) return
-  const text = mdPasteText.value
-  if (!text.trim()) return
-  mdPasteConverting.value = true
-  mdPasteOutputPath.value = ''
-  try {
-    const result = await tauriCallSafe('convert_markdown_text', {
-      text,
-      format: mdPasteFormat.value,
-      outputDir: null,
-      fileStem: mdPasteFileName.value.trim() || null,
-    })
-    if (result.ok) {
-      const outputPath = String(result.data?.output_path || '')
-      mdPasteOutputPath.value = outputPath
-      ElMessage.success(`转换完成：${outputPath}`)
-    } else {
-      ElMessage.error(userFacingError(result.error, '转换失败'))
-    }
-  } finally {
-    mdPasteConverting.value = false
-  }
-}
-
-async function openMarkdownPasteDir() {
-  if (!mdPasteOutputPath.value) return
-  await openPath(parentDir(mdPasteOutputPath.value))
-}
 
 function addAntiOcrFiles(paths) {
   const existing = new Set(antiOcrFiles.value.map((f) => f.path))
@@ -1134,16 +891,6 @@ function isPdfPath(path) {
 }
 
 async function handleDroppedPdfPaths(paths) {
-  if (activeTab.value === 'markdown') {
-    const docPaths = [...new Set((paths || []).filter(isMarkdownConvertiblePath))]
-    if (!docPaths.length) {
-      ElMessage.warning('请拖入 Markdown 或 Word 文件（.md / .docx / .doc）')
-      return
-    }
-    if (docPaths.length < (paths || []).length) ElMessage.warning('已忽略不支持的文件')
-    loadMarkdownFiles(docPaths)
-    return
-  }
   const pdfPaths = [...new Set((paths || []).filter(isPdfPath))]
   if (!pdfPaths.length) {
     ElMessage.warning('请拖入 PDF 文件')
@@ -1407,18 +1154,6 @@ h3 {
   color: var(--docsy-text);
   font-size: 13px;
   margin: 6px 0;
-}
-
-.paste-convert {
-  margin-top: 12px;
-}
-
-.paste-convert-bar {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-top: 8px;
 }
 
 .path-hint {
