@@ -37,6 +37,7 @@ import {
   parseReferenceSourceKey,
   syncReferenceSourceFromKey,
   partyItemsToValues,
+  displayPartyValue,
   inputValueForField,
   resolveReferenceValueFromSource,
 } from './fieldRowUtils.js'
@@ -145,6 +146,8 @@ export function useTemplateState() {
   const editingLibraryTemplatePath = ref('')
   const fillDocumentRuns = ref([])
   const fillPreviewVisible = ref(false)
+  const fillPreviewLoading = ref(false)
+  const fillPreviewError = ref('')
   const fillPreviewOverlays = ref([])
   const fillPreviewText = ref('')
   // Export dialog state
@@ -1828,6 +1831,7 @@ export function useTemplateState() {
       semanticKey: field.semanticKey,
       dateFormat: field.type === 'date' ? field.dateFormat || 'iso' : '',
       _nameManuallySet: Boolean(field.name && field.label && field.name !== field.label),
+      _fromManifestRef: true,
       // 从既有模板回读的行：同名同类型本就是一个字段的多处位置，
       // 保存时允许 buildFields 合并回去（不走自动加序号）。
       _allowSameNameMerge: true,
@@ -1973,16 +1977,7 @@ export function useTemplateState() {
     resetFormValues((result.data.fields || []).filter(isRenderableField))
 
     // Load document content for fill preview (non-blocking)
-    tauriCallSafe('inspect_docsytpl_content', { path }).then((contentResult) => {
-      if (requestSeq !== templateOpenRequestSeq) return
-      if (contentResult.ok) {
-        fillDocumentRuns.value = contentResult.data.documentRuns || []
-      } else {
-        fillDocumentRuns.value = []
-      }
-      // Rebuild preview if panel is open
-      if (fillPreviewVisible.value) buildFillPreview()
-    })
+    void loadFillPreviewContent(path, requestSeq)
 
     await loadHistoryContext(false)
     return true
@@ -2028,6 +2023,27 @@ export function useTemplateState() {
 
   // ── Fill Preview ──────────────────────────────────────────────────────────────
 
+  async function loadFillPreviewContent(path = templatePath.value, requestSeq = templateOpenRequestSeq) {
+    if (!path) return
+    fillPreviewLoading.value = true
+    fillPreviewError.value = ''
+    const contentResult = await tauriCallSafe('inspect_docsytpl_content', { path })
+    if (requestSeq !== templateOpenRequestSeq || path !== templatePath.value) return
+    fillPreviewLoading.value = false
+    if (contentResult.ok) {
+      fillDocumentRuns.value = contentResult.data.documentRuns || []
+      if (!fillDocumentRuns.value.length) fillPreviewError.value = '模板中没有可预览的正文内容'
+    } else {
+      fillDocumentRuns.value = []
+      fillPreviewError.value = userFacingError(contentResult.error, '文档预览加载失败')
+    }
+    if (fillPreviewVisible.value) buildFillPreview()
+  }
+
+  function reloadFillPreview() {
+    return loadFillPreviewContent()
+  }
+
   function buildFillPreview() {
     const runs = fillDocumentRuns.value
     const manifest = templateManifest.value
@@ -2037,13 +2053,18 @@ export function useTemplateState() {
       return
     }
 
-    // Build markId → field mapping (first occurrence wins for duplicate fields)
+    // 已保存模板内的 sdt tag 才是稳定身份；保存时拆分前后缀可能改变
+    // 后续 runIndex，因此带 tag 的字段不能再用初次导入时的 markId 匹配。
+    const tagToField = new Map()
     const markToField = new Map()
     for (const field of manifest.fields) {
       if (!isRenderableField(field)) continue
-      for (const ref of field.markRefs || []) {
-        if (ref.markId && !markToField.has(ref.markId)) {
-          markToField.set(ref.markId, field)
+      for (const [refIndex, markRef] of (field.markRefs || []).entries()) {
+        const tag = String(markRef.tag || '').trim()
+        if (tag) {
+          tagToField.set(tag, { field, refIndex })
+        } else if (markRef.markId && !markToField.has(markRef.markId)) {
+          markToField.set(markRef.markId, { field, refIndex })
         }
       }
     }
@@ -2058,27 +2079,32 @@ export function useTemplateState() {
       }
       lastParagraph = run.paragraphIndex
 
-      const field = markToField.get(run.id)
-      if (field) {
-        const paraKey = `${field.id}:${run.paragraphIndex}`
+      const storedTag = /^\{\{([A-Za-z0-9_.:-]+)\}\}$/.exec(String(run.text || '').trim())?.[1] || ''
+      const matched = (storedTag && tagToField.get(storedTag)) || markToField.get(run.id)
+      if (matched) {
+        const { field, refIndex } = matched
+        const paraKey = `${field.id}:${run.paragraphIndex}:${field.type === 'party_list' ? refIndex : 'field'}`
         if (renderedFieldAtParagraph.has(paraKey)) continue
         renderedFieldAtParagraph.add(paraKey)
-        const value = formValues[field.id] ?? formValues[field.name] ?? formValues[`fill:${field.name}`]
+        let value = formValues[field.id] ?? formValues[field.name] ?? formValues[`fill:${field.name}`]
+        if (field.type === 'reference' && isEmptyValue(value)) {
+          value = resolveReferenceValueFromSource(fixedReferenceSource(field.reference), normalizeValuesForReferenceSources())
+        }
         let displayValue
         let isFilled = false
-        if (value != null && value !== '' && value !== false) {
-          if (Array.isArray(value)) {
-            displayValue = value
-              .map((v) => (typeof v === 'object' ? v.text : v))
-              .filter(Boolean)
-              .join('、')
+        if (!isEmptyValue(value) && value !== false) {
+          if (field.type === 'party_list' && Array.isArray(value) && (field.markRefs || []).length > 1) {
+            displayValue = displayPartyValue(value[refIndex])
+          } else if (Array.isArray(value)) {
+            displayValue = value.map(displayPartyValue).filter(Boolean).join('、')
           } else {
             displayValue = String(value)
           }
-          isFilled = true
+          isFilled = Boolean(displayValue)
         } else {
           displayValue = `[${field.label || field.name}]`
         }
+        if (!displayValue) displayValue = `[${field.label || field.name}]`
         parts.push(displayValue)
         overlays.push({
           runId: run.id,
@@ -2703,6 +2729,9 @@ export function useTemplateState() {
 
   function toggleFillPreview() {
     fillPreviewVisible.value = !fillPreviewVisible.value
+    if (fillPreviewVisible.value && !fillDocumentRuns.value.length && !fillPreviewLoading.value) {
+      void reloadFillPreview()
+    }
   }
 
   // ── Return ──────────────────────────────────────────────────────────────────
@@ -2750,6 +2779,8 @@ export function useTemplateState() {
     filteredFillPositionEntries,
     filteredRenderableFields,
     fillPreviewVisible,
+    fillPreviewLoading,
+    fillPreviewError,
     fillPreviewText,
     fillPreviewOverlays,
     fillDocumentRuns,
@@ -2821,6 +2852,7 @@ export function useTemplateState() {
     onSaveFieldReference,
     onSaveFieldDateFormat,
     toggleFillPreview,
+    reloadFillPreview,
 
     // History tab events
     loadTemplateHistoryRuns,

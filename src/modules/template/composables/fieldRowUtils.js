@@ -264,7 +264,9 @@ export function displayValue(value) {
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (Array.isArray(value)) return value.map(displayValue).join('、')
-  return value.name || value.label || JSON.stringify(value)
+  const objectText = value.name || value.label || value.text
+  if (objectText != null) return `${objectText}${value.suffix || ''}`
+  return JSON.stringify(value)
 }
 
 export function shortDateTime(value) {
@@ -669,7 +671,7 @@ export function previewSourceLabel(row) {
   return `【${row.label || row.name || row.text}】`
 }
 
-export function previewReplacementText(row, sampleValues = {}) {
+export function previewReplacementText(row, sampleValues = {}, occurrence = 0) {
   const usage = rowUsage(row)
   if (usage === 'ignore') return row.text
   if (usage === 'delete_text') return ''
@@ -679,7 +681,15 @@ export function previewReplacementText(row, sampleValues = {}) {
   if (row.type === 'reference') return previewReferenceValue(row, sampleValues) || row.text
   const value = sampleValues[row.name]
   if (row.type === 'date' && !isEmptyPreviewValue(value)) return normalizePreviewDate(value)
-  if (!isEmptyPreviewValue(value)) return Array.isArray(value) ? value.join('、') : String(value)
+  if (!isEmptyPreviewValue(value)) {
+    if (Array.isArray(value)) {
+      if (row.type === 'party_list' && (row.markRefs || []).length > 1) {
+        return displayPartyValue(value[occurrence])
+      }
+      return value.map(displayPartyValue).filter(Boolean).join('、')
+    }
+    return String(value)
+  }
   return row.text
 }
 

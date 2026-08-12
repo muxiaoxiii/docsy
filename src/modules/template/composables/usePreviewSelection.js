@@ -36,6 +36,7 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
     let segmentIndex = 0
     let lastParagraph = null
     const rangesByRun = previewRangesByRun(rows)
+    const rangesByStoredTag = storedTemplateRangesByTag(rows)
     for (const run of runs) {
       if (lastParagraph !== null && run.paragraphIndex !== lastParagraph) {
         original.push(previewPlainSegment('\n', segmentIndex++))
@@ -43,11 +44,24 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
       }
       lastParagraph = run.paragraphIndex
       const runText = String(run.text || '')
-      const ranges = rangesByRun.get(run.id) || []
+      const storedTag = storedTemplatePlaceholderTag(runText)
+      // 编辑已保存模板时以 sdt tag 为稳定身份。保存过程可能因拆分
+      // 前后缀而改变后续 runIndex，旧 markId 只适用于初次导入的源 Word。
+      const ranges = storedTag
+        ? rangesByStoredTag.get(storedTag) || []
+        : (rangesByRun.get(run.id) || []).filter((range) => !range.row._fromManifestRef)
       let cursor = 0
       for (const range of ranges) {
-        const start = Math.max(0, Math.min(charLength(runText), range.start ?? 0))
-        const end = Math.max(start, Math.min(charLength(runText), range.end ?? charLength(runText)))
+        // 已保存的 docsytpl 会把原文字替换为 `{{field.ref.N}}`。manifest
+        // 中的 start/end 仍是第一次导入 Word 时的原文字范围（通常只有
+        // 2–4 个字），若继续按旧范围截取，`.ref.1}}` 会作为正文泄漏到
+        // “渲染示意”。命中字段所在 run 且整段是内部占位符时，应覆盖
+        // 整个 run；普通 Word 原文和用户输入的花括号文本不受影响。
+        const storedPlaceholder = Boolean(storedTag)
+        const start = storedPlaceholder ? 0 : Math.max(0, Math.min(charLength(runText), range.start ?? 0))
+        const end = storedPlaceholder
+          ? charLength(runText)
+          : Math.max(start, Math.min(charLength(runText), range.end ?? charLength(runText)))
         if (end <= cursor) continue
         const visibleStart = Math.max(cursor, start)
         if (cursor < visibleStart) {
@@ -61,7 +75,18 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
           text: range.occurrence === 0 ? previewSourceLabel(range.row) : '',
           deleted: range.occurrence > 0,
         })
-        const replacementText = range.occurrence === 0 ? previewReplacementText(range.row, sampleValues) : ''
+        const previewEachPartyItem =
+          range.row.type === 'party_list' && Array.isArray(sampleValues[range.row.name])
+        let replacementText =
+          range.occurrence === 0 || previewEachPartyItem
+            ? previewReplacementText(range.row, sampleValues, range.occurrence)
+            : ''
+        // 已保存模板没有示例值时，previewReplacementText 会回退到字段
+        // 原文，形成“请求人请求人”这类看似重复的正文。明确显示待填标记，
+        // 既不暴露内部代码，也不会冒充最终渲染内容。
+        if (storedPlaceholder && replacementText === range.row.text) {
+          replacementText = `【待填：${range.row.label || range.row.name || '字段'}】`
+        }
         rendered.push({
           ...marked,
           id: `rendered-${marked.id}`,
@@ -77,6 +102,23 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
       }
     }
     return { original, rendered }
+  }
+
+  function storedTemplatePlaceholderTag(text) {
+    return /^\{\{([A-Za-z0-9_.:-]+)\}\}$/.exec(String(text || '').trim())?.[1] || ''
+  }
+
+  function storedTemplateRangesByTag(rows) {
+    const map = new Map()
+    for (const row of rows || []) {
+      if (!row.enabled) continue
+      for (const [occurrence, markRef] of (row.markRefs || []).entries()) {
+        const tag = String(markRef?.tag || '').trim()
+        if (!tag) continue
+        map.set(tag, [{ row, start: 0, end: undefined, occurrence }])
+      }
+    }
+    return map
   }
 
   function buildTextFallbackPreview(text) {

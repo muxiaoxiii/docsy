@@ -106,6 +106,35 @@ describe('displayPartyValue', () => {
   })
 })
 
+describe('filenamePreviewText 多项字段', () => {
+  it('对象值使用姓名和后缀，不把内部 JSON 写进文件名', () => {
+    const tokens = [{ type: 'field', value: '受托人' }]
+    const fields = [{ id: 'lawyer', name: '受托人', type: 'party_list' }]
+    expect(
+      filenamePreviewText(tokens, {
+        fields,
+        formValues: { lawyer: { text: '李月春', suffix: '律师' } },
+      }),
+    ).toBe('李月春律师.docx')
+  })
+
+  it('多项对象按顿号连接并保留各自后缀', () => {
+    const tokens = [{ type: 'field', value: '受托人' }]
+    const fields = [{ id: 'lawyer', name: '受托人', type: 'party_list' }]
+    expect(
+      filenamePreviewText(tokens, {
+        fields,
+        formValues: {
+          lawyer: [
+            { text: '李月春', suffix: '律师' },
+            { text: '王明', suffix: '实习律师' },
+          ],
+        },
+      }),
+    ).toBe('李月春律师、王明实习律师.docx')
+  })
+})
+
 describe('formatDateValue iso 留空', () => {
   it('全部留空时输出空串而不是 "-  -"', () => {
     expect(formatDateValue('留空', 'iso')).toBe('')

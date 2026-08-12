@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // ── Browser/tauri environment stubs (must exist before module import) ────────
 const hoisted = vi.hoisted(() => {
   const manifests = {}
+  const contents = {}
   globalThis.window = {
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     addEventListener: () => {},
@@ -11,7 +12,7 @@ const hoisted = vi.hoisted(() => {
     clearTimeout: () => {},
     getSelection: () => ({ removeAllRanges: () => {} }),
   }
-  return { manifests }
+  return { manifests, contents }
 })
 
 vi.mock('element-plus', () => ({
@@ -34,7 +35,9 @@ vi.mock('../../../core/tauriBridge.js', () => ({
       const manifest = hoisted.manifests[payload?.path]
       return manifest ? { ok: true, data: manifest } : { ok: false, error: 'not found' }
     }
-    if (cmd === 'inspect_docsytpl_content') return { ok: true, data: { documentText: '', documentRuns: [] } }
+    if (cmd === 'inspect_docsytpl_content') {
+      return { ok: true, data: hoisted.contents[payload?.path] || { documentText: '', documentRuns: [] } }
+    }
     if (cmd === 'inspect_docx_template') return { ok: true, data: { marks: [], documentText: '', documentRuns: [] } }
     if (cmd === 'get_template_history_context') {
       return { ok: true, data: { lastValues: {}, fieldSuggestions: {}, semanticSuggestions: {}, associationSuggestions: {} } }
@@ -131,6 +134,44 @@ function renderCalls() {
 beforeEach(() => {
   tauriCallSafe.mockClear()
   for (const key of Object.keys(hoisted.manifests)) delete hoisted.manifests[key]
+  for (const key of Object.keys(hoisted.contents)) delete hoisted.contents[key]
+})
+
+describe('useTemplateState 填写预览', () => {
+  it('按稳定 tag 匹配已保存模板，run 序号变化后仍显示正文', async () => {
+    const field = makeField({
+      id: 'fld_party_list_79d05910',
+      name: '受托人',
+      label: '受托人',
+      type: 'party_list',
+      marks: ['old-r13', 'old-r14'],
+      markRefs: [
+        { markId: 'old-r13', tag: 'fld_party_list_79d05910.ref.1' },
+        { markId: 'old-r14', tag: 'fld_party_list_79d05910.ref.2' },
+      ],
+    })
+    hoisted.contents['/t/letter.docsytpl'] = {
+      documentText: '',
+      documentRuns: [
+        { id: 'new-r15', paragraphIndex: 0, text: '委托' },
+        { id: 'new-r16', paragraphIndex: 0, text: '{{fld_party_list_79d05910.ref.1}}' },
+        { id: 'new-r17', paragraphIndex: 0, text: '律师、' },
+        { id: 'new-r18', paragraphIndex: 0, text: '{{fld_party_list_79d05910.ref.2}}' },
+        { id: 'new-r19', paragraphIndex: 0, text: '律师。' },
+      ],
+    }
+    const state = useTemplateState()
+    await openTpl(state, '/t/letter.docsytpl', [field])
+    state.formValues['fld_party_list_79d05910'] = [
+      { text: '李月春', suffix: '' },
+      { text: '王明', suffix: '' },
+    ]
+    state.toggleFillPreview()
+    await state.reloadFillPreview()
+
+    expect(state.fillPreviewText.value).toBe('委托李月春律师、王明律师。')
+    expect(state.fillPreviewText.value).not.toContain('{{')
+  })
 })
 
 describe('useTemplateState reference 字段', () => {

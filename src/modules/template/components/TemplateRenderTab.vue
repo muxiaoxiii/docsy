@@ -75,7 +75,7 @@
         <strong>{{ filenamePreview }}</strong>
       </div>
 
-      <div class="fill-workbench" :class="{ 'with-preview': fillPreviewVisible && fillPreviewText }">
+      <div class="fill-workbench" :class="{ 'with-preview': fillPreviewVisible }">
         <div class="field-editor-column">
           <div class="field-section-heading">
             <div>
@@ -417,7 +417,7 @@
           </div>
         </div>
 
-        <aside v-if="fillPreviewVisible && fillPreviewText" class="fill-preview-panel">
+        <aside v-if="fillPreviewVisible" class="fill-preview-panel">
           <div class="fill-preview-header">
             <div>
               <span>实时预览</span>
@@ -431,7 +431,13 @@
             :overlays="fillPreviewOverlays"
             mode="fill"
           />
-          <pre v-else class="fill-preview-text">{{ fillPreviewText }}</pre>
+          <pre v-else-if="fillPreviewText" class="fill-preview-text">{{ fillPreviewText }}</pre>
+          <div v-else class="fill-preview-status">
+            <span v-if="fillPreviewLoading" class="preview-loading-dot" aria-hidden="true"></span>
+            <strong>{{ fillPreviewLoading ? '正在加载文档预览' : '暂时无法显示预览' }}</strong>
+            <p v-if="!fillPreviewLoading">{{ fillPreviewError || '请重新加载模板正文' }}</p>
+            <el-button v-if="!fillPreviewLoading" size="small" @click="$emit('reload-fill-preview')">重新加载</el-button>
+          </div>
         </aside>
         <button v-else type="button" class="preview-invitation" @click="$emit('toggle-fill-preview')">
           <span class="preview-invitation-icon">文</span>
@@ -491,6 +497,8 @@ const props = defineProps({
   fieldSearch: { type: String, default: '' },
   // Fill preview
   fillPreviewVisible: { type: Boolean, default: false },
+  fillPreviewLoading: { type: Boolean, default: false },
+  fillPreviewError: { type: String, default: '' },
   fillPreviewText: { type: String, default: '' },
   fillPreviewOverlays: { type: Array, default: () => [] },
   fillDocumentRuns: { type: Array, default: () => [] },
@@ -524,6 +532,7 @@ const emit = defineEmits([
   'save-field-reference',
   'save-field-date-format',
   'toggle-fill-preview',
+  'reload-fill-preview',
 ])
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -910,39 +919,28 @@ function structureEditorTitle(field) {
 }
 
 .library-panel.has-active-template {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
+  padding: 16px;
 }
 
 .library-panel.has-active-template .panel-header {
   align-items: center;
-  margin-bottom: 0;
-}
-
-.library-panel.has-active-template .panel-header p {
-  display: none;
+  margin-bottom: 14px;
 }
 
 .library-panel.has-active-template .template-library-grid {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 1px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 1px 4px 4px 1px;
 }
 
 .library-panel.has-active-template .template-library-card {
-  grid-template-columns: minmax(150px, 1fr) auto auto auto;
-  align-items: center;
-  flex: 0 0 auto;
-  min-width: 420px;
-  padding: 9px 11px;
+  min-width: 0;
+  padding: 13px 14px;
 }
 
 .library-panel.has-active-template .template-card-actions {
-  margin-top: 0;
+  margin-top: 4px;
 }
 
 h3 {
@@ -1411,6 +1409,39 @@ p {
   word-break: break-word;
 }
 
+.fill-preview-status {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 220px;
+  padding: 24px;
+  border: 1px dashed var(--docsy-border-strong);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+  color: var(--docsy-text);
+  text-align: center;
+}
+
+.fill-preview-status p {
+  max-width: 280px;
+  line-height: 1.6;
+}
+
+.preview-loading-dot {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--docsy-border-strong);
+  border-top-color: var(--docsy-primary);
+  border-radius: 50%;
+  animation: fill-preview-spin 700ms linear infinite;
+}
+
+@keyframes fill-preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .preview-invitation {
   display: grid;
   place-content: center;
@@ -1484,30 +1515,17 @@ p {
     border-left: 0;
   }
 
-  .library-panel.has-active-template {
-    grid-template-columns: 1fr;
-  }
-
   .library-panel.has-active-template .panel-header {
     align-items: center;
     flex-direction: row;
     justify-content: space-between;
   }
-
-  .library-panel.has-active-template .template-library-card {
-    min-width: 380px;
-  }
 }
 
 @media (max-width: 760px) {
-  .library-panel.has-active-template .template-library-card {
-    grid-template-columns: 1fr auto;
-    min-width: min(360px, 88vw);
-  }
-
-  .library-panel.has-active-template .template-library-card > span,
-  .library-panel.has-active-template .template-library-card > small {
-    display: none;
+  .library-panel.has-active-template .template-library-grid {
+    grid-template-columns: 1fr;
+    max-height: 360px;
   }
 
   .fill-command-actions > *,

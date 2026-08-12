@@ -67,6 +67,8 @@
           :fill-position-entries="filteredFillPositionEntries"
           :filtered-renderable-fields="filteredRenderableFields"
           :fill-preview-visible="fillPreviewVisible"
+          :fill-preview-loading="fillPreviewLoading"
+          :fill-preview-error="fillPreviewError"
           :fill-preview-text="fillPreviewText"
           :fill-preview-overlays="fillPreviewOverlays"
           :fill-document-runs="fillDocumentRuns"
@@ -91,6 +93,7 @@
           @save-field-reference="onSaveFieldReference"
           @save-field-date-format="onSaveFieldDateFormat"
           @toggle-fill-preview="toggleFillPreview"
+          @reload-fill-preview="reloadFillPreview"
         />
       </el-tab-pane>
 
