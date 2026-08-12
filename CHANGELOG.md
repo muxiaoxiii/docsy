@@ -2,6 +2,17 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [Unreleased]
+
+### 新增
+- **PDF → Markdown（文本层提取）**：文书转换接受 PDF，用 poppler `pdftotext -layout` 提取已有文本层，支持起止页段（留空全文）、页间分页标记；空文本页逐页提示"可能为扫描件，建议 AI 解析"；长任务可取消。AI 文档解析选项以禁用态占位（后续提供）。
+- **更多格式转 Markdown**：经内置转换引擎（基于 MIT 许可的开源组件裁剪，致谢见 THIRD-PARTY-NOTICES.md）支持 doc/docm/xls/xlsx/xlsm/xlsb/ppt/pptx/pps/pot/odt/ods/odp/rtf/csv/epub → md；docx 仍优先走质量更好的自研管线。
+- **双向互转框架**：选项区拆为「转成 Markdown」与「Markdown 转出为」（Word/Excel/PowerPoint/网页），md→html 本轮新增（与粘贴即转共用渲染）；暂不支持的方向明示禁用。
+- **.doc 流程简化**：默认直接转换（实测真实 Word 生成的 .doc 表格/加粗/标题/多级列表均正确），检测到 Word/WPS 时另提供"高保真转换"按钮（macOS textutil 产物的 OLE 兼容边界已记录）。
+
+### 变更
+- 文书转换逐行不再显示"输入体积 → 输出体积"（格式转换体积无可比性），批量汇报仅"转换完成 x/y"。
+
 ## [0.9.7-beta16] - 2026-08-12
 
 ### 新增

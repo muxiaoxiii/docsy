@@ -1,8 +1,8 @@
 export default {
   id: 'markdown-convert',
-  name: 'MD↔Word',
+  name: 'MD转换',
   icon: 'Document',
-  description: 'Markdown 与 Word 文档双向转换',
+  description: 'Markdown 与 Office 文档双向转换',
   category: 'document',
   order: 35,
   defaultVisible: true,
@@ -12,16 +12,16 @@ export default {
       path: '/markdown',
       name: 'markdown-convert',
       component: () => import('./views/MarkdownConvertView.vue'),
-      meta: { title: 'MD↔Word', moduleId: 'markdown-convert' },
+      meta: { title: 'MD转换', moduleId: 'markdown-convert' },
     },
   ],
 
-  menuItems: [{ label: 'MD↔Word', route: 'markdown-convert', icon: 'Document' }],
+  menuItems: [{ label: 'MD转换', route: 'markdown-convert', icon: 'Document' }],
 
   homeCards: [
     {
-      title: 'MD↔Word',
-      description: 'Markdown 与 Word 双向转换，也可粘贴 Markdown 直接生成文档',
+      title: 'MD转换',
+      description: 'Markdown 与 Word、Excel、PowerPoint 等 Office 文档互转',
       route: 'markdown-convert',
       icon: 'Document',
     },

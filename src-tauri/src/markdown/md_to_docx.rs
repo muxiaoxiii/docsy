@@ -2,21 +2,109 @@
 
 use anyhow::{Context, Result};
 use docx_rs::{
-    AbstractNumbering, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel, Level, LevelJc,
-    LevelText, NumberFormat, Numbering, NumberingId, Paragraph, ParagraphBorder,
-    ParagraphBorderPosition, ParagraphChild, Pic, Run, RunFonts, Shading, SpecialIndentType,
-    Start, Style, StyleType, Table, TableCell, TableRow,
+    AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel, Level, LevelJc,
+    LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, PageMargin, Paragraph,
+    ParagraphBorder, ParagraphBorderPosition, ParagraphChild, Pic, Run, RunFonts, Shading,
+    SpecialIndentType, Start, Style, StyleType, Table, TableCell, TableCellBorder,
+    TableCellBorderPosition, TableCellBorders, TableCellMargins, TableLayoutType, TableRow,
+    WidthType,
 };
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-/// 正文字体：西文 Times New Roman，中文宋体（法律文书惯例）。
-fn body_fonts() -> RunFonts {
+/// Markdown 生成 DOCX 的版式预设。只影响新生成文件，不会改写导入的文档。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocxStylePreset {
+    Professional,
+    Legal,
+    Compact,
+}
+
+impl DocxStylePreset {
+    pub fn parse(value: Option<&str>) -> Result<Self> {
+        match value.unwrap_or("professional") {
+            "professional" => Ok(Self::Professional),
+            "legal" => Ok(Self::Legal),
+            "compact" => Ok(Self::Compact),
+            other => anyhow::bail!("未知的 Word 文档样式: {other}"),
+        }
+    }
+
+    fn body_size(self) -> usize {
+        match self {
+            Self::Professional => 22,
+            Self::Legal => 24,
+            Self::Compact => 20,
+        }
+    }
+
+    fn line_spacing(self) -> LineSpacing {
+        match self {
+            Self::Professional => LineSpacing::new().line(360).after(120),
+            Self::Legal => LineSpacing::new().line(420).after(0),
+            Self::Compact => LineSpacing::new().line(300).after(60),
+        }
+    }
+
+    fn page_margin(self) -> PageMargin {
+        match self {
+            Self::Professional => PageMargin {
+                top: 1440,
+                right: 1440,
+                bottom: 1440,
+                left: 1440,
+                header: 720,
+                footer: 720,
+                gutter: 0,
+            },
+            Self::Legal => PageMargin {
+                top: 1440,
+                right: 1440,
+                bottom: 1440,
+                left: 1800,
+                header: 720,
+                footer: 720,
+                gutter: 0,
+            },
+            Self::Compact => PageMargin {
+                top: 1080,
+                right: 1080,
+                bottom: 1080,
+                left: 1080,
+                header: 540,
+                footer: 540,
+                gutter: 0,
+            },
+        }
+    }
+
+    fn heading_color(self) -> &'static str {
+        match self {
+            Self::Professional => "1F4E79",
+            Self::Legal | Self::Compact => "000000",
+        }
+    }
+
+    fn table_header_color(self) -> &'static str {
+        match self {
+            Self::Professional => "D9EAF7",
+            Self::Legal => "E7E6E6",
+            Self::Compact => "EAF1E8",
+        }
+    }
+}
+
+/// 正文字体：西文 Times New Roman；法律文书使用宋体，其他预设使用兼容的中文正文。
+fn body_fonts(style: DocxStylePreset) -> RunFonts {
+    let east_asia = match style {
+        DocxStylePreset::Professional | DocxStylePreset::Compact => "等线",
+        DocxStylePreset::Legal => "宋体",
+    };
     RunFonts::new()
         .ascii("Times New Roman")
         .hi_ansi("Times New Roman")
-        .east_asia("宋体")
+        .east_asia(east_asia)
 }
 
 /// 等宽字体：代码块 / 行内代码用。
@@ -56,6 +144,7 @@ struct ImageCtx {
 
 struct Builder<'a> {
     base_dir: &'a Path,
+    style: DocxStylePreset,
     docx: Docx,
     next_numbering_id: usize,
     /// 当前块（段落 / 标题 / 表格单元格）的行内容。
@@ -69,12 +158,27 @@ struct Builder<'a> {
     in_code_block: bool,
     code_buf: String,
     table: Option<TableState>,
+    has_primary_heading: bool,
+}
+
+fn table_borders() -> TableCellBorders {
+    let mut borders = TableCellBorders::with_empty();
+    for position in [
+        TableCellBorderPosition::Top,
+        TableCellBorderPosition::Left,
+        TableCellBorderPosition::Bottom,
+        TableCellBorderPosition::Right,
+    ] {
+        borders = borders.set(TableCellBorder::new(position).size(4).color("B7C3D0"));
+    }
+    borders
 }
 
 impl<'a> Builder<'a> {
-    fn new(base_dir: &'a Path) -> Self {
+    fn new(base_dir: &'a Path, style: DocxStylePreset) -> Self {
         Self {
             base_dir,
+            style,
             docx: Docx::new(),
             // numId 从 2 开始：docx-rs 写出 numbering.xml 时总会内置
             // abstractNumId=1 + numId=1 的默认十进制编号，不能冲突。
@@ -88,6 +192,7 @@ impl<'a> Builder<'a> {
             in_code_block: false,
             code_buf: String::new(),
             table: None,
+            has_primary_heading: false,
         }
     }
 
@@ -240,14 +345,22 @@ impl<'a> Builder<'a> {
                     for child in std::mem::take(&mut self.children) {
                         para.children.push(child);
                     }
-                    let cell = TableCell::new().add_paragraph(para);
+                    let mut cell = TableCell::new()
+                        .add_paragraph(para)
+                        .set_borders(table_borders());
+                    if t.in_header {
+                        cell = cell.shading(Shading::new().fill(self.style.table_header_color()));
+                    }
                     t.current_cells.push(cell);
                     self.table = Some(t);
                 }
             }
             TagEnd::Table => {
                 if let Some(t) = self.table.take() {
-                    let table = Table::new(t.rows);
+                    let table = Table::new(t.rows)
+                        .layout(TableLayoutType::Fixed)
+                        .width(9_000, WidthType::Dxa)
+                        .margins(TableCellMargins::new().margin(72, 96, 72, 96));
                     self.docx = std::mem::take(&mut self.docx).add_table(table);
                 }
             }
@@ -264,7 +377,7 @@ impl<'a> Builder<'a> {
             img.alt.push_str(text);
             return;
         }
-        let mut run = Run::new().add_text(text);
+        let mut run = Run::new().add_text(text).fonts(body_fonts(self.style));
         if self.inline.bold || self.header_cell_active() {
             run = run.bold();
         }
@@ -287,10 +400,22 @@ impl<'a> Builder<'a> {
         let mut para = Paragraph::new();
         if let Some(level) = heading {
             para = para.style(&format!("Heading{level}"));
+            // Markdown 的首个 H1 通常就是文档标题；标题不应孤立在页尾。
+            para = para.keep_next(true);
+            if level == 1 && !self.has_primary_heading {
+                para = para.align(AlignmentType::Center);
+                self.has_primary_heading = true;
+            }
         }
         if self.blockquote_depth > 0 {
             // 引用块：整段左缩进
             para = para.indent(Some(420 * self.blockquote_depth as i32), None, None, None);
+        } else if heading.is_none()
+            && self.list_stack.is_empty()
+            && self.style == DocxStylePreset::Legal
+        {
+            // 法律文书正文通常使用首行缩进两字符；标题、列表和引用不套用。
+            para = para.indent(None, Some(SpecialIndentType::FirstLine(480)), None, None);
         }
         if let Some(list) = self.list_stack.last() {
             let level = (self.list_stack.len() - 1).min(8);
@@ -432,7 +557,7 @@ fn build_pic(path: &Path) -> Option<Pic> {
 }
 
 /// 内置标题样式：黑色加粗 + 正文字体，避免中文标题变默认蓝色/缺字体。
-fn heading_styles() -> Vec<Style> {
+fn heading_styles(style: DocxStylePreset) -> Vec<Style> {
     // (级别, 字号 half-points)
     let specs = [(1, 32), (2, 28), (3, 26), (4, 24), (5, 22), (6, 20)];
     specs
@@ -442,26 +567,36 @@ fn heading_styles() -> Vec<Style> {
                 .name(format!("heading {level}"))
                 .bold()
                 .size(*size)
-                .color("000000")
-                .fonts(body_fonts())
+                .color(style.heading_color())
+                .fonts(body_fonts(style))
                 .outline_lvl(level - 1)
         })
         .collect()
 }
 
 /// 生成 docx 字节（供写文件与测试复用）。
-pub fn build_docx_bytes(md: &str, base_dir: &Path) -> Result<Vec<u8>> {
+pub fn build_docx_bytes_with_style(
+    md: &str,
+    base_dir: &Path,
+    style: DocxStylePreset,
+) -> Result<Vec<u8>> {
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(md, options);
-    let mut builder = Builder::new(base_dir);
+    let mut builder = Builder::new(base_dir, style);
     for event in parser {
         builder.handle_event(event);
     }
     let mut docx = builder.docx;
-    docx = docx.default_fonts(body_fonts()).default_size(24);
-    for style in heading_styles() {
-        docx = docx.add_style(style);
+    docx = docx
+        // A4（210 × 297 mm），避免由用户本机默认模板决定纸张大小。
+        .page_size(11_906, 16_838)
+        .default_fonts(body_fonts(style))
+        .default_size(style.body_size())
+        .default_line_spacing(style.line_spacing())
+        .page_margin(style.page_margin());
+    for heading_style in heading_styles(style) {
+        docx = docx.add_style(heading_style);
     }
     let mut buf = Cursor::new(Vec::new());
     docx.build()
@@ -470,11 +605,16 @@ pub fn build_docx_bytes(md: &str, base_dir: &Path) -> Result<Vec<u8>> {
     Ok(buf.into_inner())
 }
 
-pub fn convert(input: &Path, output: &Path) -> Result<()> {
+#[cfg(test)]
+pub fn build_docx_bytes(md: &str, base_dir: &Path) -> Result<Vec<u8>> {
+    build_docx_bytes_with_style(md, base_dir, DocxStylePreset::Professional)
+}
+
+pub fn convert(input: &Path, output: &Path, style: DocxStylePreset) -> Result<()> {
     let md = std::fs::read_to_string(input)
         .with_context(|| format!("无法读取 Markdown 文件: {}", input.display()))?;
     let base_dir = input.parent().unwrap_or_else(|| Path::new("."));
-    let bytes = build_docx_bytes(&md, base_dir)?;
+    let bytes = build_docx_bytes_with_style(&md, base_dir, style)?;
     std::fs::write(output, &bytes)
         .with_context(|| format!("无法写入 docx 文件: {}", output.display()))?;
     // 自验证：生成的文件必须能被 docx-rs reader 读回
@@ -489,6 +629,7 @@ pub fn convert(input: &Path, output: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use docx_rs::DocumentChild;
+    use std::io::Read;
 
     const SAMPLE_MD: &str = r#"# 合同标题
 
@@ -577,6 +718,35 @@ let x = 1;
         assert!(md.contains("[链接](https://example.com)"), "md:\n{md}");
         // 任务列表
         assert!(md.contains("☑ 已完成事项") || md.contains("已完成事项"), "md:\n{md}");
+    }
+
+    #[test]
+    fn all_word_style_presets_emit_a4_and_distinct_typography() {
+        for (preset, east_asia_font, heading_color) in [
+            (DocxStylePreset::Professional, "等线", "1F4E79"),
+            (DocxStylePreset::Legal, "宋体", "000000"),
+            (DocxStylePreset::Compact, "等线", "000000"),
+        ] {
+            let bytes = build_docx_bytes_with_style("# 标题\n\n正文", Path::new("."), preset).unwrap();
+            let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+            let mut document_xml = String::new();
+            archive
+                .by_name("word/document.xml")
+                .unwrap()
+                .read_to_string(&mut document_xml)
+                .unwrap();
+            let mut styles_xml = String::new();
+            archive
+                .by_name("word/styles.xml")
+                .unwrap()
+                .read_to_string(&mut styles_xml)
+                .unwrap();
+
+            assert!(document_xml.contains("w:w=\"11906\""), "A4 width missing");
+            assert!(document_xml.contains("w:h=\"16838\""), "A4 height missing");
+            assert!(styles_xml.contains(east_asia_font), "font missing: {east_asia_font}");
+            assert!(styles_xml.contains(heading_color), "heading color missing: {heading_color}");
+        }
     }
 
     #[test]

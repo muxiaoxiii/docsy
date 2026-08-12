@@ -17,5 +17,7 @@ test-pdf/
 .workbuddy/
 .mimocode/
 
-docs/
+docs/*
+!docs/office-markdown-converter-design.md
+!docs/pdf-markdown-converter-design.md
 Archived/

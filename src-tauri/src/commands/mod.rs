@@ -105,6 +105,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         // markdown
         markdown::convert_markdown,
         markdown::convert_markdown_text,
+        markdown::convert_pdf_text_layer,
         // settings
         settings::get_app_settings,
         settings::set_app_settings,
