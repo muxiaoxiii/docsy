@@ -881,7 +881,7 @@ p {
   display: grid;
   gap: 8px;
   min-width: 0;
-  padding: 12px 34px 12px 12px;
+  padding: 12px 12px 40px;
   border: 1px solid var(--docsy-border-subtle);
   border-left: 3px solid transparent;
   border-radius: var(--docsy-radius);
@@ -891,7 +891,17 @@ p {
 }
 
 .fill-field-body {
-  display: contents;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fill-field-body :deep(.el-input),
+.fill-field-body :deep(.el-autocomplete),
+.fill-field-body :deep(.el-select),
+.fill-field-body :deep(.el-date-editor) {
+  width: 100%;
+  min-width: 0;
 }
 
 .field-more-button {
@@ -1017,11 +1027,11 @@ p {
 }
 
 .party-list-row.compact {
-  grid-template-columns: 24px minmax(0, 1fr) minmax(72px, 90px) minmax(96px, auto);
+  grid-template-columns: 24px minmax(0, 1fr) minmax(92px, 118px);
 }
 
 .party-list-row.compact.no-suffix {
-  grid-template-columns: 24px minmax(0, 1fr) minmax(96px, auto);
+  grid-template-columns: 24px minmax(0, 1fr);
 }
 
 .party-list-row.compact .el-button {
@@ -1033,7 +1043,8 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 4px;
-  justify-content: flex-end;
+  grid-column: 2 / -1;
+  justify-content: flex-start;
   min-width: 0;
 }
 

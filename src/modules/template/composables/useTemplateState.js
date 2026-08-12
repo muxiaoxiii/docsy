@@ -27,7 +27,11 @@ const typeHelpItems = [
   { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、律所名称。' },
   { value: 'date', label: '日期', description: '日期字段，填写时用日期选择器，生成时输出中文日期格式。' },
   { value: 'select', label: '下拉选择', description: '从预设选项中选择或手动输入，如案由、诉讼阶段。' },
-  { value: 'party_list', label: '列表', description: '适合当事人、律师等多项内容；多个名称按顺序用顿号连接。' },
+  {
+    value: 'party_list',
+    label: '多项分组',
+    description: '同一文本字段可填写多项，用于当事人、律师等的顺序、每项后缀和引用；不是独立业务字段。',
+  },
   { value: 'reference', label: '引用', description: '复用前面字段的值；来源由填写时选择或在设置里指定。' },
   { value: 'checkbox', label: '单个勾选', description: '一个独立方框，只控制是否勾选。' },
   { value: 'radio_group', label: '互斥勾选组', description: '多个方框只能选一个，如一般授权/特别授权。' },

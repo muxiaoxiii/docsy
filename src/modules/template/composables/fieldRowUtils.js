@@ -19,7 +19,11 @@ export const FIELD_TYPE_GROUPS = [
   { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、律所名称。' },
   { value: 'date', label: '日期', description: '日期字段，填写时用日期选择器；可设输出格式或留空手写。' },
   { value: 'select', label: '下拉选择', description: '从预设选项中选择或手动输入，如案由、诉讼阶段。' },
-  { value: 'party_list', label: '列表', description: '适合当事人、律师等多项内容；多个名称按顺序用顿号连接。' },
+  {
+    value: 'party_list',
+    label: '多项分组',
+    description: '同一文本字段可填写多项，用于当事人、律师等的顺序、每项后缀和引用；不是独立业务字段。',
+  },
   { value: 'reference', label: '引用', description: '复用前面字段的值；来源由填写时选择或在设置里指定。' },
   {
     value: 'check',
@@ -82,7 +86,7 @@ export const previewLegendItems = [
   { className: 'preview-text', label: '文本', type: 'text' },
   { className: 'preview-text', label: '下拉选择', type: 'select' },
   { className: 'preview-date', label: '日期', type: 'date' },
-  { className: 'preview-party', label: '列表', type: 'party_list' },
+  { className: 'preview-party', label: '多项分组', type: 'party_list' },
   { className: 'preview-reference', label: '引用', type: 'reference' },
   { className: 'preview-checkbox', label: '单个勾选', type: 'checkbox' },
   { className: 'preview-radio', label: '互斥勾选组', type: 'radio_group' },
@@ -319,26 +323,34 @@ export function isPureConnectorText(text) {
 // ── Mark / ref helpers ───────────────────────────────────────────────────────
 
 export function markRefsForTextRange(row, start, end) {
+  const sourceRefs = row.markRefs?.length
+    ? row.markRefs
+    : [{ markId: row.markId, start: null, end: null }]
   const segments = row.markSegments?.length ? row.markSegments : [{ markId: row.markId, text: row.text }]
-  const refs = []
+  const result = []
   let cursor = 0
-  for (const segment of segments) {
+  for (const [index, segment] of segments.entries()) {
     const length = charLength(segment.text)
     const segmentStart = cursor
     const segmentEnd = cursor + length
     const overlapStart = Math.max(start, segmentStart)
     const overlapEnd = Math.min(end, segmentEnd)
-    if (overlapEnd > overlapStart && segment.markId) {
-      refs.push({
-        markId: segment.markId,
-        start: overlapStart - segmentStart,
-        end: overlapEnd - segmentStart,
+    const sourceRef = sourceRefs[index] || { markId: segment.markId, start: null, end: null }
+    if (overlapEnd > overlapStart && sourceRef.markId) {
+      // A row may already be a slice of a run (for example after stripping the
+      // leading "、" from "、李月春律师"). Preserve that source offset when it
+      // is split again; otherwise the next save targets the wrong characters.
+      const sourceStart = sourceRef.start == null ? 0 : sourceRef.start
+      result.push({
+        markId: sourceRef.markId,
+        start: sourceStart + overlapStart - segmentStart,
+        end: sourceStart + overlapEnd - segmentStart,
       })
     }
     cursor = segmentEnd
   }
-  if (!refs.length && row.markId) refs.push({ markId: row.markId, start, end })
-  return refs
+  if (!result.length && row.markId) result.push({ markId: row.markId, start, end })
+  return result
 }
 
 export function refsForRowTextRange(row, start, end) {

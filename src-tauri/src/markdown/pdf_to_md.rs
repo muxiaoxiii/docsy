@@ -314,6 +314,11 @@ pub fn convert_pdf_text_layer(
     token: Option<&CancellationToken>,
 ) -> Result<PdfTextLayerOutput> {
     validate_page_range(start_page, end_page)?;
+    // A cancelled task must not be reported as a missing input/tool error.
+    // This also keeps queued conversions cancellable before any disk access.
+    if token.is_some_and(CancellationToken::is_cancelled) {
+        anyhow::bail!("操作已取消");
+    }
     let input_path = PathBuf::from(input);
     if !input_path.is_file() {
         anyhow::bail!("输入文件不存在: {input}");
@@ -385,6 +390,78 @@ pub fn convert_pdf_text_layer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn create_text_fixture_pdf(path: &Path) {
+        use lopdf::{
+            content::{Content, Operation},
+            dictionary, Document, Object, Stream,
+        };
+
+        let mut document = Document::with_version("1.7");
+        let pages_id = document.new_object_id();
+        let font_id = document.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = document.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let mut page_ids = Vec::new();
+        for (index, text) in ["First page text", "Second page text"].iter().enumerate() {
+            let content = Content {
+                operations: vec![
+                    Operation::new("BT", vec![]),
+                    Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 12.into()]),
+                    Operation::new(
+                        "Tm",
+                        vec![
+                            1.into(),
+                            0.into(),
+                            0.into(),
+                            1.into(),
+                            72.into(),
+                            (760 - index as i32 * 20).into(),
+                        ],
+                    ),
+                    Operation::new("Tj", vec![Object::string_literal(*text)]),
+                    Operation::new("ET", vec![]),
+                ],
+            };
+            let content_id =
+                document.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+            let page_id = document.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "Contents" => content_id,
+                "Resources" => resources_id,
+                "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            });
+            page_ids.push(page_id);
+        }
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => page_ids.into_iter().map(Into::into).collect::<Vec<Object>>(),
+                "Count" => 2,
+            }),
+        );
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+        document.save(path).unwrap();
+    }
+
+    fn temp_test_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "docsy-pdf-md-{label}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ))
+    }
 
     #[test]
     fn pdftotext_args_with_page_range() {
@@ -464,9 +541,10 @@ mod tests {
 
     #[test]
     fn end_to_end_extracts_fixture_pdf() {
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-pdf/测试文件1.pdf");
-        let dir = std::env::temp_dir().join(format!("docsy-pdf-md-test-{}", std::process::id()));
+        let dir = temp_test_dir("fixture");
         std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("fixture.pdf");
+        create_text_fixture_pdf(&fixture);
         let result = convert_pdf_text_layer(
             fixture.to_str().unwrap(),
             Some(dir.to_str().unwrap()),
@@ -479,19 +557,17 @@ mod tests {
         let markdown = std::fs::read_to_string(&result.output_path).unwrap();
         assert!(markdown.contains("## 第 2 页"));
         assert!(!markdown.contains("## 第 1 页"));
+        assert!(markdown.contains("Second page text"));
         let _ = std::fs::remove_file(&result.output_path);
-        let _ = std::fs::remove_dir(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn cancellation_stops_before_pdf_text_is_rendered() {
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-pdf/测试文件1.pdf");
-        let dir = std::env::temp_dir().join(format!(
-            "docsy-pdf-md-cancel-test-{}-{}",
-            std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        ));
+        let dir = temp_test_dir("cancel");
         std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("fixture.pdf");
+        create_text_fixture_pdf(&fixture);
         let token = CancellationToken::new();
         token.cancel();
         let error = convert_pdf_text_layer(

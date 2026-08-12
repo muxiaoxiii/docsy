@@ -17,6 +17,126 @@ use super::{RenderTemplateArgs, TemplateField, TemplateManifest};
 const GENERATE_COL_LABEL: &str = "是否生成";
 const SAMPLE_ROW_FLAG: &str = "否";
 
+/// A spreadsheet column is not always an independently fillable field. A
+/// repeatable field has a second column for its per-item suffixes, while a
+/// configured reference is shown for transparency but populated automatically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BatchColumnKind {
+    Value,
+    PartySuffix,
+    ReferenceAuto,
+}
+
+impl BatchColumnKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Value => "value",
+            Self::PartySuffix => "party_suffix",
+            Self::ReferenceAuto => "reference_auto",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "party_suffix" => Self::PartySuffix,
+            "reference_auto" => Self::ReferenceAuto,
+            _ => Self::Value,
+        }
+    }
+
+    fn accepts_input(self) -> bool {
+        matches!(self, Self::Value | Self::PartySuffix)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BatchColumn<'a> {
+    field: &'a TemplateField,
+    kind: BatchColumnKind,
+}
+
+fn has_configured_reference(field: &TemplateField) -> bool {
+    if field.field_type != "reference" {
+        return false;
+    }
+    let Some(reference) = field.reference.as_ref() else {
+        return false;
+    };
+    let mode = reference.source_mode.as_str();
+    (mode == "field" && !reference.source_field.trim().is_empty())
+        || (mode == "semantic" && !reference.source_semantic_key.trim().is_empty())
+}
+
+fn batch_columns(manifest: &TemplateManifest) -> Vec<BatchColumn<'_>> {
+    let mut columns = Vec::new();
+    for field in manifest
+        .fields
+        .iter()
+        .filter(|field| is_renderable(&field.field_type))
+    {
+        if has_configured_reference(field) {
+            columns.push(BatchColumn {
+                field,
+                kind: BatchColumnKind::ReferenceAuto,
+            });
+            continue;
+        }
+        columns.push(BatchColumn {
+            field,
+            kind: BatchColumnKind::Value,
+        });
+        if field.field_type == "party_list" {
+            columns.push(BatchColumn {
+                field,
+                kind: BatchColumnKind::PartySuffix,
+            });
+        }
+    }
+    columns
+}
+
+fn field_label(field: &TemplateField) -> &str {
+    if field.label.is_empty() {
+        &field.name
+    } else {
+        &field.label
+    }
+}
+
+fn reference_description(field: &TemplateField) -> String {
+    let Some(reference) = field.reference.as_ref() else {
+        return "待选择来源".to_string();
+    };
+    let source = if reference.source_mode == "semantic" {
+        reference.source_semantic_key.trim()
+    } else {
+        reference.source_field.trim()
+    };
+    if source.is_empty() {
+        return "待选择来源".to_string();
+    }
+    if let Some(index) = reference.source_index {
+        format!("{}第 {} 项", source, index + 1)
+    } else {
+        source.to_string()
+    }
+}
+
+fn batch_column_label(column: BatchColumn<'_>) -> String {
+    match column.kind {
+        BatchColumnKind::Value if column.field.field_type == "reference" => {
+            format!("{}（引用来源待选择）", field_label(column.field))
+        }
+        BatchColumnKind::Value => field_label(column.field).to_string(),
+        BatchColumnKind::PartySuffix => format!("{}（每项后缀）", field_label(column.field)),
+        BatchColumnKind::ReferenceAuto => format!(
+            "{}（引用：{}，自动带入）",
+            field_label(column.field),
+            reference_description(column.field)
+        ),
+    }
+}
+
 /// Export template fields as an xlsx fill sheet.
 /// Row 1 (hidden): metadata — template_id | field_id | field_type per column
 /// Row 2: field labels (user-visible headers) + "是否生成" column
@@ -27,11 +147,7 @@ pub fn export_fields_xlsx(
     default_values: &HashMap<String, serde_json::Value>,
     output_path: &str,
 ) -> Result<String> {
-    let renderable: Vec<&TemplateField> = manifest
-        .fields
-        .iter()
-        .filter(|f| is_renderable(&f.field_type))
-        .collect();
+    let columns = batch_columns(manifest);
 
     // Prefer the last recorded run values as the sample row, fall back to the
     // caller-provided defaults.
@@ -49,40 +165,48 @@ pub fn export_fields_xlsx(
 
     // Row 0 (hidden): metadata
     ws.set_row_hidden(0)?;
-    for (col, field) in renderable.iter().enumerate() {
+    for (col, column) in columns.iter().enumerate() {
         let col = col as u16;
         let meta = format!(
-            "{}\t{}\t{}",
-            manifest.template.id, field.id, field.field_type
+            "{}\t{}\t{}\t{}",
+            manifest.template.id,
+            column.field.id,
+            column.field.field_type,
+            column.kind.as_str()
         );
         ws.write_string(0, col, &meta)?;
     }
 
     // Row 1: field labels + generate flag column
-    for (col, field) in renderable.iter().enumerate() {
-        let col = col as u16;
-        let label = if field.label.is_empty() {
-            &field.name
-        } else {
-            &field.label
-        };
-        ws.write_string(1, col, label)?;
+    for (col, column) in columns.iter().enumerate() {
+        ws.write_string(1, col as u16, batch_column_label(*column))?;
     }
-    ws.write_string(1, renderable.len() as u16, GENERATE_COL_LABEL)?;
+    ws.write_string(1, columns.len() as u16, GENERATE_COL_LABEL)?;
 
     // Row 2: sample row from the last recorded values (flag "否", not rendered)
     if !sample_values.is_empty() {
-        for (col, field) in renderable.iter().enumerate() {
-            if let Some(value) = sample_values.get(&field.id) {
-                ws.write_string(2, col as u16, value_to_display(value))?;
+        for (col, column) in columns.iter().enumerate() {
+            let sample = match column.kind {
+                BatchColumnKind::Value => sample_values
+                    .get(&column.field.id)
+                    .map(|value| value_to_display_for_column(value, column.kind)),
+                BatchColumnKind::PartySuffix => sample_values
+                    .get(&column.field.id)
+                    .map(party_suffixes_to_display),
+                BatchColumnKind::ReferenceAuto => {
+                    Some(format!("自动带入：{}", reference_description(column.field)))
+                }
+            };
+            if let Some(value) = sample {
+                ws.write_string(2, col as u16, value)?;
             }
         }
-        ws.write_string(2, renderable.len() as u16, SAMPLE_ROW_FLAG)?;
+        ws.write_string(2, columns.len() as u16, SAMPLE_ROW_FLAG)?;
     }
 
     // Auto-fit column widths (approximate)
-    for (col, field) in renderable.iter().enumerate() {
-        let label_len = field.label.chars().count().max(field.name.chars().count());
+    for (col, column) in columns.iter().enumerate() {
+        let label_len = batch_column_label(*column).chars().count();
         let width = (label_len as f64 * 2.0 + 4.0).clamp(10.0, 40.0);
         ws.set_column_width(col as u16, width)?;
     }
@@ -125,6 +249,47 @@ fn value_to_display(value: &serde_json::Value) -> String {
         }
         _ => String::new(),
     }
+}
+
+fn value_to_display_for_column(value: &serde_json::Value, kind: BatchColumnKind) -> String {
+    if kind != BatchColumnKind::Value {
+        return String::new();
+    }
+    match value {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|item| match item {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Object(obj) => obj
+                    .get("name")
+                    .or_else(|| obj.get("text"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                _ => String::new(),
+            })
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("、"),
+        _ => value_to_display(value),
+    }
+}
+
+fn party_suffixes_to_display(value: &serde_json::Value) -> String {
+    let serde_json::Value::Array(items) = value else {
+        return String::new();
+    };
+    items
+        .iter()
+        .map(|item| {
+            item.as_object()
+                .and_then(|obj| obj.get("suffix"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("、")
 }
 
 // ── Validation ──────────────────────────────────────────────────────────────
@@ -508,9 +673,21 @@ fn format_date_value(value: &str, format: &str) -> String {
         return value.to_string();
     };
     let fmt = if format.is_empty() { "iso" } else { format };
-    let y_str = if y > 0 { y.to_string() } else { "    ".to_string() };
-    let m_str = if m > 0 { m.to_string() } else { "  ".to_string() };
-    let d_str = if d > 0 { d.to_string() } else { "  ".to_string() };
+    let y_str = if y > 0 {
+        y.to_string()
+    } else {
+        "    ".to_string()
+    };
+    let m_str = if m > 0 {
+        m.to_string()
+    } else {
+        "  ".to_string()
+    };
+    let d_str = if d > 0 {
+        d.to_string()
+    } else {
+        "  ".to_string()
+    };
     if fmt == "cn" || fmt == "blank" {
         return format!("{y_str}年{m_str}月{d_str}日");
     }
@@ -518,8 +695,16 @@ fn format_date_value(value: &str, format: &str) -> String {
         return format!(
             "{}年{}月{}日",
             cn_number(y),
-            if m > 0 { cn_number(m) } else { "  ".to_string() },
-            if d > 0 { cn_number(d) } else { "  ".to_string() }
+            if m > 0 {
+                cn_number(m)
+            } else {
+                "  ".to_string()
+            },
+            if d > 0 {
+                cn_number(d)
+            } else {
+                "  ".to_string()
+            }
         );
     }
     let month_long = if (1..=12).contains(&m) {
@@ -656,7 +841,7 @@ pub fn batch_render(
         .filter(|f| is_renderable(&f.field_type))
         .collect();
 
-    let mut col_map: Vec<(usize, &TemplateField)> = Vec::new();
+    let mut col_map: Vec<(usize, &TemplateField, BatchColumnKind)> = Vec::new();
     let mut generate_col_idx: Option<usize> = None;
     for (col_idx, meta_cell) in meta_row.iter().enumerate() {
         let meta_str = cell_to_string(meta_cell);
@@ -664,7 +849,13 @@ pub fn batch_render(
         if parts.len() >= 3 {
             let field_id = parts[1];
             if let Some(field) = renderable.iter().find(|f| f.id == field_id) {
-                col_map.push((col_idx, field));
+                let kind = parts
+                    .get(3)
+                    .map(|value| BatchColumnKind::from_str(value))
+                    .unwrap_or(BatchColumnKind::Value);
+                if kind.accepts_input() {
+                    col_map.push((col_idx, field, kind));
+                }
             }
         } else {
             let label = cell_to_string(
@@ -707,7 +898,10 @@ pub fn batch_render(
             }
         }
         // Check if row has any data
-        let has_data = col_map.iter().any(|(col, _)| {
+        let has_data = col_map.iter().any(|(col, _, kind)| {
+            if *kind != BatchColumnKind::Value {
+                return false;
+            }
             let cell = row.get(*col).cloned().unwrap_or(calamine::Data::Empty);
             !cell_to_string(&cell).trim().is_empty()
         });
@@ -762,25 +956,37 @@ pub fn batch_render(
 
 fn build_row_values(
     row: &[calamine::Data],
-    col_map: &[(usize, &TemplateField)],
+    col_map: &[(usize, &TemplateField, BatchColumnKind)],
     manifest: &TemplateManifest,
 ) -> HashMap<String, serde_json::Value> {
     let mut values = HashMap::new();
+    let mut party_names: HashMap<&str, Vec<String>> = HashMap::new();
+    let mut party_suffixes: HashMap<&str, Vec<String>> = HashMap::new();
 
-    for (col, field) in col_map {
+    for (col, field, kind) in col_map {
         let cell = row.get(*col).cloned().unwrap_or(calamine::Data::Empty);
         let text = cell_to_string(&cell);
 
-        let value = match field.field_type.as_str() {
-            "party_list" => {
-                let items: Vec<serde_json::Value> = text
-                    .split('、')
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| serde_json::Value::String(s.to_string()))
-                    .collect();
-                serde_json::Value::Array(items)
+        if field.field_type == "party_list" {
+            let parts = text
+                .split('、')
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            match kind {
+                BatchColumnKind::Value => {
+                    party_names.insert(field.id.as_str(), parts);
+                }
+                BatchColumnKind::PartySuffix => {
+                    party_suffixes.insert(field.id.as_str(), parts);
+                }
+                BatchColumnKind::ReferenceAuto => {}
             }
+            continue;
+        }
+
+        let value = match field.field_type.as_str() {
             "checkbox" => {
                 let trimmed = text.trim().to_lowercase();
                 // 与 scan.rs CHECKBOX_CHARS 对齐："√" 和 "☒"（带叉勾选框）都算勾选
@@ -838,6 +1044,41 @@ fn build_row_values(
         }
     }
 
+    for field in manifest
+        .fields
+        .iter()
+        .filter(|field| field.field_type == "party_list")
+    {
+        let names = party_names.remove(field.id.as_str()).unwrap_or_default();
+        if names.is_empty() {
+            continue;
+        }
+        let suffixes = party_suffixes.remove(field.id.as_str()).unwrap_or_default();
+        let defaults = default_party_suffixes(field);
+        let items = names
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let suffix = suffixes
+                    .get(index)
+                    .cloned()
+                    .or_else(|| defaults.get(index).cloned())
+                    .unwrap_or_default();
+                let normalized_name = if !suffix.is_empty() && name.ends_with(&suffix) {
+                    name[..name.len() - suffix.len()].trim().to_string()
+                } else {
+                    name
+                };
+                serde_json::json!({ "name": normalized_name, "suffix": suffix })
+            })
+            .collect::<Vec<_>>();
+        let value = serde_json::Value::Array(items);
+        values.insert(field.id.clone(), value.clone());
+        if !field.name.is_empty() {
+            values.insert(field.name.clone(), value);
+        }
+    }
+
     // Add semantic key aliases
     let semantic_pairs: Vec<(String, serde_json::Value)> = manifest
         .fields
@@ -856,7 +1097,78 @@ fn build_row_values(
         values.entry(sk).or_insert(v);
     }
 
+    resolve_configured_references(&mut values, manifest);
+
     values
+}
+
+fn default_party_suffixes(field: &TemplateField) -> Vec<String> {
+    field
+        .mark_refs
+        .iter()
+        .filter_map(|reference| reference.optional_rule.as_ref())
+        .map(|rule| rule.remove_empty_suffix.trim().to_string())
+        .filter(|suffix| !suffix.is_empty())
+        .collect()
+}
+
+fn resolve_configured_references(
+    values: &mut HashMap<String, serde_json::Value>,
+    manifest: &TemplateManifest,
+) {
+    // Resolve in several passes so a reference can safely point at a previous
+    // reference. Templates are small; bounded iteration also avoids cycles
+    // stalling batch rendering.
+    for _ in 0..manifest.fields.len().max(1) {
+        let mut changed = false;
+        for field in manifest
+            .fields
+            .iter()
+            .filter(|field| has_configured_reference(field))
+        {
+            let Some(reference) = field.reference.as_ref() else {
+                continue;
+            };
+            let source_key = if reference.source_mode == "semantic" {
+                reference.source_semantic_key.trim()
+            } else {
+                reference.source_field.trim()
+            };
+            let Some(source) = values.get(source_key).cloned() else {
+                continue;
+            };
+            let resolved = reference_display_value(&source, reference.source_index);
+            if values.get(&field.id) != Some(&resolved) {
+                values.insert(field.id.clone(), resolved.clone());
+                if !field.name.is_empty() {
+                    values.insert(field.name.clone(), resolved);
+                }
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+fn reference_display_value(
+    value: &serde_json::Value,
+    source_index: Option<usize>,
+) -> serde_json::Value {
+    let text = match value {
+        serde_json::Value::Array(items) => match source_index {
+            Some(index) => items.get(index).map(value_to_display).unwrap_or_default(),
+            None => items
+                .iter()
+                .map(value_to_display)
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>()
+                .join("、"),
+        },
+        _ => value_to_display(value),
+    };
+    serde_json::Value::String(text)
 }
 
 fn generate_filename(
@@ -1070,9 +1382,13 @@ mod tests {
 
     fn single_cell_value(field: &TemplateField, cell: calamine::Data) -> serde_json::Value {
         let manifest = test_manifest(vec![field.clone()]);
-        let col_map: Vec<(usize, &TemplateField)> = vec![(0, &manifest.fields[0])];
+        let col_map: Vec<(usize, &TemplateField, BatchColumnKind)> =
+            vec![(0, &manifest.fields[0], BatchColumnKind::Value)];
         let values = build_row_values(&[cell], &col_map, &manifest);
-        values.get(&field.id).cloned().unwrap_or(serde_json::Value::Null)
+        values
+            .get(&field.id)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
     }
 
     #[test]
@@ -1093,6 +1409,123 @@ mod tests {
                 "{unchecked} 应判定为未勾选"
             );
         }
+    }
+
+    #[test]
+    fn batch_party_values_keep_per_item_suffixes_in_a_separate_column() {
+        let mut field = test_field("lawyers", "party_list");
+        field.name = "律师".to_string();
+        field.mark_refs = vec![
+            super::super::TemplateMarkRef {
+                optional_rule: Some(super::super::OptionalFieldRule {
+                    enabled: true,
+                    remove_empty_suffix: "律师".to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            super::super::TemplateMarkRef {
+                optional_rule: Some(super::super::OptionalFieldRule {
+                    enabled: true,
+                    remove_empty_suffix: "实习律师".to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ];
+        let manifest = test_manifest(vec![field]);
+        let columns = vec![
+            (0, &manifest.fields[0], BatchColumnKind::Value),
+            (1, &manifest.fields[0], BatchColumnKind::PartySuffix),
+        ];
+        let values = build_row_values(
+            &[
+                calamine::Data::String("吕晗、李月春".to_string()),
+                calamine::Data::String("律师、实习律师".to_string()),
+            ],
+            &columns,
+            &manifest,
+        );
+        assert_eq!(
+            values.get("lawyers"),
+            Some(&serde_json::json!([
+                { "name": "吕晗", "suffix": "律师" },
+                { "name": "李月春", "suffix": "实习律师" }
+            ]))
+        );
+    }
+
+    #[test]
+    fn batch_party_values_use_template_suffixes_when_suffix_column_is_empty() {
+        let mut field = test_field("lawyers", "party_list");
+        field.name = "律师".to_string();
+        field.mark_refs = vec![
+            super::super::TemplateMarkRef {
+                optional_rule: Some(super::super::OptionalFieldRule {
+                    enabled: true,
+                    remove_empty_suffix: "律师".to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            super::super::TemplateMarkRef {
+                optional_rule: Some(super::super::OptionalFieldRule {
+                    enabled: true,
+                    remove_empty_suffix: "实习律师".to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ];
+        let manifest = test_manifest(vec![field]);
+        let columns = vec![
+            (0, &manifest.fields[0], BatchColumnKind::Value),
+            (1, &manifest.fields[0], BatchColumnKind::PartySuffix),
+        ];
+        let values = build_row_values(
+            &[
+                calamine::Data::String("吕晗、李月春".to_string()),
+                calamine::Data::Empty,
+            ],
+            &columns,
+            &manifest,
+        );
+        assert_eq!(
+            values.get("lawyers"),
+            Some(&serde_json::json!([
+                { "name": "吕晗", "suffix": "律师" },
+                { "name": "李月春", "suffix": "实习律师" }
+            ]))
+        );
+    }
+
+    #[test]
+    fn configured_reference_is_resolved_without_an_excel_input_column() {
+        let mut source = test_field("requester", "text");
+        source.name = "请求人".to_string();
+        let mut reference = test_field("principal", "reference");
+        reference.name = "委托人".to_string();
+        reference.reference = Some(super::super::TemplateFieldReference {
+            source_mode: "field".to_string(),
+            source_field: "请求人".to_string(),
+            source_semantic_key: String::new(),
+            source_index: None,
+        });
+        let manifest = test_manifest(vec![source, reference]);
+        let columns = vec![(0, &manifest.fields[0], BatchColumnKind::Value)];
+        let values = build_row_values(
+            &[calamine::Data::String(
+                "西安隆基乐叶光伏科技有限公司".to_string(),
+            )],
+            &columns,
+            &manifest,
+        );
+        assert_eq!(
+            values.get("principal"),
+            Some(&serde_json::Value::String(
+                "西安隆基乐叶光伏科技有限公司".to_string()
+            ))
+        );
     }
 
     #[test]

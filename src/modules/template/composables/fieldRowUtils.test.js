@@ -6,10 +6,29 @@ import {
   filenamePreviewText,
   formatDateValue,
   inputValueForField,
+  markRefsForTextRange,
   parseDateParts,
   referenceSelectionFor,
   resolveReferenceValueFromSource,
 } from './fieldRowUtils.js'
+
+describe('markRefsForTextRange 坐标传播', () => {
+  it('再次拆分已去除连接符的 run 时保留原始起点', () => {
+    const row = {
+      markId: 'word/document.xml-p2-r14',
+      text: '李月春律师',
+      markRefs: [{ markId: 'word/document.xml-p2-r14', start: 1, end: 6 }],
+      markSegments: [{ markId: 'word/document.xml-p2-r14', text: '李月春律师' }],
+    }
+
+    expect(markRefsForTextRange(row, 0, 3)).toEqual([
+      { markId: 'word/document.xml-p2-r14', start: 1, end: 4 },
+    ])
+    expect(markRefsForTextRange(row, 3, 5)).toEqual([
+      { markId: 'word/document.xml-p2-r14', start: 4, end: 6 },
+    ])
+  })
+})
 
 describe('parseDateParts 容错', () => {
   it('正常解析数字日期', () => {

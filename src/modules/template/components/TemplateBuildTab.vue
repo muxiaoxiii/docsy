@@ -62,6 +62,15 @@
           </h3>
         </div>
         <div class="panel-actions">
+          <el-button
+            v-if="allReferenceSuggestions().length"
+            size="small"
+            type="warning"
+            plain
+            @click="$emit('apply-all-reference-suggestions')"
+          >
+            处理 {{ allReferenceSuggestions().length }} 处重复文本
+          </el-button>
           <el-popover placement="bottom-end" trigger="hover" width="420" popper-class="field-rules-popper">
             <template #reference>
               <el-button size="small" text class="help-button">
@@ -91,8 +100,8 @@
                 <p>例：标黄"（案号："设为前缀，案号设为文本，标黄"）"设为后缀，三行字段名都填"案号"。</p>
               </section>
               <section>
-                <h4>列表与勾选</h4>
-                <p>当事人列表会按填写顺序用顿号连接；勾选组只改方框符号，选项文字保留 Word 原文。</p>
+                <h4>多项分组与勾选</h4>
+                <p>多项分组仍是一个字段：可增减项目、按顺序用顿号连接，并可被引用到某一项；勾选组只改方框符号，选项文字保留 Word 原文。</p>
               </section>
             </div>
           </el-popover>
@@ -130,7 +139,7 @@
           <el-option label="文本" value="text" />
           <el-option label="日期" value="date" />
           <el-option label="下拉选择" value="select" />
-          <el-option label="列表" value="party_list" />
+          <el-option label="多项分组" value="party_list" />
           <el-option label="引用" value="reference" />
           <el-option label="互斥勾选组" value="radio_group" />
           <el-option label="多选勾选组" value="checkbox_group" />
@@ -190,8 +199,8 @@
         </el-table-column>
         <el-table-column label="类型" width="168">
           <template #default="{ row }">
-            <span v-if="row.virtualPartyGroup" class="muted">当事人列表</span>
-            <span v-else-if="row.displayOnly" class="muted">当事人项</span>
+            <span v-if="row.virtualPartyGroup" class="muted">多项分组</span>
+            <span v-else-if="row.displayOnly" class="muted">分组项</span>
             <span v-else-if="isConnectorRow(row)" class="muted">连接符</span>
             <template v-else>
               <el-select
@@ -266,24 +275,43 @@
         </el-table-column>
         <el-table-column label="关系" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag v-if="row.virtualPartyGroup" size="small" type="success">当事人列表</el-tag>
-            <el-tag v-else-if="row.displayOnly" size="small" type="success">列表项</el-tag>
-            <el-tag v-else-if="rowUsage(row) === 'prefix'" size="small" type="info">{{ relationSummary(row) }}</el-tag>
-            <el-tag v-else-if="rowUsage(row) === 'suffix'" size="small" type="info">{{ relationSummary(row) }}</el-tag>
-            <el-tag v-else-if="rowUsage(row) === 'delete_text'" size="small" type="danger">删除文本</el-tag>
-            <el-tag v-else-if="row.type === 'reference'" size="small" type="warning">
-              引用 {{ referenceSourceLabel(row) || '未指定' }}
-            </el-tag>
-            <el-tag v-else-if="isGroupedField(row)" size="small" type="success">{{ groupedFieldSummary(row) }}</el-tag>
-            <el-button
-              v-else-if="referenceSuggestion(row)"
-              size="small"
-              type="primary"
-              link
-              @click="$emit('apply-reference-suggestion', row)"
-              >改成引用</el-button
-            >
-            <span v-else class="muted">-</span>
+            <div class="relation-cell">
+            <el-tag v-if="row.virtualPartyGroup" size="small" type="success">多项分组</el-tag>
+            <el-tag v-else-if="row.displayOnly" size="small" type="success">分组项</el-tag>
+              <el-tag v-else-if="rowUsage(row) === 'prefix'" size="small" type="info">{{ relationSummary(row) }}</el-tag>
+              <el-tag v-else-if="rowUsage(row) === 'suffix'" size="small" type="info">{{ relationSummary(row) }}</el-tag>
+              <el-tag v-else-if="rowUsage(row) === 'delete_text'" size="small" type="danger">删除文本</el-tag>
+              <el-tag v-else-if="row.type === 'reference'" size="small" type="warning">
+                引用 {{ referenceSourceLabel(row) || '未指定' }}
+              </el-tag>
+              <el-tag v-else-if="isGroupedField(row)" size="small" type="success">{{ groupedFieldSummary(row) }}</el-tag>
+              <span v-else class="muted">-</span>
+              <el-popover
+                v-if="!row.displayOnly && row.type !== 'reference' && referenceSuggestion(row)"
+                placement="bottom-start"
+                trigger="click"
+                width="320"
+              >
+                <template #reference>
+                  <el-button size="small" type="primary" link class="reference-action-button">改为引用</el-button>
+                </template>
+                <div class="reference-suggestion">
+                  <p>
+                    与前面的“{{ referenceSuggestion(row).targetLabel }}”文本相同，改为引用后无需重复填写。
+                    <span v-if="referenceSuggestion(row).targetKind === 'party_item'">将引用该列表项。</span>
+                  </p>
+                  <el-checkbox v-model="row.referenceIncludePrefix" :disabled="!referenceSuggestion(row).prefixRows.length">
+                    同时归属前缀
+                  </el-checkbox>
+                  <el-checkbox v-model="row.referenceIncludeSuffix" :disabled="!referenceSuggestion(row).suffixRows.length">
+                    同时归属后缀
+                  </el-checkbox>
+                  <div class="reference-actions">
+                    <el-button size="small" type="primary" @click="applyReferenceSuggestion(row)">确认改为引用</el-button>
+                  </div>
+                </div>
+              </el-popover>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="设置" width="64" align="center">
@@ -292,47 +320,11 @@
             <template v-else>
               <el-popover placement="left-start" trigger="click" width="420">
                 <template #reference>
-                  <el-badge v-if="hasUnseenReferenceSuggestion(row)" value="!" type="danger" class="settings-badge">
-                    <el-button size="small" circle @click="row.referenceHintSeen = true">⋯</el-button>
-                  </el-badge>
-                  <el-button v-else size="small" circle @click="row.referenceHintSeen = true">⋯</el-button>
+                  <el-button size="small" circle>⋯</el-button>
                 </template>
                 <div class="row-settings">
                   <h4>{{ row.text || row.name }}</h4>
                   <p class="setting-caption">{{ relationSummary(row) }}</p>
-
-                  <div v-if="referenceSuggestion(row)" class="reference-suggestion">
-                    <p>
-                      字段内容与前面的"{{ referenceSuggestion(row).targetLabel }}"相同，建议改成引用，共用同一个填写值。
-                      <span v-if="referenceSuggestion(row).targetKind === 'party_item'">
-                        这是当事人列表中的单个成员。
-                      </span>
-                    </p>
-                    <el-checkbox v-model="row.referenceIncludePrefix">
-                      包含当前这处的前缀
-                      <span class="setting-caption">
-                        {{ referenceSuggestion(row).prefixRows.length ? '会一并归属到引用字段' : '当前未检测到' }}
-                      </span>
-                    </el-checkbox>
-                    <el-checkbox v-model="row.referenceIncludeSuffix">
-                      包含当前这处的后缀
-                      <span class="setting-caption">
-                        {{ referenceSuggestion(row).suffixRows.length ? '会一并归属到引用字段' : '当前未检测到' }}
-                      </span>
-                    </el-checkbox>
-                    <div class="reference-actions">
-                      <el-button size="small" type="primary" @click="$emit('apply-reference-suggestion', row)">
-                        改成引用
-                      </el-button>
-                      <el-button
-                        size="small"
-                        :disabled="!allReferenceSuggestions().length"
-                        @click="$emit('apply-all-reference-suggestions')"
-                      >
-                        全部应用
-                      </el-button>
-                    </div>
-                  </div>
 
                   <el-form label-width="84px" size="small">
                     <el-form-item label="显示名" v-if="rowUsage(row) === 'field'">
@@ -659,7 +651,6 @@ import {
   isGroupedField as isGroupedFieldFn,
   groupedFieldSummary,
   referenceSourceLabel,
-  hasUnseenReferenceSuggestion as hasUnseenReferenceSuggestionFn,
   previewTokenClass,
   previewFormatClass,
   fillFieldLabel,
@@ -835,12 +826,14 @@ function allReferenceSuggestions() {
   return allReferenceSuggestionsFn(props.fieldRows)
 }
 
-function markerGroupMembers(row) {
-  return markerGroupMembersFn(row, props.fieldRows)
+function applyReferenceSuggestion(row) {
+  if (!row) return
+  row.referenceHintSeen = true
+  emit('apply-reference-suggestion', row)
 }
 
-function hasUnseenReferenceSuggestion(row) {
-  return hasUnseenReferenceSuggestionFn(row, props.fieldRows)
+function markerGroupMembers(row) {
+  return markerGroupMembersFn(row, props.fieldRows)
 }
 
 defineExpose({ fieldTableRef, sourcePreviewRef, documentPreviewRef })
@@ -1267,14 +1260,22 @@ p {
   font-size: 12px;
 }
 
-.settings-badge {
-  line-height: 1;
+.relation-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.reference-action-button {
+  flex: 0 0 auto;
 }
 
 .reference-suggestion {
   display: grid;
   gap: 6px;
-  margin-bottom: 12px;
+  margin: 0;
   padding: 10px;
   border: 1px solid var(--docsy-danger-border);
   border-radius: var(--docsy-radius);
