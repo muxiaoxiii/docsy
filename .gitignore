@@ -1,6 +1,8 @@
 node_modules/
 dist/
 src-tauri/target/
+src-tauri/vendor/*/target/
+src-tauri/vendor/*/Cargo.lock
 .codex-pet-runs/
 .pet-runs/
 test-pdf/

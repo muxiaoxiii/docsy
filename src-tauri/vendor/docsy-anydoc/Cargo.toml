@@ -45,10 +45,6 @@ repository = "https://github.com/muxiaoxiii/docsy"
 name = "docsy_anydoc"
 path = "src/lib.rs"
 
-[[example]]
-name = "convert"
-path = "examples/convert.rs"
-
 [dependencies.calamine]
 version = "0.36.1"
 features = ["dates"]

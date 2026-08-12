@@ -1,6 +1,8 @@
 use crate::commands::{run_blocking, run_managed};
 use serde::Serialize;
 
+const PDF_TEXT_LAYER_OPERATION_ID: &str = "convert_pdf_text_layer:auto";
+
 /// convert_pdf_text_layer 的返回结果（snake_case JSON，前端按此对接）。
 #[derive(Debug, Serialize)]
 pub struct PdfTextLayerResult {
@@ -32,6 +34,8 @@ pub async fn convert_pdf_text_layer(
             output_dir.as_deref(),
             start_page,
             end_page,
+            Some(PDF_TEXT_LAYER_OPERATION_ID),
+            Some(&token),
         )
     })
     .await?;

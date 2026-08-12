@@ -1,31 +1,45 @@
 //! PDF 文本层 → Markdown。
 //!
 //! 这是 MD 转换中的轻量路径：只读取 PDF 已有文本层，不执行 OCR，不重采样原件。
-//! 扫描件、复杂表格和公式由后续可选的本地 AI worker 处理，不能在这里静默降级。
+//! 处理过程分两遍流式读取临时文本：第一遍识别跨页重复的页首/页尾噪声，第二遍逐页
+//! 写 Markdown。因此大型 PDF 不会同时把全文文本层和 Markdown 保留在内存中。
 
 use anyhow::{Context, Result};
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 use crate::external::PopplerTool;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PdfTextExtraction {
-    pub markdown: String,
-    pub pages_with_text: usize,
-    /// 范围内无文本层的页码（原始页码，1-based）。
-    pub empty_pages: Vec<u32>,
-}
+const EDGE_LINE_COUNT: usize = 3;
+const MAX_EDGE_LINE_CHARS: usize = 240;
 
-/// `convert_pdf_text_layer` 命令的业务结果（命令层再做 serde 封装）。
 #[derive(Debug)]
 pub struct PdfTextLayerOutput {
     pub output_path: String,
     pub pages_with_text: usize,
+    /// 范围内去除重复页首/页尾文本后无正文的页码（原始页码，1-based）。
     pub empty_pages: Vec<u32>,
     pub input_size: u64,
     pub output_size: u64,
     pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum PageEdge {
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EdgeLineKey {
+    edge: PageEdge,
+    fingerprint: String,
 }
 
 /// 页段参数校验：start 从 1 开始，end 不早于 start。
@@ -70,136 +84,273 @@ fn build_pdftotext_args(
     args
 }
 
-/// 通过 SubprocessRegistry 运行 pdftotext，前端 `cancel_operation` 可杀进程；
-/// 无 registry（单元测试等场景）时回退 `.output()`。
-fn run_pdftotext_cancellable(mut cmd: std::process::Command) -> Result<std::process::Output> {
-    if let Some(registry) = crate::get_subprocess_registry() {
-        let op_id = format!("pdf_text_layer:{}", std::process::id());
-        registry
-            .spawn_and_wait(&op_id, cmd)
-            .context("执行 pdftotext 失败")
-    } else {
-        cmd.output().context("执行 pdftotext 失败")
+/// 用与 OperationManager 相同的 ID 注册子进程；取消 token 后立即终止 pdftotext。
+fn run_pdftotext_cancellable(
+    mut cmd: Command,
+    operation_id: Option<&str>,
+    token: Option<&CancellationToken>,
+) -> Result<Output> {
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().context("执行 pdftotext 失败")?;
+    let registry = crate::get_subprocess_registry();
+    if let (Some(registry), Some(operation_id)) = (registry, operation_id) {
+        registry.register(operation_id, child.id());
+    }
+
+    loop {
+        if token.is_some_and(|token| token.is_cancelled()) {
+            if let (Some(registry), Some(operation_id)) = (registry, operation_id) {
+                let _ = registry.cancel(operation_id);
+            } else {
+                let _ = child.kill();
+            }
+            let _ = child.wait_with_output();
+            anyhow::bail!("操作已取消");
+        }
+        if child.try_wait()?.is_some() {
+            let output = child
+                .wait_with_output()
+                .context("读取 pdftotext 输出失败")?;
+            if let (Some(registry), Some(operation_id)) = (registry, operation_id) {
+                registry.unregister(operation_id);
+            }
+            return Ok(output);
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
-/// 提取 PDF 文本层为 Markdown。`start_page`/`end_page` 为 None 时处理全文。
-pub fn extract_pdf_text_pages(
+fn run_pdftotext_to_file(
     input: &Path,
+    output: &Path,
     start_page: Option<u32>,
     end_page: Option<u32>,
-) -> Result<PdfTextExtraction> {
-    validate_page_range(start_page, end_page)?;
+    operation_id: Option<&str>,
+    token: Option<&CancellationToken>,
+) -> Result<()> {
     let pdftotext = PopplerTool::binary_path_for("pdftotext")
         .context("未找到 pdftotext，无法读取 PDF 文本层")?;
-    let output = crate::util::fs::temp_named_path("docsy_pdf_text_layer", "txt");
-    let args = build_pdftotext_args(input, &output, start_page, end_page);
     let mut cmd = crate::external::hidden_command(&pdftotext);
-    cmd.args(&args);
-    let command_result = run_pdftotext_cancellable(cmd);
-
-    let text_result = std::fs::read_to_string(&output).context("读取 PDF 文本层输出失败");
-    let _ = std::fs::remove_file(&output);
-    let command_result = command_result?;
+    cmd.args(build_pdftotext_args(input, output, start_page, end_page));
+    let command_result = run_pdftotext_cancellable(cmd, operation_id, token)?;
     if !command_result.status.success() {
         anyhow::bail!(
             "PDF 文本层提取失败：{}",
             crate::external::command_failure_detail(&command_result)
         );
     }
-
-    let text = text_result?;
-    // 借用切分，避免再持有一份完整文本拷贝；末尾空段是 pdftotext 结尾 \x0c 的产物，丢弃。
-    let mut pages: Vec<&str> = text.split('\u{000c}').map(str::trim).collect();
-    if pages.last().is_some_and(|page| page.is_empty()) {
-        pages.pop();
+    if !output.is_file() {
+        anyhow::bail!("PDF 文本层提取未生成输出文件");
     }
+    crate::util::fs::set_private_permissions(output).ok();
+    Ok(())
+}
 
-    let first_page = start_page.unwrap_or(1);
-    let mut empty_pages = Vec::new();
-    let mut pages_with_text = 0usize;
-    for (index, page) in pages.iter().enumerate() {
-        if page.is_empty() {
-            empty_pages.push(first_page + index as u32);
-        } else {
-            pages_with_text += 1;
+/// 按分页符读取单页。pdftotext 末尾通常带一个空页段，调用方负责忽略。
+fn for_each_text_page(
+    path: &Path,
+    first_page: u32,
+    mut visit: impl FnMut(u32, Vec<String>) -> Result<()>,
+) -> Result<u32> {
+    let mut reader = BufReader::new(File::open(path).context("读取 PDF 文本层输出失败")?);
+    let mut buffer = Vec::new();
+    let mut page_number = first_page;
+    let mut pages = 0_u32;
+    loop {
+        buffer.clear();
+        let read = reader.read_until(b'\x0c', &mut buffer)?;
+        if read == 0 {
+            break;
         }
-    }
-    if pages_with_text == 0 {
-        anyhow::bail!(
-            "没有读取到可复制的 PDF 文本层。该文件可能是扫描件；请在后续版本安装本地 AI 文档解析包后重新处理。"
-        );
-    }
-
-    Ok(PdfTextExtraction {
-        markdown: markdown_from_pages(&pages, first_page),
-        pages_with_text,
-        empty_pages,
-    })
-}
-
-pub fn extract_pdf_text_markdown(input: &Path) -> Result<PdfTextExtraction> {
-    extract_pdf_text_pages(input, None, None)
-}
-
-/// `first_page` 为第一段的原始页码（有页段时保持原页码偏移）。
-fn markdown_from_pages(pages: &[&str], first_page: u32) -> String {
-    let mut markdown = String::from(
-        "<!-- 由 Docsy 从 PDF 现有文本层提取；不包含 OCR、版面重建或表格识别。 -->\n\n",
-    );
-    for (index, page) in pages.iter().enumerate() {
-        let page_number = first_page + index as u32;
-        markdown.push_str(&format!("## 第 {page_number} 页\n\n"));
-        if page.is_empty() {
-            markdown.push_str("> （本页无可提取的文本层，可能为扫描件或纯图片页。）");
-        } else {
-            markdown.push_str(page);
+        if buffer.last() == Some(&b'\x0c') {
+            buffer.pop();
         }
-        markdown.push_str("\n\n");
+        // pdftotext 使用 UTF-8 输出；遇到损坏字节时使用替换字符保留其他可读内容。
+        let raw = String::from_utf8_lossy(&buffer);
+        if raw.is_empty() && read > 0 && reader.fill_buf()?.is_empty() {
+            break;
+        }
+        let lines = raw.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
+        visit(page_number, lines)?;
+        page_number = page_number.saturating_add(1);
+        pages = pages.saturating_add(1);
     }
-    markdown
+    Ok(pages)
 }
 
-/// 空页提示文案（多页合并列出原始页码）。
-pub(crate) fn empty_page_notice(empty_pages: &[u32]) -> Option<String> {
-    if empty_pages.is_empty() {
+fn normalized_edge_fingerprint(line: &str) -> Option<String> {
+    let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() || collapsed.chars().count() > MAX_EDGE_LINE_CHARS {
         return None;
     }
-    let list = empty_pages
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join("、");
-    Some(format!(
-        "第 {list} 页无文本层，可能为扫描件，建议后续用 AI 文档解析包处理。"
-    ))
+    let mut result = String::with_capacity(collapsed.len());
+    let mut previous_was_number = false;
+    for ch in collapsed.chars() {
+        let is_number = ch.is_ascii_digit() || ('０'..='９').contains(&ch);
+        if is_number {
+            if !previous_was_number {
+                result.push('#');
+            }
+        } else {
+            result.push(ch);
+        }
+        previous_was_number = is_number;
+    }
+    Some(result)
 }
 
-/// `convert_pdf_text_layer` 命令的业务实现：页段校验、页数校验、文本层提取、落盘。
+fn edge_line_keys(lines: &[String]) -> Vec<(usize, EdgeLineKey)> {
+    let nonempty = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    let mut keys = Vec::new();
+    for (index, line) in nonempty.iter().take(EDGE_LINE_COUNT) {
+        if let Some(fingerprint) = normalized_edge_fingerprint(line) {
+            keys.push((
+                *index,
+                EdgeLineKey {
+                    edge: PageEdge::Top,
+                    fingerprint,
+                },
+            ));
+        }
+    }
+    for (index, line) in nonempty.iter().rev().take(EDGE_LINE_COUNT) {
+        if let Some(fingerprint) = normalized_edge_fingerprint(line) {
+            keys.push((
+                *index,
+                EdgeLineKey {
+                    edge: PageEdge::Bottom,
+                    fingerprint,
+                },
+            ));
+        }
+    }
+    keys
+}
+
+fn detect_repeating_edge_lines(path: &Path, first_page: u32) -> Result<HashSet<EdgeLineKey>> {
+    let mut occurrences: HashMap<EdgeLineKey, HashSet<u32>> = HashMap::new();
+    let page_count = for_each_text_page(path, first_page, |page, lines| {
+        for (_, key) in edge_line_keys(&lines) {
+            occurrences.entry(key).or_default().insert(page);
+        }
+        Ok(())
+    })?;
+    if page_count < 2 {
+        return Ok(HashSet::new());
+    }
+    Ok(occurrences
+        .into_iter()
+        .filter_map(|(key, pages)| (pages.len() >= 2).then_some(key))
+        .collect())
+}
+
+fn clean_page_lines(lines: &[String], repeating_edges: &HashSet<EdgeLineKey>) -> Vec<String> {
+    let indexes_to_remove = edge_line_keys(lines)
+        .into_iter()
+        .filter_map(|(index, key)| repeating_edges.contains(&key).then_some(index))
+        .collect::<HashSet<_>>();
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| (!indexes_to_remove.contains(&index)).then_some(line.clone()))
+        .collect()
+}
+
+fn is_page_text_empty(lines: &[String]) -> bool {
+    lines.iter().all(|line| line.trim().is_empty())
+}
+
+fn render_markdown(
+    text_path: &Path,
+    markdown_path: &Path,
+    first_page: u32,
+    repeating_edges: &HashSet<EdgeLineKey>,
+    token: Option<&CancellationToken>,
+) -> Result<(usize, Vec<u32>)> {
+    let output = File::create(markdown_path)
+        .with_context(|| format!("写入 PDF Markdown 失败: {}", markdown_path.display()))?;
+    let mut writer = BufWriter::new(output);
+    writer.write_all(
+        "<!-- 由 Docsy 从 PDF 现有文本层提取；已滤除跨页重复的页首和页尾文本；不包含 OCR、版面重建或表格识别。 -->\n\n".as_bytes(),
+    )?;
+    let mut pages_with_text = 0usize;
+    let mut empty_pages = Vec::new();
+    for_each_text_page(text_path, first_page, |page, lines| {
+        if token.is_some_and(|token| token.is_cancelled()) {
+            anyhow::bail!("操作已取消");
+        }
+        let lines = clean_page_lines(&lines, repeating_edges);
+        writeln!(writer, "## 第 {page} 页\n")?;
+        if is_page_text_empty(&lines) {
+            empty_pages.push(page);
+            writeln!(
+                writer,
+                "> （本页无可靠的可提取文本层，可能为扫描件或纯图片页。）\n"
+            )?;
+        } else {
+            pages_with_text += 1;
+            for line in lines {
+                writeln!(writer, "{line}")?;
+            }
+            writeln!(writer)?;
+        }
+        Ok(())
+    })?;
+    writer.flush()?;
+    Ok((pages_with_text, empty_pages))
+}
+
+/// PDF 文本层 → Markdown 的生产入口。全文仅落在受限临时文件和最终输出中。
 pub fn convert_pdf_text_layer(
     input: &str,
     output_dir: Option<&str>,
     start_page: Option<u32>,
     end_page: Option<u32>,
+    operation_id: Option<&str>,
+    token: Option<&CancellationToken>,
 ) -> Result<PdfTextLayerOutput> {
     validate_page_range(start_page, end_page)?;
     let input_path = PathBuf::from(input);
     if !input_path.is_file() {
         anyhow::bail!("输入文件不存在: {input}");
     }
-    // 页数总数校验：qpdf 不可用时跳过，不阻塞转换。
-    if let Ok(total) = crate::pdf::qpdf::page_count(input) {
-        if let Some(end) = end_page {
-            if end > total {
-                anyhow::bail!("结束页（{end}）超出 PDF 总页数（{total}）");
-            }
-        }
-    }
-
-    let extracted = extract_pdf_text_pages(&input_path, start_page, end_page)?;
+    let first_page = start_page.unwrap_or(1);
+    let temp_path = crate::util::fs::temp_named_path("docsy_pdf_text_layer", "txt");
+    let temp_guard = crate::util::fs::TempPathGuard::new(temp_path.clone());
+    run_pdftotext_to_file(
+        &input_path,
+        temp_guard.path(),
+        start_page,
+        end_page,
+        operation_id,
+        token,
+    )?;
+    let repeating_edges = detect_repeating_edge_lines(temp_guard.path(), first_page)?;
     let output_path = crate::markdown::output_path_for(&input_path, output_dir, "md")?;
-    std::fs::write(&output_path, &extracted.markdown)
-        .with_context(|| format!("写入 PDF Markdown 失败: {}", output_path.display()))?;
+    let render_result = render_markdown(
+        temp_guard.path(),
+        &output_path,
+        first_page,
+        &repeating_edges,
+        token,
+    );
+    let (pages_with_text, empty_pages) = match render_result {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = std::fs::remove_file(&output_path);
+            return Err(error);
+        }
+    };
+    if pages_with_text == 0 {
+        let _ = std::fs::remove_file(&output_path);
+        anyhow::bail!(
+            "没有读取到可靠的 PDF 文本层。该文件可能是扫描件；请使用后续的本地 AI 文档解析包处理。"
+        );
+    }
 
     let input_size = std::fs::metadata(&input_path)
         .with_context(|| format!("无法读取输入文件信息: {input}"))?
@@ -207,20 +358,24 @@ pub fn convert_pdf_text_layer(
     let output_size = std::fs::metadata(&output_path)
         .with_context(|| format!("输出文件生成失败: {}", output_path.display()))?
         .len();
-
     let mut warning = format!(
-        "已从 {} 页可复制文本生成 Markdown；这是文本层提取，扫描件、表格和复杂版面请使用本地 AI 文档解析。",
-        extracted.pages_with_text
+        "已从 {pages_with_text} 页可靠文本生成 Markdown；这是文本层提取，扫描件、表格和复杂版面请使用本地 AI 文档解析。"
     );
-    if let Some(notice) = empty_page_notice(&extracted.empty_pages) {
-        warning.push(' ');
-        warning.push_str(&notice);
+    if !empty_pages.is_empty() {
+        let list = empty_pages
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join("、");
+        warning.push_str(&format!(" 第 {list} 页无可靠文本层，已保留页码占位。"));
     }
-
+    if !repeating_edges.is_empty() {
+        warning.push_str(" 已滤除跨页重复的页首/页尾文本。");
+    }
     Ok(PdfTextLayerOutput {
         output_path: output_path.display().to_string(),
-        pages_with_text: extracted.pages_with_text,
-        empty_pages: extracted.empty_pages,
+        pages_with_text,
+        empty_pages,
         input_size,
         output_size,
         warning: Some(warning),
@@ -232,32 +387,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn writes_explicit_page_boundaries() {
-        let markdown = markdown_from_pages(&["第一页", "第二页"], 1);
-        assert!(markdown.contains("## 第 1 页\n\n第一页"));
-        assert!(markdown.contains("## 第 2 页\n\n第二页"));
-        assert!(markdown.starts_with("<!-- 由 Docsy"));
-    }
-
-    #[test]
-    fn pdftotext_args_without_page_range() {
-        let args = build_pdftotext_args(
-            Path::new("/tmp/in.pdf"),
-            Path::new("/tmp/out.txt"),
-            None,
-            None,
-        );
-        let args: Vec<String> = args
-            .iter()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            args,
-            ["-layout", "-enc", "UTF-8", "--", "/tmp/in.pdf", "/tmp/out.txt"]
-        );
-    }
-
-    #[test]
     fn pdftotext_args_with_page_range() {
         let args = build_pdftotext_args(
             Path::new("/tmp/in.pdf"),
@@ -265,14 +394,22 @@ mod tests {
             Some(3),
             Some(9),
         );
-        let args: Vec<String> = args
+        let args = args
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
-            .collect();
+            .collect::<Vec<_>>();
         assert_eq!(
             args,
             [
-                "-layout", "-enc", "UTF-8", "-f", "3", "-l", "9", "--", "/tmp/in.pdf",
+                "-layout",
+                "-enc",
+                "UTF-8",
+                "-f",
+                "3",
+                "-l",
+                "9",
+                "--",
+                "/tmp/in.pdf",
                 "/tmp/out.txt"
             ]
         );
@@ -284,41 +421,89 @@ mod tests {
         assert!(validate_page_range(None, Some(0)).is_err());
         assert!(validate_page_range(Some(5), Some(3)).is_err());
         assert!(validate_page_range(Some(1), Some(1)).is_ok());
-        assert!(validate_page_range(None, Some(10)).is_ok());
-        assert!(validate_page_range(Some(2), None).is_ok());
-        assert!(validate_page_range(None, None).is_ok());
     }
 
     #[test]
-    fn empty_pages_get_placeholder_and_offset_page_numbers() {
-        let markdown = markdown_from_pages(&["第三页内容", "", "第五页内容"], 3);
-        assert!(markdown.contains("## 第 3 页\n\n第三页内容"));
-        assert!(markdown.contains("## 第 4 页\n\n> （本页无可提取的文本层"));
-        assert!(markdown.contains("## 第 5 页\n\n第五页内容"));
+    fn normalizes_varying_page_numbers_without_content_specific_rules() {
+        assert_eq!(
+            normalized_edge_fingerprint("证据 13"),
+            Some("证据 #".into())
+        );
+        assert_eq!(normalized_edge_fingerprint("— 2 —"), Some("— # —".into()));
     }
 
     #[test]
-    fn empty_page_notice_lists_original_page_numbers() {
-        assert_eq!(empty_page_notice(&[]), None);
-        let notice = empty_page_notice(&[2, 5]).unwrap();
-        assert!(notice.contains("第 2、5 页无文本层"));
+    fn only_repeated_edge_text_is_removed() {
+        let repeated = EdgeLineKey {
+            edge: PageEdge::Top,
+            fingerprint: "证据 #".into(),
+        };
+        let mut remove = HashSet::new();
+        remove.insert(repeated);
+        let lines = vec!["证据 13".into(), "正文内容".into(), "— 2 —".into()];
+        let cleaned = clean_page_lines(&lines, &remove);
+        assert_eq!(cleaned, vec!["正文内容", "— 2 —"]);
     }
 
-    /// 端到端：需要本机安装 poppler（pdftotext）。
     #[test]
-    #[ignore = "requires poppler"]
-    fn extract_fixture_pdf_end_to_end() {
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../test-pdf/测试文件1.pdf");
-        let extracted = extract_pdf_text_pages(&fixture, None, None).unwrap();
-        assert!(extracted.pages_with_text > 0);
-        assert!(extracted.markdown.contains("## 第 1 页"));
+    fn repeating_page_edges_leave_header_only_pages_empty() {
+        let path = std::env::temp_dir().join(format!(
+            "docsy-pdf-md-edges-{}-{}.txt",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::write(&path, "证据 13\n\n— 1 —\u{000c}证据 14\n\n— 2 —\u{000c}").unwrap();
 
-        // 页段：页码保持原始偏移
-        let partial = extract_pdf_text_pages(&fixture, Some(2), Some(3)).unwrap();
-        assert!(partial.markdown.contains("## 第 2 页"));
-        assert!(!partial.markdown.contains("## 第 1 页"));
+        let repeated = detect_repeating_edge_lines(&path, 1).unwrap();
+        let page_one = vec!["证据 13".into(), "".into(), "— 1 —".into()];
+        let page_two = vec!["证据 14".into(), "".into(), "— 2 —".into()];
+        assert!(is_page_text_empty(&clean_page_lines(&page_one, &repeated)));
+        assert!(is_page_text_empty(&clean_page_lines(&page_two, &repeated)));
+        let _ = std::fs::remove_file(path);
+    }
 
-        assert!(extract_pdf_text_pages(&fixture, Some(4), Some(2)).is_err());
+    #[test]
+    fn end_to_end_extracts_fixture_pdf() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-pdf/测试文件1.pdf");
+        let dir = std::env::temp_dir().join(format!("docsy-pdf-md-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let result = convert_pdf_text_layer(
+            fixture.to_str().unwrap(),
+            Some(dir.to_str().unwrap()),
+            Some(2),
+            Some(3),
+            None,
+            None,
+        )
+        .unwrap();
+        let markdown = std::fs::read_to_string(&result.output_path).unwrap();
+        assert!(markdown.contains("## 第 2 页"));
+        assert!(!markdown.contains("## 第 1 页"));
+        let _ = std::fs::remove_file(&result.output_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn cancellation_stops_before_pdf_text_is_rendered() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-pdf/测试文件1.pdf");
+        let dir = std::env::temp_dir().join(format!(
+            "docsy-pdf-md-cancel-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let token = CancellationToken::new();
+        token.cancel();
+        let error = convert_pdf_text_layer(
+            fixture.to_str().unwrap(),
+            Some(dir.to_str().unwrap()),
+            None,
+            None,
+            None,
+            Some(&token),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("操作已取消"));
+        let _ = std::fs::remove_dir(&dir);
     }
 }

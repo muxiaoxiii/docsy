@@ -1,7 +1,7 @@
 <template>
   <div class="markdown-convert-view" :class="{ 'is-file-dragging': dragging }">
     <div v-if="dragging" class="document-drop-overlay">
-      <div class="document-drop-message">松开以添加 Markdown 或 Office 文件</div>
+      <div class="document-drop-message">松开以添加 Markdown、Office 或 PDF 文件</div>
     </div>
 
     <ToolWorkspaceShell
@@ -10,6 +10,9 @@
     >
       <template #toolbar>
         <el-button type="primary" @click="selectFiles">选择 Markdown / Office / PDF 文件</el-button>
+        <el-button type="success" :disabled="converting || !hasPendingFiles" @click="runQueue">
+          开始转换
+        </el-button>
       </template>
 
       <div class="convert-workspace">
@@ -19,7 +22,7 @@
               <h3>文件互转</h3>
               <p>支持 Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 与常见 Markdown 扩展名。</p>
             </div>
-            <span class="direction-note">MD ↔ Office</span>
+            <span class="direction-note">MD ↔ Office · PDF → MD</span>
           </div>
           <div class="file-convert-options">
             <span class="option-label">转成 Markdown</span>
@@ -81,6 +84,14 @@
               <el-tag size="small" type="info">{{ item.directionTag }}</el-tag>
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
               <span v-if="item.warning" class="queue-warning">{{ item.warning }}</span>
+            </template>
+            <template #item-actions="{ item, index }">
+              <el-button v-if="item.status === 'done' && item.outputPath" link type="primary" size="small" @click="openOutput(item)">
+                打开
+              </el-button>
+              <el-button v-if="item.status !== 'processing'" link type="danger" size="small" @click="removeFile(index)">
+                删除
+              </el-button>
             </template>
           </FileQueuePanel>
           <div v-if="summary" class="result-line">{{ summary }}</div>
@@ -167,6 +178,7 @@ const pdfStartPage = ref(null)
 const pdfEndPage = ref(null)
 
 const hasPdfInQueue = computed(() => files.value.some((item) => extensionOf(item.path) === 'pdf'))
+const hasPendingFiles = computed(() => files.value.some((item) => item.status === 'pending'))
 
 const markdownExtensions = ['md', 'markdown', 'mdown', 'mkdn', 'mdwn', 'mdtxt']
 const officeExtensions = [
@@ -267,7 +279,7 @@ async function loadFiles(paths) {
   if (!items.length) return
   files.value.push(...items)
   summary.value = ''
-  void runQueue()
+  ElMessage.info('已加入转换列表。确认转换设置后，点击“开始转换”。')
 }
 
 function clearFiles() {
@@ -281,6 +293,12 @@ function removeFile(index) {
 
 async function runQueue() {
   if (converting.value) return
+  const startPage = Number(pdfStartPage.value || 0)
+  const endPage = Number(pdfEndPage.value || 0)
+  if (hasPdfInQueue.value && startPage && endPage && endPage < startPage) {
+    ElMessage.error('PDF 结束页不能早于起始页')
+    return
+  }
   converting.value = true
   const processed = []
   try {
@@ -307,6 +325,7 @@ async function runQueue() {
           })
       if (result.ok) {
         item.status = 'done'
+        item.outputPath = String(result.data?.output_path || '')
         item.warning = String(result.data?.warning || '')
         item.statusText = item.warning ? '完成（有提示）' : '完成'
         if (isPdf && result.data?.pages_with_text != null) {
@@ -317,9 +336,11 @@ async function runQueue() {
         item.inputSize = Number(result.data?.input_size) || 0
         item.outputSize = Number(result.data?.output_size) || 0
       } else {
-        item.status = 'failed'
-        item.statusText = userFacingError(result.error, '转换失败')
-        item.statusType = 'danger'
+        const message = userFacingError(result.error, '转换失败')
+        const cancelled = /操作已取消/.test(message)
+        item.status = cancelled ? 'cancelled' : 'failed'
+        item.statusText = cancelled ? '已取消' : message
+        item.statusType = cancelled ? 'info' : 'danger'
       }
       processed.push(item)
     }
@@ -364,6 +385,10 @@ async function convertPastedText() {
 
 async function openPasteOutputDir() {
   if (pasteOutputPath.value) await openPath(parentDir(pasteOutputPath.value))
+}
+
+async function openOutput(item) {
+  if (item?.outputPath) await openPath(item.outputPath)
 }
 
 async function handleDroppedPaths(paths) {

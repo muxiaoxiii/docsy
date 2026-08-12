@@ -124,9 +124,28 @@ fn is_markdown_input(input: &Path) -> bool {
 fn is_office_input(input: &Path) -> bool {
     matches!(
         source_extension(input).as_str(),
-        "doc" | "docx" | "docm" | "xls" | "xlsx" | "xlsm" | "xlsb" | "ppt" | "pptx"
-            | "pptm" | "pps" | "ppsx" | "ppsm" | "pot" | "potx" | "potm" | "odt" | "ods"
-            | "odp" | "rtf" | "csv" | "epub"
+        "doc"
+            | "docx"
+            | "docm"
+            | "xls"
+            | "xlsx"
+            | "xlsm"
+            | "xlsb"
+            | "ppt"
+            | "pptx"
+            | "pptm"
+            | "pps"
+            | "ppsx"
+            | "ppsm"
+            | "pot"
+            | "potx"
+            | "potm"
+            | "odt"
+            | "ods"
+            | "odp"
+            | "rtf"
+            | "csv"
+            | "epub"
     )
 }
 
@@ -145,7 +164,11 @@ fn detect_direction(input: &Path) -> Result<Direction> {
 }
 
 /// 计算输出路径：默认放输入同目录，文件名同 stem 换后缀，撞名时自动加序号。
-pub(crate) fn output_path_for(input: &Path, output_dir: Option<&str>, extension: &str) -> Result<PathBuf> {
+pub(crate) fn output_path_for(
+    input: &Path,
+    output_dir: Option<&str>,
+    extension: &str,
+) -> Result<PathBuf> {
     let dir = match output_dir {
         Some(d) => {
             let dir = PathBuf::from(d);
@@ -216,8 +239,9 @@ fn word_save_as_docx(input: &Path, output: &Path) -> Result<()> {
         "-Command",
         &script,
     ]);
-    let result = crate::external::command_output_with_timeout(&mut cmd, std::time::Duration::from_secs(120))
-        .context("执行 Word/WPS 转换进程失败")?;
+    let result =
+        crate::external::command_output_with_timeout(&mut cmd, std::time::Duration::from_secs(120))
+            .context("执行 Word/WPS 转换进程失败")?;
     if !result.status.success() {
         anyhow::bail!(
             "Word/WPS 进程返回错误: {}",
@@ -261,8 +285,11 @@ end run
         .arg(script)
         .arg(input.display().to_string())
         .arg(output.display().to_string());
-    let result = crate::external::command_output_with_timeout(&mut command, std::time::Duration::from_secs(120))
-        .context("执行 Microsoft Word 转换进程失败")?;
+    let result = crate::external::command_output_with_timeout(
+        &mut command,
+        std::time::Duration::from_secs(120),
+    )
+    .context("执行 Microsoft Word 转换进程失败")?;
     if !result.status.success() {
         anyhow::bail!(
             "Microsoft Word 进程返回错误: {}",
@@ -300,10 +327,7 @@ fn markdown_to_office(
         )
         .map_err(|error| anyhow::anyhow!("生成 PowerPoint 失败: {error}")),
         OfficeOutputFormat::Html => {
-            let title = input
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("文档");
+            let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("文档");
             std::fs::write(output, markdown_to_html_document(title, &markdown))
                 .with_context(|| format!("无法写入 HTML 文件: {}", output.display()))
         }
@@ -386,7 +410,10 @@ fn office_input_warning(extension: &str, facts: &OfficeImportFacts) -> Option<St
     };
     let mut notices = base.into_iter().collect::<Vec<_>>();
     if facts.asset_count > 0 {
-        notices.push(format!("已导出 {} 个嵌入资源到同级 assets 目录。", facts.asset_count));
+        notices.push(format!(
+            "已导出 {} 个嵌入资源到同级 assets 目录。",
+            facts.asset_count
+        ));
     }
     if facts.note_count > 0 {
         notices.push(format!("已保留 {} 条脚注或尾注。", facts.note_count));
@@ -420,7 +447,11 @@ pub fn convert(
     } else {
         md_to_docx::DocxStylePreset::Professional
     };
-    let output_extension = if markdown_input { target.extension() } else { "md" };
+    let output_extension = if markdown_input {
+        target.extension()
+    } else {
+        "md"
+    };
     let output_path = output_path_for(&input_path, output_dir, output_extension)?;
     let input_size = std::fs::metadata(&input_path)
         .with_context(|| format!("无法读取输入文件信息: {input}"))?
@@ -429,32 +460,37 @@ pub fn convert(
 
     let (direction, source_format, output_format) = if markdown_input {
         markdown_to_office(&input_path, &output_path, target, style)?;
-        (target.direction(), "markdown".to_string(), target.label().to_string())
+        (
+            target.direction(),
+            "markdown".to_string(),
+            target.label().to_string(),
+        )
     } else if pdf_input {
-        let extracted = pdf_to_md::extract_pdf_text_markdown(&input_path)?;
-        std::fs::write(&output_path, extracted.markdown)
-            .with_context(|| format!("写入 PDF Markdown 失败: {}", output_path.display()))?;
-        let mut notice = format!(
-            "已从 {} 页可复制文本生成 Markdown；这是文本层提取，扫描件、表格和复杂版面请使用本地 AI 文档解析。",
-            extracted.pages_with_text
-        );
-        if let Some(empty_notice) = pdf_to_md::empty_page_notice(&extracted.empty_pages) {
-            notice.push(' ');
-            notice.push_str(&empty_notice);
-        }
-        warning = Some(notice);
-        (Direction::PdfToMd, "pdf".to_string(), "markdown".to_string())
+        // 非命令调用同样走流式实现；此路径没有可取消任务时传 None。
+        let extracted =
+            pdf_to_md::convert_pdf_text_layer(input, output_dir, None, None, None, None)?;
+        return Ok(ConvertResult {
+            output_path: extracted.output_path,
+            direction: Direction::PdfToMd,
+            source_format: "pdf".to_string(),
+            output_format: "markdown".to_string(),
+            input_size: extracted.input_size,
+            output_size: extracted.output_size,
+            warning: extracted.warning,
+        });
     } else {
         match ext.as_str() {
             "docx" | "docm" => {
                 if let Err(error) = docx_to_md::convert(&input_path, &output_path) {
-                    let facts = office_to_markdown(&input_path, &output_path).with_context(|| {
-                        format!(
-                            "Docsy Word 读取器失败（{error}），AnyDoc 兜底读取也失败"
-                        )
-                    })?;
+                    let facts =
+                        office_to_markdown(&input_path, &output_path).with_context(|| {
+                            format!("Docsy Word 读取器失败（{error}），AnyDoc 兜底读取也失败")
+                        })?;
                     warning = office_input_warning(&ext, &facts).or_else(|| {
-                        Some("已使用兼容读取器导出 Markdown；个别图片或细节格式可能简化。".to_string())
+                        Some(
+                            "已使用兼容读取器导出 Markdown；个别图片或细节格式可能简化。"
+                                .to_string(),
+                        )
                     });
                 }
             }
@@ -662,7 +698,10 @@ mod tests {
             "md",
         )
         .unwrap();
-        assert_eq!(path, PathBuf::from("/tmp/docsy-nonexistent-dir-xyz/合同.md"));
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/docsy-nonexistent-dir-xyz/合同.md")
+        );
     }
 
     #[test]
@@ -678,7 +717,10 @@ mod tests {
     #[test]
     fn parse_doc_engine_values() {
         assert_eq!(parse_doc_engine(None).unwrap(), DocEngine::Extract);
-        assert_eq!(parse_doc_engine(Some("extract")).unwrap(), DocEngine::Extract);
+        assert_eq!(
+            parse_doc_engine(Some("extract")).unwrap(),
+            DocEngine::Extract
+        );
         assert_eq!(parse_doc_engine(Some("word")).unwrap(), DocEngine::Word);
         assert!(parse_doc_engine(Some("libreoffice")).is_err());
     }
@@ -695,8 +737,7 @@ mod tests {
     fn doc_extract_manual_quality_probe() {
         let path = std::env::var("DOCSY_DOC_FIXTURE").expect("set DOCSY_DOC_FIXTURE");
         let result =
-            docsy_anydoc::docsy::extract_office_markdown(Path::new(&path), "probe_assets")
-                .unwrap();
+            docsy_anydoc::docsy::extract_office_markdown(Path::new(&path), "probe_assets").unwrap();
         println!(
             "--- format: {:?}, assets: {}, notes: {} ---\n{}",
             result.format, result.asset_count, result.note_count, result.markdown
@@ -797,14 +838,7 @@ mod tests {
         let input = dir.join("网页.md");
         std::fs::write(&input, "# 标题\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n").unwrap();
 
-        let result = convert(
-            input.to_str().unwrap(),
-            None,
-            None,
-            Some("html"),
-            None,
-        )
-        .unwrap();
+        let result = convert(input.to_str().unwrap(), None, None, Some("html"), None).unwrap();
         assert_eq!(result.direction, Direction::MdToHtml);
         assert_eq!(result.output_format, "html");
         assert!(result.output_path.ends_with("网页.html"));

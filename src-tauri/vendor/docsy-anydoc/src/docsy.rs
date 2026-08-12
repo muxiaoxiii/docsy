@@ -107,7 +107,7 @@ fn normalize_markdown(markdown: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_markdown;
+    use super::{extension_for_media_type, normalize_markdown};
 
     #[test]
     fn preserves_paragraphs_and_normalizes_line_endings() {
