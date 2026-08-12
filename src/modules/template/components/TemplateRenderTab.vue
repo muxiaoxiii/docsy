@@ -1,6 +1,6 @@
 <template>
   <section class="workspace">
-    <div class="panel">
+    <div class="panel library-panel" :class="{ 'has-active-template': templateManifest }">
       <div class="panel-header">
         <div>
           <h3>模板库</h3>
@@ -28,16 +28,20 @@
           </div>
         </div>
       </div>
-      <el-empty v-else description="还没有保存到软件内部的模板" />
+      <el-empty v-else description="模板库为空，请先从“制作模板”保存模板" :image-size="60" />
     </div>
 
     <div v-if="templateManifest" class="panel form-panel">
-      <div class="panel-header compact">
-        <div>
+      <div class="fill-command-bar">
+        <div class="active-template-heading">
+          <span class="active-template-label">正在填写</span>
           <h3>{{ templateManifest.template.name }}</h3>
-          <p>{{ renderableTemplateFields.length }} 个字段。输入时会从历史和通用字段里即时检索。</p>
+          <p>
+            已填写 {{ filledFieldCount }} / {{ editableFieldCount }}
+            <span v-if="requiredFieldCount"> · 必填 {{ filledRequiredCount }} / {{ requiredFieldCount }}</span>
+          </p>
         </div>
-        <div class="actions inline field-filter-actions">
+        <div class="fill-command-actions">
           <el-input
             :model-value="fieldSearch"
             size="small"
@@ -46,325 +50,394 @@
             class="field-search-input"
             @update:model-value="$emit('update:fieldSearch', $event)"
           />
+          <el-button :disabled="!templateManifest" @click="$emit('toggle-fill-preview')">
+            {{ fillPreviewVisible ? '收起预览' : '文档预览' }}
+          </el-button>
+          <el-dropdown trigger="click" @command="$emit('batch-command', $event)">
+            <el-button :loading="batchProcessing">
+              批量填写 <el-icon class="el-icon--right"><arrow-down /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="export">导出字段表</el-dropdown-item>
+                <el-dropdown-item command="import">导入并生成</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button type="success" :loading="rendering" @click="$emit('render-template')">生成 Word</el-button>
         </div>
-        <el-button type="success" :loading="rendering" @click="$emit('render-template')">
-          生成 Word
-        </el-button>
-        <span v-if="filenamePreview" class="filename-preview" :title="filenamePreview">{{ filenamePreview }}</span>
-        <el-button :disabled="!templateManifest" @click="$emit('toggle-fill-preview')">
-          {{ fillPreviewVisible ? '收起预览' : '预览' }}
-        </el-button>
-        <el-dropdown @command="$emit('batch-command', $event)" trigger="click">
-          <el-button :loading="batchProcessing"
-            >批量填写 <el-icon class="el-icon--right"><arrow-down /></el-icon
-          ></el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="export">导出字段表</el-dropdown-item>
-              <el-dropdown-item command="import">导入并生成</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+      </div>
+      <div class="fill-progress-track" aria-hidden="true">
+        <span :style="{ width: `${fillProgressPercent}%` }"></span>
+      </div>
+      <div v-if="filenamePreview" class="filename-preview" :title="filenamePreview">
+        <span>输出文件名</span>
+        <strong>{{ filenamePreview }}</strong>
       </div>
 
-      <div class="template-form-grid">
-        <section
-          v-for="field in fillPositionEntries"
-          :key="`${field.id}#${field.posIndex ?? 0}`"
-          class="fill-field-card"
-          :class="{ 'duplicate-field': field._isDuplicate, 'follow-field': field.posIndex > 0 || (!field.editable && !field.isReference) }"
-        >
-          <div class="fill-field-header">
-            <el-tooltip :content="fillFieldLabel(field)" placement="top" :show-after="500" :disabled="fillFieldLabel(field).length < 12">
-              <strong class="field-name">{{ fillFieldLabel(field) }}</strong>
-            </el-tooltip>
-            <span v-if="field.posIndex > 0" class="position-label fill-all-tag">位置{{ field.posIndex + 1 }}</span>
-
-            <em v-if="field.required" class="fill-all-tag">必填</em>
-            <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
-              同名字段，自动同步
-            </el-tag>
-            <el-tag v-else-if="field.fillAllPositions && field.posIndex > 0 && !hasSlotTypeOverride(field) && effectiveFieldType(field) === 'reference'" size="small" effect="plain" class="fill-all-tag">
-              {{ followerReferenceLabel(field) }}
-            </el-tag>
+      <div class="fill-workbench" :class="{ 'with-preview': fillPreviewVisible && fillPreviewText }">
+        <div class="field-editor-column">
+          <div class="field-section-heading">
+            <div>
+              <h3>填写字段</h3>
+              <p>内容会自动保存到本次填写状态；同名字段会同步更新。</p>
+            </div>
+            <span>{{ fillPositionEntries.length }} 项</span>
           </div>
-          <div class="fill-field-body">
-            <div v-if="fieldStructureHints(field).length" class="fill-structure-hints">
-              <span v-for="hint in fieldStructureHints(field)" :key="hint.key" class="fill-structure-hint">
-                {{ hint.label }}：<code :class="{ empty: hint.empty }">{{ hint.text }}</code>
-                <em>空值时删除</em>
-              </span>
-            </div>
-            <template v-if="field.editable || field.isReference || hasSlotTypeOverride(field) || effectiveFieldType(field) === 'reference'">
-            <div v-if="effectiveFieldType(field) === 'date'" class="date-fill-row">
-              <el-date-picker
-                v-if="getEntryValue(field) !== '留空'"
-                :model-value="getEntryValue(field)"
-                type="date"
-                value-format="YYYY-MM-DD"
-                @update:model-value="setEntryValue(field, $event)"
-              />
-              <span v-else class="date-blank-text">留空</span>
-              <button type="button" class="date-blank-btn" @click="toggleDateBlank(field)">
-                {{ getEntryValue(field) === '留空' ? '输入日期' : '留空' }}
-              </button>
-            </div>
-            <el-checkbox
-              v-else-if="effectiveFieldType(field) === 'checkbox'"
-              :model-value="getEntryValue(field)"
-              @update:model-value="setEntryValue(field, $event)"
+          <div class="template-form-grid">
+            <section
+              v-for="field in fillPositionEntries"
+              :key="`${field.id}#${field.posIndex ?? 0}`"
+              class="fill-field-card"
+              :class="{
+                'duplicate-field': field._isDuplicate,
+                'follow-field': field.posIndex > 0 || (!field.editable && !field.isReference),
+                'is-filled': !isEmptyValue(getEntryValue(field)),
+              }"
             >
-              {{ firstOptionLabel(field) || '选中' }}
-            </el-checkbox>
-            <el-radio-group
-              v-else-if="effectiveFieldType(field) === 'radio_group'"
-              :model-value="getEntryValue(field)"
-              @update:model-value="setEntryValue(field, $event)"
-            >
-              <el-radio v-for="option in field.options" :key="option.id" :label="option.id">
-                {{ option.label }}
-              </el-radio>
-            </el-radio-group>
-            <el-checkbox-group
-              v-else-if="effectiveFieldType(field) === 'checkbox_group'"
-              :model-value="getEntryValue(field)"
-              @update:model-value="setEntryValue(field, $event)"
-            >
-              <el-checkbox v-for="option in field.options" :key="option.id" :label="option.id">
-                {{ option.label }}
-              </el-checkbox>
-            </el-checkbox-group>
-            <div v-else-if="effectiveFieldType(field) === 'party_list'" class="party-list-editor">
-              <div
-                v-for="(item, index) in getPartyListRows(field)"
-                :key="index"
-                class="party-list-row compact"
-                :class="{ 'no-suffix': !partyFieldUsesSuffix(field) }"
-              >
-                <span class="party-order">{{ index + 1 }}</span>
-                <el-autocomplete
-                  v-model="item.text"
-                  size="small"
-                  placeholder="名称"
-                  :fetch-suggestions="(query, cb) => $emit('complete-field', field, query, cb)"
-                  @input="commitPartyTempRow(field); $emit('schedule-history-refresh')"
-                />
-                <el-select
-                  v-if="partyFieldUsesSuffix(field)"
-                  v-model="item.suffix"
-                  size="small"
-                  filterable
-                  allow-create
-                  default-first-option
-                  placeholder="后缀"
-                  @change="commitPartyTempRow(field); $emit('schedule-history-refresh')"
+              <div class="fill-field-header">
+                <el-tooltip
+                  :content="fillFieldLabel(field)"
+                  placement="top"
+                  :show-after="500"
+                  :disabled="fillFieldLabel(field).length < 12"
                 >
-                  <el-option
-                    v-for="suffix in partySuffixOptions(field)"
-                    :key="suffix"
-                    :label="suffix"
-                    :value="suffix"
-                  />
-                </el-select>
-                <div class="party-row-actions">
-                  <el-button
-                    size="small"
-                    text
-                    :disabled="index === 0"
-                    @click="$emit('move-party-item', field, index, -1)"
-                  >
-                    上移
-                  </el-button>
-                  <el-button
-                    size="small"
-                    text
-                    :disabled="index === getPartyListRows(field).length - 1"
-                    @click="$emit('move-party-item', field, index, 1)"
-                  >
-                    下移
-                  </el-button>
-                  <el-button size="small" text type="danger" @click="$emit('remove-party-item', field, index)">
-                    删除
-                  </el-button>
-                </div>
-              </div>
-              <div v-if="partyFieldStructureHint(field)" class="field-structure-hint">
-                {{ partyFieldStructureHint(field) }}
-              </div>
-              <div class="party-list-add-row">
-                <el-button size="small" @click="$emit('add-party-item', field)">添加一项</el-button>
-              </div>
-            </div>
-            <div v-else-if="effectiveFieldType(field) === 'reference'" class="reference-fill-editor">
-              <div v-if="isReferenceSingleCandidate(field)" class="reference-fixed-value">
-                {{ referenceFixedDisplayLabel(field) }}
-              </div>
-              <el-select
-                v-else
-                :model-value="getReferenceSelection(field)"
-                filterable
-                clearable
-                class="reference-select-muted"
-                :placeholder="followerReferenceLabel(field)"
-                @update:model-value="$emit('reference-selection-change', field, $event)"
-              >
-                <el-option
-                  v-for="item in referenceFillOptions(field)"
-                  :key="item.key"
-                  :label="item.label"
-                  :value="item.key"
-                />
-              </el-select>
-              <p v-if="effectiveFieldType(field) === 'reference' && !hasSlotTypeOverride(field)" class="setting-caption">引用字段从已填字段取值，不能手动输入；前后缀在"…"菜单里设置。</p>
-            </div>
-            <el-select
-              v-else-if="effectiveFieldType(field) === 'select'"
-              :model-value="getEntryValue(field)"
-              filterable
-              allow-create
-              default-first-option
-              clearable
-              placeholder="选择或输入"
-              @update:model-value="setEntryValue(field, $event)"
-            >
-              <el-option
-                v-for="opt in selectFieldOptions(field)"
-                :key="opt.value"
-                :label="opt.label"
-                :value="opt.value"
-              />
-            </el-select>
-            <el-autocomplete
-              v-else
-              :model-value="getEntryValue(field)"
-              size="small"
-              :fetch-suggestions="(query, cb) => $emit('complete-field', field, query, cb)"
-              @input="(val) => { setEntryValue(field, val); $emit('schedule-history-refresh') }"
-              @keyup.enter="$event.target.blur()"
-            />
-            <div v-if="templateStoredSuggestionItems(field).length" class="suggestion-row">
-              <el-tag
-                v-for="item in templateStoredSuggestionItems(field)"
-                :key="`${field.name}-${item.source}-${item.display}`"
-                size="small"
-                effect="plain"
-                class="suggestion-tag"
-                @click="$emit('apply-suggestion', field, item.value)"
-              >
-                {{ item.display }}
-                <span v-if="item.count">×{{ item.count }}</span>
-              </el-tag>
-            </div>
-            </template>
-            <template v-else>
-              <div class="follow-value">{{ getEntryValue(field) || '（空）' }}</div>
+                  <strong class="field-name">{{ fillFieldLabel(field) }}</strong>
+                </el-tooltip>
+                <span v-if="field.posIndex > 0" class="position-label fill-all-tag">位置{{ field.posIndex + 1 }}</span>
 
-            </template>
-            <el-popover placement="bottom-end" trigger="click" width="280">
-              <template #reference>
-                <button class="field-more-button" type="button">…</button>
-              </template>
-              <div class="fill-structure-editor">
-                <strong>{{ structureEditorTitle(field) }}</strong>
-                <div class="setting-row">
-                  <span class="setting-label">字段类型</span>
-                  <el-select
-                    :model-value="typeGroupOf(effectiveFieldType(field))"
-                    size="small"
-                    class="type-group-select"
-                    teleported
-                    @update:model-value="(group) => onFieldTypeGroupChange(field, group)"
-                  >
-                    <el-option
-                      v-for="item in fieldTypeOverrideGroups"
-                      :key="item.value"
-                      :value="item.value"
-                      :label="item.label"
-                    />
-                  </el-select>
-                  <el-select
-                    v-if="typeGroupSubOptions(effectiveFieldType(field))"
-                    :model-value="effectiveFieldType(field)"
-                    size="small"
-                    class="type-sub-select"
-                    teleported
-                    @update:model-value="(type) => $emit('set-field-type-override', field, type)"
-                  >
-                    <el-option
-                      v-for="sub in typeGroupSubOptions(effectiveFieldType(field))"
-                      :key="sub.value"
-                      :value="sub.value"
-                      :label="sub.label"
-                    />
-                  </el-select>
+                <em v-if="field.required" class="fill-all-tag">必填</em>
+                <el-tag v-if="field.isDuplicate" size="small" effect="plain" type="info" class="fill-all-tag">
+                  同名字段，自动同步
+                </el-tag>
+                <el-tag
+                  v-else-if="
+                    field.fillAllPositions &&
+                    field.posIndex > 0 &&
+                    !hasSlotTypeOverride(field) &&
+                    effectiveFieldType(field) === 'reference'
+                  "
+                  size="small"
+                  effect="plain"
+                  class="fill-all-tag"
+                >
+                  {{ followerReferenceLabel(field) }}
+                </el-tag>
+              </div>
+              <div class="fill-field-body">
+                <div v-if="fieldStructureHints(field).length" class="fill-structure-hints">
+                  <span v-for="hint in fieldStructureHints(field)" :key="hint.key" class="fill-structure-hint">
+                    {{ hint.label }}：<code :class="{ empty: hint.empty }">{{ hint.text }}</code>
+                    <em>空值时删除</em>
+                  </span>
                 </div>
-                <el-input
-                  :model-value="getStructureOverride(field).prefix"
-                  size="small"
-                  placeholder="前缀"
-                  @input="(val) => setStructureOverride(field, 'prefix', val)"
+                <template
+                  v-if="
+                    field.editable ||
+                    field.isReference ||
+                    hasSlotTypeOverride(field) ||
+                    effectiveFieldType(field) === 'reference'
+                  "
                 >
-                  <template #prepend>前缀</template>
-                </el-input>
-                <el-input
-                  v-if="!fieldUsesRepeatableSuffix(field)"
-                  :model-value="getStructureOverride(field).suffix"
-                  size="small"
-                  placeholder="后缀"
-                  @input="(val) => setStructureOverride(field, 'suffix', val)"
-                >
-                  <template #prepend>后缀</template>
-                </el-input>
-                <p v-else class="setting-caption">这是列表项后缀，每一项单独设置；字段整体后缀不在这里修改。</p>
-                <div v-if="isReferenceablePosition(field)" class="setting-row">
-                  <span class="setting-label">引用来源</span>
+                  <div v-if="effectiveFieldType(field) === 'date'" class="date-fill-row">
+                    <el-date-picker
+                      v-if="getEntryValue(field) !== '留空'"
+                      :model-value="getEntryValue(field)"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      @update:model-value="setEntryValue(field, $event)"
+                    />
+                    <span v-else class="date-blank-text">留空</span>
+                    <button type="button" class="date-blank-btn" @click="toggleDateBlank(field)">
+                      {{ getEntryValue(field) === '留空' ? '输入日期' : '留空' }}
+                    </button>
+                  </div>
+                  <el-checkbox
+                    v-else-if="effectiveFieldType(field) === 'checkbox'"
+                    :model-value="getEntryValue(field)"
+                    @update:model-value="setEntryValue(field, $event)"
+                  >
+                    {{ firstOptionLabel(field) || '选中' }}
+                  </el-checkbox>
+                  <el-radio-group
+                    v-else-if="effectiveFieldType(field) === 'radio_group'"
+                    :model-value="getEntryValue(field)"
+                    @update:model-value="setEntryValue(field, $event)"
+                  >
+                    <el-radio v-for="option in field.options" :key="option.id" :label="option.id">
+                      {{ option.label }}
+                    </el-radio>
+                  </el-radio-group>
+                  <el-checkbox-group
+                    v-else-if="effectiveFieldType(field) === 'checkbox_group'"
+                    :model-value="getEntryValue(field)"
+                    @update:model-value="setEntryValue(field, $event)"
+                  >
+                    <el-checkbox v-for="option in field.options" :key="option.id" :label="option.id">
+                      {{ option.label }}
+                    </el-checkbox>
+                  </el-checkbox-group>
+                  <div v-else-if="effectiveFieldType(field) === 'party_list'" class="party-list-editor">
+                    <div
+                      v-for="(item, index) in getPartyListRows(field)"
+                      :key="index"
+                      class="party-list-row compact"
+                      :class="{ 'no-suffix': !partyFieldUsesSuffix(field) }"
+                    >
+                      <span class="party-order">{{ index + 1 }}</span>
+                      <el-autocomplete
+                        v-model="item.text"
+                        size="small"
+                        placeholder="名称"
+                        :fetch-suggestions="(query, cb) => $emit('complete-field', field, query, cb)"
+                        @input="() => {
+                          commitPartyTempRow(field)
+                          $emit('schedule-history-refresh')
+                        }"
+                      />
+                      <el-select
+                        v-if="partyFieldUsesSuffix(field)"
+                        v-model="item.suffix"
+                        size="small"
+                        filterable
+                        allow-create
+                        default-first-option
+                        placeholder="后缀"
+                        @change="() => {
+                          commitPartyTempRow(field)
+                          $emit('schedule-history-refresh')
+                        }"
+                      >
+                        <el-option
+                          v-for="suffix in partySuffixOptions(field)"
+                          :key="suffix"
+                          :label="suffix"
+                          :value="suffix"
+                        />
+                      </el-select>
+                      <div class="party-row-actions">
+                        <el-button
+                          size="small"
+                          text
+                          :disabled="index === 0"
+                          @click="$emit('move-party-item', field, index, -1)"
+                        >
+                          上移
+                        </el-button>
+                        <el-button
+                          size="small"
+                          text
+                          :disabled="index === getPartyListRows(field).length - 1"
+                          @click="$emit('move-party-item', field, index, 1)"
+                        >
+                          下移
+                        </el-button>
+                        <el-button size="small" text type="danger" @click="$emit('remove-party-item', field, index)">
+                          删除
+                        </el-button>
+                      </div>
+                    </div>
+                    <div v-if="partyFieldStructureHint(field)" class="field-structure-hint">
+                      {{ partyFieldStructureHint(field) }}
+                    </div>
+                    <div class="party-list-add-row">
+                      <el-button size="small" @click="$emit('add-party-item', field)">添加一项</el-button>
+                    </div>
+                  </div>
+                  <div v-else-if="effectiveFieldType(field) === 'reference'" class="reference-fill-editor">
+                    <div v-if="isReferenceSingleCandidate(field)" class="reference-fixed-value">
+                      {{ referenceFixedDisplayLabel(field) }}
+                    </div>
+                    <el-select
+                      v-else
+                      :model-value="getReferenceSelection(field)"
+                      filterable
+                      clearable
+                      class="reference-select-muted"
+                      :placeholder="followerReferenceLabel(field)"
+                      @update:model-value="$emit('reference-selection-change', field, $event)"
+                    >
+                      <el-option
+                        v-for="item in referenceFillOptions(field)"
+                        :key="item.key"
+                        :label="item.label"
+                        :value="item.key"
+                      />
+                    </el-select>
+                    <p
+                      v-if="effectiveFieldType(field) === 'reference' && !hasSlotTypeOverride(field)"
+                      class="setting-caption"
+                    >
+                      引用字段从已填字段取值，不能手动输入；前后缀在"…"菜单里设置。
+                    </p>
+                  </div>
                   <el-select
-                    :model-value="getSavedReferenceKey(field)"
+                    v-else-if="effectiveFieldType(field) === 'select'"
+                    :model-value="getEntryValue(field)"
                     filterable
+                    allow-create
+                    default-first-option
                     clearable
-                    placeholder="同字段首个位置"
-                    size="small"
-                    teleported
-                    @update:model-value="(key) => $emit('save-field-reference', field, key || '')"
+                    placeholder="选择或输入"
+                    @update:model-value="setEntryValue(field, $event)"
                   >
                     <el-option
-                      v-for="item in referenceFillOptions(field)"
-                      :key="item.key"
-                      :label="item.label"
-                      :value="item.key"
+                      v-for="opt in selectFieldOptions(field)"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
                     />
                   </el-select>
-                  <p class="setting-caption">选择后此位置引用所选字段的值，并保存到模板。</p>
-                </div>
-                <div v-if="effectiveFieldType(field) === 'date'" class="setting-row">
-                  <span class="setting-label">日期格式</span>
-                  <el-select
-                    :model-value="field.dateFormat || 'iso'"
+                  <el-autocomplete
+                    v-else
+                    :model-value="getEntryValue(field)"
                     size="small"
-                    teleported
-                    @update:model-value="(fmt) => $emit('save-field-date-format', field, fmt)"
-                  >
-                    <el-option v-for="item in dateFormatOptions" :key="item.value" :label="item.label" :value="item.value" />
-                  </el-select>
-                </div>
+                    :fetch-suggestions="(query, cb) => $emit('complete-field', field, query, cb)"
+                    @input="
+                      (val) => {
+                        setEntryValue(field, val)
+                        $emit('schedule-history-refresh')
+                      }
+                    "
+                    @keyup.enter="$event.target.blur()"
+                  />
+                  <div v-if="templateStoredSuggestionItems(field).length" class="suggestion-row">
+                    <el-tag
+                      v-for="item in templateStoredSuggestionItems(field)"
+                      :key="`${field.name}-${item.source}-${item.display}`"
+                      size="small"
+                      effect="plain"
+                      class="suggestion-tag"
+                      @click="$emit('apply-suggestion', field, item.value)"
+                    >
+                      {{ item.display }}
+                      <span v-if="item.count">×{{ item.count }}</span>
+                    </el-tag>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="follow-value">{{ getEntryValue(field) || '（空）' }}</div>
+                </template>
+                <el-popover placement="bottom-end" trigger="click" width="280">
+                  <template #reference>
+                    <button class="field-more-button" type="button">…</button>
+                  </template>
+                  <div class="fill-structure-editor">
+                    <strong>{{ structureEditorTitle(field) }}</strong>
+                    <div class="setting-row">
+                      <span class="setting-label">字段类型</span>
+                      <el-select
+                        :model-value="typeGroupOf(effectiveFieldType(field))"
+                        size="small"
+                        class="type-group-select"
+                        teleported
+                        @update:model-value="(group) => onFieldTypeGroupChange(field, group)"
+                      >
+                        <el-option
+                          v-for="item in fieldTypeOverrideGroups"
+                          :key="item.value"
+                          :value="item.value"
+                          :label="item.label"
+                        />
+                      </el-select>
+                      <el-select
+                        v-if="typeGroupSubOptions(effectiveFieldType(field))"
+                        :model-value="effectiveFieldType(field)"
+                        size="small"
+                        class="type-sub-select"
+                        teleported
+                        @update:model-value="(type) => $emit('set-field-type-override', field, type)"
+                      >
+                        <el-option
+                          v-for="sub in typeGroupSubOptions(effectiveFieldType(field))"
+                          :key="sub.value"
+                          :value="sub.value"
+                          :label="sub.label"
+                        />
+                      </el-select>
+                    </div>
+                    <el-input
+                      :model-value="getStructureOverride(field).prefix"
+                      size="small"
+                      placeholder="前缀"
+                      @input="(val) => setStructureOverride(field, 'prefix', val)"
+                    >
+                      <template #prepend>前缀</template>
+                    </el-input>
+                    <el-input
+                      v-if="!fieldUsesRepeatableSuffix(field)"
+                      :model-value="getStructureOverride(field).suffix"
+                      size="small"
+                      placeholder="后缀"
+                      @input="(val) => setStructureOverride(field, 'suffix', val)"
+                    >
+                      <template #prepend>后缀</template>
+                    </el-input>
+                    <p v-else class="setting-caption">这是列表项后缀，每一项单独设置；字段整体后缀不在这里修改。</p>
+                    <div v-if="isReferenceablePosition(field)" class="setting-row">
+                      <span class="setting-label">引用来源</span>
+                      <el-select
+                        :model-value="getSavedReferenceKey(field)"
+                        filterable
+                        clearable
+                        placeholder="同字段首个位置"
+                        size="small"
+                        teleported
+                        @update:model-value="(key) => $emit('save-field-reference', field, key || '')"
+                      >
+                        <el-option
+                          v-for="item in referenceFillOptions(field)"
+                          :key="item.key"
+                          :label="item.label"
+                          :value="item.key"
+                        />
+                      </el-select>
+                      <p class="setting-caption">选择后此位置引用所选字段的值，并保存到模板。</p>
+                    </div>
+                    <div v-if="effectiveFieldType(field) === 'date'" class="setting-row">
+                      <span class="setting-label">日期格式</span>
+                      <el-select
+                        :model-value="field.dateFormat || 'iso'"
+                        size="small"
+                        teleported
+                        @update:model-value="(fmt) => $emit('save-field-date-format', field, fmt)"
+                      >
+                        <el-option
+                          v-for="item in dateFormatOptions"
+                          :key="item.value"
+                          :label="item.label"
+                          :value="item.value"
+                        />
+                      </el-select>
+                    </div>
+                  </div>
+                </el-popover>
               </div>
-            </el-popover>
+            </section>
           </div>
-        </section>
-      </div>
-
-      <div v-if="fillPreviewVisible && fillPreviewText" class="fill-preview-panel">
-        <div class="fill-preview-header">
-          <h3>填写预览</h3>
-          <p>未填入的字段用方括号标注，以最终生成效果为准。</p>
         </div>
-        <DocumentPreview
-          v-if="fillDocumentRuns.length && fillPreviewOverlays.length"
-          :runs="fillDocumentRuns"
-          :overlays="fillPreviewOverlays"
-          mode="fill"
-        />
-        <pre v-else class="fill-preview-text">{{ fillPreviewText }}</pre>
+
+        <aside v-if="fillPreviewVisible && fillPreviewText" class="fill-preview-panel">
+          <div class="fill-preview-header">
+            <div>
+              <span>实时预览</span>
+              <h3>文档内容</h3>
+            </div>
+            <p>未填写字段以方括号标注</p>
+          </div>
+          <DocumentPreview
+            v-if="fillDocumentRuns.length && fillPreviewOverlays.length"
+            :runs="fillDocumentRuns"
+            :overlays="fillPreviewOverlays"
+            mode="fill"
+          />
+          <pre v-else class="fill-preview-text">{{ fillPreviewText }}</pre>
+        </aside>
+        <button v-else type="button" class="preview-invitation" @click="$emit('toggle-fill-preview')">
+          <span class="preview-invitation-icon">文</span>
+          <strong>打开文档预览</strong>
+          <small>在填写时同步核对字段所在位置</small>
+        </button>
       </div>
     </div>
   </section>
@@ -484,6 +557,22 @@ const filenamePreview = computed(() =>
   }),
 )
 
+const editableEntries = computed(() =>
+  props.fillPositionEntries.filter((field) => field.editable && !field.isDuplicate),
+)
+const requiredEntries = computed(() => editableEntries.value.filter((field) => field.required))
+const editableFieldCount = computed(() => editableEntries.value.length)
+const requiredFieldCount = computed(() => requiredEntries.value.length)
+const filledFieldCount = computed(
+  () => editableEntries.value.filter((field) => !isEmptyValue(getEntryValue(field))).length,
+)
+const filledRequiredCount = computed(
+  () => requiredEntries.value.filter((field) => !isEmptyValue(getEntryValue(field))).length,
+)
+const fillProgressPercent = computed(() =>
+  editableFieldCount.value ? Math.round((filledFieldCount.value / editableFieldCount.value) * 100) : 0,
+)
+
 // Types offered in the fill-page "…" menu (fillable types only; the structural
 // link/action types belong to the build page).
 const fieldTypeOverrideGroups = FIELD_TYPE_GROUPS.filter((g) => !['link', 'action'].includes(g.value))
@@ -576,9 +665,7 @@ function selectFieldOptions(field) {
 
 function getFormValueByPrimary(field) {
   // For duplicate fields, get the value from the first field with the same name
-  const primary = props.renderableTemplateFields.find(
-    (f) => f.name === field.name && !f._isDuplicate
-  )
+  const primary = props.renderableTemplateFields.find((f) => f.name === field.name && !f._isDuplicate)
   if (primary) return props.formValues[fieldFormKey(primary)]
   return props.formValues[fieldFormKey(field)]
 }
@@ -710,11 +797,7 @@ function templateStoredSuggestionItems(field) {
 function fieldStructureHints(field) {
   const override = existingStructureOverrideForField(field)
   const prefixes = override ? [override.prefix ?? ''] : []
-  const suffixes = fieldUsesRepeatableSuffix(field)
-    ? []
-    : override
-      ? [override.suffix ?? '']
-      : []
+  const suffixes = fieldUsesRepeatableSuffix(field) ? [] : override ? [override.suffix ?? ''] : []
   return [
     ...prefixes.filter(Boolean).map((text, index) => ({
       key: `prefix-${index}-${text}`,
@@ -756,14 +839,25 @@ function structureEditorTitle(field) {
 
 <style scoped>
 .filename-preview {
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface-muted);
   color: var(--docsy-text-muted, #909399);
-  max-width: 200px;
+  font-size: 12px;
+}
+
+.filename-preview strong {
+  min-width: 0;
   overflow: hidden;
+  color: var(--docsy-text);
+  font-size: 12px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
-  vertical-align: middle;
-  margin-left: 4px;
 }
 .date-fill-row {
   display: flex;
@@ -791,8 +885,8 @@ function structureEditorTitle(field) {
 
 .workspace {
   display: grid;
-  gap: 14px;
-  padding-top: 8px;
+  gap: 16px;
+  padding-top: 10px;
 }
 
 .panel {
@@ -813,6 +907,42 @@ function structureEditorTitle(field) {
 
 .panel-header.compact {
   align-items: center;
+}
+
+.library-panel.has-active-template {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+}
+
+.library-panel.has-active-template .panel-header {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.library-panel.has-active-template .panel-header p {
+  display: none;
+}
+
+.library-panel.has-active-template .template-library-grid {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.library-panel.has-active-template .template-library-card {
+  grid-template-columns: minmax(150px, 1fr) auto auto auto;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 420px;
+  padding: 9px 11px;
+}
+
+.library-panel.has-active-template .template-card-actions {
+  margin-top: 0;
 }
 
 h3 {
@@ -839,7 +969,7 @@ p {
 
 .template-library-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 10px;
 }
 
@@ -853,12 +983,26 @@ p {
   color: var(--docsy-text-strong);
   text-align: left;
   cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
 }
 
 .template-library-card:hover,
 .template-library-card.active {
   border-color: var(--docsy-primary);
   background: var(--docsy-primary-soft);
+}
+
+.template-library-card:hover {
+  transform: translateY(-1px);
+}
+
+.template-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
 }
 
 .template-library-card span,
@@ -868,11 +1012,107 @@ p {
 
 .form-panel {
   min-height: 0;
+  padding: 0;
+  overflow: clip;
+}
+
+.fill-command-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px 14px;
+  background: color-mix(in srgb, var(--docsy-surface-elevated) 94%, transparent);
+}
+
+.active-template-heading {
+  display: grid;
+  min-width: 210px;
+}
+
+.active-template-heading h3 {
+  margin-top: 2px;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.active-template-heading p {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.active-template-label {
+  color: var(--docsy-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.fill-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.field-search-input {
+  width: 170px;
+}
+
+.fill-progress-track {
+  height: 3px;
+  overflow: hidden;
+  background: var(--docsy-surface-muted);
+}
+
+.fill-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: 0 var(--docsy-radius) var(--docsy-radius) 0;
+  background: var(--docsy-primary);
+  transition: width 220ms ease;
+}
+
+.fill-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.32fr);
+  min-height: 420px;
+}
+
+.fill-workbench.with-preview {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.68fr);
+}
+
+.field-editor-column {
+  min-width: 0;
+  padding: 18px;
+}
+
+.field-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.field-section-heading h3 {
+  font-size: 15px;
+}
+
+.field-section-heading > span {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+  font-size: 12px;
 }
 
 .template-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 12px;
 }
 
@@ -883,11 +1123,25 @@ p {
   min-width: 0;
   padding: 12px 12px 40px;
   border: 1px solid var(--docsy-border-subtle);
-  border-left: 3px solid transparent;
+  border-left: 3px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
-  background: var(--docsy-surface-elevated);
+  background: color-mix(in srgb, var(--docsy-surface-elevated) 96%, var(--docsy-surface-muted));
   overflow-wrap: break-word;
   word-break: break-word;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.fill-field-card:focus-within {
+  border-color: color-mix(in srgb, var(--docsy-primary) 55%, var(--docsy-border-subtle));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--docsy-primary) 10%, transparent);
+}
+
+.fill-field-card.is-filled {
+  border-left-color: var(--docsy-primary);
+  background: color-mix(in srgb, var(--docsy-primary-soft) 34%, var(--docsy-surface-elevated));
 }
 
 .fill-field-body {
@@ -962,8 +1216,6 @@ p {
   background: #fef0f0;
   color: var(--el-color-danger);
 }
-
-
 
 .fill-structure-hints {
   display: flex;
@@ -1110,19 +1362,31 @@ p {
 
 /* Fill preview */
 .fill-preview-panel {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--docsy-border-subtle);
+  min-width: 0;
+  padding: 18px;
+  border-left: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface-muted);
 }
 
 .fill-preview-header {
-  margin-bottom: 8px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .fill-preview-header h3 {
-  margin: 0 0 4px;
-  font-size: 14px;
+  margin: 2px 0 0;
+  font-size: 15px;
   color: var(--docsy-text-strong);
+}
+
+.fill-preview-header span {
+  color: var(--docsy-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
 }
 
 .fill-preview-header p {
@@ -1147,6 +1411,47 @@ p {
   word-break: break-word;
 }
 
+.preview-invitation {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 28px 18px;
+  border: 0;
+  border-left: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+}
+
+.preview-invitation:hover {
+  background: var(--docsy-primary-soft);
+}
+
+.preview-invitation-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 64px;
+  margin-bottom: 6px;
+  border: 1px solid var(--docsy-border-strong);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-preview-paper, #fff);
+  color: var(--docsy-primary);
+  font-family: 'SimSun', '宋体', serif;
+  font-size: 22px;
+  box-shadow: 0 8px 22px rgba(48, 41, 32, 0.08);
+}
+
+.preview-invitation small {
+  max-width: 180px;
+  color: var(--docsy-text-muted);
+  line-height: 1.5;
+}
+
 @media (max-width: 1180px) {
   .template-form-grid {
     grid-template-columns: 1fr;
@@ -1157,9 +1462,65 @@ p {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .fill-command-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .fill-command-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .fill-workbench,
+  .fill-workbench.with-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .fill-preview-panel,
+  .preview-invitation {
+    border-top: 1px solid var(--docsy-border-subtle);
+    border-left: 0;
+  }
+
+  .library-panel.has-active-template {
+    grid-template-columns: 1fr;
+  }
+
+  .library-panel.has-active-template .panel-header {
+    align-items: center;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .library-panel.has-active-template .template-library-card {
+    min-width: 380px;
+  }
 }
 
 @media (max-width: 760px) {
+  .library-panel.has-active-template .template-library-card {
+    grid-template-columns: 1fr auto;
+    min-width: min(360px, 88vw);
+  }
+
+  .library-panel.has-active-template .template-library-card > span,
+  .library-panel.has-active-template .template-library-card > small {
+    display: none;
+  }
+
+  .fill-command-actions > *,
+  .field-search-input {
+    flex: 1 1 140px;
+    width: auto;
+  }
+
+  .field-editor-column,
+  .fill-preview-panel {
+    padding: 14px;
+  }
+
   .party-list-row,
   .party-list-row.compact,
   .party-list-row.compact.no-suffix {

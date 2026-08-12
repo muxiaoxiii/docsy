@@ -1,6 +1,6 @@
 <template>
   <section class="workspace">
-    <div class="panel">
+    <div class="panel source-panel" :class="{ 'has-source': sourceDocx }">
       <div class="panel-header">
         <div>
           <h3>导入标黄 Word</h3>
@@ -9,7 +9,7 @@
         <el-button type="primary" :loading="scanning" @click="$emit('select-source-docx')">选择 Word</el-button>
       </div>
 
-      <el-descriptions v-if="sourceDocx" :column="1" size="small" border>
+      <el-descriptions v-if="sourceDocx" :column="2" size="small" border>
         <el-descriptions-item label="文件">{{ sourceDocx }}</el-descriptions-item>
         <el-descriptions-item label="识别">
           {{ marks.length }} 个标黄片段，{{ checkboxLikeCount }} 个疑似勾选符号
@@ -111,6 +111,39 @@
             placeholder="模板名称"
             @update:model-value="$emit('update:templateName', $event)"
           />
+        </div>
+      </div>
+
+      <div class="build-command-bar">
+        <div class="build-field-summary">
+          <strong>{{ configuredFieldCount }} 个字段</strong>
+          <span>{{ requiredBuildFieldCount }} 个必填 · {{ specialFieldCount }} 个特殊类型</span>
+        </div>
+        <div class="template-build-actions">
+          <el-button :disabled="!documentText" @click="$emit('update:showDocumentText', !showDocumentText)">
+            {{ showDocumentText ? '收起全文' : '查看全文' }}
+          </el-button>
+          <el-button :disabled="!documentText" @click="$emit('update:showTemplatePreview', !showTemplatePreview)">
+            {{ showTemplatePreview ? '收起预览' : '模板预览' }}
+          </el-button>
+          <el-button :disabled="!undoStack.length" @click="$emit('undo-last-action')">撤销</el-button>
+          <el-button
+            v-if="editingLibraryTemplatePath"
+            :disabled="!fieldRows.length"
+            type="warning"
+            :loading="saving"
+            @click="$emit('save-template', true)"
+          >
+            覆盖保存
+          </el-button>
+          <el-button
+            :disabled="!fieldRows.length"
+            :type="editingLibraryTemplatePath ? 'primary' : 'success'"
+            :loading="saving"
+            @click="$emit('save-template', false)"
+          >
+            {{ editingLibraryTemplatePath ? '另存为' : '保存模板' }}
+          </el-button>
         </div>
       </div>
 
@@ -500,33 +533,6 @@
         </el-collapse-item>
       </el-collapse>
 
-      <div class="template-build-actions">
-        <el-button :disabled="!documentText" @click="$emit('update:showDocumentText', !showDocumentText)">
-          {{ showDocumentText ? '收起全文' : '查看模板全文' }}
-        </el-button>
-        <el-button :disabled="!documentText" @click="$emit('update:showTemplatePreview', !showTemplatePreview)">
-          {{ showTemplatePreview ? '收起预览' : '预览模板' }}
-        </el-button>
-        <el-button :disabled="!undoStack.length" @click="$emit('undo-last-action')">撤销</el-button>
-        <el-button
-          v-if="editingLibraryTemplatePath"
-          :disabled="!fieldRows.length"
-          type="warning"
-          :loading="saving"
-          @click="$emit('save-template', true)"
-        >
-          覆盖保存
-        </el-button>
-        <el-button
-          :disabled="!fieldRows.length"
-          :type="editingLibraryTemplatePath ? 'primary' : 'success'"
-          :loading="saving"
-          @click="$emit('save-template', false)"
-        >
-          {{ editingLibraryTemplatePath ? '另存为' : '保存模板' }}
-        </el-button>
-      </div>
-
       <div v-if="showDocumentText" class="preview-panel">
         <div class="preview-panel-header">
           <h3>模板全文</h3>
@@ -760,6 +766,12 @@ function onTypeGroupChange(row, group) {
 }
 
 const checkboxLikeCount = computed(() => props.marks.filter((mark) => mark.checkboxLike).length)
+const configuredBuildRows = computed(() => props.fieldRows.filter((row) => rowUsage(row) === 'field' && !row.displayOnly))
+const configuredFieldCount = computed(() => new Set(configuredBuildRows.value.map((row) => row.name || row.rowId)).size)
+const requiredBuildFieldCount = computed(() => configuredBuildRows.value.filter((row) => row.required).length)
+const specialFieldCount = computed(
+  () => configuredBuildRows.value.filter((row) => !['text', 'textarea'].includes(row.type)).length,
+)
 
 const filenameAvailableFields = computed(() => {
   const seen = new Set()
@@ -858,6 +870,22 @@ defineExpose({ fieldTableRef, sourcePreviewRef, documentPreviewRef })
   margin-top: 4px;
 }
 
+.source-panel.has-source .panel-header {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.filename-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+}
+
+.filename-panel .panel-header {
+  margin-bottom: 0;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -916,6 +944,34 @@ p {
 
 .template-name {
   max-width: 260px;
+}
+
+.build-command-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 -14px 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--docsy-border-subtle);
+  border-bottom: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface-muted);
+}
+
+.build-field-summary {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.build-field-summary strong {
+  color: var(--docsy-text-strong);
+  font-size: 13px;
+}
+
+.build-field-summary span {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
 }
 
 .document-collapse {
@@ -1070,7 +1126,6 @@ p {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin-top: 12px;
 }
 
 .preview-panel {
@@ -1477,6 +1532,11 @@ p {
   min-height: 0;
 }
 
+.field-panel :deep(.el-table) {
+  overflow: hidden;
+  border-radius: var(--docsy-radius);
+}
+
 @media (max-width: 1180px) {
   .template-preview-grid {
     grid-template-columns: 1fr;
@@ -1492,6 +1552,16 @@ p {
     display: flex;
     flex-wrap: wrap;
     align-self: stretch;
+  }
+
+  .filename-panel {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .build-command-bar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .template-name {

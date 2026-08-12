@@ -18,8 +18,28 @@ import {
 } from '../rules/publicRules.js'
 import { useTemplateSettings } from './useTemplateSettings.js'
 import { useBatchFill } from './useBatchFill.js'
-import { markToRow, normalizeFieldRows, autoMergeMarks, inferFieldFromText, validateFieldRowsBeforeSave, buildFields } from './useFieldNormalization.js'
-import { ensureExtension, splitPartyLabelSegments, fieldFormKey, sliceChars, charLength, referenceSourceKey, formatDateValue, parseReferenceSourceKey, syncReferenceSourceFromKey, partyItemsToValues, inputValueForField, resolveReferenceValueFromSource } from './fieldRowUtils.js'
+import {
+  markToRow,
+  normalizeFieldRows,
+  autoMergeMarks,
+  inferFieldFromText,
+  validateFieldRowsBeforeSave,
+  buildFields,
+} from './useFieldNormalization.js'
+import {
+  ensureExtension,
+  splitPartyLabelSegments,
+  fieldFormKey,
+  sliceChars,
+  charLength,
+  referenceSourceKey,
+  formatDateValue,
+  parseReferenceSourceKey,
+  syncReferenceSourceFromKey,
+  partyItemsToValues,
+  inputValueForField,
+  resolveReferenceValueFromSource,
+} from './fieldRowUtils.js'
 import { usePreviewSelection } from './usePreviewSelection.js'
 import { registerSnapshotProvider } from '../../../shared/diagnostics.js'
 
@@ -91,12 +111,16 @@ export function useTemplateState() {
   } = usePreviewSelection(documentRuns, documentText, fieldRows, previewSampleValues)
 
   // Sync composable's DOM refs with child component's exposed refs
-  watch(buildTabRef, (ref) => {
-    if (ref) {
-      sourcePreviewRef.value = ref.sourcePreviewRef
-      documentPreviewRef.value = ref.documentPreviewRef
-    }
-  }, { immediate: true })
+  watch(
+    buildTabRef,
+    (ref) => {
+      if (ref) {
+        sourcePreviewRef.value = ref.sourcePreviewRef
+        documentPreviewRef.value = ref.documentPreviewRef
+      }
+    },
+    { immediate: true },
+  )
 
   const scanning = ref(false)
   const saving = ref(false)
@@ -290,7 +314,17 @@ export function useTemplateState() {
     if (!templateManifest.value?.fields) return
     const manifestField = templateManifest.value.fields.find((f) => f.id === field.id)
     if (!manifestField) return
-    const skip = ['reference', 'party_list', 'checkbox', 'radio_group', 'checkbox_group', 'prefix', 'suffix', 'delete_text', 'ignore']
+    const skip = [
+      'reference',
+      'party_list',
+      'checkbox',
+      'radio_group',
+      'checkbox_group',
+      'prefix',
+      'suffix',
+      'delete_text',
+      'ignore',
+    ]
     if (skip.includes(type)) return
     if (manifestField.type === type) return
     manifestField.type = type
@@ -317,13 +351,211 @@ export function useTemplateState() {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
+  function shouldUseFillUiDemo() {
+    return import.meta.env.DEV && new window.URLSearchParams(window.location.search).get('ui-demo') === 'fill'
+  }
+
+  function shouldUseBuildUiDemo() {
+    return import.meta.env.DEV && new window.URLSearchParams(window.location.search).get('ui-demo') === 'build'
+  }
+
+  function applyBuildUiDemo() {
+    const demoMarks = [
+      { id: 'build-p1-r1', text: '上海澄明科技有限公司', context: '原告：', checkboxLike: false },
+      { id: 'build-p2-r1', text: '杭州远川网络有限公司', context: '被告：', checkboxLike: false },
+      { id: 'build-p3-r1', text: '上海市浦东新区人民法院', context: '受理法院：', checkboxLike: false },
+      { id: 'build-p4-r1', text: '（2026）沪0115民初12345号', context: '案号：', checkboxLike: false },
+      { id: 'build-p5-r1', text: '2026年8月18日', context: '开庭日期：', checkboxLike: false },
+      { id: 'build-p6-r1', text: '□', context: '是否申请财产保全：', checkboxLike: true, optionLabel: '申请财产保全' },
+    ].map((mark, index) => ({ ...mark, displayId: mark.id, part: 'document', runIndex: index * 2 + 1 }))
+    const fieldDefinitions = [
+      { type: 'text', name: '原告', label: '原告', required: true },
+      { type: 'text', name: '被告', label: '被告', required: true },
+      { type: 'text', name: '受理法院', label: '受理法院', required: true },
+      { type: 'text', name: '案号', label: '案号', required: false, optionalWhenEmpty: true, optionalPrefix: '案号：' },
+      { type: 'date', name: '开庭日期', label: '开庭日期', required: false, dateFormat: 'cn' },
+      { type: 'checkbox', name: '申请财产保全', label: '申请财产保全', required: false },
+    ]
+
+    activeTab.value = 'build'
+    sourceDocx.value = '/演示文档/民事起诉状（标黄）.docx'
+    templateName.value = '民事起诉状'
+    marks.value = demoMarks
+    documentRuns.value = [
+      { id: 'build-title', paragraphIndex: 0, runIndex: 0, text: '民事起诉状', bold: true },
+      { id: 'build-label-1', paragraphIndex: 1, runIndex: 1, text: '原告：' },
+      { id: 'build-p1-r1', paragraphIndex: 1, runIndex: 2, text: demoMarks[0].text },
+      { id: 'build-label-2', paragraphIndex: 2, runIndex: 3, text: '被告：' },
+      { id: 'build-p2-r1', paragraphIndex: 2, runIndex: 4, text: demoMarks[1].text },
+      { id: 'build-label-3', paragraphIndex: 3, runIndex: 5, text: '受理法院：' },
+      { id: 'build-p3-r1', paragraphIndex: 3, runIndex: 6, text: demoMarks[2].text },
+      { id: 'build-label-4', paragraphIndex: 4, runIndex: 7, text: '案号：' },
+      { id: 'build-p4-r1', paragraphIndex: 4, runIndex: 8, text: demoMarks[3].text },
+      { id: 'build-label-5', paragraphIndex: 5, runIndex: 9, text: '开庭日期：' },
+      { id: 'build-p5-r1', paragraphIndex: 5, runIndex: 10, text: demoMarks[4].text },
+      { id: 'build-label-6', paragraphIndex: 6, runIndex: 11, text: '是否申请财产保全：' },
+      { id: 'build-p6-r1', paragraphIndex: 6, runIndex: 12, text: demoMarks[5].text },
+    ]
+    documentText.value = documentRuns.value.map((run) => run.text).join('')
+    fieldRows.value = demoMarks.map((mark, index) => ({
+      ...markToRow(mark, index),
+      ...fieldDefinitions[index],
+      markRefs: [{ markId: mark.id, start: 0, end: charLength(mark.text) }],
+      markSegments: [{ markId: mark.id, text: mark.text }],
+      semanticKey: fieldDefinitions[index].name,
+    }))
+    filenameTokens.value = [
+      { id: 'build-filename-1', type: 'preset', value: '模板名' },
+      { id: 'build-filename-2', type: 'literal', value: '-' },
+      { id: 'build-filename-3', type: 'field', value: '案号' },
+    ]
+    Object.assign(previewSampleValues, {
+      原告: '上海澄明科技有限公司',
+      被告: '杭州远川网络有限公司',
+      受理法院: '上海市浦东新区人民法院',
+      案号: '（2026）沪0115民初12345号',
+      开庭日期: '2026年8月18日',
+    })
+    showTemplatePreview.value = true
+  }
+
+  function applyFillUiDemo() {
+    const demoFields = [
+      {
+        id: 'demo-plaintiff',
+        name: '原告',
+        label: '原告',
+        type: 'party_list',
+        required: true,
+        markRefs: [{ markId: 'demo-p1-r1' }],
+      },
+      {
+        id: 'demo-defendant',
+        name: '被告',
+        label: '被告',
+        type: 'party_list',
+        required: true,
+        markRefs: [{ markId: 'demo-p2-r1' }],
+      },
+      {
+        id: 'demo-court',
+        name: '受理法院',
+        label: '受理法院',
+        type: 'text',
+        required: true,
+        fillAllPositions: true,
+        markRefs: [{ markId: 'demo-p3-r1' }, { markId: 'demo-p8-r1' }],
+      },
+      {
+        id: 'demo-case-no',
+        name: '案号',
+        label: '案号',
+        type: 'text',
+        required: false,
+        markRefs: [{ markId: 'demo-p4-r1' }],
+      },
+      {
+        id: 'demo-stage',
+        name: '审理程序',
+        label: '审理程序',
+        type: 'select',
+        required: true,
+        options: [
+          { id: 'first', label: '一审', checkedText: '一审' },
+          { id: 'second', label: '二审', checkedText: '二审' },
+          { id: 'retrial', label: '再审', checkedText: '再审' },
+        ],
+        markRefs: [{ markId: 'demo-p5-r1' }],
+      },
+      {
+        id: 'demo-hearing-date',
+        name: '开庭日期',
+        label: '开庭日期',
+        type: 'date',
+        required: false,
+        markRefs: [{ markId: 'demo-p6-r1' }],
+      },
+      {
+        id: 'demo-preservation',
+        name: '申请财产保全',
+        label: '申请财产保全',
+        type: 'checkbox',
+        required: false,
+        options: [{ id: 'enabled', label: '随案提交财产保全申请' }],
+        markRefs: [{ markId: 'demo-p7-r1' }],
+      },
+    ]
+    const manifest = {
+      template: { id: 'ui-demo-civil-complaint', name: '民事起诉状（填写态演示）' },
+      name: '民事起诉状（填写态演示）',
+      fields: demoFields,
+      filenameTemplate: {
+        tokens: [
+          { id: 'demo-filename-1', type: 'preset', value: '模板名' },
+          { id: 'demo-filename-2', type: 'literal', value: '-' },
+          { id: 'demo-filename-3', type: 'field', value: '案号' },
+        ],
+      },
+    }
+
+    activeTab.value = 'render'
+    templatePath.value = 'demo://civil-complaint'
+    templateManifest.value = manifest
+    templateLibrary.value = [
+      {
+        path: templatePath.value,
+        name: manifest.template.name,
+        fieldCount: demoFields.length,
+        updated: new Date().toISOString(),
+      },
+    ]
+    filenameTokens.value = manifest.filenameTemplate.tokens
+    resetFormValues(demoFields)
+    Object.assign(formValues, {
+      'demo-plaintiff': [{ text: '上海澄明科技有限公司', suffix: '' }],
+      'demo-defendant': [{ text: '杭州远川网络有限公司', suffix: '' }],
+      'demo-court': '上海市浦东新区人民法院',
+      'demo-case-no': '',
+      'demo-stage': '一审',
+      'demo-hearing-date': '2026-08-18',
+      'demo-preservation': false,
+    })
+    fillDocumentRuns.value = [
+      { id: 'demo-title', paragraphIndex: 0, text: '民事起诉状', bold: true },
+      { id: 'demo-label-1', paragraphIndex: 1, text: '原告：' },
+      { id: 'demo-p1-r1', paragraphIndex: 1, text: '原告名称' },
+      { id: 'demo-label-2', paragraphIndex: 2, text: '被告：' },
+      { id: 'demo-p2-r1', paragraphIndex: 2, text: '被告名称' },
+      { id: 'demo-label-3', paragraphIndex: 3, text: '受理法院：' },
+      { id: 'demo-p3-r1', paragraphIndex: 3, text: '法院名称' },
+      { id: 'demo-label-4', paragraphIndex: 4, text: '案号：' },
+      { id: 'demo-p4-r1', paragraphIndex: 4, text: '案号' },
+      { id: 'demo-label-5', paragraphIndex: 5, text: '审理程序：' },
+      { id: 'demo-p5-r1', paragraphIndex: 5, text: '程序' },
+      { id: 'demo-label-6', paragraphIndex: 6, text: '开庭日期：' },
+      { id: 'demo-p6-r1', paragraphIndex: 6, text: '日期' },
+      { id: 'demo-label-7', paragraphIndex: 7, text: '其他申请：' },
+      { id: 'demo-p7-r1', paragraphIndex: 7, text: '财产保全' },
+      { id: 'demo-label-8', paragraphIndex: 8, text: '此致\n' },
+      { id: 'demo-p8-r1', paragraphIndex: 8, text: '法院名称' },
+    ]
+    fillPreviewVisible.value = true
+    buildFillPreview()
+  }
+
   onMounted(() => {
     document.addEventListener('selectionchange', rememberSourcePreviewSelection)
     document.addEventListener('pointerup', rememberSourcePreviewSelection)
     window.addEventListener('docsy-template-library-changed', refreshLibraryAndHistory)
-    void loadTemplateLibrary()
-    void loadTemplateHistoryRuns()
-    void loadTemplateDatabase()
+    if (shouldUseFillUiDemo()) {
+      applyFillUiDemo()
+    } else if (shouldUseBuildUiDemo()) {
+      applyBuildUiDemo()
+    } else {
+      void loadTemplateLibrary()
+      void loadTemplateHistoryRuns()
+      void loadTemplateDatabase()
+    }
 
     registerSnapshotProvider('template', () => ({
       templatePath: templatePath.value,
@@ -772,7 +1004,10 @@ export function useTemplateState() {
     sourcePreviewSelection.value = null
     sourcePreviewSelectionPayload.value = null
     clearPreviewSampleValues()
-    fieldRows.value = normalizeFieldRows(autoMergeMarks(marks.value).map((mark, index) => markToRow(mark, index)), documentRuns.value)
+    fieldRows.value = normalizeFieldRows(
+      autoMergeMarks(marks.value).map((mark, index) => markToRow(mark, index)),
+      documentRuns.value,
+    )
     if (!fieldRows.value.length) {
       ElMessage.warning('没有找到黄色高亮标记')
     }
@@ -1022,7 +1257,10 @@ export function useTemplateState() {
   }
 
   function manualFieldMeta(text, effectiveType, inferredField) {
-    if (inferredField?.type === effectiveType && !['prefix', 'suffix', 'ignore', 'delete_text'].includes(effectiveType)) {
+    if (
+      inferredField?.type === effectiveType &&
+      !['prefix', 'suffix', 'ignore', 'delete_text'].includes(effectiveType)
+    ) {
       return {
         name: inferredField.name,
         label: inferredField.label,
@@ -1274,9 +1512,10 @@ export function useTemplateState() {
       args: {
         // Editing a library template has no source Word file: pass the docsytpl
         // package itself so the backend rebuilds from its embedded document.
-        sourceDocx: isEditingExisting || !sourceDocx.value
-          ? editingLibraryTemplatePath.value || templatePath.value
-          : sourceDocx.value,
+        sourceDocx:
+          isEditingExisting || !sourceDocx.value
+            ? editingLibraryTemplatePath.value || templatePath.value
+            : sourceDocx.value,
         outputPath: isEditingExisting ? editingLibraryTemplatePath.value : '',
         templateName: confirmedName,
         fields,
@@ -1333,7 +1572,8 @@ export function useTemplateState() {
     const values = {}
     const partyValues = new Map()
     for (const row of fieldRows.value) {
-      if (!row.enabled || rowUsage(row) !== 'field' || isMarkerType(row.type) || isGeneratedFieldName(row.name)) continue
+      if (!row.enabled || rowUsage(row) !== 'field' || isMarkerType(row.type) || isGeneratedFieldName(row.name))
+        continue
       const name = row.name.trim()
       const text = String(row.text || '').trim()
       if (!name || !text) continue
@@ -1575,7 +1815,7 @@ export function useTemplateState() {
       rowId: `edit:${field.id}${suffix}`,
       displayId: markId,
       markId,
-      markRefs: markRef ? [markRef] : (field.markRefs || []),
+      markRefs: markRef ? [markRef] : field.markRefs || [],
       markSegments: [],
       charStart: null,
       charEnd: null,
@@ -1586,7 +1826,7 @@ export function useTemplateState() {
       name: field.name,
       label: field.label,
       semanticKey: field.semanticKey,
-      dateFormat: field.type === 'date' ? (field.dateFormat || 'iso') : '',
+      dateFormat: field.type === 'date' ? field.dateFormat || 'iso' : '',
       _nameManuallySet: Boolean(field.name && field.label && field.name !== field.label),
       // 从既有模板回读的行：同名同类型本就是一个字段的多处位置，
       // 保存时允许 buildFields 合并回去（不走自动加序号）。
@@ -1629,7 +1869,7 @@ export function useTemplateState() {
       rowId: `${field.name.replace('delete_', '')}${suffix}`,
       displayId: markId,
       markId,
-      markRefs: markRef ? [markRef] : (field.markRefs || []),
+      markRefs: markRef ? [markRef] : field.markRefs || [],
       markSegments: [],
       charStart: null,
       charEnd: null,
@@ -1823,13 +2063,15 @@ export function useTemplateState() {
         const paraKey = `${field.id}:${run.paragraphIndex}`
         if (renderedFieldAtParagraph.has(paraKey)) continue
         renderedFieldAtParagraph.add(paraKey)
-        const value =
-          formValues[field.id] ?? formValues[field.name] ?? formValues[`fill:${field.name}`]
+        const value = formValues[field.id] ?? formValues[field.name] ?? formValues[`fill:${field.name}`]
         let displayValue
         let isFilled = false
         if (value != null && value !== '' && value !== false) {
           if (Array.isArray(value)) {
-            displayValue = value.map((v) => (typeof v === 'object' ? v.text : v)).filter(Boolean).join('、')
+            displayValue = value
+              .map((v) => (typeof v === 'object' ? v.text : v))
+              .filter(Boolean)
+              .join('、')
           } else {
             displayValue = String(value)
           }
@@ -1881,8 +2123,7 @@ export function useTemplateState() {
     const filledValues = {}
     for (const [key, value] of Object.entries(normalizeValues())) {
       const empty =
-        value === undefined || value === null || value === '' ||
-        (Array.isArray(value) && value.length === 0)
+        value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)
       if (!empty) filledValues[key] = value
     }
     const result = await tauriCallSafe('get_template_history_context', {
@@ -1947,11 +2188,11 @@ export function useTemplateState() {
     const existing = templateLibrary.value.find((item) => fileName(item.path) === sourceName)
     if (existing) {
       try {
-        await ElMessageBox.confirm(
-          `模板库中已存在同名模板"${sourceName}"，是否覆盖？`,
-          '重名提示',
-          { confirmButtonText: '覆盖', cancelButtonText: '取消', type: 'warning' },
-        )
+        await ElMessageBox.confirm(`模板库中已存在同名模板"${sourceName}"，是否覆盖？`, '重名提示', {
+          confirmButtonText: '覆盖',
+          cancelButtonText: '取消',
+          type: 'warning',
+        })
       } catch {
         return // User cancelled
       }
@@ -1988,9 +2229,7 @@ export function useTemplateState() {
     }
     exportResultDir = result.data
     const count = exportSelectedPaths.value.length
-    exportResult.value = count > 1
-      ? `已导出 ${count} 个模板到 Docsy模板 文件夹`
-      : `已导出 1 个模板`
+    exportResult.value = count > 1 ? `已导出 ${count} 个模板到 Docsy模板 文件夹` : `已导出 1 个模板`
     ElMessage.success('模板导出成功')
   }
 
@@ -2059,7 +2298,14 @@ export function useTemplateState() {
     toggleBatchSaveRow,
     batchSaveRowSummary,
     submitBatchSave,
-  } = useBatchFill(templatePath, templateManifest, normalizeValues, normalizeStructureOverrides, itemSeparatorSetting, loadTemplateHistoryRuns)
+  } = useBatchFill(
+    templatePath,
+    templateManifest,
+    normalizeValues,
+    normalizeStructureOverrides,
+    itemSeparatorSetting,
+    loadTemplateHistoryRuns,
+  )
 
   function normalizeValues() {
     // Source values are collected once, before the loop, so reference fields
@@ -2088,9 +2334,7 @@ export function useTemplateState() {
         addSemanticAliasValue(values, field, normalizedValue)
       }
     }
-    const independentSlots = new Set(
-      Object.keys(typeOverrides).filter((k) => k.includes('#')),
-    )
+    const independentSlots = new Set(Object.keys(typeOverrides).filter((k) => k.includes('#')))
     for (const key of Object.keys(referenceSelections)) {
       if (key.includes('#')) independentSlots.add(key)
     }
