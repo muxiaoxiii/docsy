@@ -213,9 +213,7 @@ fn default_scan_artifacts() -> bool {
     true
 }
 
-pub fn detect(args: &serde_json::Value) -> Result<DetectionResult> {
-    let args: DetectionArgs =
-        serde_json::from_value(args.clone()).context("解析页眉页脚检测参数失败")?;
+pub fn detect(args: &DetectionArgs) -> Result<DetectionResult> {
     let input = Path::new(&args.input_path);
     if !input.exists() {
         anyhow::bail!("PDF 不存在: {}", input.display());
@@ -257,7 +255,7 @@ pub fn detect(args: &serde_json::Value) -> Result<DetectionResult> {
     let xml = run_pdftotext_bbox(input, args.max_pages)?;
     let words = parse_pdftotext_bbox(&xml)?;
     let page_sizes = parse_pdftotext_page_sizes(&xml)?;
-    let pages = build_page_detections(&words, &page_sizes, &args);
+    let pages = build_page_detections(&words, &page_sizes, args);
     log_detection_stage(
         input,
         "page-text",
@@ -305,7 +303,7 @@ pub fn detect(args: &serde_json::Value) -> Result<DetectionResult> {
     );
 
     Ok(DetectionResult {
-        input_path: args.input_path,
+        input_path: args.input_path.clone(),
         pages_analyzed,
         artifact,
         pages,
@@ -326,9 +324,7 @@ fn log_detection_stage(input: &Path, stage: &str, started: Instant, details: ser
     );
 }
 
-pub fn suggest_split_ranges(args: &serde_json::Value) -> Result<SplitSuggestionResult> {
-    let args: SplitSuggestionArgs =
-        serde_json::from_value(args.clone()).context("解析拆分建议参数失败")?;
+pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestionResult> {
     let total_pages =
         super::qpdf::page_count(&args.input_path).context("读取合并 PDF 总页数失败")?;
     let requested_pages = args
@@ -337,14 +333,15 @@ pub fn suggest_split_ranges(args: &serde_json::Value) -> Result<SplitSuggestionR
         .min(total_pages)
         .max(1);
     let max_pages = requested_pages.min(MAX_SPLIT_ANALYSIS_PAGES);
-    let detection = detect(&serde_json::json!({
-        "inputPath": args.input_path,
-        "maxPages": max_pages,
-        "headerZoneMm": args.header_zone_mm,
-        "footerZoneMm": args.footer_zone_mm.unwrap_or(25.0),
-        "footerZoneRatio": 0.03,
-        "scanArtifacts": false
-    }))?;
+    let detection = detect(&DetectionArgs {
+        input_path: args.input_path.clone(),
+        max_pages,
+        header_zone_ratio: default_header_zone_ratio(),
+        footer_zone_ratio: 0.03,
+        header_zone_mm: args.header_zone_mm,
+        footer_zone_mm: args.footer_zone_mm,
+        scan_artifacts: false,
+    })?;
     let items = build_split_suggestions_from_pages(&detection.pages);
     let items = augment_splits_with_page_number_boundaries(items, &detection.pages);
     let header_pages = count_split_header_pages(&detection.pages);
@@ -1676,9 +1673,8 @@ fn is_noise(text: &str, normalized_text: &str) -> bool {
 /// Digits may be Arabic or Chinese numerals; anything may follow the number
 /// (e.g. "证据1（合同）").
 fn is_evidence_label_text(normalized_text: &str) -> bool {
-    static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^(证据|对比文件)\s*[0-9一二三四五六七八九十百千]+").unwrap()
-    });
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^(证据|对比文件)\s*[0-9一二三四五六七八九十百千]+").unwrap());
     RE.is_match(normalized_text.trim())
 }
 
@@ -2838,12 +2834,15 @@ mod tests {
             eprintln!("skipping: file not found");
             return;
         }
-        let result = detect(&serde_json::json!({
-            "inputPath": path,
-            "maxPages": 35,
-            "headerZoneMm": 25.0,
-            "footerZoneMm": 25.0,
-        }))
+        let result = detect(&DetectionArgs {
+            input_path: path.to_string_lossy().to_string(),
+            max_pages: 35,
+            header_zone_mm: Some(25.0),
+            footer_zone_mm: Some(25.0),
+            header_zone_ratio: default_header_zone_ratio(),
+            footer_zone_ratio: default_footer_zone_ratio(),
+            scan_artifacts: true,
+        })
         .unwrap();
         eprintln!(
             "=== Header Candidates ({} total) ===",
@@ -2881,12 +2880,15 @@ mod tests {
                 eprintln!("skipping: {} not found", path.display());
                 continue;
             }
-            let result = detect(&serde_json::json!({
-                "inputPath": path,
-                "maxPages": 45,
-                "headerZoneMm": 25.0,
-                "footerZoneMm": 25.0,
-            }))
+            let result = detect(&DetectionArgs {
+                input_path: path.to_string_lossy().to_string(),
+                max_pages: 45,
+                header_zone_mm: Some(25.0),
+                footer_zone_mm: Some(25.0),
+                header_zone_ratio: default_header_zone_ratio(),
+                footer_zone_ratio: default_footer_zone_ratio(),
+                scan_artifacts: true,
+            })
             .unwrap();
             let label = result
                 .header_candidates
@@ -2933,12 +2935,15 @@ mod tests {
 
         for path in paths {
             let started = std::time::Instant::now();
-            let result = detect(&serde_json::json!({
-                "inputPath": path,
-                "maxPages": 40,
-                "headerZoneMm": 25.0,
-                "footerZoneMm": 25.0,
-            }))
+            let result = detect(&DetectionArgs {
+                input_path: path.to_string_lossy().to_string(),
+                max_pages: 40,
+                header_zone_mm: Some(25.0),
+                footer_zone_mm: Some(25.0),
+                header_zone_ratio: default_header_zone_ratio(),
+                footer_zone_ratio: default_footer_zone_ratio(),
+                scan_artifacts: true,
+            })
             .unwrap_or_else(|error| panic!("{}: {error:#}", path.display()));
             for candidate in result
                 .header_candidates
@@ -2978,4 +2983,3 @@ mod tests {
         }
     }
 }
-

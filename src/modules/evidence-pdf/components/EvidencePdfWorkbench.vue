@@ -2327,7 +2327,9 @@ async function applySplitHeaderFooterReplacement() {
     const failedCount = result.data.failed?.length || 0
     const successCount = result.data.results?.length || 0
     const warningCount = (result.data.results || []).filter((item) => item.warnings?.length).length
-    if (failedCount) {
+    if (result.data.cancelled) {
+      ElMessage.warning(`处理已取消，已完成 ${successCount} 个 PDF；未处理文件保持原样`)
+    } else if (failedCount) {
       ElMessage.warning(`已替换 ${successCount} 个，失败 ${failedCount} 个`)
     } else if (warningCount) {
       ElMessage.warning(`已替换 ${successCount} 个 PDF，其中 ${warningCount} 个有处理提示`)
@@ -2440,6 +2442,16 @@ async function applyHeaderFooter() {
     )
     // 收集所有有 warning 的文件的具体提示
     const warningDetails = formatProcessingWarningSummary(result.data.results || [])
+
+    if (result.data.cancelled) {
+      ElNotification({
+        title: '处理已取消',
+        message: `已完成 ${successCount} 个 PDF；未处理文件保持原样`,
+        type: 'warning',
+        duration: 0,
+      })
+      return
+    }
 
     if (merge?.status === 'done') {
       const cleanupText =
@@ -2612,7 +2624,9 @@ async function finishQuickCleanupPipeline() {
 
     const successCount = result.data.results?.length || 0
     const failedCount = result.data.failed?.length || 0
-    if (failedCount) {
+    if (result.data.cancelled) {
+      ElMessage.warning(`删除已取消，已完成 ${successCount} 个 PDF；未处理文件保持原样`)
+    } else if (failedCount) {
       ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个。输出目录：${outputDir}`)
     } else {
       ElMessage.success(`已完成 ${successCount} 个 PDF，输出目录：${outputDir}`)
@@ -2874,7 +2888,9 @@ async function executeImmediateDelete() {
 
     const successCount = result.data.results?.length || 0
     const failedCount = result.data.failed?.length || 0
-    if (failedCount) {
+    if (result.data.cancelled) {
+      ElMessage.warning(`删除已取消，已完成 ${successCount} 个 PDF；未处理文件保持原样`)
+    } else if (failedCount) {
       ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个。输出目录：${outputDir}`)
     } else {
       ElMessage.success(`已完成 ${successCount} 个 PDF，输出目录：${outputDir}`)

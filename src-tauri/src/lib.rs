@@ -57,19 +57,7 @@ impl SubprocessRegistry {
             }
         };
         if let Some(pid) = pid {
-            #[cfg(unix)]
-            {
-                // Try SIGTERM first (graceful), then SIGKILL if needed
-                let _ = std::process::Command::new("kill")
-                    .args(["-TERM", &pid.to_string()])
-                    .output();
-            }
-            #[cfg(windows)]
-            {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/T", "/F"])
-                    .output();
-            }
+            kill_pid(pid);
             return true;
         }
         false
@@ -107,19 +95,29 @@ impl SubprocessRegistry {
             return;
         };
         for pid in pids {
-            #[cfg(unix)]
-            {
-                let _ = std::process::Command::new("kill")
-                    .args(["-TERM", &pid.to_string()])
-                    .output();
-            }
-            #[cfg(windows)]
-            {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/T", "/F"])
-                    .output();
-            }
+            kill_pid(pid);
         }
+    }
+}
+
+/// Kill a process by PID. SIGTERM first (graceful), SIGKILL after 2s if still alive.
+fn kill_pid(pid: u32) {
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output();
+        // Give the process 2 seconds to exit gracefully, then SIGKILL
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .output();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
     }
 }
 

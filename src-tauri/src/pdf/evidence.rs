@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use crate::external::ExternalTool;
@@ -16,26 +15,19 @@ use crate::ConversionState;
 const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm"];
 
 /// Run a child process with interactive timeout.
-/// When the initial timeout expires, emits a Tauri event and waits for user response.
-/// If the user chooses to continue, waits another `timeout` period, repeating up to `max_rounds`.
+/// When the initial timeout expires, calls `on_timeout` to ask the user whether to continue.
+/// If the user chooses to continue, waits another `timeout` period.
 /// Returns Ok(output) on success, Err on cancel or max rounds exceeded.
 fn run_process_with_interactive_timeout(
     cmd: &mut std::process::Command,
     initial_timeout: std::time::Duration,
-    conversion_state: &Arc<ConversionState>,
-    app: &tauri::AppHandle,
+    on_timeout: &dyn Fn() -> bool,
 ) -> Result<std::process::Output> {
-    conversion_state.reset();
-
     let mut child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .context("启动转换进程失败")?;
-
-    conversion_state
-        .pid
-        .store(child.id() as u64, Ordering::SeqCst);
 
     let timeout = initial_timeout;
     let mut wait_started = std::time::Instant::now();
@@ -72,8 +64,7 @@ fn run_process_with_interactive_timeout(
 
         // Check timeout
         if wait_started.elapsed() >= timeout {
-            // Ask user whether to continue
-            let should_continue = conversion_state.wait_for_user_response(app);
+            let should_continue = on_timeout();
             if !should_continue {
                 let _ = child.kill();
                 anyhow::bail!("用户取消了转换");
@@ -109,7 +100,7 @@ impl FileType {
 }
 
 #[derive(Debug, Deserialize)]
-struct OverlayConfig {
+pub struct OverlayConfig {
     header: Option<HeaderConfig>,
     footer: Option<FooterConfig>,
 }
@@ -135,7 +126,7 @@ struct FooterConfig {
 }
 
 #[derive(Debug, Deserialize)]
-struct IdentityConfig {
+pub struct IdentityConfig {
     prefix: Option<String>,
     start_number: Option<u32>,
 }
@@ -263,18 +254,35 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
     }))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildGroupPdfsArgs {
+    pub root: String,
+    #[serde(default)]
+    pub groups: Vec<GroupConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupConfig {
+    pub name: String,
+    pub id: String,
+    #[serde(default)]
+    pub files: Vec<FileConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileConfig {
+    pub path: String,
+    pub file_type: String,
+}
+
 pub fn build_group_pdfs(
-    args: &serde_json::Value,
+    args: &BuildGroupPdfsArgs,
     conversion_state: &Arc<ConversionState>,
 ) -> Result<serde_json::Value> {
-    let root = args["root"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("缺少 root 参数"))?;
-    let groups = args["groups"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("缺少 groups 参数"))?;
-
-    let evidence_dir = Path::new(root).join("_evidence_output");
+    let evidence_dir = Path::new(&args.root).join("_evidence_output");
     fs::create_dir_all(&evidence_dir)?;
 
     let qpdf_bin = crate::external::QpdfTool.binary_path()?;
@@ -282,28 +290,17 @@ pub fn build_group_pdfs(
     let mut results = Vec::new();
     let mut failed_conversions = Vec::new();
 
-    for group in groups {
-        let group_name = group["name"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("分组缺少 name"))?;
-        let group_id = group["id"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("分组缺少 id"))?;
-        let files = group["files"]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("分组缺少 files"))?;
+    for group in &args.groups {
+        let group_name = &group.name;
+        let group_id = &group.id;
 
         let mut pdf_paths: Vec<String> = Vec::new();
 
-        for file in files {
-            let file_path = file["path"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("文件缺少 path"))?;
-            let file_type = file["fileType"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("文件缺少 fileType"))?;
+        for file in &group.files {
+            let file_path = &file.path;
+            let file_type = &file.file_type;
 
-            match file_type {
+            match file_type.as_str() {
                 "pdf" => {
                     pdf_paths.push(file_path.to_string());
                 }
@@ -344,7 +341,7 @@ pub fn build_group_pdfs(
             "pageCount": page_count,
             "conversionFailures": failed_conversions
                 .iter()
-                .filter(|item| item["groupId"].as_str() == Some(group_id))
+                .filter(|item| item["groupId"].as_str() == Some(group_id.as_str()))
                 .cloned()
                 .collect::<Vec<_>>(),
         }));
@@ -357,56 +354,47 @@ pub fn build_group_pdfs(
     }))
 }
 
-pub fn merge_all(args: &serde_json::Value) -> Result<String> {
-    let evidence_dir = args["evidenceDir"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("缺少 evidenceDir 参数"))?;
-    let group_pdfs = args["groupPdfs"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("缺少 groupPdfs 参数"))?;
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeAllArgs {
+    pub evidence_dir: String,
+    pub group_pdfs: Vec<String>,
+    #[serde(default)]
+    pub output_path: Option<String>,
+    #[serde(default)]
+    pub identity: Option<IdentityConfig>,
+    #[serde(default)]
+    pub overlay: Option<OverlayConfig>,
+}
 
-    if group_pdfs.is_empty() {
+pub fn merge_all(args: &MergeAllArgs) -> Result<String> {
+    if args.group_pdfs.is_empty() {
         anyhow::bail!("没有可合并的分组 PDF");
     }
 
-    let output_path_str = args["outputPath"]
-        .as_str()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            Path::new(evidence_dir)
-                .join(format!("evidence_merged_{}.pdf", ts))
-                .display()
-                .to_string()
-        });
-
-    let identity: Option<IdentityConfig> = args
-        .get("identity")
-        .and_then(|v| serde_json::from_value(v.clone()).ok());
-
-    let overlay_cfg: Option<OverlayConfig> = args
-        .get("overlay")
-        .and_then(|v| serde_json::from_value(v.clone()).ok());
+    let output_path_str = args.output_path.clone().unwrap_or_else(|| {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        Path::new(&args.evidence_dir)
+            .join(format!("evidence_merged_{}.pdf", ts))
+            .display()
+            .to_string()
+    });
 
     let qpdf_bin = crate::external::QpdfTool.binary_path()?;
 
-    let inputs: Vec<String> = group_pdfs
-        .iter()
-        .map(|v| v.as_str().unwrap_or("").to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let inputs: Vec<String> = args.group_pdfs.clone();
 
-    let renamed_paths = if let Some(ref ident) = identity {
-        apply_identity_rename(&inputs, evidence_dir, ident)?
+    let renamed_paths = if let Some(ref ident) = args.identity {
+        apply_identity_rename(&inputs, &args.evidence_dir, ident)?
     } else {
         inputs
     };
 
-    let overlaid_paths = if let Some(ref cfg) = overlay_cfg {
-        apply_overlay_batch(&renamed_paths, evidence_dir, cfg)?
+    let overlaid_paths = if let Some(ref cfg) = args.overlay {
+        apply_overlay_batch(&renamed_paths, &args.evidence_dir, cfg)?
     } else {
         renamed_paths
     };
@@ -518,13 +506,11 @@ fn convert_doc_to_pdf_with_word(
     ]);
 
     let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
-    let output_result = run_process_with_interactive_timeout(
-        &mut cmd,
-        std::time::Duration::from_secs(60),
-        conversion_state,
-        app,
-    )
-    .context("Microsoft Word 转换失败")?;
+    let output_result =
+        run_process_with_interactive_timeout(&mut cmd, std::time::Duration::from_secs(60), &|| {
+            conversion_state.wait_for_user_response(app)
+        })
+        .context("Microsoft Word 转换失败")?;
 
     if !output_result.status.success() || !output.exists() {
         anyhow::bail!(
@@ -581,13 +567,11 @@ fn convert_doc_to_pdf_with_wps(
     ]);
 
     let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
-    let output_result = run_process_with_interactive_timeout(
-        &mut cmd,
-        std::time::Duration::from_secs(60),
-        conversion_state,
-        app,
-    )
-    .context("WPS Writer 转换失败")?;
+    let output_result =
+        run_process_with_interactive_timeout(&mut cmd, std::time::Duration::from_secs(60), &|| {
+            conversion_state.wait_for_user_response(app)
+        })
+        .context("WPS Writer 转换失败")?;
 
     if !output_result.status.success() || !output.exists() {
         anyhow::bail!(
@@ -645,8 +629,7 @@ end run
     let result = run_process_with_interactive_timeout(
         &mut command,
         std::time::Duration::from_secs(60),
-        conversion_state,
-        app,
+        &|| conversion_state.wait_for_user_response(app),
     )
     .context("启动 Microsoft Word 转换失败")?;
 
@@ -686,8 +669,7 @@ fn convert_doc_to_pdf_with_libreoffice(
     let result = run_process_with_interactive_timeout(
         &mut command,
         std::time::Duration::from_secs(60),
-        conversion_state,
-        app,
+        &|| conversion_state.wait_for_user_response(app),
     )?;
 
     if !result.status.success() {
@@ -876,21 +858,31 @@ fn apply_overlay_batch(
         }
     }
 
-    let args = serde_json::json!({ "items": jobs });
-    let result = header_footer::batch_overlay(&args)?;
+    let jobs: Vec<header_footer::HeaderFooterJob> = jobs
+        .into_iter()
+        .map(serde_json::from_value)
+        .collect::<Result<_, _>>()
+        .context("构建旧版证据页眉页脚任务失败")?;
+    let result = header_footer::batch_overlay(&jobs)?;
 
-    let results = result.get("results").and_then(|v| v.as_array());
-    let mut output_paths = Vec::new();
-    if let Some(results) = results {
-        for r in results {
-            if let Some(path) = r.get("outputPath").and_then(|v| v.as_str()) {
-                output_paths.push(path.to_string());
-            }
-        }
+    if !result.failed.is_empty() {
+        let details = result
+            .failed
+            .iter()
+            .map(|failure| format!("{}: {}", failure.path, failure.message))
+            .collect::<Vec<_>>()
+            .join("；");
+        anyhow::bail!("旧版证据页眉页脚处理失败: {details}");
     }
 
-    if output_paths.is_empty() {
-        output_paths = inputs.to_vec();
+    let output_paths: Vec<String> = result
+        .results
+        .iter()
+        .map(|r| r.output_path.clone())
+        .collect();
+
+    if output_paths.is_empty() && !inputs.is_empty() {
+        anyhow::bail!("旧版证据页眉页脚处理未生成任何输出文件");
     }
 
     Ok(output_paths)

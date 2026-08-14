@@ -9,7 +9,7 @@ use std::collections::HashMap;
 pub struct BuildEvidenceGroupPdfsArgs {
     root: String,
     #[serde(default)]
-    groups: Vec<serde_json::Value>,
+    groups: Vec<crate::pdf::evidence::GroupConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -44,17 +44,17 @@ pub struct PreviewOverlayArgs {
 #[serde(rename_all = "camelCase")]
 pub struct ApplyEvidencePdfRulesArgs {
     #[serde(default)]
-    items: Option<Vec<serde_json::Value>>,
+    pub items: Option<Vec<crate::pdf::header_footer::HeaderFooterJob>>,
     #[serde(default)]
-    jobs: Option<Vec<serde_json::Value>>,
+    pub jobs: Option<Vec<crate::pdf::header_footer::HeaderFooterJob>>,
     #[serde(default)]
-    merge: Option<serde_json::Value>,
+    pub merge: Option<serde_json::Value>,
     #[serde(default)]
-    session: Option<serde_json::Value>,
+    pub session: Option<serde_json::Value>,
     #[serde(default)]
-    annotation_rule: Option<serde_json::Value>,
+    pub annotation_rule: Option<serde_json::Value>,
     #[serde(flatten)]
-    extra: HashMap<String, serde_json::Value>,
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -196,7 +196,6 @@ pub async fn optimize_pdf_lossless(
 pub async fn split_merged_evidence_pdf(
     args: crate::pdf::split::SplitMergedArgs,
 ) -> Result<crate::pdf::split::SplitMergedResult, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::split::split_merged(&args)).await
 }
 
@@ -211,21 +210,29 @@ pub async fn build_evidence_group_pdfs(
     conversion_state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
 ) -> Result<serde_json::Value, String> {
     let state = (*conversion_state).clone();
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
-    run_blocking(move || crate::pdf::evidence::build_group_pdfs(&args, &state)).await
+    let build_args = crate::pdf::evidence::BuildGroupPdfsArgs {
+        root: args.root,
+        groups: args.groups,
+    };
+    run_blocking(move || crate::pdf::evidence::build_group_pdfs(&build_args, &state)).await
 }
 
 #[tauri::command]
 pub async fn merge_evidence_pdfs(args: MergeEvidencePdfsArgs) -> Result<String, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
-    run_blocking(move || crate::pdf::evidence::merge_all(&args)).await
+    let merge_args = crate::pdf::evidence::MergeAllArgs {
+        evidence_dir: args.evidence_dir,
+        group_pdfs: args.group_pdfs,
+        output_path: None,
+        identity: None,
+        overlay: None,
+    };
+    run_blocking(move || crate::pdf::evidence::merge_all(&merge_args)).await
 }
 
 #[tauri::command]
 pub async fn overlay_pdf_text(
     args: crate::pdf::header_footer::HeaderFooterJob,
-) -> Result<serde_json::Value, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
+) -> Result<crate::pdf::header_footer::HeaderFooterResult, String> {
     run_blocking(move || crate::pdf::header_footer::overlay_text(&args)).await
 }
 
@@ -233,15 +240,20 @@ pub async fn overlay_pdf_text(
 pub async fn batch_overlay_pdf_text(
     manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     args: BatchOverlayArgs,
-) -> Result<serde_json::Value, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
+) -> Result<crate::pdf::header_footer::BatchHeaderFooterResult, String> {
     let progress_manager = manager.inner().clone();
     run_managed(&manager, "batch_overlay_pdf_text", None, move |token| {
-        crate::pdf::header_footer::batch_overlay_cancellable(&args, &token, &|index, total, input| {
-            let name = input.rsplit(['/', '\\']).next().unwrap_or(input);
-            progress_manager
-                .update("batch_overlay_pdf_text:auto", format!("正在处理 {index}/{total}:{name}"));
-        })
+        crate::pdf::header_footer::batch_overlay_cancellable(
+            &args.items,
+            &token,
+            &|index, total, input| {
+                let name = input.rsplit(['/', '\\']).next().unwrap_or(input);
+                progress_manager.update(
+                    "batch_overlay_pdf_text:auto",
+                    format!("正在处理 {index}/{total}:{name}"),
+                );
+            },
+        )
     })
     .await
 }
@@ -250,8 +262,7 @@ pub async fn batch_overlay_pdf_text(
 pub async fn apply_evidence_pdf_rules(
     manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     args: ApplyEvidencePdfRulesArgs,
-) -> Result<serde_json::Value, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
+) -> Result<crate::pdf::evidence_session::ApplyRulesResult, String> {
     let progress_manager = manager.inner().clone();
     run_managed(&manager, "apply_evidence_pdf_rules", None, move |token| {
         crate::pdf::evidence_session::apply_rules_cancellable(&args, &token, &|label| {
@@ -265,15 +276,26 @@ pub async fn apply_evidence_pdf_rules(
 pub async fn preview_pdf_header_footer(
     args: PreviewOverlayArgs,
 ) -> Result<crate::pdf::preview::PreviewResult, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
-    run_blocking(move || crate::pdf::header_footer::preview_overlay(&args)).await
+    let annotation_rule: Option<crate::pdf::header_footer::PreviewAnnotationRule> = args
+        .annotation_rule
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    run_blocking(move || {
+        crate::pdf::header_footer::preview_overlay(
+            &args.job,
+            args.page,
+            args.dpi,
+            annotation_rule.as_ref(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn detect_pdf_header_footer(
     args: crate::pdf::detection::DetectionArgs,
 ) -> Result<crate::pdf::detection::DetectionResult, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::detection::detect(&args)).await
 }
 
@@ -281,7 +303,6 @@ pub async fn detect_pdf_header_footer(
 pub async fn inspect_merged_evidence_pdf(
     args: crate::pdf::detection::SplitSuggestionArgs,
 ) -> Result<crate::pdf::detection::SplitSuggestionResult, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::detection::suggest_split_ranges(&args)).await
 }
 
@@ -289,7 +310,6 @@ pub async fn inspect_merged_evidence_pdf(
 pub async fn delete_pdf_annotations(
     args: crate::pdf::annotations::DeleteAnnotationsArgs,
 ) -> Result<crate::pdf::annotations::DeleteAnnotationsResult, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::annotations::delete_annotations(&args)).await
 }
 
@@ -297,7 +317,6 @@ pub async fn delete_pdf_annotations(
 pub async fn delete_pdf_header_footer_artifacts(
     args: crate::pdf::artifacts::DeleteHeaderFooterArtifactsArgs,
 ) -> Result<crate::pdf::artifacts::DeleteHeaderFooterArtifactsResult, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::artifacts::delete_header_footer_artifacts(&args)).await
 }
 
@@ -305,7 +324,6 @@ pub async fn delete_pdf_header_footer_artifacts(
 pub async fn render_pdf_preview(
     args: crate::pdf::preview::PreviewArgs,
 ) -> Result<crate::pdf::preview::PreviewResult, String> {
-    let args = serde_json::to_value(args).map_err(|e| e.to_string())?;
     run_blocking(move || crate::pdf::preview::render_preview(&args)).await
 }
 

@@ -490,10 +490,7 @@ fn find_nested_paragraphs(
 fn sdt_content_children(sdt: XmlNode) -> Vec<XmlNode> {
     if let XmlNode::Element { children, .. } = sdt {
         for child in children {
-            if let XmlNode::Element {
-                name, children, ..
-            } = child
-            {
+            if let XmlNode::Element { name, children, .. } = child {
                 if name == "w:sdtContent" {
                     return children;
                 }
@@ -532,7 +529,9 @@ fn count_target_runs(
     let mut in_field_code = false;
     for child in children {
         let XmlNode::Element {
-            name, children: sub, ..
+            name,
+            children: sub,
+            ..
         } = child
         else {
             continue;
@@ -1032,8 +1031,8 @@ mod tests {
             .iter()
             .map(|(n, d)| (n.as_str(), d.as_slice()))
             .collect();
-        let index = crate::docx_template::scan::scan_package_index_to_document_index(&scan_parts)
-            .unwrap();
+        let index =
+            crate::docx_template::scan::scan_package_index_to_document_index(&scan_parts).unwrap();
         let first = build_template_docx(&parts, &fields, &index).unwrap();
         let first_xml = String::from_utf8(first[0].1.clone()).unwrap();
         assert!(first_xml.contains("<w:sdt>"), "first save wraps sdt");

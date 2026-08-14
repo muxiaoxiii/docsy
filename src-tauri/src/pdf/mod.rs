@@ -1,6 +1,7 @@
 pub mod annotations;
 pub mod anti_ocr;
 pub mod artifacts;
+pub(crate) mod bookmarks;
 pub(crate) mod cmap;
 pub mod compress;
 pub mod content_text;
@@ -10,6 +11,8 @@ pub mod evidence_session;
 mod glyph_names;
 pub mod header_footer;
 pub mod normalize;
+pub(crate) mod overlay_font;
+pub(crate) mod overlay_pdf;
 pub mod page_info;
 pub mod preview;
 pub mod qpdf;

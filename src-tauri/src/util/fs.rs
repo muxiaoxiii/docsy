@@ -62,6 +62,45 @@ pub fn temp_named_path(prefix: &str, extension: &str) -> PathBuf {
     }
 }
 
+/// 在目标文件同目录创建临时路径，供完成写入后原子替换目标文件使用。
+///
+/// 同目录可避免跨卷 `rename` 失败，也不会把未完成内容暴露为目标文件。
+pub fn sibling_temp_path(target: &Path, prefix: &str) -> PathBuf {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    unique_output_path(
+        parent,
+        &format!(".{prefix}-{}-{stamp}", std::process::id()),
+        extension,
+    )
+}
+
+/// 用同目录临时文件安全替换目标文件。
+///
+/// Windows 不能直接 rename 覆盖已有文件，因此先将旧文件改名为备份；若替换失败，
+/// 会尽力恢复旧文件。调用方应确保 `from` 和 `to` 在同一目录。
+pub fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    let backup = sibling_temp_path(to, "docsy-backup");
+    std::fs::rename(to, &backup)?;
+    match std::fs::rename(from, to) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&backup);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = std::fs::rename(&backup, to);
+            Err(error)
+        }
+    }
+}
+
 /// 将文件名主干转为文件系统安全字符串。
 ///
 /// - 去除尾部 `.pdf` 后缀

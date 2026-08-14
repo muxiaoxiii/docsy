@@ -1,32 +1,137 @@
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{annotations, header_footer, qpdf, same_path};
 
-pub fn apply_rules_cancellable(
-    args: &Value,
-    token: &tokio_util::sync::CancellationToken,
-    progress: &dyn Fn(String),
-) -> Result<Value> {
-    apply_rules_inner(args, Some(token), progress)
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/// 最终返回给前端的结构化结果。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyRulesResult {
+    pub session: Option<Value>,
+    pub results: Vec<header_footer::HeaderFooterResult>,
+    pub failed: Vec<header_footer::HeaderFooterFailure>,
+    pub merge: MergeResult,
+    pub summary: ApplyRulesSummary,
+    pub optimize: OptimizeSummary,
+    pub cancelled: bool,
 }
 
-fn apply_rules_inner(
-    args: &Value,
-    token: Option<&tokio_util::sync::CancellationToken>,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyRulesSummary {
+    pub total: usize,
+    pub success: usize,
+    pub failed: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeResult {
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removed_intermediates: Option<usize>,
+}
+
+impl MergeResult {
+    fn disabled() -> Self {
+        Self {
+            enabled: false,
+            status: None,
+            output_path: None,
+            output_mode: None,
+            message: None,
+            removed_intermediates: None,
+        }
+    }
+    fn skipped(message: impl Into<String>) -> Self {
+        Self {
+            enabled: true,
+            status: Some("skipped".into()),
+            output_path: None,
+            output_mode: None,
+            message: Some(message.into()),
+            removed_intermediates: None,
+        }
+    }
+    fn done(output: String, mode: String, removed: usize) -> Self {
+        Self {
+            enabled: true,
+            status: Some("done".into()),
+            output_path: Some(output),
+            output_mode: Some(mode),
+            message: None,
+            removed_intermediates: Some(removed),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeSummary {
+    pub count: u64,
+    pub input_size: u64,
+    pub output_size: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MergeSpec {
+    enabled: bool,
+    output_path: String,
+    output_mode: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnotationRule {
+    #[serde(default, alias = "removeAnnotations", alias = "remove")]
+    pub remove: bool,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Public entry
+// ---------------------------------------------------------------------------
+
+pub fn apply_rules_cancellable(
+    args: &crate::commands::pdf::ApplyEvidencePdfRulesArgs,
+    token: &tokio_util::sync::CancellationToken,
     progress: &dyn Fn(String),
-) -> Result<Value> {
-    if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+) -> Result<ApplyRulesResult> {
+    if token.is_cancelled() {
         anyhow::bail!("操作已取消");
     }
-    let items = extract_job_items(args)?;
-    let annotation_rule = extract_annotation_rule(args);
+
+    // Extract typed data from the args struct
+    let items = extract_job_items_from_args(args)?;
+    let annotation_rule = extract_annotation_rule_from_args(args);
+    let merge = extract_merge_from_args(args);
+    let optimize_output = args
+        .extra
+        .get("optimizeOutput")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let mut temp_paths = Vec::new();
     let mut original_input_by_temp = BTreeMap::new();
-    let mut annotation_failed = Vec::new();
+    let mut annotation_failed: Vec<header_footer::HeaderFooterFailure> = Vec::new();
+
     let prepared_items = prepare_items_for_processing(
         items,
         &annotation_rule,
@@ -35,12 +140,10 @@ fn apply_rules_inner(
         &mut annotation_failed,
         progress,
     );
-    let merge = extract_merge(args);
-    let batch_result = if prepared_items.is_empty() {
-        json!({ "results": [], "failed": [] })
+
+    let batch_result: header_footer::BatchHeaderFooterResult = if prepared_items.is_empty() {
+        header_footer::BatchHeaderFooterResult::empty()
     } else {
-        let batch_args = json!({ "items": prepared_items });
-        // 批注删除后输入是临时文件，进度展示时还原为原始文件名
         let overlay_progress = |index: usize, total: usize, input: &str| {
             let original = original_input_by_temp
                 .get(input)
@@ -51,45 +154,47 @@ fn apply_rules_inner(
                 file_name_of(original)
             ));
         };
-        let batch = if let Some(token) = token {
-            header_footer::batch_overlay_cancellable(&batch_args, token, &overlay_progress)
-        } else {
-            header_footer::batch_overlay(&batch_args)
-        };
+        let batch =
+            header_footer::batch_overlay_cancellable(&prepared_items, token, &overlay_progress);
         match batch {
-            Ok(value) => value,
+            Ok(result) => result,
             Err(err) => {
                 cleanup_temp_paths(temp_paths);
                 return Err(err);
             }
         }
     };
-    let mut results = restore_original_inputs(
-        batch_result
-            .get("results")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
-        &original_input_by_temp,
-    );
-    let mut failed = batch_result
-        .get("failed")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+
+    let mut results = restore_original_inputs(batch_result.results, &original_input_by_temp);
+    let mut failed = batch_result.failed;
     failed.extend(annotation_failed);
-    if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+
+    if batch_result.cancelled || token.is_cancelled() {
         cleanup_temp_paths(temp_paths);
-        anyhow::bail!("操作已取消");
+        return Ok(ApplyRulesResult {
+            session: args.session.clone(),
+            summary: ApplyRulesSummary {
+                total: results.len() + failed.len(),
+                success: results.len(),
+                failed: failed.len(),
+            },
+            results,
+            failed,
+            merge: MergeResult::skipped("操作已取消，未合并未处理的 PDF"),
+            optimize: OptimizeSummary::default(),
+            cancelled: true,
+        });
     }
-    let mut optimize_summary = Value::Null;
-    if extract_optimize_output(args) {
-        optimize_summary = optimize_result_outputs(&mut results, token, progress);
-        if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+
+    let mut optimize_summary = OptimizeSummary::default();
+    if optimize_output {
+        optimize_summary = optimize_result_outputs(&mut results, Some(token), progress);
+        if token.is_cancelled() {
             cleanup_temp_paths(temp_paths);
             anyhow::bail!("操作已取消");
         }
     }
+
     if merge.enabled {
         progress("正在合并 PDF 并写入书签".to_string());
     }
@@ -102,134 +207,77 @@ fn apply_rules_inner(
     };
     cleanup_temp_paths(temp_paths);
 
-    Ok(json!({
-        "session": args.get("session").cloned().unwrap_or(Value::Null),
-        "results": results,
-        "failed": failed,
-        "merge": merge_result,
-        "summary": {
-            "total": results.len() + failed.len(),
-            "success": results.len(),
-            "failed": failed.len()
+    let session = args.session.clone();
+
+    Ok(ApplyRulesResult {
+        session,
+        summary: ApplyRulesSummary {
+            total: results.len() + failed.len(),
+            success: results.len(),
+            failed: failed.len(),
         },
-        "optimize": optimize_summary
-    }))
-}
-
-/// 读取导出优化开关：前端在 payload 根级传 `optimizeOutput: true`。
-fn extract_optimize_output(args: &Value) -> bool {
-    args.get("optimizeOutput")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
-/// 对每个成功结果的输出文件就地无损优化（丢弃页树不可达对象）。
-/// 优化失败不阻断导出，只在该结果的 warnings 里追加提示。
-/// 返回 { count, inputSize, outputSize } 汇总，供前端展示体积收益。
-fn optimize_result_outputs(
-    results: &mut [Value],
-    token: Option<&tokio_util::sync::CancellationToken>,
-    progress: &dyn Fn(String),
-) -> Value {
-    let mut count = 0_u64;
-    let mut input_size = 0_u64;
-    let mut output_size = 0_u64;
-    let total = results.len();
-    for (index, item) in results.iter_mut().enumerate() {
-        if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
-            break;
-        }
-        let Some(output_path) = item
-            .get("outputPath")
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
-        else {
-            continue;
-        };
-        progress(format!(
-            "正在优化导出 {}/{total}:{}",
-            index + 1,
-            file_name_of(&output_path)
-        ));
-        match qpdf::optimize_in_place(&output_path) {
-            Ok(result) if result.changed => {
-                count += 1;
-                input_size += result.input_size;
-                output_size += result.output_size;
-                item["optimize"] = json!({
-                    "changed": true,
-                    "inputSize": result.input_size,
-                    "outputSize": result.output_size,
-                });
-            }
-            Ok(_) => {}
-            Err(err) => {
-                let warnings = item
-                    .get("warnings")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                let mut warnings = warnings;
-                warnings.push(json!(format!("体积优化失败，已保留未优化结果: {err}")));
-                item["warnings"] = Value::Array(warnings);
-            }
-        }
-    }
-    json!({
-        "count": count,
-        "inputSize": input_size,
-        "outputSize": output_size,
+        results,
+        failed,
+        merge: merge_result,
+        optimize: optimize_summary,
+        cancelled: false,
     })
 }
 
-#[derive(Debug, Clone, Default)]
-struct MergeSpec {
-    enabled: bool,
-    output_path: String,
-    output_mode: String,
-}
+// ---------------------------------------------------------------------------
+// Extraction helpers (typed from args)
+// ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default)]
-struct AnnotationRule {
-    remove: bool,
-    kinds: Vec<String>,
-}
-
-fn extract_job_items(args: &Value) -> Result<Vec<Value>> {
-    let items = args
-        .get("items")
-        .or_else(|| args.get("jobs"))
-        .and_then(Value::as_array)
-        .cloned()
+fn extract_job_items_from_args(
+    args: &crate::commands::pdf::ApplyEvidencePdfRulesArgs,
+) -> Result<Vec<header_footer::HeaderFooterJob>> {
+    let raw_items = args
+        .items
+        .as_ref()
+        .or(args.jobs.as_ref())
         .context("缺少证据 PDF 处理任务 items")?;
-
-    if items.is_empty() {
+    if raw_items.is_empty() {
         anyhow::bail!("证据 PDF 处理任务为空");
     }
-
-    Ok(items)
+    Ok(raw_items.clone())
 }
 
-fn extract_merge(args: &Value) -> MergeSpec {
-    let Some(merge) = args.get("merge") else {
+fn extract_annotation_rule_from_args(
+    args: &crate::commands::pdf::ApplyEvidencePdfRulesArgs,
+) -> AnnotationRule {
+    // Try session.annotationRule first, then annotationRule
+    let rule_value = args
+        .session
+        .as_ref()
+        .and_then(|s| s.get("annotationRule"))
+        .or(args.annotation_rule.as_ref());
+    let Some(value) = rule_value else {
+        return AnnotationRule::default();
+    };
+    serde_json::from_value(value.clone()).unwrap_or_default()
+}
+
+fn extract_merge_from_args(args: &crate::commands::pdf::ApplyEvidencePdfRulesArgs) -> MergeSpec {
+    let Some(merge_value) = args.merge.as_ref() else {
         return MergeSpec::default();
     };
     MergeSpec {
-        enabled: merge
+        enabled: merge_value
             .get("enabled")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        output_path: merge
+        output_path: merge_value
             .get("outputPath")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-        output_mode: merge
+        output_mode: merge_value
             .get("outputMode")
             .or_else(|| {
-                args.get("session")
-                    .and_then(|session| session.get("outputRule"))
-                    .and_then(|rule| rule.get("outputMode"))
+                args.session
+                    .as_ref()
+                    .and_then(|s| s.get("outputRule"))
+                    .and_then(|r| r.get("outputMode"))
             })
             .and_then(Value::as_str)
             .unwrap_or("files_and_merge")
@@ -237,140 +285,138 @@ fn extract_merge(args: &Value) -> MergeSpec {
     }
 }
 
-fn extract_annotation_rule(args: &Value) -> AnnotationRule {
-    let rule = args
-        .get("session")
-        .and_then(|session| session.get("annotationRule"))
-        .or_else(|| args.get("annotationRule"));
-    let Some(rule) = rule else {
-        return AnnotationRule::default();
-    };
-    AnnotationRule {
-        remove: rule
-            .get("removeAnnotations")
-            .or_else(|| rule.get("remove"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        kinds: rule
-            .get("kinds")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(ToString::to_string)
-                    .collect()
-            })
-            .unwrap_or_default(),
-    }
-}
+// ---------------------------------------------------------------------------
+// Processing pipeline
+// ---------------------------------------------------------------------------
 
 fn prepare_items_for_processing(
-    items: Vec<Value>,
+    items: Vec<header_footer::HeaderFooterJob>,
     rule: &AnnotationRule,
     temp_paths: &mut Vec<PathBuf>,
     original_input_by_temp: &mut BTreeMap<String, String>,
-    failed: &mut Vec<Value>,
+    failed: &mut Vec<header_footer::HeaderFooterFailure>,
     progress: &dyn Fn(String),
-) -> Vec<Value> {
+) -> Vec<header_footer::HeaderFooterJob> {
     if !rule.remove {
         return items;
     }
 
     let total = items.len();
     let mut prepared = Vec::new();
-    for (index, mut item) in items.into_iter().enumerate() {
-        let input = item
-            .get("inputPath")
-            .or_else(|| item.get("input"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        if input.is_empty() {
-            failed.push(json!({
-                "path": "",
-                "message": "缺少批注删除输入路径"
-            }));
+    for (index, mut job) in items.into_iter().enumerate() {
+        if job.input_path.is_empty() {
+            failed.push(header_footer::HeaderFooterFailure {
+                path: String::new(),
+                message: "缺少批注删除输入路径".to_string(),
+            });
             continue;
         }
 
         progress(format!(
             "正在删除批注 {}/{total}:{}",
             index + 1,
-            file_name_of(&input)
+            file_name_of(&job.input_path)
         ));
-        match annotations::delete_annotations_to_temp(&input, &rule.kinds) {
+        match annotations::delete_annotations_to_temp(&job.input_path, &rule.kinds) {
             Ok(temp_path) => {
                 let temp_path_string = temp_path.to_string_lossy().to_string();
-                original_input_by_temp.insert(temp_path_string.clone(), input);
-                item["inputPath"] = Value::String(temp_path_string);
+                original_input_by_temp.insert(temp_path_string.clone(), job.input_path.clone());
+                job.input_path = temp_path_string;
                 temp_paths.push(temp_path);
-                prepared.push(item);
+                prepared.push(job);
             }
-            Err(err) => failed.push(json!({
-                "path": input,
-                "message": format!("删除批注失败: {err}")
-            })),
+            Err(err) => failed.push(header_footer::HeaderFooterFailure {
+                path: job.input_path,
+                message: format!("删除批注失败: {err}"),
+            }),
         }
     }
     prepared
 }
 
 fn restore_original_inputs(
-    results: Vec<Value>,
+    results: Vec<header_footer::HeaderFooterResult>,
     original_input_by_temp: &BTreeMap<String, String>,
-) -> Vec<Value> {
+) -> Vec<header_footer::HeaderFooterResult> {
     results
         .into_iter()
-        .map(|mut item| {
-            let original = item
-                .get("inputPath")
-                .and_then(Value::as_str)
-                .and_then(|input| original_input_by_temp.get(input))
-                .cloned();
-            if let Some(original) = original {
-                item["inputPath"] = Value::String(original);
+        .map(|mut result| {
+            if let Some(original) = original_input_by_temp.get(&result.input_path) {
+                result.input_path = original.clone();
             }
-            item
+            result
         })
         .collect()
 }
 
+fn optimize_result_outputs(
+    results: &mut [header_footer::HeaderFooterResult],
+    token: Option<&tokio_util::sync::CancellationToken>,
+    progress: &dyn Fn(String),
+) -> OptimizeSummary {
+    let mut summary = OptimizeSummary::default();
+    let total = results.len();
+    for (index, result) in results.iter_mut().enumerate() {
+        if token.is_some_and(|t| t.is_cancelled()) {
+            break;
+        }
+        if result.output_path.is_empty() {
+            continue;
+        }
+        progress(format!(
+            "正在优化导出 {}/{total}:{}",
+            index + 1,
+            file_name_of(&result.output_path)
+        ));
+        match qpdf::optimize_in_place(&result.output_path) {
+            Ok(opt) if opt.changed => {
+                summary.count += 1;
+                summary.input_size += opt.input_size;
+                summary.output_size += opt.output_size;
+                result.warnings.push(format!(
+                    "已优化体积: {} → {}",
+                    human_size(opt.input_size),
+                    human_size(opt.output_size)
+                ));
+            }
+            Ok(_) => {}
+            Err(err) => {
+                result
+                    .warnings
+                    .push(format!("体积优化失败，已保留未优化结果: {err}"));
+            }
+        }
+    }
+    summary
+}
+
+// ---------------------------------------------------------------------------
+// Merge
+// ---------------------------------------------------------------------------
+
 fn apply_merge_if_requested(
     merge: &MergeSpec,
-    items: &[Value],
-    results: &[Value],
-    failed: &[Value],
-) -> Result<Value> {
+    items: &[header_footer::HeaderFooterJob],
+    results: &[header_footer::HeaderFooterResult],
+    failed: &[header_footer::HeaderFooterFailure],
+) -> Result<MergeResult> {
     if !merge.enabled {
-        return Ok(json!({ "enabled": false }));
+        return Ok(MergeResult::disabled());
     }
     if !failed.is_empty() {
-        return Ok(json!({
-            "enabled": true,
-            "status": "skipped",
-            "message": "存在处理失败的 PDF，已跳过合并"
-        }));
+        return Ok(MergeResult::skipped("存在处理失败的 PDF，已跳过合并"));
     }
     if merge.output_path.trim().is_empty() {
-        return Ok(json!({
-            "enabled": true,
-            "status": "skipped",
-            "message": "未设置合并输出路径"
-        }));
+        return Ok(MergeResult::skipped("未设置合并输出路径"));
     }
 
     let inputs: Vec<String> = results
         .iter()
-        .filter_map(|item| item.get("outputPath").and_then(Value::as_str))
-        .map(ToString::to_string)
+        .map(|r| r.output_path.clone())
+        .filter(|p| !p.is_empty())
         .collect();
     if inputs.is_empty() {
-        return Ok(json!({
-            "enabled": true,
-            "status": "skipped",
-            "message": "没有可合并的处理结果"
-        }));
+        return Ok(MergeResult::skipped("没有可合并的处理结果"));
     }
 
     if let Some(parent) = Path::new(&merge.output_path).parent() {
@@ -380,82 +426,72 @@ fn apply_merge_if_requested(
     }
     let output = qpdf::merge(&inputs, &merge.output_path)?;
 
-    // Apply bookmarks to the merged PDF: collect all bookmarks from items,
-    // adjusting page_index to be global in the merged PDF.
     let merge_bookmarks = collect_merge_bookmarks(items, results);
     let remove_existing = items
         .first()
-        .and_then(|item| item.get("bookmarkRemoveExisting"))
-        .and_then(Value::as_bool)
+        .map(|j| j.bookmark_remove_existing)
         .unwrap_or(false);
     if !merge_bookmarks.is_empty() || remove_existing {
         header_footer::apply_bookmarks(Path::new(&output), &merge_bookmarks, remove_existing)
             .context("合并 PDF 写入书签失败")?;
     }
 
-    let removed_intermediates = if merge.output_mode == "merge_only" {
+    let removed = if merge.output_mode == "merge_only" {
         remove_intermediate_outputs(results, &merge.output_path)
     } else {
         0
     };
-    Ok(json!({
-        "enabled": true,
-        "status": "done",
-        "outputPath": output,
-        "outputMode": merge.output_mode,
-        "removedIntermediates": removed_intermediates
-    }))
+
+    Ok(MergeResult::done(
+        output,
+        merge.output_mode.clone(),
+        removed,
+    ))
 }
 
-/// Collect all bookmarks from items, adjusting page_index to global position
-/// in the merged PDF. Each file's bookmarks get an offset equal to the sum of
-/// page counts of all preceding files.
 fn collect_merge_bookmarks(
-    items: &[Value],
-    results: &[Value],
+    items: &[header_footer::HeaderFooterJob],
+    results: &[header_footer::HeaderFooterResult],
 ) -> Vec<header_footer::BookmarkConfig> {
     let mut bookmarks = Vec::new();
     let mut page_offset: u32 = 0;
 
     for (item, result) in items.iter().zip(results.iter()) {
-        let pages = result.get("pages").and_then(Value::as_u64).unwrap_or(0) as u32;
-
-        // Collect bookmarks from the bookmarks array
-        if let Some(bms) = item.get("bookmarks").and_then(Value::as_array) {
-            for bm_value in bms {
-                if let Ok(bm) =
-                    serde_json::from_value::<header_footer::BookmarkConfig>(bm_value.clone())
-                {
-                    if bm.enabled && !bm.label.is_empty() {
-                        let mut adjusted = bm;
-                        adjusted.page_index += page_offset;
-                        bookmarks.push(adjusted);
-                    }
-                }
+        for bm in &item.bookmarks {
+            if bm.enabled && !bm.label.is_empty() {
+                let mut adjusted = bm.clone();
+                adjusted.page_index += page_offset;
+                bookmarks.push(adjusted);
             }
         }
-
-        page_offset += pages;
+        page_offset += result.pages;
     }
 
     bookmarks
 }
 
-fn remove_intermediate_outputs(results: &[Value], merge_output_path: &str) -> usize {
+fn remove_intermediate_outputs(
+    results: &[header_footer::HeaderFooterResult],
+    merge_output_path: &str,
+) -> usize {
     let mut removed = 0_usize;
-    for item in results {
-        let Some(output_path) = item.get("outputPath").and_then(Value::as_str) else {
-            continue;
-        };
-        if same_path(Path::new(output_path), Path::new(merge_output_path)) {
+    for result in results {
+        if result.output_path.is_empty() {
             continue;
         }
-        if fs::remove_file(output_path).is_ok() {
+        if same_path(Path::new(&result.output_path), Path::new(merge_output_path)) {
+            continue;
+        }
+        if fs::remove_file(&result.output_path).is_ok() {
             removed += 1;
         }
     }
     removed
 }
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
 fn cleanup_temp_paths(paths: Vec<PathBuf>) {
     for path in paths {
@@ -463,9 +499,18 @@ fn cleanup_temp_paths(paths: Vec<PathBuf>) {
     }
 }
 
-/// 取路径末段作为进度展示的文件名，兼容 Windows/Unix 分隔符。
 fn file_name_of(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+fn human_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
 }
 
 #[cfg(test)]
@@ -481,27 +526,23 @@ mod tests {
     }
 
     #[test]
-    fn extracts_optimize_output_flag() {
-        assert!(extract_optimize_output(&json!({ "optimizeOutput": true })));
-        assert!(!extract_optimize_output(&json!({ "optimizeOutput": false })));
-        assert!(!extract_optimize_output(&json!({})));
-    }
-
-    #[test]
-    fn extracts_items_from_business_payload() {
-        let items = extract_job_items(&json!({
-            "session": { "totalPages": 3 },
-            "items": [{ "inputPath": "/tmp/a.pdf" }]
+    fn annotation_rule_from_json() {
+        let rule: AnnotationRule = serde_json::from_value(json!({
+            "removeAnnotations": true,
+            "kinds": ["Highlight", "Underline"]
         }))
         .unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["inputPath"], "/tmp/a.pdf");
+        assert!(rule.remove);
+        assert_eq!(rule.kinds, vec!["Highlight", "Underline"]);
     }
 
     #[test]
-    fn rejects_empty_business_payload() {
-        let err = extract_job_items(&json!({ "items": [] })).unwrap_err();
-        assert!(err.to_string().contains("任务为空"));
+    fn merge_result_serializes_correctly() {
+        let r = MergeResult::skipped("测试");
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["enabled"], true);
+        assert_eq!(v["status"], "skipped");
+        assert_eq!(v["message"], "测试");
     }
 
     #[test]
@@ -511,35 +552,52 @@ mod tests {
             output_path: "/tmp/final.pdf".to_string(),
             output_mode: "files_and_merge".to_string(),
         };
-        let value =
-            apply_merge_if_requested(&merge, &[], &[], &[json!({ "path": "/tmp/a.pdf" })]).unwrap();
-        assert_eq!(value["status"], "skipped");
+        let failed = vec![header_footer::HeaderFooterFailure {
+            path: "/tmp/a.pdf".to_string(),
+            message: "test".to_string(),
+        }];
+        let result = apply_merge_if_requested(&merge, &[], &[], &failed).unwrap();
+        assert_eq!(result.enabled, true);
+        assert_eq!(result.status.as_deref(), Some("skipped"));
     }
 
     #[test]
-    fn extracts_annotation_rule_from_session() {
-        let rule = extract_annotation_rule(&json!({
-            "session": {
+    fn extract_annotation_rule_from_session_field() {
+        let args = crate::commands::pdf::ApplyEvidencePdfRulesArgs {
+            items: None,
+            jobs: None,
+            merge: None,
+            session: Some(json!({
                 "annotationRule": {
-                    "removeAnnotations": true,
-                    "kinds": ["Highlight", "Underline"]
+                    "remove": true,
+                    "kinds": ["Stamp"]
                 }
-            }
-        }));
+            })),
+            annotation_rule: None,
+            extra: std::collections::HashMap::new(),
+        };
+        let rule = extract_annotation_rule_from_args(&args);
         assert!(rule.remove);
-        assert_eq!(rule.kinds, vec!["Highlight", "Underline"]);
+        assert_eq!(rule.kinds, vec!["Stamp"]);
     }
 
     #[test]
-    fn extracts_merge_only_output_mode() {
-        let merge = extract_merge(&json!({
-            "merge": {
+    fn extract_merge_from_args_basic() {
+        let args = crate::commands::pdf::ApplyEvidencePdfRulesArgs {
+            items: None,
+            jobs: None,
+            merge: Some(json!({
                 "enabled": true,
-                "outputPath": "/tmp/final.pdf",
+                "outputPath": "/tmp/out.pdf",
                 "outputMode": "merge_only"
-            }
-        }));
+            })),
+            session: None,
+            annotation_rule: None,
+            extra: std::collections::HashMap::new(),
+        };
+        let merge = extract_merge_from_args(&args);
         assert!(merge.enabled);
+        assert_eq!(merge.output_path, "/tmp/out.pdf");
         assert_eq!(merge.output_mode, "merge_only");
     }
 }

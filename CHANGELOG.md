@@ -2,6 +2,28 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.9.7-beta21] - 2026-08-14
+
+### 变更
+- **Rust 后端架构重构**：消除 `commands/pdf.rs` 全部 12 处 `serde_json::to_value` 双重序列化，业务函数直接接受类型化参数，恢复编译期类型安全。
+- **header_footer.rs 上帝模块拆分**：3004 行拆为 4 个职责清晰的模块——`header_footer.rs`（主编排 + 数据类型）、`bookmarks.rs`（书签 CRUD）、`overlay_font.rs`（字体发现/子集/嵌入/文本算子/度量）、`overlay_pdf.rs`（overlay PDF 构建 + 区域/碰撞检测），主文件减少 55%。
+- **evidence_session 全面类型化**：新增 `ApplyRulesResult`、`MergeResult`、`OptimizeSummary` 等结构体，内部数据流从 `serde_json::Value` 全部改为类型化结构体，`apply_rules_cancellable` 返回结构化结果。
+- **DocsyError 增强**：新增 `Io`、`ExternalTool`、`PdfParse`、`Cancelled` 错误变体；`From<anyhow::Error>` 智能分类（检测"不存在"/"已取消"/"关键词）；新增 `From<std::io::Error>` 实现。
+- **取消机制改进**：`SubprocessRegistry::cancel` 加 SIGKILL 兜底（SIGTERM → 2s → SIGKILL）；`evidence.rs` 解耦 `AppHandle`，`run_process_with_interactive_timeout` 改为接受回调闭包。
+- **evidence 模块**：新增 `MergeAllArgs`、`BuildGroupPdfsArgs`、`GroupConfig`、`FileConfig` 类型化结构体，`merge_all` 和 `build_group_pdfs` 不再接受 JSON。
+- **detection 模块**：`detect` 和 `suggest_split_ranges` 改为接受 `DetectionArgs`/`SplitSuggestionArgs`，内部调用也改为类型化。
+- **preview 模块**：`render_preview` 改为接受 `PreviewArgs`，字段改为 pub。
+- **split 模块**：`split_merged` 改为接受 `SplitMergedArgs`。
+- **annotations 模块**：delete_annotations 改为接受 `DeleteAnnotationsArgs`。
+- **artifacts 模块**：`delete_header_footer_artifacts` 改为接受 `DeleteHeaderFooterArtifactsArgs`。
+- **header_footer 类型公开**：`HeaderFooterResult`、`BatchHeaderFooterResult`、`HeaderFooterFailure`、`PreviewAnnotationRule`、`HeaderFooterJob` 部分字段改为 pub。
+
+### 修复
+- **无效任务静默跳过**：`ApplyEvidencePdfRulesArgs` 的 `items`/`jobs` 改为 `Vec<HeaderFooterJob>`，反序列化在 Tauri 边界完成，失败直接报错而非静默跳过。
+- **书签写入安全**：`apply_bookmarks` 改为临时文件写入后原子替换，失败时原 PDF 保持不变。
+- **取消时杀子进程**：取消页眉页脚批处理会终止当前 `qpdf` 子进程，保留已完成文件。
+- **Clippy 严格模式**：修复全部 Clippy 警告，`cargo clippy --lib -- -D warnings` 通过。
+
 ## [0.9.7-beta20] - 2026-08-12
 
 ### 修复

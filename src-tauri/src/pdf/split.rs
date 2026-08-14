@@ -65,9 +65,7 @@ pub struct SplitFailure {
     message: String,
 }
 
-pub fn split_merged(args: &serde_json::Value) -> Result<SplitMergedResult> {
-    let args: SplitMergedArgs =
-        serde_json::from_value(args.clone()).context("解析合并 PDF 拆分参数失败")?;
+pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
     if args.items.is_empty() {
         anyhow::bail!("缺少拆分页段");
     }
@@ -81,18 +79,18 @@ pub fn split_merged(args: &serde_json::Value) -> Result<SplitMergedResult> {
     let mut outputs = Vec::new();
     let mut failed = Vec::new();
 
-    for item in args.items {
-        match validate_range(&item, total_pages)
-            .and_then(|_| extract_range(&args.input_path, &args.output_dir, &item, &args.cleanup))
+    for item in &args.items {
+        match validate_range(item, total_pages)
+            .and_then(|_| extract_range(&args.input_path, &args.output_dir, item, &args.cleanup))
         {
             Ok(output_path) => outputs.push(SplitOutput {
-                name: item.name,
+                name: item.name.clone(),
                 page_start: item.page_start,
                 page_end: item.page_end,
                 output_path,
             }),
             Err(err) => failed.push(SplitFailure {
-                name: item.name,
+                name: item.name.clone(),
                 page_start: item.page_start,
                 page_end: item.page_end,
                 message: err.to_string(),
@@ -180,16 +178,19 @@ fn extract_range(
         anyhow::bail!("qpdf 页段拆分失败");
     }
     if cleanup.header_enabled || cleanup.footer_enabled {
-        let cleanup_result = super::header_footer::overlay_text(&serde_json::json!({
-            "inputPath": qpdf_output_path.to_string_lossy(),
-            "outputPath": output_path.to_string_lossy(),
-            "cleanup": {
-                "headerEnabled": cleanup.header_enabled,
-                "footerEnabled": cleanup.footer_enabled,
-                "headerHeightMm": cleanup.header_height_mm,
-                "footerHeightMm": cleanup.footer_height_mm
-            }
-        }));
+        let job: super::header_footer::HeaderFooterJob =
+            serde_json::from_value(serde_json::json!({
+                "inputPath": qpdf_output_path.to_string_lossy(),
+                "outputPath": output_path.to_string_lossy(),
+                "cleanup": {
+                    "headerEnabled": cleanup.header_enabled,
+                    "footerEnabled": cleanup.footer_enabled,
+                    "headerHeightMm": cleanup.header_height_mm,
+                    "footerHeightMm": cleanup.footer_height_mm
+                }
+            }))
+            .context("构建页眉页脚清理参数失败")?;
+        let cleanup_result = super::header_footer::overlay_text(&job);
         let _ = std::fs::remove_file(&qpdf_output_path);
         cleanup_result?;
     }

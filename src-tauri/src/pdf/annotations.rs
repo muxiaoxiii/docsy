@@ -26,9 +26,7 @@ pub struct DeleteAnnotationsResult {
     pages_touched: usize,
 }
 
-pub fn delete_annotations(args: &serde_json::Value) -> Result<DeleteAnnotationsResult> {
-    let args: DeleteAnnotationsArgs =
-        serde_json::from_value(args.clone()).context("解析批注删除参数失败")?;
+pub fn delete_annotations(args: &DeleteAnnotationsArgs) -> Result<DeleteAnnotationsResult> {
     delete_annotations_file(&args.input_path, &args.output_path, &args.kinds)
 }
 

@@ -1587,7 +1587,8 @@ mod tests {
     }
 
     #[test]
-    fn repeatable_party_suffix_replaces_its_template_text_once() {        let mut field = field("lawyers", "party_list");
+    fn repeatable_party_suffix_replaces_its_template_text_once() {
+        let mut field = field("lawyers", "party_list");
         field.mark_refs = vec![
             super::super::TemplateMarkRef {
                 tag: "lawyers.ref.1".to_string(),

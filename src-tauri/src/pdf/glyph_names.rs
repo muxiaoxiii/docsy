@@ -4577,8 +4577,7 @@ pub fn glyph_to_char(name: &str) -> Option<char> {
     if let Some(rest) = name.strip_prefix("uni") {
         // AGL: `uni` 后接多个 4 位码点是连字名（如 uni4E2D4E2E），映射到一个
         // 字符串而非单个 char。保守返回 None，让调用方走不可解码兜底。
-        if rest.len() > 4 && rest.len() % 4 == 0 && rest.bytes().all(|b| b.is_ascii_hexdigit())
-        {
+        if rest.len() > 4 && rest.len() % 4 == 0 && rest.bytes().all(|b| b.is_ascii_hexdigit()) {
             return None;
         }
         if let Some(hex) = rest.get(..4) {

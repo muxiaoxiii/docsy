@@ -982,13 +982,8 @@ mod tests {
         )
         .unwrap();
         let font_cmaps = BTreeMap::from([(String::from("FCID"), cmap)]);
-        let (filtered, result) = filter_page_operations_with_cmaps(
-            &operations,
-            &plan,
-            1,
-            &font_cmaps,
-            &IDENTITY_MATRIX,
-        );
+        let (filtered, result) =
+            filter_page_operations_with_cmaps(&operations, &plan, 1, &font_cmaps, &IDENTITY_MATRIX);
         assert_eq!(result.removed_header, 1);
         assert!(filtered.iter().all(|operation| operation.operator != "Tj"));
     }
@@ -1198,9 +1193,7 @@ mod tests {
                 .as_stream()
                 .ok()
                 .and_then(|stream| stream.get_plain_content().ok())
-                .map(|content| {
-                    !String::from_utf8_lossy(&content).contains("Nested Form Header")
-                })
+                .map(|content| !String::from_utf8_lossy(&content).contains("Nested Form Header"))
                 .unwrap_or(true)
         }));
         let _ = std::fs::remove_file(input);
@@ -1264,14 +1257,7 @@ mod tests {
                 Operation::new("q", vec![]),
                 Operation::new(
                     "cm",
-                    vec![
-                        1.into(),
-                        0.into(),
-                        0.into(),
-                        1.into(),
-                        0.into(),
-                        400.into(),
-                    ],
+                    vec![1.into(), 0.into(), 0.into(), 1.into(), 0.into(), 400.into()],
                 ),
                 Operation::new("Do", vec![Object::Name(b"Fx1".to_vec())]),
                 Operation::new("Q", vec![]),
@@ -1499,4 +1485,3 @@ mod tests {
         doc.save(path).unwrap();
     }
 }
-

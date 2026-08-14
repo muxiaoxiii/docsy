@@ -12,11 +12,11 @@ use super::temp_named_path;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewArgs {
-    input_path: String,
+    pub input_path: String,
     #[serde(default = "default_preview_page")]
-    page: u32,
+    pub page: u32,
     #[serde(default = "default_preview_dpi")]
-    dpi: u32,
+    pub dpi: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,8 +39,7 @@ fn default_preview_dpi() -> u32 {
     120
 }
 
-pub fn render_preview(args: &serde_json::Value) -> Result<PreviewResult> {
-    let args: PreviewArgs = serde_json::from_value(args.clone()).context("解析预览参数失败")?;
+pub fn render_preview(args: &PreviewArgs) -> Result<PreviewResult> {
     let input = Path::new(&args.input_path);
     if !input.exists() {
         anyhow::bail!("PDF 不存在: {}", input.display());

@@ -497,7 +497,10 @@ fn decode_legacy_cjk_pdf_string(bytes: &[u8]) -> Option<String> {
             continue;
         }
         let score = legacy_cjk_candidate_score(encoding, value);
-        if best.as_ref().is_none_or(|(best_score, _)| score > *best_score) {
+        if best
+            .as_ref()
+            .is_none_or(|(best_score, _)| score > *best_score)
+        {
             best = Some((score, value.to_string()));
         }
     }
@@ -710,10 +713,8 @@ impl HeaderFooterArtifactEditResult {
 }
 
 pub fn delete_header_footer_artifacts(
-    args: &serde_json::Value,
+    args: &DeleteHeaderFooterArtifactsArgs,
 ) -> Result<DeleteHeaderFooterArtifactsResult> {
-    let args: DeleteHeaderFooterArtifactsArgs =
-        serde_json::from_value(args.clone()).context("解析标准页眉页脚删除参数失败")?;
     delete_header_footer_artifacts_file(
         &args.input_path,
         &args.output_path,

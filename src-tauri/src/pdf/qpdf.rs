@@ -205,7 +205,9 @@ where
 
     // Step 2: qpdf 按页重建 + 结构优化（丢弃不可达对象，收益通常大于单纯重写）
     let output_path = unique_output_path_in_dir(input_path, output_dir, "_compressed");
-    progress(super::compress::CompressProgress::phase("按页重建并整理结构"));
+    progress(super::compress::CompressProgress::phase(
+        "按页重建并整理结构",
+    ));
     rebuild_pages(&temp_path, &output_path)?;
 
     // 清理临时文件
@@ -329,17 +331,7 @@ pub fn optimize_in_place(input: &str) -> Result<OptimizeResult> {
     let input_size = std::fs::metadata(input_path)?.len();
 
     // 临时文件必须与原文件同目录：std::fs::rename 不能跨卷/跨盘移动。
-    // 名称带纳秒时间戳避免同进程并发任务撞名。
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
-    let temp_path = crate::util::fs::unique_output_path(
-        parent,
-        &format!(".docsy-optimizing-{}-{stamp}", std::process::id()),
-        "pdf",
-    );
+    let temp_path = crate::util::fs::sibling_temp_path(input_path, "docsy-optimizing");
     let guard = crate::util::fs::TempPathGuard::new(temp_path.clone());
     rebuild_pages(input_path, guard.path())?;
 
@@ -353,39 +345,13 @@ pub fn optimize_in_place(input: &str) -> Result<OptimizeResult> {
         });
     }
 
-    replace_file(guard.path(), input_path)?;
+    crate::util::fs::replace_file(guard.path(), input_path).context("替换优化后的文件失败")?;
     Ok(OptimizeResult {
         output_path: input.to_string(),
         input_size,
         output_size,
         changed: true,
     })
-}
-
-/// 用 `from` 的内容替换 `to`：先在同目录改名备份原文件，替换成功后删除备份，
-/// 任一失败尽量恢复现场（Windows 上 rename 不允许目标已存在，也不能跨盘）。
-fn replace_file(from: &Path, to: &Path) -> Result<()> {
-    let parent = to.parent().unwrap_or_else(|| Path::new("."));
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let backup = crate::util::fs::unique_output_path(
-        parent,
-        &format!(".docsy-optimize-backup-{}-{stamp}", std::process::id()),
-        "pdf",
-    );
-    std::fs::rename(to, &backup).context("备份待优化文件失败")?;
-    match std::fs::rename(from, to) {
-        Ok(()) => {
-            let _ = std::fs::remove_file(&backup);
-            Ok(())
-        }
-        Err(err) => {
-            let _ = std::fs::rename(&backup, to);
-            Err(err).context("替换优化后的文件失败")
-        }
-    }
 }
 
 /// qpdf 按页重建：--empty --pages <input> 1-z，丢弃页树不可达对象并施加优化参数。

@@ -87,8 +87,13 @@ pub(crate) fn expand_ligatures(text: &str) -> String {
             '\u{FB04}' => result.push_str("ffl"),
             '\u{FB05}' | '\u{FB06}' => result.push_str("st"),
             // Invisible format characters and bidi controls.
-            '\u{00AD}' | '\u{034F}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}' => {}
+            '\u{00AD}'
+            | '\u{034F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}' => {}
             '\u{2000}'..='\u{200A}' => result.push(' '),
             _ => result.push(character),
         }
@@ -138,9 +143,10 @@ fn is_combining_mark(character: char) -> bool {
 /// A left-to-right cluster starts with a digit of any script (numbers stay
 /// LTR inside RTL text) or a non-RTL letter.
 fn cluster_is_ltr(cluster: &str) -> bool {
-    cluster.chars().next().is_some_and(|base| {
-        base.is_numeric() || (base.is_alphabetic() && !is_rtl_char(base))
-    })
+    cluster
+        .chars()
+        .next()
+        .is_some_and(|base| base.is_numeric() || (base.is_alphabetic() && !is_rtl_char(base)))
 }
 
 fn reverse_visual_rtl(text: &str) -> String {
@@ -298,10 +304,7 @@ mod tests {
 
     #[test]
     fn removes_bidi_control_characters() {
-        assert_eq!(
-            expand_ligatures("a\u{200E}\u{200F}\u{202E}\u{2066}b"),
-            "ab"
-        );
+        assert_eq!(expand_ligatures("a\u{200E}\u{200F}\u{202E}\u{2066}b"), "ab");
     }
 
     #[test]

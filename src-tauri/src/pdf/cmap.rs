@@ -1089,10 +1089,7 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(
-            cmap.decode(&[0xA1, 0x82, 0xA0]),
-            Some("ｱあ".to_string())
-        );
+        assert_eq!(cmap.decode(&[0xA1, 0x82, 0xA0]), Some("ｱあ".to_string()));
     }
 
     #[test]

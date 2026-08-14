@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use docx_rs::{
-    Docx, DocumentChild, DrawingData, Hyperlink, HyperlinkData, Paragraph, ParagraphChild, Run,
+    DocumentChild, Docx, DrawingData, Hyperlink, HyperlinkData, Paragraph, ParagraphChild, Run,
     RunChild, Table, TableCellContent, TableChild, TableRowChild, TextBoxContentChild,
 };
 use std::collections::HashMap;
@@ -621,9 +621,7 @@ fn collect_rids_from_table(table: &Table, out: &mut Vec<String>) {
             let TableRowChild::TableCell(cell) = cell_child;
             for content in &cell.children {
                 match content {
-                    TableCellContent::Paragraph(p) => {
-                        collect_rids_from_children(&p.children, out)
-                    }
+                    TableCellContent::Paragraph(p) => collect_rids_from_children(&p.children, out),
                     TableCellContent::Table(t) => collect_rids_from_table(t, out),
                     _ => {}
                 }
@@ -733,7 +731,8 @@ fn export_images(bytes: &[u8], docx: &Docx, output: &Path) -> Result<ExportedIma
     let rels_xml = match archive.by_name("word/_rels/document.xml.rels") {
         Ok(mut f) => {
             let mut s = String::new();
-            f.read_to_string(&mut s).context("读取 document.xml.rels 失败")?;
+            f.read_to_string(&mut s)
+                .context("读取 document.xml.rels 失败")?;
             s
         }
         // 没有 rels 就没有可导出的图片
@@ -744,7 +743,9 @@ fn export_images(bytes: &[u8], docx: &Docx, output: &Path) -> Result<ExportedIma
     // 先解析出所有可导出的图片（rid、扩展名、字节），避免先建目录才发现没图
     let mut plan: Vec<(String, String, Vec<u8>)> = Vec::new();
     for rid in rids {
-        let Some(target) = rels.get(&rid) else { continue };
+        let Some(target) = rels.get(&rid) else {
+            continue;
+        };
         let zip_path = media_zip_path(target);
         let Ok(mut entry) = archive.by_name(&zip_path) else {
             continue;
@@ -798,8 +799,8 @@ fn export_images(bytes: &[u8], docx: &Docx, output: &Path) -> Result<ExportedIma
 }
 
 pub fn convert(input: &Path, output: &Path) -> Result<()> {
-    let bytes = std::fs::read(input)
-        .with_context(|| format!("无法读取 docx 文件: {}", input.display()))?;
+    let bytes =
+        std::fs::read(input).with_context(|| format!("无法读取 docx 文件: {}", input.display()))?;
     let docx = docx_rs::read_docx(&bytes).context("无法解析 docx 文件")?;
     let exported = export_images(&bytes, &docx, output)?;
     let md = render_document(&docx, exported);
@@ -868,9 +869,7 @@ mod tests {
                     ),
             )
             // 全段加粗但不是标题样式：保持原样输出，不猜标题
-            .add_paragraph(
-                Paragraph::new().add_run(Run::new().add_text("整段加粗").bold()),
-            );
+            .add_paragraph(Paragraph::new().add_run(Run::new().add_text("整段加粗").bold()));
         let md = docx_bytes_to_md(&pack(docx)).unwrap();
         assert!(md.contains("# 证据目录"), "md:\n{md}");
         assert!(md.contains("## 第二节"), "md:\n{md}");
@@ -904,19 +903,11 @@ mod tests {
             .add_numbering(Numbering::new(1, 1))
             .add_abstract_numbering(ordered)
             .add_numbering(Numbering::new(2, 2))
-            .add_paragraph(
-                para("无序一").numbering(NumberingId::new(1), IndentLevel::new(0)),
-            )
-            .add_paragraph(
-                para("无序二").numbering(NumberingId::new(1), IndentLevel::new(0)),
-            )
+            .add_paragraph(para("无序一").numbering(NumberingId::new(1), IndentLevel::new(0)))
+            .add_paragraph(para("无序二").numbering(NumberingId::new(1), IndentLevel::new(0)))
             .add_paragraph(para("中间普通段落"))
-            .add_paragraph(
-                para("有序一").numbering(NumberingId::new(2), IndentLevel::new(0)),
-            )
-            .add_paragraph(
-                para("有序二").numbering(NumberingId::new(2), IndentLevel::new(0)),
-            );
+            .add_paragraph(para("有序一").numbering(NumberingId::new(2), IndentLevel::new(0)))
+            .add_paragraph(para("有序二").numbering(NumberingId::new(2), IndentLevel::new(0)));
         let md = docx_bytes_to_md(&pack(docx)).unwrap();
         assert!(md.contains("- 无序一"), "md:\n{md}");
         assert!(md.contains("- 无序二"), "md:\n{md}");
@@ -954,8 +945,7 @@ mod tests {
                     .add_run(Run::new().add_text("再加下划线").underline("single")),
             )
             .add_paragraph(
-                Paragraph::new()
-                    .add_run(Run::new().add_text("粗下划").bold().underline("single")),
+                Paragraph::new().add_run(Run::new().add_text("粗下划").bold().underline("single")),
             );
         let md = docx_bytes_to_md(&pack(docx)).unwrap();
         // 相邻同格式 run 合并为一个 <u> 段
@@ -1013,8 +1003,9 @@ mod tests {
                 Paragraph::new().add_run(Run::new().add_text("第二段").bold()),
             )));
         let mut run = Run::new();
-        run.children
-            .push(RunChild::Drawing(Box::new(docx_rs::Drawing::new().text_box(text_box))));
+        run.children.push(RunChild::Drawing(Box::new(
+            docx_rs::Drawing::new().text_box(text_box),
+        )));
         let p = Paragraph::new().add_run(run);
         let docx = Docx::new();
         let mut ctx = Ctx::new(&docx);
@@ -1094,12 +1085,16 @@ mod image_export_tests {
         let input = dir.join("纯文本.docx");
         let output = dir.join("纯文本.md");
 
-        let docx = Docx::new().add_paragraph(Paragraph::new().add_run(Run::new().add_text("没有图片")));
+        let docx =
+            Docx::new().add_paragraph(Paragraph::new().add_run(Run::new().add_text("没有图片")));
         std::fs::write(&input, pack_docx(docx)).unwrap();
 
         convert(&input, &output).unwrap();
         assert!(output.is_file());
-        assert!(!dir.join("纯文本_assets").exists(), "无图文档不应创建 assets 目录");
+        assert!(
+            !dir.join("纯文本_assets").exists(),
+            "无图文档不应创建 assets 目录"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1116,8 +1111,7 @@ mod image_export_tests {
         let output = dir.join("复用.md");
 
         let pic = Pic::new_with_dimensions(png_bytes(1, 1), 1, 1);
-        let docx = Docx::new()
-            .add_paragraph(Paragraph::new().add_run(Run::new().add_image(pic)));
+        let docx = Docx::new().add_paragraph(Paragraph::new().add_run(Run::new().add_image(pic)));
         std::fs::write(&input, pack_docx(docx)).unwrap();
 
         convert(&input, &output).unwrap();

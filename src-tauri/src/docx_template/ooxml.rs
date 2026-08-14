@@ -159,7 +159,10 @@ fn parse_children<R: std::io::BufRead>(
 
 /// 解析元素属性。畸形属性不再静默丢弃：记录告警日志后跳过该属性；
 /// 值反转义失败时按空值处理并告警。
-fn parse_attributes(e: &BytesStart, decoder: quick_xml::encoding::Decoder) -> Vec<(String, String)> {
+fn parse_attributes(
+    e: &BytesStart,
+    decoder: quick_xml::encoding::Decoder,
+) -> Vec<(String, String)> {
     e.attributes()
         .filter_map(|attr| {
             let attr = match attr {

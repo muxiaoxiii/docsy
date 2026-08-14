@@ -2,10 +2,10 @@
 
 use anyhow::{Context, Result};
 use docx_rs::{
-    AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel, Level, LevelJc,
-    LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, PageMargin, Paragraph,
-    ParagraphBorder, ParagraphBorderPosition, ParagraphChild, Pic, Run, RunFonts, Shading,
-    SpecialIndentType, Start, Style, StyleType, Table, TableCell, TableCellBorder,
+    AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
+    Level, LevelJc, LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, PageMargin,
+    Paragraph, ParagraphBorder, ParagraphBorderPosition, ParagraphChild, Pic, Run, RunFonts,
+    Shading, SpecialIndentType, Start, Style, StyleType, Table, TableCell, TableCellBorder,
     TableCellBorderPosition, TableCellBorders, TableCellMargins, TableLayoutType, TableRow,
     WidthType,
 };
@@ -261,7 +261,8 @@ impl<'a> Builder<'a> {
             Tag::Strong => self.inline.bold = true,
             Tag::Strikethrough => self.inline.strike = true,
             Tag::Link { dest_url, .. } => {
-                self.link_stack.push((self.children.len(), dest_url.to_string()));
+                self.link_stack
+                    .push((self.children.len(), dest_url.to_string()));
             }
             Tag::Image { dest_url, .. } => {
                 self.image_stack.push(ImageCtx {
@@ -717,7 +718,10 @@ let x = 1;
         // 链接
         assert!(md.contains("[链接](https://example.com)"), "md:\n{md}");
         // 任务列表
-        assert!(md.contains("☑ 已完成事项") || md.contains("已完成事项"), "md:\n{md}");
+        assert!(
+            md.contains("☑ 已完成事项") || md.contains("已完成事项"),
+            "md:\n{md}"
+        );
     }
 
     #[test]
@@ -727,7 +731,8 @@ let x = 1;
             (DocxStylePreset::Legal, "宋体", "000000"),
             (DocxStylePreset::Compact, "等线", "000000"),
         ] {
-            let bytes = build_docx_bytes_with_style("# 标题\n\n正文", Path::new("."), preset).unwrap();
+            let bytes =
+                build_docx_bytes_with_style("# 标题\n\n正文", Path::new("."), preset).unwrap();
             let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
             let mut document_xml = String::new();
             archive
@@ -744,8 +749,14 @@ let x = 1;
 
             assert!(document_xml.contains("w:w=\"11906\""), "A4 width missing");
             assert!(document_xml.contains("w:h=\"16838\""), "A4 height missing");
-            assert!(styles_xml.contains(east_asia_font), "font missing: {east_asia_font}");
-            assert!(styles_xml.contains(heading_color), "heading color missing: {heading_color}");
+            assert!(
+                styles_xml.contains(east_asia_font),
+                "font missing: {east_asia_font}"
+            );
+            assert!(
+                styles_xml.contains(heading_color),
+                "heading color missing: {heading_color}"
+            );
         }
     }
 
