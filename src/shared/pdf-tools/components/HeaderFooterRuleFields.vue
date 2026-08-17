@@ -84,8 +84,9 @@
               :max="9999"
               size="small"
               controls-position="right"
+              :disabled="headerNumberingSourceModel === 'default'"
             />
-            <span class="field-hint">{{ headerNumberingSourceModel === 'default' ? '跟随全局' : '仅覆盖本规则' }}</span>
+            <span class="field-hint">{{ headerNumberingSourceModel === 'default' ? '跟随全局，选择单独设置后可修改' : '仅覆盖本规则' }}</span>
           </div>
           <div v-if="headerMode === 'custom'" class="rule-item">
             <label>页眉文本</label>
@@ -305,27 +306,20 @@
         </div>
         <div class="hf-section-grid">
           <div class="rule-item">
-            <label>编号设置</label>
-            <el-select v-model="pageNumberingSourceModel">
-              <el-option label="跟随全局编号" value="default" />
-              <el-option label="本规则单独设置" value="custom" />
-            </el-select>
-          </div>
-          <div class="rule-item">
             <label>页码起始</label>
-            <el-input-number v-model="effectivePageStartModel" :min="1" :max="999999" controls-position="right" />
-            <span class="field-hint">{{ pageNumberingSourceModel === 'default' ? '跟随全局' : '仅覆盖本规则' }}</span>
+            <el-input-number v-model="pageStartModel" :min="1" :max="999999" controls-position="right" />
+            <span class="field-hint">总页数随起始自动偏移</span>
           </div>
           <div class="rule-item">
             <label>连续方式</label>
-            <el-select v-model="effectivePageSequenceModel">
+            <el-select v-model="pageSequenceModel">
               <el-option label="全部文件连续" value="continuous" />
               <el-option label="每个文件单独编号" value="per-file" />
             </el-select>
           </div>
           <div class="rule-item">
             <label>总页数口径</label>
-            <el-select v-model="effectiveTotalModeModel">
+            <el-select v-model="pageTotalModeModel">
               <el-option label="合并后总页数" value="combined" />
               <el-option label="单个文件页数" value="per-file" />
             </el-select>
@@ -754,27 +748,18 @@ const effectiveHeaderSeqStartModel = computed({
     : Number(props.numberingDefaults.evidenceStart ?? 1),
   set: (value) => updateGroupNumbering('header', { source: 'custom', evidenceStart: Number(value) }),
 })
-const pageNumberingSourceModel = computed({
-  get: () => selectedPageNumberGroup.value?.numbering?.source || 'default',
-  set: (value) => updateGroupNumbering('pageNumber', { source: value }),
+// 页码编号收归规则自含：读取时兼容旧数据（pageStart 为空则回落旧全局值），写入只改规则本身
+const pageStartModel = computed({
+  get: () => Number(selectedPageNumberGroup.value?.numbering?.pageStart ?? props.numberingDefaults.pageStart ?? 1),
+  set: (value) => updateGroupNumbering('pageNumber', { pageStart: Math.max(1, Number(value) || 1) }),
 })
-function pageNumberingValue(key, fallback) {
-  if (pageNumberingSourceModel.value === 'custom' && selectedPageNumberGroup.value?.numbering?.[key] != null) {
-    return selectedPageNumberGroup.value.numbering[key]
-  }
-  return props.numberingDefaults[key] ?? fallback
-}
-const effectivePageStartModel = computed({
-  get: () => Number(pageNumberingValue('pageStart', 1)),
-  set: (value) => updateGroupNumbering('pageNumber', { source: 'custom', pageStart: Number(value) }),
+const pageSequenceModel = computed({
+  get: () => selectedPageNumberGroup.value?.numbering?.sequence || 'continuous',
+  set: (value) => updateGroupNumbering('pageNumber', { sequence: value }),
 })
-const effectivePageSequenceModel = computed({
-  get: () => pageNumberingValue('sequence', 'continuous'),
-  set: (value) => updateGroupNumbering('pageNumber', { source: 'custom', sequence: value }),
-})
-const effectiveTotalModeModel = computed({
-  get: () => pageNumberingValue('totalMode', 'combined'),
-  set: (value) => updateGroupNumbering('pageNumber', { source: 'custom', totalMode: value }),
+const pageTotalModeModel = computed({
+  get: () => selectedPageNumberGroup.value?.numbering?.totalMode || 'combined',
+  set: (value) => updateGroupNumbering('pageNumber', { totalMode: value }),
 })
 const pageNumberPresetModel = computed({
   get() {

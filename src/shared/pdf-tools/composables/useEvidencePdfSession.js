@@ -76,10 +76,9 @@ export function createDefaultPageNumberGroup() {
     color: '#000000',
     fileIds: [],
     numbering: {
-      source: 'default',
-      pageStart: null,
-      sequence: null,
-      totalMode: null,
+      pageStart: 1,
+      sequence: 'continuous',
+      totalMode: 'combined',
     },
     exceptions: [],
   }
@@ -101,14 +100,14 @@ export function effectiveHeaderNumbering(group, defaults = createDefaultNumberin
 }
 
 export function effectivePageNumbering(group, defaults = createDefaultNumberingDefaults()) {
-  const custom = group?.numbering?.source === 'custom'
-  const value = (key, fallback) => (custom && group?.numbering?.[key] != null ? group.numbering[key] : fallback)
+  // 页码起始收归规则自含：不再区分跟随全局/单独设置。
+  // 兼容旧数据：旧规则 numbering.pageStart 为 null 时回落到旧全局 defaults.pageStart。
+  const numbering = group?.numbering || {}
+  const pageStart = Number(numbering.pageStart ?? defaults.pageStart) || 1
   return {
-    pageStart: Math.max(1, Number(value('pageStart', defaults.pageStart)) || 1),
-    // 连续方式 / 总页数口径没有全局默认：跟随全局时固定为内置行为
-    // （全部文件连续、合并后总页数）；需要差异时在单条规则内单独设置。
-    sequence: value('sequence', 'continuous'),
-    totalMode: value('totalMode', 'combined'),
+    pageStart: Math.max(1, pageStart),
+    sequence: numbering.sequence || 'continuous',
+    totalMode: numbering.totalMode || 'combined',
   }
 }
 

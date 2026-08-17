@@ -475,11 +475,20 @@ describe('Evidence PDF session helpers', () => {
     expect(pnOverlay.numberOffset).toBe(-2)
   })
 
-  it('forwards global numbering defaults into page number overlays', () => {
+  it('falls back to legacy global pageStart for old groups without their own start', () => {
     const files = [
       { ...createEvidenceFile('/case/合同.pdf'), pages: 2 },
       { ...createEvidenceFile('/case/付款.pdf'), pages: 4 },
     ]
+    // 旧数据：跟随全局的页码规则 numbering.pageStart 为 null，回落到旧全局值
+    for (const file of files) {
+      file.pageNumberGroups = [
+        {
+          ...createDefaultPageNumberGroup(),
+          numbering: { source: 'default', pageStart: null, sequence: null, totalMode: null },
+        },
+      ]
+    }
 
     const items = buildHeaderFooterItems(
       files,
@@ -496,6 +505,26 @@ describe('Evidence PDF session helpers', () => {
     expect(pn).toBeTruthy()
     expect(pn.numberOffset).toBe(180)
     expect(pn.numberTotal).toBe(186)
+  })
+
+  it('keeps the rule-owned pageStart when stale global defaults are present', () => {
+    // 新数据：页码起始收归规则自含（默认 1），残留的 defaults.pageStart 不再生效
+    const files = [{ ...createEvidenceFile('/case/合同.pdf'), pages: 2 }]
+
+    const items = buildHeaderFooterItems(
+      files,
+      {
+        ...baseRules,
+        pageNumberEnabled: true,
+        numberingDefaults: { evidenceStart: 21, pageStart: 181 },
+      },
+      '/out',
+    )
+
+    const pn = items[0].extraOverlays.find((o) => o.artifactKind === 'PageNumber')
+    expect(pn).toBeTruthy()
+    expect(pn.numberOffset).toBe(0)
+    expect(pn.numberTotal).toBe(2)
   })
 
   it('forwards global evidence start into per-file headers', () => {

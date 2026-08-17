@@ -1,7 +1,7 @@
 <template>
   <el-dialog v-model="visibleModel" title="插入规则高级设置" width="min(1080px, 96vw)" append-to-body>
     <div class="dialog-head">
-      <span>这里的设置立即用于本次处理；未覆盖的内容继续跟随对应主规则。</span>
+      <span>这里设置规则的文件范围、页段和页码例外；编号起始在主面板各规则内设置，未覆盖的内容跟随主规则。</span>
       <el-button v-if="activeKind === 'pageNumber'" type="primary" size="small" :disabled="!selectedGroup" @click="addException">添加页码例外</el-button>
     </div>
 
@@ -27,19 +27,12 @@
         <div class="rule-item"><label>指定文件</label><el-select v-model="selectedGroup.fileIds" multiple collapse-tags clearable placeholder="全部文件"><el-option v-for="file in files" :key="fileId(file)" :label="file.name" :value="fileId(file)" /></el-select></div>
         <div class="rule-item"><label>起始页</label><el-input-number v-model="selectedGroup.pageStart" :min="1" controls-position="right" /></div>
         <div class="rule-item"><label>结束页</label><el-input-number v-model="selectedGroup.pageEnd" :min="0" controls-position="right" /><span class="inherit-text">0 表示到文件末页</span></div>
-        <div v-if="activeKind === 'header' && selectedGroup.mode === 'per_file'" class="rule-item"><label>证据序号</label><el-select v-model="selectedGroup.numbering.source" @change="ensureCustomNumbering(selectedGroup, 'header')"><el-option label="跟随全局" value="default" /><el-option label="单独设置" value="custom" /></el-select><el-input-number v-if="selectedGroup.numbering.source === 'custom'" v-model="selectedGroup.numbering.evidenceStart" :min="0" controls-position="right" /></div>
+        <div v-if="activeKind === 'header' && selectedGroup.mode === 'per_file'" class="rule-item"><label>证据序号</label><el-select v-model="selectedGroup.numbering.source" @change="ensureCustomNumbering(selectedGroup)"><el-option label="跟随全局" value="default" /><el-option label="单独设置" value="custom" /></el-select><el-input-number v-if="selectedGroup.numbering.source === 'custom'" v-model="selectedGroup.numbering.evidenceStart" :min="0" controls-position="right" /></div>
       </div>
     </template>
     <template v-else-if="selectedGroup">
       <div class="page-rule-base">
         <div class="rule-item"><label>指定文件</label><el-select v-model="selectedGroup.fileIds" multiple collapse-tags clearable placeholder="全部文件"><el-option v-for="file in files" :key="fileId(file)" :label="file.name" :value="fileId(file)" /></el-select></div>
-        <div class="rule-item"><label>编号来源</label><el-select v-model="selectedGroup.numbering.source" @change="ensureCustomNumbering(selectedGroup, 'pageNumber')"><el-option label="跟随全局编号" value="default" /><el-option label="本规则单独设置" value="custom" /></el-select></div>
-        <template v-if="selectedGroup.numbering.source === 'custom'">
-          <div class="rule-item"><label>页码起始</label><el-input-number v-model="selectedGroup.numbering.pageStart" :min="1" controls-position="right" /></div>
-          <div class="rule-item"><label>连续方式</label><el-select v-model="selectedGroup.numbering.sequence"><el-option label="全部文件连续" value="continuous" /><el-option label="每个文件重新编号" value="per-file" /></el-select></div>
-          <div class="rule-item"><label>总页数口径</label><el-select v-model="selectedGroup.numbering.totalMode"><el-option label="合并后总页数" value="combined" /><el-option label="单个文件页数" value="per-file" /></el-select></div>
-        </template>
-        <span v-else class="global-numbering-hint">全局：证据 {{ numberingDefaults.evidenceStart }} 起，页码 {{ numberingDefaults.pageStart }} 起</span>
       </div>
       <el-table :data="selectedExceptions" border size="small" max-height="58vh">
         <el-table-column label="范围依据" width="132">
@@ -146,15 +139,9 @@ const selectedExceptions = computed(() => selectedGroup.value?.exceptions || [])
 
 function fileId(file) { return String(file?.id || file?.path || '') }
 function groupRangeText(group) { return group.fileIds?.length ? `${group.fileIds.length} 个文件` : group.pageEnd > 0 ? `第 ${group.pageStart || 1}-${group.pageEnd} 页` : '全部页面' }
-function ensureCustomNumbering(group, kind) {
+function ensureCustomNumbering(group) {
   if (group.numbering.source !== 'custom') return
-  if (kind === 'header') group.numbering.evidenceStart ??= Number(props.numberingDefaults.evidenceStart || 1)
-  else {
-    group.numbering.pageStart ??= Number(props.numberingDefaults.pageStart || 1)
-    // 这两个没有全局默认，单独设置时以内置行为为初始值
-    group.numbering.sequence ??= 'continuous'
-    group.numbering.totalMode ??= 'combined'
-  }
+  group.numbering.evidenceStart ??= Number(props.numberingDefaults.evidenceStart || 1)
 }
 function clone(value) { return JSON.parse(JSON.stringify(value || [])) }
 function cleanOverrides(value) {
@@ -228,7 +215,6 @@ watch(localFooterGroups, (value) => emit('update:footerGroups', clone(value)), {
 .page-rule-base { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 12px; border: 1px solid var(--docsy-border-subtle); background: var(--docsy-surface-soft); }
 .page-rule-base .rule-item { min-width: 145px; }
 .page-rule-base .rule-item:first-child { min-width: 220px; }
-.global-numbering-hint { align-self: center; color: var(--docsy-text-muted); font-size: 12px; }
 .rule-item { display: flex; flex-direction: column; gap: 6px; }
 .rule-item label { color: var(--docsy-text-muted); font-size: 12px; }
 </style>

@@ -222,10 +222,9 @@
         </div>
         <div v-if="insertHeaderFooterEnabled" class="numbering-defaults">
           <div class="numbering-defaults-title">
-            <strong>全局编号</strong><span>各条规则默认跟随；也可在规则内单独覆盖</span>
+            <strong>证据编号</strong><span>各条页眉规则默认跟随；也可在规则内单独覆盖。页码起始在各页码规则内设置</span>
           </div>
           <div class="rule-item"><label>证据序号起始</label><el-input-number v-model="numberingDefaults.evidenceStart" :min="0" :max="9999" /></div>
-          <div class="rule-item"><label>页码起始</label><el-input-number v-model="numberingDefaults.pageStart" :min="1" :max="999999" /></div>
         </div>
         <HeaderFooterRuleFields
           v-if="insertHeaderFooterEnabled"
@@ -1474,6 +1473,9 @@ function cloneData(value) {
 function builtInProcessingSettings(evidenceStart, pageStart) {
   const headerGroup = createDefaultHeaderGroup()
   headerGroup.mode = 'per_file'
+  const pageNumberGroup = createDefaultPageNumberGroup()
+  // 页码起始收归规则自含：预设的接续起始页直接写进默认页码规则
+  pageNumberGroup.numbering.pageStart = Math.max(1, Number(pageStart) || 1)
   return {
     schemaVersion: 1,
     normalizeA4: false,
@@ -1495,7 +1497,7 @@ function builtInProcessingSettings(evidenceStart, pageStart) {
     numberingDefaults: { ...createDefaultNumberingDefaults(), evidenceStart, pageStart },
     headerGroups: [headerGroup],
     footerTextGroups: [createDefaultFooterTextGroup()],
-    pageNumberGroups: [createDefaultPageNumberGroup()],
+    pageNumberGroups: [pageNumberGroup],
     bookmarkEnabled: true,
     bookmarkRemoveExisting: false,
     bookmarkLabelSource: 'header',
@@ -1873,7 +1875,6 @@ const firstFooterPreview = computed(() => {
   const pnGroup = globalApplyEnabled.value ? selectedPageNumberGroup.value : selectedGroupFor(first, 'pageNumber')
   if (!first || !footerEnabled.value || !pnGroup || !totalOverlayPages.value) return ''
   const numbering = effectivePageNumbering(pnGroup, numberingDefaults.value)
-  const continuous = numbering.sequence !== 'per-file'
   let tpl = pnGroup.template || '{page}/{total}'
   if (!pageNumberShowTotal.value)
     tpl = tpl
