@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
+use lopdf::{Document, Object, ObjectId};
 use serde_json::Value;
+use std::collections::HashSet;
+use std::path::Path;
 
 use crate::external::ExternalTool;
 
@@ -19,6 +22,17 @@ pub struct PageSize {
 }
 
 pub fn get_page_infos(input: &str) -> Result<Vec<PageSize>> {
+    match get_page_infos_with_qpdf(input) {
+        Ok(pages) => Ok(pages),
+        Err(qpdf_error) => get_page_infos_with_lopdf(Path::new(input)).with_context(|| {
+            format!(
+                "无法读取 PDF 页面尺寸，已停止处理以避免按错误 A4 尺寸定位内容；qpdf 解析失败：{qpdf_error:#}"
+            )
+        }),
+    }
+}
+
+fn get_page_infos_with_qpdf(input: &str) -> Result<Vec<PageSize>> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
 
@@ -38,6 +52,95 @@ pub fn get_page_infos(input: &str) -> Result<Vec<PageSize>> {
 
     let json: Value = serde_json::from_slice(&output.stdout).context("解析 qpdf JSON 失败")?;
     parse_page_sizes(&json)
+}
+
+fn get_page_infos_with_lopdf(input: &Path) -> Result<Vec<PageSize>> {
+    let doc = Document::load(input).context("lopdf 无法读取 PDF")?;
+    page_infos_from_lopdf_document(&doc)
+}
+
+fn page_infos_from_lopdf_document(doc: &Document) -> Result<Vec<PageSize>> {
+    let pages = doc.get_pages();
+    if pages.is_empty() {
+        anyhow::bail!("PDF 无页面");
+    }
+
+    pages
+        .into_iter()
+        .map(|(page_number, page_id)| {
+            let box_value = inherited_page_value(doc, page_id, b"CropBox")
+                .or_else(|| inherited_page_value(doc, page_id, b"MediaBox"))
+                .with_context(|| format!("第 {page_number} 页及其父级均无 CropBox/MediaBox"))?;
+            let size = page_size_from_lopdf_box(&box_value)
+                .with_context(|| format!("第 {page_number} 页的页面框格式无效"))?;
+            let rotate = inherited_page_value(doc, page_id, b"Rotate")
+                .and_then(|value| value.as_i64().ok())
+                .unwrap_or(0)
+                .rem_euclid(360) as i32;
+            Ok(apply_rotation(size, rotate))
+        })
+        .collect()
+}
+
+fn inherited_page_value(doc: &Document, start: ObjectId, key: &[u8]) -> Option<Object> {
+    let mut current = Some(start);
+    let mut visited = HashSet::new();
+    while let Some(object_id) = current {
+        if !visited.insert(object_id) {
+            return None;
+        }
+        let dictionary = doc.get_dictionary(object_id).ok()?;
+        if let Ok(value) = dictionary.get(key) {
+            return resolve_lopdf_object(doc, value);
+        }
+        current = dictionary
+            .get(b"Parent")
+            .ok()
+            .and_then(|value| value.as_reference().ok());
+    }
+    None
+}
+
+fn resolve_lopdf_object(doc: &Document, value: &Object) -> Option<Object> {
+    let mut current = value.clone();
+    let mut visited = HashSet::new();
+    for _ in 0..32 {
+        let Object::Reference(object_id) = current else {
+            return Some(current);
+        };
+        if !visited.insert(object_id) {
+            return None;
+        }
+        current = doc.get_object(object_id).ok()?.clone();
+    }
+    None
+}
+
+fn page_size_from_lopdf_box(value: &Object) -> Option<PageSize> {
+    let Object::Array(values) = value else {
+        return None;
+    };
+    if values.len() < 4 {
+        return None;
+    }
+    let x0 = values[0].as_float().ok()?;
+    let y0 = values[1].as_float().ok()?;
+    let x1 = values[2].as_float().ok()?;
+    let y1 = values[3].as_float().ok()?;
+    let width = (x1 - x0).abs();
+    let height = (y1 - y0).abs();
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    Some(PageSize {
+        width_pt: width,
+        height_pt: height,
+        raw_width_pt: width,
+        raw_height_pt: height,
+        box_x0: x0.min(x1),
+        box_y0: y0.min(y1),
+        rotate: 0,
+    })
 }
 
 pub(crate) fn parse_page_sizes(json: &Value) -> Result<Vec<PageSize>> {
@@ -164,7 +267,42 @@ fn page_size_from_box(value: &Value) -> Option<PageSize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lopdf::dictionary;
     use serde_json::json;
+
+    fn document_with_inherited_page_box() -> Document {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.add_object(dictionary! {});
+        let inherited_crop_box = doc.add_object(Object::Array(vec![
+            10.into(),
+            20.into(),
+            510.into(),
+            720.into(),
+        ]));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            // The inherited CropBox must take precedence over this local
+            // MediaBox, matching the PDF page attribute rules.
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+                "CropBox" => inherited_crop_box,
+                "Rotate" => 90,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc
+    }
 
     #[test]
     fn parses_qpdf_page_sizes() {
@@ -246,5 +384,21 @@ mod tests {
         let pages = parse_page_sizes(&value).expect("page size should be read after metadata");
         assert_eq!(pages[0].width_pt, 612.0);
         assert_eq!(pages[0].height_pt, 792.0);
+    }
+
+    #[test]
+    fn lopdf_fallback_resolves_inherited_and_indirect_page_attributes() {
+        let doc = document_with_inherited_page_box();
+
+        let pages = page_infos_from_lopdf_document(&doc).expect("inherited box should resolve");
+
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].raw_width_pt, 500.0);
+        assert_eq!(pages[0].raw_height_pt, 700.0);
+        assert_eq!(pages[0].width_pt, 700.0);
+        assert_eq!(pages[0].height_pt, 500.0);
+        assert_eq!(pages[0].box_x0, 10.0);
+        assert_eq!(pages[0].box_y0, 20.0);
+        assert_eq!(pages[0].rotate, 90);
     }
 }

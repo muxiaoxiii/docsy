@@ -12,6 +12,7 @@ import {
   candidateTargetRange,
   createDefaultHeaderGroup,
   createDefaultFooterTextGroup,
+  createDefaultPageNumberGroup,
   createEvidenceFile,
   expandPlaceholders,
   naturalCompare,
@@ -26,6 +27,8 @@ import {
 const baseRules = {
   normalizeA4: false,
   a4Orientation: 'preserve',
+  a4ContentRotation: 'none',
+  a4ContentMarginMm: 10,
   rasterDpi: 200,
   cleanupHeaderEnabled: true,
   cleanupFooterEnabled: true,
@@ -441,20 +444,103 @@ describe('Evidence PDF session helpers', () => {
       { ...createEvidenceFile('/case/合同.pdf'), pages: 2, header: '证据1 合同' },
       { ...createEvidenceFile('/case/付款.pdf'), pages: 4, header: '证据2 付款' },
     ]
+    // 连续方式没有全局默认：每个文件单独编号通过单条规则单独设置
+    for (const file of files) {
+      file.pageNumberGroups = [
+        {
+          ...createDefaultPageNumberGroup(),
+          numbering: { source: 'custom', pageStart: 1, sequence: 'per-file', totalMode: 'per-file' },
+        },
+      ]
+    }
 
     const items = buildHeaderFooterItems(
       files,
       {
         ...baseRules,
-        footerContinuous: false,
+        pageNumberEnabled: true,
       },
       '/out',
     )
 
+    // job 基准始终是全局物理页码；单文件编号通过规则 sequence='per-file' + numberOffset 表达
     expect(items[0].pageStart).toBe(1)
-    expect(items[0].totalPages).toBe(2)
-    expect(items[1].pageStart).toBe(1)
-    expect(items[1].totalPages).toBe(4)
+    expect(items[0].totalPages).toBe(6)
+    expect(items[1].pageStart).toBe(3)
+    expect(items[1].totalPages).toBe(6)
+    const pnOverlay = items[1].extraOverlays.find((o) => o.artifactKind === 'PageNumber')
+    expect(pnOverlay).toBeTruthy()
+    expect(pnOverlay.sequence).toBe('per-file')
+    // 物理页 3 → 显示编号 1（每个文件重新从 1 编号）
+    expect(pnOverlay.numberOffset).toBe(-2)
+  })
+
+  it('forwards global numbering defaults into page number overlays', () => {
+    const files = [
+      { ...createEvidenceFile('/case/合同.pdf'), pages: 2 },
+      { ...createEvidenceFile('/case/付款.pdf'), pages: 4 },
+    ]
+
+    const items = buildHeaderFooterItems(
+      files,
+      {
+        ...baseRules,
+        pageNumberEnabled: true,
+        numberingDefaults: { evidenceStart: 21, pageStart: 181 },
+      },
+      '/out',
+    )
+
+    // 第一个文件页码从 181 开始：物理页 1 → 显示 181，offset 180
+    const pn = items[0].extraOverlays.find((o) => o.artifactKind === 'PageNumber')
+    expect(pn).toBeTruthy()
+    expect(pn.numberOffset).toBe(180)
+    expect(pn.numberTotal).toBe(186)
+  })
+
+  it('forwards global evidence start into per-file headers', () => {
+    const files = [
+      { ...createEvidenceFile('/case/合同.pdf'), pages: 1 },
+      { ...createEvidenceFile('/case/付款.pdf'), pages: 1 },
+    ]
+
+    const items = buildHeaderFooterItems(
+      files,
+      {
+        ...baseRules,
+        headerMode: 'per_file',
+        numberingDefaults: { evidenceStart: 21, pageStart: 1 },
+      },
+      '/out',
+    )
+
+    expect(items[0].header.text).toBe('证据21')
+    expect(items[1].header.text).toBe('证据22')
+  })
+
+  it('lets a page number group override global numbering per rule', () => {
+    const file = { ...createEvidenceFile('/case/合同.pdf'), pages: 3 }
+    file.pageNumberGroups = [
+      {
+        ...createDefaultPageNumberGroup(),
+        numbering: { source: 'custom', pageStart: 5, sequence: 'continuous', totalMode: 'combined' },
+      },
+    ]
+
+    const items = buildHeaderFooterItems(
+      [file],
+      {
+        ...baseRules,
+        pageNumberEnabled: true,
+        numberingDefaults: { evidenceStart: 1, pageStart: 100 },
+      },
+      '/out',
+    )
+
+    const pn = items[0].extraOverlays.find((o) => o.artifactKind === 'PageNumber')
+    expect(pn).toBeTruthy()
+    expect(pn.numberOffset).toBe(4)
+    expect(pn.numberTotal).toBe(7)
   })
 
   it('builds a business-level evidence PDF rules payload', () => {

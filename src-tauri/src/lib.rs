@@ -72,6 +72,10 @@ impl SubprocessRegistry {
         }
     }
 
+    pub fn has_active(&self) -> bool {
+        self.pids.lock().map(|map| !map.is_empty()).unwrap_or(false)
+    }
+
     /// Spawn a command, register its PID, wait for completion, unregister.
     /// This is the primary entry point for cancellable subprocesses.
     pub fn spawn_and_wait(
@@ -128,6 +132,24 @@ static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::
 /// Set once during app initialization; qpdf/ffmpeg can access it without Tauri state.
 static SUBPROCESS_REGISTRY: std::sync::OnceLock<Arc<SubprocessRegistry>> =
     std::sync::OnceLock::new();
+
+/// Coordinates the asynchronous close confirmation shown by the frontend.
+/// Every native close request is intercepted once; the confirmed retry is
+/// allowed through without prompting again.
+#[derive(Default)]
+pub struct CloseRequestState {
+    allow_next_close: AtomicBool,
+}
+
+impl CloseRequestState {
+    pub fn allow_next_close(&self) {
+        self.allow_next_close.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take_allowed_close(&self) -> bool {
+        self.allow_next_close.swap(false, Ordering::SeqCst)
+    }
+}
 
 pub fn get_subprocess_registry() -> Option<&'static Arc<SubprocessRegistry>> {
     SUBPROCESS_REGISTRY.get()
@@ -216,8 +238,11 @@ pub fn run() {
     let conversion_state = Arc::new(ConversionState::new());
     let subprocess_registry = Arc::new(SubprocessRegistry::new());
     let operation_manager = Arc::new(operations::OperationManager::new());
+    let close_request_state = Arc::new(CloseRequestState::default());
     let operation_manager_for_setup = operation_manager.clone();
     let operation_manager_for_close = operation_manager.clone();
+    let subprocess_registry_for_close = subprocess_registry.clone();
+    let close_request_state_for_event = close_request_state.clone();
     let _ = SUBPROCESS_REGISTRY.set(subprocess_registry.clone());
 
     tauri::Builder::default()
@@ -227,9 +252,20 @@ pub fn run() {
         .manage(conversion_state)
         .manage(subprocess_registry)
         .manage(operation_manager)
-        .on_window_event(move |_window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                operation_manager_for_close.cancel_all();
+        .manage(close_request_state)
+        .on_window_event(move |window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if close_request_state_for_event.take_allowed_close() {
+                    return;
+                }
+
+                api.prevent_close();
+                let backend_active = !operation_manager_for_close.list_active().is_empty()
+                    || subprocess_registry_for_close.has_active();
+                let _ = window.emit(
+                    "docsy-close-requested",
+                    serde_json::json!({ "backendActive": backend_active }),
+                );
             }
         })
         .setup(move |app| {
@@ -251,5 +287,29 @@ fn cleanup_webkit_cache() {
         .join("NetworkCache");
     if cache_dir.exists() {
         let _ = std::fs::remove_dir_all(&cache_dir);
+    }
+}
+
+#[cfg(test)]
+mod close_request_tests {
+    use super::*;
+
+    #[test]
+    fn confirmed_close_is_consumed_once() {
+        let state = CloseRequestState::default();
+        assert!(!state.take_allowed_close());
+        state.allow_next_close();
+        assert!(state.take_allowed_close());
+        assert!(!state.take_allowed_close());
+    }
+
+    #[test]
+    fn subprocess_registry_reports_active_work() {
+        let registry = SubprocessRegistry::new();
+        assert!(!registry.has_active());
+        registry.register("test", 42);
+        assert!(registry.has_active());
+        registry.unregister("test");
+        assert!(!registry.has_active());
     }
 }

@@ -31,108 +31,134 @@ export function renderPageNumberTemplate(template, page, total, style = 'arabic'
     .replaceAll('{range}', `${formattedPage}/${formattedTotal}`)
 }
 
-export function effectivePageNumberRule(baseRule, globalPage, localPage) {
-  const base = { ...baseRule }
-  const matching = (baseRule?.overrides || []).filter((rule) => {
-    const coordinate = rule.scope === 'file' ? localPage : globalPage
-    return coordinate >= Number(rule.start || 1) && coordinate <= Number(rule.end || rule.start || 1)
+export function normalizePageNumberException(rule, index = 0) {
+  if (rule?.scope && typeof rule.scope === 'object') {
+    return {
+      id: rule.id || `exception-${Date.now()}-${index}`,
+      scope: {
+        type: rule.scope.type || 'global',
+        start: Math.max(1, Number(rule.scope.start) || 1),
+        end: Math.max(1, Number(rule.scope.end || rule.scope.start) || 1),
+        fileIds: [...(rule.scope.fileIds || [])],
+      },
+      overrides: { ...(rule.overrides || {}) },
+    }
+  }
+  const overrides = {}
+  if (rule?.action === 'exclude') overrides.enabled = false
+  for (const key of ['style', 'template', 'align', 'region', 'marginMm', 'offsetXMm', 'fontSize', 'fontFamily', 'color', 'startOffset', 'count']) {
+    if (rule?.[key] !== undefined && rule?.[key] !== null && rule?.[key] !== '') overrides[key] = rule[key]
+  }
+  return {
+    id: rule?.id || `exception-${Date.now()}-${index}`,
+    scope: {
+      type: rule?.scope === 'file' ? 'file' : 'global',
+      start: Math.max(1, Number(rule?.start) || 1),
+      end: Math.max(1, Number(rule?.end || rule?.start) || 1),
+      fileIds: [...(rule?.fileIds || [])],
+    },
+    overrides,
+  }
+}
+
+function fileStableId(file) {
+  return String(file?.id || file?.path || '')
+}
+
+function exceptionMatches(exception, file, globalPage, localPage) {
+  const scope = exception.scope || {}
+  const fileIds = scope.fileIds || []
+  if (fileIds.length && !fileIds.includes(fileStableId(file))) return false
+  const coordinate = scope.type === 'file' ? localPage : globalPage
+  return coordinate >= Number(scope.start || 1) && coordinate <= Number(scope.end || scope.start || 1)
+}
+
+export function effectivePageNumberRule(baseRule, globalPage, localPage, file = null) {
+  const exceptions = (baseRule?.exceptions || baseRule?.overrides || []).map(normalizePageNumberException)
+  return exceptions
+    .filter((entry) => exceptionMatches(entry, file, globalPage, localPage))
+    .reduce((result, entry) => ({ ...result, ...entry.overrides }), { ...baseRule })
+}
+
+function documentPages(baseRule, currentFile) {
+  const files = Array.isArray(baseRule.allFiles) && baseRule.allFiles.length ? baseRule.allFiles : [currentFile]
+  return files.flatMap((file) => {
+    const start = Number(file.pageStart || 1)
+    return Array.from({ length: Number(file.pages || 0) }, (_, index) => ({ file, localPage: index + 1, globalPage: start + index }))
   })
-  return matching.reduce((result, override) => ({ ...result, ...override }), base)
+}
+
+function pageCountsForNumbering(baseRule, currentFile) {
+  const allPages = documentPages(baseRule, currentFile)
+  const localPages = allPages.filter((entry) => fileStableId(entry.file) === fileStableId(currentFile))
+  const totalPages = baseRule.totalMode === 'combined'
+    ? allPages
+    : localPages
+  const counted = totalPages.filter((entry) => pageCounts(entry, baseRule))
+  return { allPages, counted }
+}
+
+function pageCounts(entry, baseRule) {
+  const rule = effectivePageNumberRule(baseRule, entry.globalPage, entry.localPage, entry.file)
+  const hidden = rule.enabled === false || rule.action === 'exclude'
+  // 隐藏页是否参与编号由例外自身的 count 决定（默认计数）
+  return !hidden || rule.count !== false
 }
 
 export function pageNumberOverlaysForFile(file, baseRule) {
   if (!baseRule?.enabled || !Number(file?.pages || 0)) return []
   const continuous = baseRule.sequence !== 'per-file'
-  const total = continuous ? Number(baseRule.totalPages || file.pages) : Number(file.pages)
+  const pageNumberStart = Math.max(1, Number(baseRule.pageNumberStart) || 1)
+  const { allPages, counted } = pageCountsForNumbering(baseRule, file)
+  const total = pageNumberStart + Math.max(0, counted.length - 1)
   const overlays = []
   let active = null
+  let countedBefore = continuous
+    ? allPages.filter((entry) => entry.globalPage < Number(file.pageStart || 1) && pageCounts(entry, baseRule)).length
+    : 0
   for (let localPage = 1; localPage <= Number(file.pages); localPage += 1) {
     const globalPage = Number(file.pageStart || 1) + localPage - 1
-    const rule = effectivePageNumberRule(baseRule, globalPage, localPage)
-    const excluded = rule.action === 'exclude' || rule.enabled === false
-    const number = continuous ? globalPage + Number(rule.startOffset || 0) : localPage + Number(rule.startOffset || 0)
-    const signature = excluded
-      ? 'exclude'
-      : JSON.stringify({
-          template: rule.template,
-          style: rule.style,
-          align: rule.align,
-          marginMm: rule.marginMm,
-          offsetXMm: rule.offsetXMm,
-          fontSize: rule.fontSize,
-          fontFamily: rule.fontFamily,
-          color: rule.color,
-          startOffset: rule.startOffset || 0,
-        })
+    const rule = effectivePageNumberRule(baseRule, globalPage, localPage, file)
+    const excluded = rule.enabled === false || rule.action === 'exclude'
+    const countsCurrent = !excluded || rule.count !== false
+    const number = pageNumberStart + countedBefore + Number(rule.startOffset || 0)
+    const signature = excluded ? 'exclude' : JSON.stringify({
+      template: rule.template, style: rule.style, align: rule.align, region: rule.region,
+      marginMm: rule.marginMm, offsetXMm: rule.offsetXMm, fontSize: rule.fontSize,
+      fontFamily: rule.fontFamily, color: rule.color, startOffset: rule.startOffset || 0, total,
+    })
     if (active && active.signature === signature && active.numberEnd + 1 === number) {
       active.pageEnd = localPage
       active.numberEnd = number
+      if (countsCurrent) countedBefore += 1
       continue
     }
     if (active && !active.excluded) overlays.push(toOverlay(active, total, continuous))
-    active = {
-      signature,
-      excluded,
-      rule,
-      pageStart: localPage,
-      pageEnd: localPage,
-      globalStart: globalPage,
-      numberStart: number,
-      numberEnd: number,
-    }
+    active = { signature, excluded, rule, pageStart: localPage, pageEnd: localPage, globalStart: globalPage, numberStart: number, numberEnd: number }
+    if (countsCurrent) countedBefore += 1
   }
   if (active && !active.excluded) overlays.push(toOverlay(active, total, continuous))
   return overlays
 }
 
 function toOverlay(group, total, continuous) {
-  // continuous mode: backend current_page = page_start(file.pageStart) + index = globalPage
-  //   numberOffset = numberStart - globalStart → page = globalPage + offset = numberStart ✓
-  // per-file mode: backend current_page = page_start(1) + index = localPage
-  //   numberOffset = numberStart - localPageStart = numberStart - pageStart
-  const offset = continuous ? group.numberStart - group.globalStart : group.numberStart - group.pageStart
+  const offset = group.numberStart - group.globalStart
   return {
-    text: group.rule.template || '{page}/{total}',
-    region: group.rule.region || 'footer',
-    artifactKind: 'PageNumber',
-    sequence: continuous ? 'continuous' : 'per-file',
-    numberStyle: group.rule.style || 'arabic',
-    numberOffset: offset,
-    numberTotal: total,
-    pageStart: group.pageStart,
-    pageEnd: group.pageEnd,
-    align: group.rule.align || 'center',
-    fontSize: Number(group.rule.fontSize || 9),
-    fontFamily: group.rule.fontFamily || 'auto',
-    marginMm: Number(group.rule.marginMm || 10),
-    offsetXMm: Number(group.rule.offsetXMm || 0),
-    color: group.rule.color || '#000000',
+    text: group.rule.template || '{page}/{total}', region: group.rule.region || 'footer', artifactKind: 'PageNumber',
+    sequence: continuous ? 'continuous' : 'per-file', numberStyle: group.rule.style || 'arabic',
+    numberOffset: offset, numberTotal: total, pageStart: group.pageStart, pageEnd: group.pageEnd,
+    align: group.rule.align || 'center', fontSize: Number(group.rule.fontSize || 9),
+    fontFamily: group.rule.fontFamily || 'auto', marginMm: Number(group.rule.marginMm || 10),
+    offsetXMm: Number(group.rule.offsetXMm || 0), color: group.rule.color || '#000000',
   }
 }
 
 function toRoman(value) {
-  const pairs = [
-    [1000, 'M'],
-    [900, 'CM'],
-    [500, 'D'],
-    [400, 'CD'],
-    [100, 'C'],
-    [90, 'XC'],
-    [50, 'L'],
-    [40, 'XL'],
-    [10, 'X'],
-    [9, 'IX'],
-    [5, 'V'],
-    [4, 'IV'],
-    [1, 'I'],
-  ]
+  const pairs = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]
   let remaining = value
   let result = ''
   for (const [amount, token] of pairs) {
-    while (remaining >= amount) {
-      result += token
-      remaining -= amount
-    }
+    while (remaining >= amount) { result += token; remaining -= amount }
   }
   return result
 }

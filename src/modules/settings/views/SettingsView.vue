@@ -136,9 +136,16 @@
         <el-descriptions-item label="ffmpeg">{{ diagnostic.ffmpeg?.version || '不可用' }}</el-descriptions-item>
       </el-descriptions>
       <div class="diag-actions">
+        <el-button type="primary" size="small" :loading="composingLogEmail" @click="sendLogEmail">
+          <el-icon><Message /></el-icon>
+          发送日志给作者
+        </el-button>
         <el-button size="small" @click="openLogDir">打开日志目录</el-button>
         <el-button size="small" @click="openLogFile">打开当前日志</el-button>
       </div>
+      <p class="diagnostic-hint">
+        将创建发往 oonlyxin@outlook.com 的邮件草稿，并仅附加已隐藏本地路径和文件名的脱敏日志。
+      </p>
     </el-card>
   </div>
 </template>
@@ -148,6 +155,7 @@ import { computed, ref, reactive, onMounted } from 'vue'
 import { openExternalUrl, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Message } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 
 const settings = ref({
@@ -158,6 +166,7 @@ const settings = ref({
 })
 const managedToolsDir = ref('')
 const checkingTools = ref(false)
+const composingLogEmail = ref(false)
 const menuModules = getMenuModules()
 const menuSettingsItems = computed(() =>
   normalizedMenuOrder()
@@ -461,6 +470,22 @@ async function openLogFile() {
   }
 }
 
+async function sendLogEmail() {
+  if (composingLogEmail.value) return
+  composingLogEmail.value = true
+  try {
+    const result = await tauriCallSafe('compose_log_email')
+    if (result.ok) {
+      if (result.data?.attached) ElMessage.success(result.data.message)
+      else ElMessage.warning(result.data?.message || '已打开邮件草稿和日志位置')
+    } else {
+      ElMessage.error(userFacingError(result.error, '无法创建日志邮件'))
+    }
+  } finally {
+    composingLogEmail.value = false
+  }
+}
+
 async function openManagedToolsDir() {
   const result = await tauriCallSafe('open_managed_tools_dir')
   if (!result.ok) {
@@ -681,6 +706,12 @@ onMounted(() => {
   margin-top: 12px;
   display: flex;
   gap: 8px;
+}
+
+.diagnostic-hint {
+  margin: 8px 0 0;
+  color: var(--docsy-text-muted);
+  font-size: 12px;
 }
 
 .section-desc {

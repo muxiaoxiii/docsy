@@ -70,14 +70,22 @@
             </el-select>
           </div>
           <div v-if="headerMode === 'per_file'" class="rule-item">
+            <label>编号设置</label>
+            <el-select v-model="headerNumberingSourceModel">
+              <el-option label="跟随全局编号" value="default" />
+              <el-option label="本规则单独设置" value="custom" />
+            </el-select>
+          </div>
+          <div v-if="headerMode === 'per_file'" class="rule-item">
             <label>序号起始</label>
             <el-input-number
-              v-model="headerPerFileSeqStartModel"
+              v-model="effectiveHeaderSeqStartModel"
               :min="0"
               :max="9999"
               size="small"
               controls-position="right"
             />
+            <span class="field-hint">{{ headerNumberingSourceModel === 'default' ? '跟随全局' : '仅覆盖本规则' }}</span>
           </div>
           <div v-if="headerMode === 'custom'" class="rule-item">
             <label>页眉文本</label>
@@ -297,10 +305,29 @@
         </div>
         <div class="hf-section-grid">
           <div class="rule-item">
+            <label>编号设置</label>
+            <el-select v-model="pageNumberingSourceModel">
+              <el-option label="跟随全局编号" value="default" />
+              <el-option label="本规则单独设置" value="custom" />
+            </el-select>
+          </div>
+          <div class="rule-item">
+            <label>页码起始</label>
+            <el-input-number v-model="effectivePageStartModel" :min="1" :max="999999" controls-position="right" />
+            <span class="field-hint">{{ pageNumberingSourceModel === 'default' ? '跟随全局' : '仅覆盖本规则' }}</span>
+          </div>
+          <div class="rule-item">
             <label>连续方式</label>
-            <el-select v-model="pageNumberSequenceModel">
+            <el-select v-model="effectivePageSequenceModel">
               <el-option label="全部文件连续" value="continuous" />
               <el-option label="每个文件单独编号" value="per-file" />
+            </el-select>
+          </div>
+          <div class="rule-item">
+            <label>总页数口径</label>
+            <el-select v-model="effectiveTotalModeModel">
+              <el-option label="合并后总页数" value="combined" />
+              <el-option label="单个文件页数" value="per-file" />
             </el-select>
           </div>
           <div class="rule-item">
@@ -357,9 +384,9 @@
             :margin-label="pageNumberRegion === 'header' ? '距顶' : '距底'"
           />
           <div class="rule-item">
-            <label>分段与例外</label>
+            <label>高级设置</label>
             <el-button @click="$emit('editPageNumberRules')">
-              设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
+              页段与例外{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
             </el-button>
           </div>
         </div>
@@ -437,6 +464,7 @@ const props = defineProps({
   footerTextPageStart: { type: Number, default: 1 },
   footerTextPageEnd: { type: Number, default: 0 },
   pageNumberGroups: { type: Array, default: () => [] },
+  numberingDefaults: { type: Object, default: () => ({ evidenceStart: 1, pageStart: 1 }) },
   selectedPageNumberGroupId: { type: String, default: '' },
   pageNumberEnabled: { type: Boolean, required: true },
   pageNumberSequence: { type: String, required: true },
@@ -465,6 +493,7 @@ const emit = defineEmits([
   'update:footerTextGroups',
   'update:selectedFooterTextGroupId',
   'update:pageNumberGroups',
+  'update:numberingDefaults',
   'update:selectedPageNumberGroupId',
   ...[
     'headerMode',
@@ -655,7 +684,6 @@ const headerAlignModel = model('headerAlign'),
   headerColorModel = model('headerColor')
 const headerPerFilePrefixModel = model('headerPerFilePrefix')
 const headerPerFileSeqTypeModel = model('headerPerFileSeqType')
-const headerPerFileSeqStartModel = model('headerPerFileSeqStart')
 const headerPageStartModel = model('headerPageStart')
 const headerPageEndModel = model('headerPageEnd')
 const headerAllPages = computed({
@@ -689,7 +717,6 @@ const footerTextAllPages = computed({
   },
 })
 const pageNumberEnabledModel = model('pageNumberEnabled'),
-  pageNumberSequenceModel = model('pageNumberSequence'),
   pageNumberStyleModel = model('pageNumberStyle'),
   pageNumberTemplateModel = model('pageNumberTemplate'),
   pageNumberRegionModel = model('pageNumberRegion'),
@@ -700,6 +727,55 @@ const pageNumberEnabledModel = model('pageNumberEnabled'),
   pageNumberOffsetXMmModel = model('pageNumberOffsetXMm'),
   pageNumberColorModel = model('pageNumberColor')
 const pageNumberShowTotalModel = model('pageNumberShowTotal')
+const selectedHeaderGroup = computed(() =>
+  props.headerGroups.find((group) => group.id === props.selectedHeaderGroupId) || props.headerGroups[0] || null,
+)
+const selectedPageNumberGroup = computed(() =>
+  props.pageNumberGroups.find((group) => group.id === props.selectedPageNumberGroupId) || props.pageNumberGroups[0] || null,
+)
+function updateSelectedGroup(kind, patch) {
+  const groups = kind === 'header' ? props.headerGroups : props.pageNumberGroups
+  const selectedId = kind === 'header' ? props.selectedHeaderGroupId : props.selectedPageNumberGroupId
+  const updated = groups.map((group) => (group.id === selectedId ? { ...group, ...patch } : group))
+  emit(kind === 'header' ? 'update:headerGroups' : 'update:pageNumberGroups', updated)
+}
+function updateGroupNumbering(kind, patch) {
+  const group = kind === 'header' ? selectedHeaderGroup.value : selectedPageNumberGroup.value
+  if (!group) return
+  updateSelectedGroup(kind, { numbering: { source: 'default', ...(group.numbering || {}), ...patch } })
+}
+const headerNumberingSourceModel = computed({
+  get: () => selectedHeaderGroup.value?.numbering?.source || 'default',
+  set: (value) => updateGroupNumbering('header', { source: value }),
+})
+const effectiveHeaderSeqStartModel = computed({
+  get: () => headerNumberingSourceModel.value === 'custom'
+    ? Number(selectedHeaderGroup.value?.numbering?.evidenceStart ?? props.headerPerFileSeqStart ?? 1)
+    : Number(props.numberingDefaults.evidenceStart ?? 1),
+  set: (value) => updateGroupNumbering('header', { source: 'custom', evidenceStart: Number(value) }),
+})
+const pageNumberingSourceModel = computed({
+  get: () => selectedPageNumberGroup.value?.numbering?.source || 'default',
+  set: (value) => updateGroupNumbering('pageNumber', { source: value }),
+})
+function pageNumberingValue(key, fallback) {
+  if (pageNumberingSourceModel.value === 'custom' && selectedPageNumberGroup.value?.numbering?.[key] != null) {
+    return selectedPageNumberGroup.value.numbering[key]
+  }
+  return props.numberingDefaults[key] ?? fallback
+}
+const effectivePageStartModel = computed({
+  get: () => Number(pageNumberingValue('pageStart', 1)),
+  set: (value) => updateGroupNumbering('pageNumber', { source: 'custom', pageStart: Number(value) }),
+})
+const effectivePageSequenceModel = computed({
+  get: () => pageNumberingValue('sequence', 'continuous'),
+  set: (value) => updateGroupNumbering('pageNumber', { source: 'custom', sequence: value }),
+})
+const effectiveTotalModeModel = computed({
+  get: () => pageNumberingValue('totalMode', 'combined'),
+  set: (value) => updateGroupNumbering('pageNumber', { source: 'custom', totalMode: value }),
+})
 const pageNumberPresetModel = computed({
   get() {
     const tpl = props.pageNumberTemplate
@@ -805,6 +881,11 @@ function addGroup() {
     color: '#000000',
     pageStart: 1,
     pageEnd: 0,
+    fileIds: [],
+    perFilePrefix: '证据',
+    perFileSeqType: 'numeric',
+    perFileSeqStart: 1,
+    numbering: { source: 'default', evidenceStart: null },
   }
   const updated = [...props.headerGroups, newGroup]
   emit('update:headerGroups', updated)
@@ -834,6 +915,7 @@ function addFooterTextGroup() {
     color: '#000000',
     pageStart: 1,
     pageEnd: 0,
+    fileIds: [],
   }
   const updated = [...props.footerTextGroups, newGroup]
   emit('update:footerTextGroups', updated)
@@ -864,6 +946,9 @@ function addPageNumberGroup() {
     marginMm: 10,
     offsetXMm: 0,
     color: '#000000',
+    fileIds: [],
+    numbering: { source: 'default', pageStart: null, sequence: null, totalMode: null },
+    exceptions: [],
   }
   const updated = [...props.pageNumberGroups, newGroup]
   emit('update:pageNumberGroups', updated)

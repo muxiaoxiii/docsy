@@ -25,4 +25,5 @@ test-pdf/
 docs/*
 !docs/office-markdown-converter-design.md
 !docs/pdf-markdown-converter-design.md
+!docs/PDF页眉页脚编号规则与预设方案.md
 Archived/

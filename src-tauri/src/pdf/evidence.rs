@@ -803,6 +803,8 @@ fn apply_overlay_batch(
             "pageStart": 1,
             "normalizeA4": false,
             "a4Orientation": "portrait",
+            "a4ContentRotation": "none",
+            "a4ContentMarginMm": 10,
             "rasterDpi": 300,
             "cleanup": {},
             "extraOverlays": [],

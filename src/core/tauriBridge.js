@@ -124,6 +124,10 @@ export async function listActiveOperations() {
   return invoke('list_active_operations')
 }
 
+export async function confirmAppClose() {
+  return invoke('confirm_app_close')
+}
+
 export function openPath(path) {
   return tauriCallSafe('open_path', { path })
 }

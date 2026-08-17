@@ -36,6 +36,10 @@ pub struct HeaderFooterJob {
     normalize_a4: bool,
     #[serde(default = "default_a4_orientation")]
     a4_orientation: String,
+    #[serde(default = "default_a4_content_rotation")]
+    a4_content_rotation: String,
+    #[serde(default = "default_a4_content_margin_mm")]
+    a4_content_margin_mm: f32,
     #[serde(default = "default_raster_dpi")]
     raster_dpi: u32,
     #[serde(default)]
@@ -252,6 +256,14 @@ fn default_a4_orientation() -> String {
     "preserve".to_string()
 }
 
+fn default_a4_content_rotation() -> String {
+    "none".to_string()
+}
+
+fn default_a4_content_margin_mm() -> f32 {
+    10.0
+}
+
 pub fn overlay_text(args: &HeaderFooterJob) -> Result<HeaderFooterResult> {
     process_job(args, None)
 }
@@ -447,6 +459,8 @@ fn process_job(
             cleanup_input,
             args.raster_dpi,
             &args.a4_orientation,
+            &args.a4_content_rotation,
+            args.a4_content_margin_mm,
         )?)
     } else {
         None
@@ -1034,6 +1048,8 @@ mod tests {
                 total_pages: Some(1),
                 normalize_a4: false,
                 a4_orientation: default_a4_orientation(),
+                a4_content_rotation: default_a4_content_rotation(),
+                a4_content_margin_mm: default_a4_content_margin_mm(),
                 raster_dpi: default_raster_dpi(),
                 cleanup: CleanupConfig::default(),
                 header: Some(OverlayTextConfig {
@@ -1141,6 +1157,8 @@ mod tests {
                 total_pages: None,
                 normalize_a4: true,
                 a4_orientation: "preserve".to_string(),
+                a4_content_rotation: "none".to_string(),
+                a4_content_margin_mm: 10.0,
                 raster_dpi: default_raster_dpi(),
                 cleanup: CleanupConfig::default(),
                 header: Some(OverlayTextConfig {
@@ -1234,6 +1252,8 @@ mod tests {
                 total_pages: Some(1),
                 normalize_a4: false,
                 a4_orientation: default_a4_orientation(),
+                a4_content_rotation: default_a4_content_rotation(),
+                a4_content_margin_mm: default_a4_content_margin_mm(),
                 raster_dpi: default_raster_dpi(),
                 cleanup: CleanupConfig {
                     header_enabled: true,

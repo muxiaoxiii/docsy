@@ -74,7 +74,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Setting, InfoFilled } from '@element-plus/icons-vue'
 import { getMenuItems } from './core/moduleRegistry.js'
-import { tauriCallSafe } from './core/tauriBridge.js'
+import { confirmAppClose, listActiveOperations, tauriCallSafe } from './core/tauriBridge.js'
 import { listen } from '@tauri-apps/api/event'
 import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
@@ -211,6 +211,45 @@ async function cancelCurrentOperation() {
 let unlistenConversionTimeout = null
 let unlistenDownloadProgress = null
 let unlistenOperationProgress = null
+let unlistenCloseRequested = null
+let closeConfirmationOpen = false
+
+async function handleCloseRequested(event) {
+  if (closeConfirmationOpen) return
+  closeConfirmationOpen = true
+  try {
+    let backendOperations = []
+    try {
+      backendOperations = await listActiveOperations()
+    } catch {
+      // The native event payload still covers registered subprocesses when the
+      // operation list cannot be queried during shutdown.
+    }
+    const hasRunningWork =
+      pendingOperations.size > 0 || backendOperations.length > 0 || Boolean(event.payload?.backendActive)
+
+    if (hasRunningWork) {
+      await ElMessageBox.confirm(
+        '当前仍有文件正在处理。中止并关闭可能导致尚未完成的输出文件不可用，是否继续关闭？',
+        '处理尚未完成',
+        {
+          confirmButtonText: '中止并关闭',
+          cancelButtonText: '继续处理',
+          type: 'warning',
+          closeOnClickModal: false,
+          closeOnPressEscape: false,
+        },
+      )
+    }
+
+    await confirmAppClose()
+  } catch {
+    // Cancelling the dialog intentionally keeps both the window and the
+    // running operation alive.
+  } finally {
+    closeConfirmationOpen = false
+  }
+}
 
 onMounted(() => {
   // Platform detection for OS-specific CSS (backdrop-filter on macOS only)
@@ -260,6 +299,10 @@ onMounted(() => {
   }).then((unlisten) => {
     unlistenOperationProgress = unlisten
   })
+
+  listen('docsy-close-requested', handleCloseRequested).then((unlisten) => {
+    unlistenCloseRequested = unlisten
+  })
 })
 
 onBeforeUnmount(() => {
@@ -273,6 +316,7 @@ onBeforeUnmount(() => {
   if (unlistenConversionTimeout) unlistenConversionTimeout()
   if (unlistenDownloadProgress) unlistenDownloadProgress()
   if (unlistenOperationProgress) unlistenOperationProgress()
+  if (unlistenCloseRequested) unlistenCloseRequested()
 })
 </script>
 

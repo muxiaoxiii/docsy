@@ -166,13 +166,36 @@
             <span class="field-hint">小页补白到 A4，大页等比缩小</span>
           </div>
           <div class="rule-item">
-            <label>A4 方向</label>
+            <label>A4 纸张方向</label>
             <el-select v-model="a4Orientation" :disabled="!normalizeA4">
               <el-option label="保持原页方向" value="preserve" />
               <el-option label="纵向" value="portrait" />
               <el-option label="横向" value="landscape" />
             </el-select>
-            <span class="field-hint">保持不判断内容方向；横向或纵向会先旋转整页</span>
+            <span class="field-hint">只决定 A4 纸张方向，不改变原内容朝向</span>
+          </div>
+          <div class="rule-item">
+            <label>内容旋转</label>
+            <el-select v-model="a4ContentRotation" :disabled="!normalizeA4">
+              <el-option label="不旋转" value="none" />
+              <el-option label="自动适配纸张" value="auto" />
+              <el-option label="顺时针 90°" value="clockwise" />
+              <el-option label="逆时针 90°" value="counterclockwise" />
+              <el-option label="旋转 180°" value="180" />
+            </el-select>
+            <span class="field-hint">默认不旋转；自动模式选择能保留更大内容的方向</span>
+          </div>
+          <div class="rule-item">
+            <label>内容安全边距</label>
+            <el-input-number
+              v-model="a4ContentMarginMm"
+              :disabled="!normalizeA4"
+              :min="0"
+              :max="30"
+              :step="1"
+              :precision="1"
+            />
+            <span class="field-hint">mm，默认四周保留 10 mm；内容过大时等比缩小</span>
           </div>
           <div class="rule-item">
             <label>删除批注对象</label>
@@ -189,8 +212,20 @@
       <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title-row">
           <div class="block-title">插入新页眉、页脚文字和页码</div>
-          <el-checkbox v-model="globalApplyEnabled" size="small">全局应用</el-checkbox>
-          <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
+          <div class="block-actions">
+            <el-button size="small" :disabled="!insertHeaderFooterEnabled" @click="pageNumberRulesVisible = true">
+              高级设置{{ totalPageNumberExceptionCount ? `（${totalPageNumberExceptionCount}）` : '' }}
+            </el-button>
+            <el-checkbox v-model="globalApplyEnabled" size="small">全局应用</el-checkbox>
+            <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
+          </div>
+        </div>
+        <div v-if="insertHeaderFooterEnabled" class="numbering-defaults">
+          <div class="numbering-defaults-title">
+            <strong>全局编号</strong><span>各条规则默认跟随；也可在规则内单独覆盖</span>
+          </div>
+          <div class="rule-item"><label>证据序号起始</label><el-input-number v-model="numberingDefaults.evidenceStart" :min="0" :max="9999" /></div>
+          <div class="rule-item"><label>页码起始</label><el-input-number v-model="numberingDefaults.pageStart" :min="1" :max="999999" /></div>
         </div>
         <HeaderFooterRuleFields
           v-if="insertHeaderFooterEnabled"
@@ -227,6 +262,7 @@
           v-model:footer-text-page-start="footerTextPageStart"
           v-model:footer-text-page-end="footerTextPageEnd"
           v-model:page-number-groups="pageNumberGroupsModel"
+          v-model:numbering-defaults="numberingDefaults"
           v-model:selected-page-number-group-id="selectedPageNumberGroupId"
           v-model:page-number-enabled="footerEnabled"
           v-model:page-number-sequence="pageNumberSequence"
@@ -239,10 +275,10 @@
           v-model:page-number-margin-mm="footerMarginMm"
           v-model:page-number-offset-x-mm="footerOffsetXMm"
           v-model:page-number-color="footerColor"
-          :page-number-override-count="pageNumberOverrides.length"
+          :page-number-override-count="selectedPageNumberExceptions.length"
           v-model:page-number-show-total="pageNumberShowTotal"
           :page-number-sample-page="previewSamplePage"
-          :page-number-sample-total="totalOverlayPages"
+          :page-number-sample-total="previewSampleTotal"
           :page-height-mm="previewHeightMm"
           @edit-page-number-rules="pageNumberRulesVisible = true"
           :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
@@ -301,6 +337,31 @@
               <el-radio value="filename">用文件名</el-radio>
             </el-radio-group>
           </div>
+        </div>
+      </div>
+
+      <div v-if="showProcessingControls && outputMode !== 'files_only'" class="rule-block">
+        <div class="preset-bar">
+          <div class="preset-label">
+            <strong>处理预设</strong>
+            <span>应用后立即用于本次处理</span>
+          </div>
+          <el-select v-model="selectedProcessingPresetId" placeholder="选择预设" class="preset-select">
+            <el-option-group label="内置预设">
+              <el-option v-for="preset in builtInProcessingPresets" :key="preset.id" :label="preset.name" :value="preset.id" />
+            </el-option-group>
+            <el-option-group v-if="userProcessingPresets.length" label="我的预设">
+              <el-option v-for="preset in userProcessingPresets" :key="preset.id" :label="preset.name" :value="preset.id" />
+            </el-option-group>
+          </el-select>
+          <el-button :disabled="!selectedProcessingPresetId" @click="applySelectedProcessingPreset">应用</el-button>
+          <el-button type="primary" plain @click="saveCurrentProcessingPreset">保存当前设置</el-button>
+          <el-dropdown v-if="selectedUserPreset" trigger="click" @command="handlePresetCommand">
+            <el-button>管理</el-button>
+            <template #dropdown>
+              <el-dropdown-menu><el-dropdown-item command="rename">重命名</el-dropdown-item><el-dropdown-item command="delete" divided>删除</el-dropdown-item></el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
 
@@ -722,6 +783,7 @@
         v-model:footer-text-page-start="footerTextPageStart"
         v-model:footer-text-page-end="footerTextPageEnd"
         v-model:page-number-groups="pageNumberGroupsModel"
+        v-model:numbering-defaults="numberingDefaults"
         v-model:selected-page-number-group-id="selectedPageNumberGroupId"
         v-model:page-number-enabled="footerEnabled"
         v-model:page-number-sequence="pageNumberSequence"
@@ -734,10 +796,10 @@
         v-model:page-number-margin-mm="footerMarginMm"
         v-model:page-number-offset-x-mm="footerOffsetXMm"
         v-model:page-number-color="footerColor"
-        :page-number-override-count="pageNumberOverrides.length"
+        :page-number-override-count="selectedPageNumberExceptions.length"
         v-model:page-number-show-total="pageNumberShowTotal"
         :page-number-sample-page="previewSamplePage"
-        :page-number-sample-total="totalOverlayPages"
+        :page-number-sample-total="previewSampleTotal"
         :page-height-mm="previewHeightMm"
         @edit-page-number-rules="pageNumberRulesVisible = true"
         :offset-limit-mm="HORIZONTAL_OFFSET_LIMIT_MM"
@@ -747,7 +809,17 @@
         <el-button type="primary" @click="applyHeaderFooterSettings">应用到预览</el-button>
       </template>
     </el-dialog>
-    <PageNumberRuleDialog v-model:visible="pageNumberRulesVisible" v-model:rules="pageNumberOverrides" />
+    <PageNumberRuleDialog
+      v-model:visible="pageNumberRulesVisible"
+      v-model:groups="pageNumberGroupsModel"
+      v-model:selected-group-id="selectedPageNumberGroupId"
+      v-model:header-groups="headerGroupsModel"
+      v-model:footer-groups="footerTextGroupsModel"
+      v-model:selected-header-group-id="selectedHeaderGroupId"
+      v-model:selected-footer-group-id="selectedFooterTextGroupId"
+      :numbering-defaults="numberingDefaults"
+      :files="overlayRows"
+    />
     <ExistingPdfElementsDialog
       v-model:visible="existingElementsVisible"
       :rows="existingElementRows"
@@ -870,8 +942,11 @@ import {
   buildOutputDir,
   createDefaultFooterTextGroup,
   createDefaultHeaderGroup,
+  createDefaultNumberingDefaults,
   createDefaultPageNumberGroup,
   createEvidenceFile,
+  effectiveHeaderNumbering,
+  effectivePageNumbering,
   fileName,
   groupsFor,
   pageRangeText,
@@ -1032,20 +1107,20 @@ const overlayRows = computed(() => {
 const selectedOverlayFile = computed(() => overlayRows.value[selectedOverlayIndex.value] || null)
 
 const headerGroups = computed(() =>
-  globalApplyEnabled.value ? [globalHeaderGroup.value] : groupsFor(selectedOverlayFile.value, 'header'),
+  globalApplyEnabled.value ? globalHeaderGroups.value : groupsFor(selectedOverlayFile.value, 'header'),
 )
 const footerTextGroups = computed(() =>
-  globalApplyEnabled.value ? [globalFooterTextGroup.value] : groupsFor(selectedOverlayFile.value, 'footerText'),
+  globalApplyEnabled.value ? globalFooterTextGroups.value : groupsFor(selectedOverlayFile.value, 'footerText'),
 )
 const pageNumberGroups = computed(() =>
-  globalApplyEnabled.value ? [globalPageNumberGroup.value] : groupsFor(selectedOverlayFile.value, 'pageNumber'),
+  globalApplyEnabled.value ? globalPageNumberGroups.value : groupsFor(selectedOverlayFile.value, 'pageNumber'),
 )
 // Writable models so HeaderFooterRuleFields can add/remove groups per file
 const headerGroupsModel = computed({
-  get: () => (globalApplyEnabled.value ? [globalHeaderGroup.value] : selectedOverlayFile.value?.headerGroups || []),
+  get: () => (globalApplyEnabled.value ? globalHeaderGroups.value : selectedOverlayFile.value?.headerGroups || []),
   set: (v) => {
     if (globalApplyEnabled.value) {
-      globalHeaderGroup.value = v[0] || createDefaultHeaderGroup()
+      globalHeaderGroups.value = v.length ? v : [createDefaultHeaderGroup()]
     } else if (selectedOverlayFile.value) {
       selectedOverlayFile.value.headerGroups = v
     }
@@ -1053,10 +1128,10 @@ const headerGroupsModel = computed({
 })
 const footerTextGroupsModel = computed({
   get: () =>
-    globalApplyEnabled.value ? [globalFooterTextGroup.value] : selectedOverlayFile.value?.footerTextGroups || [],
+    globalApplyEnabled.value ? globalFooterTextGroups.value : selectedOverlayFile.value?.footerTextGroups || [],
   set: (v) => {
     if (globalApplyEnabled.value) {
-      globalFooterTextGroup.value = v[0] || createDefaultFooterTextGroup()
+      globalFooterTextGroups.value = v.length ? v : [createDefaultFooterTextGroup()]
     } else if (selectedOverlayFile.value) {
       selectedOverlayFile.value.footerTextGroups = v
     }
@@ -1064,10 +1139,10 @@ const footerTextGroupsModel = computed({
 })
 const pageNumberGroupsModel = computed({
   get: () =>
-    globalApplyEnabled.value ? [globalPageNumberGroup.value] : selectedOverlayFile.value?.pageNumberGroups || [],
+    globalApplyEnabled.value ? globalPageNumberGroups.value : selectedOverlayFile.value?.pageNumberGroups || [],
   set: (v) => {
     if (globalApplyEnabled.value) {
-      globalPageNumberGroup.value = v[0] || createDefaultPageNumberGroup()
+      globalPageNumberGroups.value = v.length ? v : [createDefaultPageNumberGroup()]
     } else if (selectedOverlayFile.value) {
       selectedOverlayFile.value.pageNumberGroups = v
     }
@@ -1081,43 +1156,46 @@ const pageNumberTemplate = computed({
 })
 const selectedHeaderGroup = computed(() =>
   globalApplyEnabled.value
-    ? globalHeaderGroup.value
+    ? globalHeaderGroups.value.find((group) => group.id === globalSelectedHeaderGroupId.value) || globalHeaderGroups.value[0]
     : selectedGroupFor(selectedOverlayFile.value, 'header') || createDefaultHeaderGroup(),
 )
 const selectedFooterTextGroup = computed(() =>
   globalApplyEnabled.value
-    ? globalFooterTextGroup.value
+    ? globalFooterTextGroups.value.find((group) => group.id === globalSelectedFooterTextGroupId.value) || globalFooterTextGroups.value[0]
     : selectedGroupFor(selectedOverlayFile.value, 'footerText') || createDefaultFooterTextGroup(),
 )
 const selectedPageNumberGroup = computed(() =>
   globalApplyEnabled.value
-    ? globalPageNumberGroup.value
+    ? globalPageNumberGroups.value.find((group) => group.id === globalSelectedPageNumberGroupId.value) || globalPageNumberGroups.value[0]
     : selectedGroupFor(selectedOverlayFile.value, 'pageNumber') || createDefaultPageNumberGroup(),
 )
 // Per-file selected group ids (bind to HeaderFooterRuleFields v-model)
 const selectedHeaderGroupId = computed({
   get: () =>
-    globalApplyEnabled.value ? globalHeaderGroup.value.id : selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
+    globalApplyEnabled.value ? globalSelectedHeaderGroupId.value : selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
   set: (v) => {
-    if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'header', v)
+    if (globalApplyEnabled.value) globalSelectedHeaderGroupId.value = v
+    else setSelectedGroup(selectedOverlayFile.value, 'header', v)
   },
 })
 const selectedFooterTextGroupId = computed({
   get: () =>
     globalApplyEnabled.value
-      ? globalFooterTextGroup.value.id
+      ? globalSelectedFooterTextGroupId.value
       : selectedOverlayFile.value?.selectedFooterTextGroupId || 'ft1',
   set: (v) => {
-    if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'footerText', v)
+    if (globalApplyEnabled.value) globalSelectedFooterTextGroupId.value = v
+    else setSelectedGroup(selectedOverlayFile.value, 'footerText', v)
   },
 })
 const selectedPageNumberGroupId = computed({
   get: () =>
     globalApplyEnabled.value
-      ? globalPageNumberGroup.value.id
+      ? globalSelectedPageNumberGroupId.value
       : selectedOverlayFile.value?.selectedPageNumberGroupId || 'pn1',
   set: (v) => {
-    if (!globalApplyEnabled.value) setSelectedGroup(selectedOverlayFile.value, 'pageNumber', v)
+    if (globalApplyEnabled.value) globalSelectedPageNumberGroupId.value = v
+    else setSelectedGroup(selectedOverlayFile.value, 'pageNumber', v)
   },
 })
 // Legacy compat refs pointing at selected file/group. Setters update the file's group.
@@ -1288,14 +1366,20 @@ const insertHeaderFooterEnabled = ref(true)
 const cleanupHeaderHeightMm = ref(18)
 const cleanupFooterHeightMm = ref(18)
 const globalApplyEnabled = ref(true)
-const globalHeaderGroup = ref(createDefaultHeaderGroup())
-const globalFooterTextGroup = ref(createDefaultFooterTextGroup())
-const globalPageNumberGroup = ref(createDefaultPageNumberGroup())
+const globalHeaderGroups = ref([createDefaultHeaderGroup()])
+const globalFooterTextGroups = ref([createDefaultFooterTextGroup()])
+const globalPageNumberGroups = ref([createDefaultPageNumberGroup()])
+const globalSelectedHeaderGroupId = ref('h1')
+const globalSelectedFooterTextGroupId = ref('ft1')
+const globalSelectedPageNumberGroupId = ref('pn1')
+const numberingDefaults = ref(createDefaultNumberingDefaults())
 const headerInsertEnabled = ref(false)
 const footerInsertEnabled = ref(false)
 const pageNumberShowTotal = ref(true)
 const normalizeA4 = ref(false)
 const a4Orientation = ref('preserve')
+const a4ContentRotation = ref('none')
+const a4ContentMarginMm = ref(10)
 const rasterDpi = ref(200)
 const removeAnnotations = ref(false)
 const bookmarkEnabled = ref(false)
@@ -1306,8 +1390,11 @@ const footerEnabled = ref(false)
 const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)
 // pageNumberSequence, pageNumberStyle, pageNumberRegion are computed from selectedPageNumberGroup above
-const pageNumberOverrides = ref([])
 const pageNumberRulesVisible = ref(false)
+const selectedPageNumberExceptions = computed(() => selectedPageNumberGroup.value?.exceptions || [])
+const totalPageNumberExceptionCount = computed(() =>
+  pageNumberGroupsModel.value.reduce((total, group) => total + Number(group.exceptions?.length || 0), 0),
+)
 // footerAlign..footerColor are page number placement, backed by selectedPageNumberGroup
 const footerAlign = computed({
   get: () => selectedPageNumberGroup.value.align,
@@ -1350,6 +1437,26 @@ const outputMode = ref('files_and_merge')
 const mergeFileName = ref('merged_evidence.pdf')
 const fileSuffixEnabled = ref(true)
 const fileSuffixText = ref('processed')
+const PROCESSING_PRESET_STORAGE_KEY = 'docsy.evidencePdf.processingPresets.v1'
+const selectedProcessingPresetId = ref('builtin-new-evidence')
+const userProcessingPresets = ref(loadProcessingPresets())
+const builtInProcessingPresets = [
+  {
+    id: 'builtin-new-evidence',
+    name: '新证据',
+    builtIn: true,
+    settings: builtInProcessingSettings(1, 1),
+  },
+  {
+    id: 'builtin-supplemental-evidence',
+    name: '补充证据（接续示例）',
+    builtIn: true,
+    settings: builtInProcessingSettings(11, 101),
+  },
+]
+const selectedUserPreset = computed(() =>
+  userProcessingPresets.value.find((preset) => preset.id === selectedProcessingPresetId.value),
+)
 const previewPage = ref(1)
 const previewReloadKey = ref(0)
 const previewData = ref({})
@@ -1359,6 +1466,209 @@ const previewHeightMm = computed(() => {
 })
 const truePreview = ref(null)
 const truePreviewLoading = ref(false)
+
+function cloneData(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function builtInProcessingSettings(evidenceStart, pageStart) {
+  const headerGroup = createDefaultHeaderGroup()
+  headerGroup.mode = 'per_file'
+  return {
+    schemaVersion: 1,
+    normalizeA4: false,
+    a4Orientation: 'preserve',
+    a4ContentRotation: 'none',
+    a4ContentMarginMm: 10,
+    rasterDpi: 200,
+    removeAnnotations: false,
+    annotationKinds: [],
+    optimizeSizeEnabled: true,
+    cleanupHeaderHeightMm: 18,
+    cleanupFooterHeightMm: 18,
+    insertHeaderFooterEnabled: true,
+    globalApplyEnabled: true,
+    headerInsertEnabled: true,
+    footerInsertEnabled: false,
+    pageNumberEnabled: true,
+    pageNumberShowTotal: true,
+    numberingDefaults: { ...createDefaultNumberingDefaults(), evidenceStart, pageStart },
+    headerGroups: [headerGroup],
+    footerTextGroups: [createDefaultFooterTextGroup()],
+    pageNumberGroups: [createDefaultPageNumberGroup()],
+    bookmarkEnabled: true,
+    bookmarkRemoveExisting: false,
+    bookmarkLabelSource: 'header',
+    outputMode: 'files_and_merge',
+    mergeFileName: 'merged_evidence.pdf',
+    fileSuffixEnabled: true,
+    fileSuffixText: 'processed',
+  }
+}
+
+function loadProcessingPresets() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PROCESSING_PRESET_STORAGE_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed.filter((item) => item?.id && item?.name && item?.settings) : []
+  } catch {
+    return []
+  }
+}
+
+function persistProcessingPresets() {
+  window.localStorage.setItem(PROCESSING_PRESET_STORAGE_KEY, JSON.stringify(userProcessingPresets.value))
+}
+
+function processingPresetSnapshot() {
+  return cloneData({
+    schemaVersion: 1,
+    normalizeA4: normalizeA4.value,
+    a4Orientation: a4Orientation.value,
+    a4ContentRotation: a4ContentRotation.value,
+    a4ContentMarginMm: a4ContentMarginMm.value,
+    rasterDpi: rasterDpi.value,
+    removeAnnotations: removeAnnotations.value,
+    annotationKinds: annotationKinds.value,
+    optimizeSizeEnabled: optimizeSizeEnabled.value,
+    cleanupHeaderHeightMm: cleanupHeaderHeightMm.value,
+    cleanupFooterHeightMm: cleanupFooterHeightMm.value,
+    headerDateValue: splitNameDateValue.value,
+    insertHeaderFooterEnabled: insertHeaderFooterEnabled.value,
+    globalApplyEnabled: globalApplyEnabled.value,
+    headerInsertEnabled: headerInsertEnabled.value,
+    footerInsertEnabled: footerInsertEnabled.value,
+    pageNumberEnabled: footerEnabled.value,
+    pageNumberShowTotal: pageNumberShowTotal.value,
+    numberingDefaults: numberingDefaults.value,
+    headerGroups: headerGroupsModel.value,
+    footerTextGroups: footerTextGroupsModel.value,
+    pageNumberGroups: pageNumberGroupsModel.value,
+    bookmarkEnabled: bookmarkEnabled.value,
+    bookmarkRemoveExisting: bookmarkRemoveExisting.value,
+    bookmarkLabelSource: bookmarkLabelSource.value,
+    outputMode: outputMode.value,
+    mergeFileName: mergeFileName.value,
+    fileSuffixEnabled: fileSuffixEnabled.value,
+    fileSuffixText: fileSuffixText.value,
+  })
+}
+
+function applyProcessingPresetSettings(settings) {
+  const value = cloneData(settings || {})
+  if ('normalizeA4' in value) normalizeA4.value = Boolean(value.normalizeA4)
+  if (value.a4Orientation) a4Orientation.value = value.a4Orientation
+  if (value.a4ContentRotation) a4ContentRotation.value = value.a4ContentRotation
+  if (value.a4ContentMarginMm != null) a4ContentMarginMm.value = Number(value.a4ContentMarginMm)
+  if (value.rasterDpi != null) rasterDpi.value = Number(value.rasterDpi)
+  if ('removeAnnotations' in value) removeAnnotations.value = Boolean(value.removeAnnotations)
+  if (Array.isArray(value.annotationKinds)) annotationKinds.value = cloneData(value.annotationKinds)
+  if ('optimizeSizeEnabled' in value) optimizeSizeEnabled.value = Boolean(value.optimizeSizeEnabled)
+  if (value.cleanupHeaderHeightMm != null) cleanupHeaderHeightMm.value = Number(value.cleanupHeaderHeightMm)
+  if (value.cleanupFooterHeightMm != null) cleanupFooterHeightMm.value = Number(value.cleanupFooterHeightMm)
+  if (value.headerDateValue) splitNameDateValue.value = value.headerDateValue
+  if ('insertHeaderFooterEnabled' in value) insertHeaderFooterEnabled.value = Boolean(value.insertHeaderFooterEnabled)
+  if ('globalApplyEnabled' in value) globalApplyEnabled.value = Boolean(value.globalApplyEnabled)
+  if ('headerInsertEnabled' in value) headerInsertEnabled.value = Boolean(value.headerInsertEnabled)
+  if ('footerInsertEnabled' in value) footerInsertEnabled.value = Boolean(value.footerInsertEnabled)
+  if ('pageNumberEnabled' in value) footerEnabled.value = Boolean(value.pageNumberEnabled)
+  if ('pageNumberShowTotal' in value) pageNumberShowTotal.value = Boolean(value.pageNumberShowTotal)
+  const presetNumbering = value.numberingDefaults || {}
+  numberingDefaults.value = {
+    evidenceStart: Number(presetNumbering.evidenceStart ?? 1),
+    pageStart: Number(presetNumbering.pageStart ?? 1),
+  }
+  const headerValues = value.headerGroups?.length ? value.headerGroups : [createDefaultHeaderGroup()]
+  const footerValues = value.footerTextGroups?.length ? value.footerTextGroups : [createDefaultFooterTextGroup()]
+  const pageValues = value.pageNumberGroups?.length ? value.pageNumberGroups : [createDefaultPageNumberGroup()]
+  if (globalApplyEnabled.value) {
+    globalHeaderGroups.value = cloneData(headerValues)
+    globalFooterTextGroups.value = cloneData(footerValues)
+    globalPageNumberGroups.value = cloneData(pageValues)
+    globalSelectedHeaderGroupId.value = globalHeaderGroups.value[0]?.id || 'h1'
+    globalSelectedFooterTextGroupId.value = globalFooterTextGroups.value[0]?.id || 'ft1'
+    globalSelectedPageNumberGroupId.value = globalPageNumberGroups.value[0]?.id || 'pn1'
+  } else {
+    for (const file of overlayFiles.value) {
+      file.headerGroups = cloneData(headerValues)
+      file.footerTextGroups = cloneData(footerValues)
+      file.pageNumberGroups = cloneData(pageValues)
+      file.selectedHeaderGroupId = file.headerGroups[0]?.id || 'h1'
+      file.selectedFooterTextGroupId = file.footerTextGroups[0]?.id || 'ft1'
+      file.selectedPageNumberGroupId = file.pageNumberGroups[0]?.id || 'pn1'
+    }
+  }
+  if ('bookmarkEnabled' in value) bookmarkEnabled.value = Boolean(value.bookmarkEnabled)
+  if ('bookmarkRemoveExisting' in value) bookmarkRemoveExisting.value = Boolean(value.bookmarkRemoveExisting)
+  if (value.bookmarkLabelSource) bookmarkLabelSource.value = value.bookmarkLabelSource
+  if (value.outputMode) outputMode.value = value.outputMode
+  if (value.mergeFileName) mergeFileName.value = value.mergeFileName
+  if ('fileSuffixEnabled' in value) fileSuffixEnabled.value = Boolean(value.fileSuffixEnabled)
+  if (value.fileSuffixText != null) fileSuffixText.value = value.fileSuffixText
+}
+
+function selectedProcessingPreset() {
+  return [...builtInProcessingPresets, ...userProcessingPresets.value].find(
+    (preset) => preset.id === selectedProcessingPresetId.value,
+  )
+}
+
+function applySelectedProcessingPreset() {
+  const preset = selectedProcessingPreset()
+  if (!preset) return
+  const availableFileIds = new Set(overlayFiles.value.map((file) => String(file.id || file.path || '')))
+  const referencedFileIds = (preset.settings?.pageNumberGroups || []).flatMap((group) =>
+    (group.exceptions || []).flatMap((entry) => entry.scope?.fileIds || []),
+  )
+  const missingFileCount = referencedFileIds.filter((id) => !availableFileIds.has(String(id))).length
+  applyProcessingPresetSettings(preset.settings)
+  ElMessage.success(`已应用“${preset.name}”，设置会用于本次处理`)
+  if (missingFileCount) ElMessage.warning(`预设中有 ${missingFileCount} 个文件范围与当前清单不匹配，相关例外不会执行`)
+  if (preset.id === 'builtin-supplemental-evidence') {
+    ElMessage.info('内置接续起点为示例值，请按本案修改证据序号和页码起始值')
+  }
+}
+
+async function saveCurrentProcessingPreset() {
+  try {
+    const { value } = await ElMessageBox.prompt('输入预设名称', '保存处理预设', {
+      inputValue: selectedUserPreset.value?.name || '', inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
+    })
+    const name = String(value || '').trim()
+    const existing = userProcessingPresets.value.find((preset) => preset.name === name)
+    if (existing) {
+      await ElMessageBox.confirm(`已存在“${name}”，是否覆盖？`, '覆盖预设', { type: 'warning' })
+      existing.settings = processingPresetSnapshot()
+      existing.updatedAt = new Date().toISOString()
+      selectedProcessingPresetId.value = existing.id
+    } else {
+      const preset = { id: `preset-${Date.now()}`, name, settings: processingPresetSnapshot(), updatedAt: new Date().toISOString() }
+      userProcessingPresets.value.push(preset)
+      selectedProcessingPresetId.value = preset.id
+    }
+    persistProcessingPresets()
+    ElMessage.success('预设已保存')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  }
+}
+
+async function handlePresetCommand(command) {
+  const preset = selectedUserPreset.value
+  if (!preset) return
+  try {
+    if (command === 'rename') {
+      const { value } = await ElMessageBox.prompt('输入新名称', '重命名预设', { inputValue: preset.name, inputPattern: /\S+/, inputErrorMessage: '名称不能为空' })
+      preset.name = String(value || '').trim()
+    } else if (command === 'delete') {
+      await ElMessageBox.confirm(`确认删除“${preset.name}”？`, '删除预设', { type: 'warning' })
+      userProcessingPresets.value = userProcessingPresets.value.filter((item) => item.id !== preset.id)
+      selectedProcessingPresetId.value = 'builtin-new-evidence'
+    }
+    persistProcessingPresets()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  }
+}
 const detectingAllHeaderFooter = ref(false)
 const deepDetecting = ref(false)
 const detectionProgressText = ref('')
@@ -1525,7 +1835,20 @@ const previewMaxPage = computed(() => {
 })
 const previewHint = computed(() => (mergedImportPlan.value ? '合并 PDF 原文预览' : '实时位置；真实预览需手动生成'))
 const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
-const previewSamplePage = computed(() => previewPage.value)
+const previewSamplePage = computed(() => {
+  const numbering = effectivePageNumbering(selectedPageNumberGroup.value, numberingDefaults.value)
+  const preceding = numbering.sequence === 'continuous'
+    ? Number(selectedOverlayFile.value?.pageStart || 1) + Number(previewPage.value || 1) - 2
+    : Number(previewPage.value || 1) - 1
+  return numbering.pageStart + Math.max(0, preceding)
+})
+const previewSampleTotal = computed(() => {
+  const numbering = effectivePageNumbering(selectedPageNumberGroup.value, numberingDefaults.value)
+  const pages = numbering.totalMode === 'combined'
+    ? totalOverlayPages.value
+    : Number(selectedOverlayFile.value?.pages || 1)
+  return numbering.pageStart + Math.max(0, pages - 1)
+})
 const plannedOutputDir = computed(() => buildOutputDir(overlayRows.value, overlayOutputDir.value))
 const plannedMergeOutputPath = computed(() =>
   buildMergeOutputPath(overlayRows.value, overlayOutputDir.value, mergeFileName.value),
@@ -1537,18 +1860,20 @@ const firstHeaderPreview = computed(() => {
   if (!globalApplyEnabled.value) return rowHeaderPreview(first, 0)
   // 全局应用时样例必须读全局页眉组和当前生效模式，
   // 否则会显示文件自带默认组（filename 模式）的渲染结果。
-  const group = globalHeaderGroup.value
+  const group = selectedHeaderGroup.value
   if (!group || group.enabled === false) return ''
   const mode = headerMode.value ?? group.mode
   if (mode === 'none') return ''
-  return buildHeaderTextForGroup(first, 0, { ...group, mode }, currentRules.value)
+  const effective = effectiveHeaderNumbering(group, numberingDefaults.value)
+  return buildHeaderTextForGroup(first, 0, { ...group, mode, perFileSeqStart: effective.evidenceStart }, currentRules.value)
 })
 const firstFooterPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
-  const pnGroup = globalApplyEnabled.value ? globalPageNumberGroup.value : selectedGroupFor(first, 'pageNumber')
+  const pnGroup = globalApplyEnabled.value ? selectedPageNumberGroup.value : selectedGroupFor(first, 'pageNumber')
   if (!first || !footerEnabled.value || !pnGroup || !totalOverlayPages.value) return ''
-  const continuous = (pnGroup.sequence || 'continuous') !== 'per-file'
+  const numbering = effectivePageNumbering(pnGroup, numberingDefaults.value)
+  const continuous = numbering.sequence !== 'per-file'
   let tpl = pnGroup.template || '{page}/{total}'
   if (!pageNumberShowTotal.value)
     tpl = tpl
@@ -1561,8 +1886,8 @@ const firstFooterPreview = computed(() => {
       .replace(/\/+$/, '')
   return renderPageNumberTemplate(
     tpl,
-    continuous ? first.pageStart || 1 : 1,
-    continuous ? totalOverlayPages.value : first.pages || 1,
+    numbering.pageStart,
+    numbering.pageStart + (numbering.totalMode === 'combined' ? totalOverlayPages.value : first.pages || 1) - 1,
     pnGroup.style || 'arabic',
   )
 })
@@ -1570,6 +1895,9 @@ const processingNotes = computed(() => {
   const notes = []
   if (normalizeA4.value) {
     notes.push('A4 规范化会把小页面居中补白到 A4，超过 A4 的页面才等比缩小；会尽量保留原 PDF 内容层')
+    if (a4ContentRotation.value !== 'none') {
+      notes.push('内容旋转仅按当前明确选择执行；纸张方向本身不会触发旋转')
+    }
   }
   if (removeAnnotations.value) {
     notes.push('删除批注只处理评论、高亮等批注对象，已扁平化到正文的标记不会被对象删除')
@@ -1723,6 +2051,8 @@ const hasApplicableProcessingRule = computed(
 const currentRules = computed(() => ({
   normalizeA4: normalizeA4.value,
   a4Orientation: a4Orientation.value,
+  a4ContentRotation: a4ContentRotation.value,
+  a4ContentMarginMm: a4ContentMarginMm.value,
   rasterDpi: rasterDpi.value,
   removeAnnotations: removeAnnotations.value,
   bookmarkEnabled: bookmarkEnabled.value,
@@ -1750,11 +2080,11 @@ const currentRules = computed(() => ({
   pageNumberGroups: insertHeaderFooterEnabled.value && footerEnabled.value ? pageNumberGroups.value : [],
   // Global group: shared group instances used by ALL files when enabled (gated by main switch)
   _globalApply: insertHeaderFooterEnabled.value && globalApplyEnabled.value,
-  _globalHeaderGroup: insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalHeaderGroup.value : null,
+  _globalHeaderGroup: insertHeaderFooterEnabled.value && globalApplyEnabled.value ? selectedHeaderGroup.value : null,
   _globalFooterTextGroup:
-    insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalFooterTextGroup.value : null,
+    insertHeaderFooterEnabled.value && globalApplyEnabled.value ? selectedFooterTextGroup.value : null,
   _globalPageNumberGroup:
-    insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalPageNumberGroup.value : null,
+    insertHeaderFooterEnabled.value && globalApplyEnabled.value ? selectedPageNumberGroup.value : null,
   footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,
@@ -1783,7 +2113,7 @@ const currentRules = computed(() => ({
   pageNumberMarginMm: footerMarginMm.value,
   pageNumberOffsetXMm: footerOffsetXMm.value,
   pageNumberColor: footerColor.value,
-  pageNumberOverrides: pageNumberOverrides.value,
+  numberingDefaults: numberingDefaults.value,
   pageNumberShowTotal: pageNumberShowTotal.value,
   selectedHeaderGroupId: selectedHeaderGroupId.value,
   selectedFooterTextGroupId: selectedFooterTextGroupId.value,
@@ -2190,6 +2520,9 @@ function applyReplacementPreset() {
   footerInsertEnabled.value = true
   pageNumberShowTotal.value = true
   normalizeA4.value = false
+  a4Orientation.value = 'preserve'
+  a4ContentRotation.value = 'none'
+  a4ContentMarginMm.value = 10
   removeAnnotations.value = false
   cleanupHeaderHeightMm.value = 18
   cleanupFooterHeightMm.value = 18
@@ -3586,9 +3919,50 @@ h3 {
 
 .preset-bar {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.preset-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+}
+
+.preset-label strong {
+  font-size: 13px;
+  color: var(--docsy-text-strong);
+}
+
+.preset-label span,
+.numbering-defaults-title span {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+}
+
+.preset-select {
+  width: min(280px, 100%);
+}
+
+.numbering-defaults {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: end;
   margin-bottom: 12px;
+  padding: 10px;
+  border-left: 3px solid var(--el-color-primary-light-5);
+  background: var(--docsy-surface-elevated);
+}
+
+.numbering-defaults-title {
+  align-self: center;
+}
+
+.numbering-defaults-title strong,
+.numbering-defaults-title span {
+  display: block;
 }
 
 .block-title {
