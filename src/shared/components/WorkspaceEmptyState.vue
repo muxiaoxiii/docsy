@@ -1,12 +1,19 @@
 <template>
-  <section class="workspace-empty-state" :class="{ compact }">
+  <section
+    class="workspace-empty-state"
+    :class="[{ compact }, `is-${state}`]"
+    :role="state === 'error' ? 'alert' : 'status'"
+    :aria-live="state === 'error' ? 'assertive' : 'polite'"
+    :aria-busy="state === 'loading'"
+  >
     <span
       class="empty-state-icon"
       :style="{ '--empty-icon-url': `url(&quot;${iconUrl || defaultIconUrl}&quot;)` }"
       aria-hidden="true"
     ></span>
-    <strong>{{ title }}</strong>
+    <strong>{{ resolvedTitle }}</strong>
     <p v-if="description">{{ description }}</p>
+    <span v-if="state === 'loading'" class="empty-state-progress" aria-hidden="true"></span>
     <div v-if="$slots.actions" class="empty-state-actions">
       <slot name="actions" />
     </div>
@@ -14,9 +21,10 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import defaultIconUrl from '../../assets/icons/documents.svg?url'
 
-defineProps({
+const props = defineProps({
   title: {
     type: String,
     default: '等待添加文件',
@@ -33,6 +41,18 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  state: {
+    type: String,
+    default: 'empty',
+    validator: (value) => ['empty', 'loading', 'error'].includes(value),
+  },
+})
+
+const resolvedTitle = computed(() => {
+  if (props.title !== '等待添加文件') return props.title
+  if (props.state === 'loading') return '正在加载'
+  if (props.state === 'error') return '加载失败'
+  return props.title
 })
 </script>
 
@@ -90,6 +110,46 @@ defineProps({
   margin: 7px 0 0;
   font-size: 12px;
   line-height: 1.65;
+}
+
+.workspace-empty-state.is-error {
+  color: var(--docsy-danger);
+  border-color: var(--docsy-danger-border);
+  background: var(--docsy-danger-soft);
+}
+
+.workspace-empty-state.is-error strong,
+.workspace-empty-state.is-error .empty-state-icon {
+  color: var(--docsy-danger);
+}
+
+.empty-state-progress {
+  width: min(180px, 70%);
+  height: 4px;
+  margin-top: 16px;
+  overflow: hidden;
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-active);
+}
+
+.empty-state-progress::after {
+  display: block;
+  width: 46%;
+  height: 100%;
+  content: '';
+  border-radius: inherit;
+  background: var(--docsy-primary);
+  animation: empty-state-loading 1.2s var(--ease-out) infinite alternate;
+}
+
+@keyframes empty-state-loading {
+  from {
+    transform: translateX(-12%);
+  }
+
+  to {
+    transform: translateX(130%);
+  }
 }
 
 .empty-state-actions {

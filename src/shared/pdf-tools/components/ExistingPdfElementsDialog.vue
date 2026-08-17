@@ -247,30 +247,30 @@ function handleRowClick(row, _column, event) {
   if (!key) return
   const target = event?.target
 
-  // Prevent text selection on row click
-  event.preventDefault()
-
   const currentIndex = filteredRows.value.findIndex(r => r.key === key)
   if (currentIndex < 0) return
 
+  // Shift+click 仅在勾选框区域触发范围选择
   if (event.shiftKey && lastClickedIndex.value >= 0) {
-    // Shift+click: range select from lastClickedIndex to currentIndex
-    const start = Math.min(lastClickedIndex.value, currentIndex)
-    const end = Math.max(lastClickedIndex.value, currentIndex)
-    const rangeKeys = filteredRows.value.slice(start, end + 1).map(r => r.key)
-    const selectedSet = new Set(selectedKeys.value)
-    rangeKeys.forEach(k => selectedSet.add(k))
-    selectedKeys.value = [...selectedSet]
-    return
+    if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) {
+      const start = Math.min(lastClickedIndex.value, currentIndex)
+      const end = Math.max(lastClickedIndex.value, currentIndex)
+      const rangeKeys = filteredRows.value.slice(start, end + 1).map(r => r.key)
+      const selectedSet = new Set(selectedKeys.value)
+      rangeKeys.forEach(k => selectedSet.add(k))
+      selectedKeys.value = [...selectedSet]
+      return
+    }
   }
 
-  // 非 shift 点击一律更新锚点（包括点勾选框），之后 shift+点击即以此为起点
+  // 更新锚点
   lastClickedIndex.value = currentIndex
 
-  // 勾选框区域的点击交给 el-checkbox 自身 v-model 切换，避免双重切换
+  // 勾选框区域交给 el-checkbox 自身 v-model 切换
   if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) return
 
-  // Normal click: toggle current row
+  // 行点击：preventDefault 防文字选中 + 手动 toggle
+  event.preventDefault()
   const idx = selectedKeys.value.indexOf(key)
   if (idx >= 0) {
     selectedKeys.value = selectedKeys.value.filter(k => k !== key)

@@ -334,7 +334,8 @@ const {
 .settings-panel {
   min-width: 0;
   overflow-y: auto;
-  padding: 22px 24px 28px;
+  padding-block: clamp(16px, 3.1dvh, 22px) clamp(20px, 3.9dvh, 28px);
+  padding-inline: 24px;
   border-right: 1px solid var(--docsy-border-subtle);
   background: var(--docsy-surface-elevated);
 }
@@ -400,19 +401,19 @@ const {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px;
+  padding: clamp(18px, 3.4dvh, 24px);
   background: color-mix(in srgb, var(--docsy-surface-muted) 82%, var(--docsy-canvas));
 }
 
 .result-empty-state {
   height: 100%;
-  min-height: 420px;
+  min-height: clamp(280px, 40dvh, 420px);
   box-sizing: border-box;
 }
 
 .workspace-action-row {
-  margin-top: 20px;
-  padding-top: 18px;
+  margin-top: clamp(14px, 2.8dvh, 20px);
+  padding-top: clamp(14px, 2.5dvh, 18px);
   border-top: 1px solid var(--docsy-border-subtle);
 }
 

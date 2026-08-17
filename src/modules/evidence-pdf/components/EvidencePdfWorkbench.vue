@@ -951,7 +951,8 @@ const workflowTitle = computed(() => {
   return '证据处理'
 })
 const workflowHint = computed(() => {
-  if (workflowMode.value === 'merge') return '处理分项证据 PDF 的页眉、连续页码、A4、批注，并按需合并输出'
+  if (workflowMode.value === 'merge')
+    return '处理分项证据 PDF 的页眉、连续页码、A4、批注，并按需合并输出；合并时压平签章外观以便打印'
   if (workflowMode.value === 'split') return '处理已合并证据 PDF；单个文件可识别页段拆分，多个文件可按统一规则批量处理'
   return '按法律证据包流程处理页眉、页码、A4、批注、合并与反向拆分'
 })
@@ -1732,11 +1733,11 @@ const currentRules = computed(() => ({
   headerGroups: insertHeaderFooterEnabled.value ? headerGroups.value : [],
   footerTextGroups: insertHeaderFooterEnabled.value && footerInsertEnabled.value ? footerTextGroups.value : [],
   pageNumberGroups: insertHeaderFooterEnabled.value && footerEnabled.value ? pageNumberGroups.value : [],
-  // Global group: shared group instances used by ALL files when enabled
-  _globalApply: globalApplyEnabled.value,
-  _globalHeaderGroup: globalApplyEnabled.value ? globalHeaderGroup.value : null,
-  _globalFooterTextGroup: globalApplyEnabled.value ? globalFooterTextGroup.value : null,
-  _globalPageNumberGroup: globalApplyEnabled.value ? globalPageNumberGroup.value : null,
+  // Global group: shared group instances used by ALL files when enabled (gated by main switch)
+  _globalApply: insertHeaderFooterEnabled.value && globalApplyEnabled.value,
+  _globalHeaderGroup: insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalHeaderGroup.value : null,
+  _globalFooterTextGroup: insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalFooterTextGroup.value : null,
+  _globalPageNumberGroup: insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalPageNumberGroup.value : null,
   footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,

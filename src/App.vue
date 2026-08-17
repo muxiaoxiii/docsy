@@ -1,17 +1,17 @@
 <template>
   <el-container class="app-container">
-    <el-aside width="236px" class="app-aside">
-      <div class="brand" @click="router.push('/')">
+    <el-aside width="var(--docsy-sidebar-width)" class="app-aside">
+      <button type="button" class="brand" aria-label="返回首页" @click="router.push('/')">
         <img src="./assets/docsy-logo.png" alt="Docsy" class="brand-logo" />
         <span class="brand-copy">
           <span class="brand-name">Docsy</span>
           <span class="brand-caption">Local Toolkit</span>
         </span>
-      </div>
+      </button>
       <div class="sidebar-section-label">工作空间</div>
       <el-menu :default-active="activeMenu" @select="onMenuSelect" class="sidebar-menu">
         <template v-for="(item, index) in menuItems" :key="item.route">
-          <el-menu-item :index="item.route">
+          <el-menu-item :index="item.route" :aria-label="item.label" :title="item.label">
             <span class="menu-index">{{ String(index + 1).padStart(2, '0') }}</span>
             <span
               class="menu-icon"
@@ -278,7 +278,14 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .app-container {
+  --docsy-sidebar-width: clamp(212px, 18vw, 236px);
+  --docsy-shell-header-height: clamp(62px, 8.4dvh, 76px);
+  --docsy-brand-height: clamp(64px, 8.4dvh, 76px);
+  --docsy-menu-item-height: clamp(42px, 5.1dvh, 46px);
+  --docsy-menu-item-gap: clamp(2px, 0.35dvh, 3px);
+  --docsy-footer-height: clamp(46px, 5.8dvh, 52px);
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--docsy-canvas);
 }
@@ -316,16 +323,26 @@ onBeforeUnmount(() => {
   z-index: 1;
   display: flex;
   align-items: center;
-  min-height: 76px;
-  padding: 17px 18px;
+  min-height: var(--docsy-brand-height);
+  width: 100%;
+  padding-block: clamp(13px, 2.1dvh, 17px);
+  padding-inline: 18px;
+  color: inherit;
   cursor: pointer;
   gap: 12px;
+  background: transparent;
+  border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.13);
+  text-align: left;
 }
 
-.brand:hover {
-  opacity: 0.8;
-  transition: opacity 0.15s ease;
+.brand {
+  transition: background-color 150ms var(--ease-out);
+}
+
+.brand:focus-visible {
+  outline-color: rgba(255, 255, 255, 0.72);
+  outline-offset: -4px;
 }
 
 .brand-logo {
@@ -335,10 +352,6 @@ onBeforeUnmount(() => {
   flex: 0 0 38px;
   filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.15));
   transition: transform 260ms var(--ease-out);
-}
-
-.brand:hover .brand-logo {
-  transform: translateY(-2px) rotate(-5deg);
 }
 
 .brand-copy {
@@ -370,7 +383,8 @@ onBeforeUnmount(() => {
 .sidebar-section-label {
   position: relative;
   z-index: 1;
-  padding: 23px 20px 8px;
+  padding-block: clamp(14px, 2.5dvh, 23px) clamp(6px, 1dvh, 8px);
+  padding-inline: 20px;
   color: rgba(255, 255, 255, 0.35);
   font-size: 10px;
   font-weight: 700;
@@ -390,12 +404,12 @@ onBeforeUnmount(() => {
 .sidebar-menu :deep(.el-menu-item) {
   display: grid;
   grid-template-columns: 30px 1fr auto;
-  height: 46px;
-  margin: 3px 0;
+  height: var(--docsy-menu-item-height);
+  margin-block: var(--docsy-menu-item-gap);
   padding: 0 12px !important;
   border-radius: var(--docsy-radius);
   color: rgba(255, 255, 255, 0.66);
-  line-height: 46px;
+  line-height: var(--docsy-menu-item-height);
 }
 
 .sidebar-menu :deep(.el-menu-item:hover) {
@@ -411,8 +425,8 @@ onBeforeUnmount(() => {
 
 .sidebar-menu :deep(.el-menu-item.is-active::before) {
   position: absolute;
-  top: 10px;
-  bottom: 10px;
+  top: clamp(8px, 1.1dvh, 10px);
+  bottom: clamp(8px, 1.1dvh, 10px);
   left: -10px;
   width: 3px;
   content: '';
@@ -474,7 +488,7 @@ onBeforeUnmount(() => {
   flex: 1;
   align-items: center;
   justify-content: center;
-  height: 52px;
+  height: var(--docsy-footer-height);
   margin: 0;
   gap: 7px;
   color: rgba(255, 255, 255, 0.48);
@@ -502,7 +516,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 76px;
+  height: var(--docsy-shell-header-height);
   padding: 0 30px;
   border-bottom: 1px solid var(--docsy-border-subtle);
   background: rgba(251, 247, 239, 0.94);
@@ -612,7 +626,8 @@ onBeforeUnmount(() => {
   }
 
   .sidebar-menu {
-    padding: 14px 10px;
+    padding-block: clamp(10px, 1.8dvh, 14px);
+    padding-inline: 10px;
   }
 
   .sidebar-menu :deep(.el-menu-item) {
@@ -639,6 +654,16 @@ onBeforeUnmount(() => {
 
   .page-context {
     display: none;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .brand:hover {
+    background: rgba(255, 255, 255, 0.055);
+  }
+
+  .brand:hover .brand-logo {
+    transform: translateY(-2px) rotate(-5deg);
   }
 }
 </style>

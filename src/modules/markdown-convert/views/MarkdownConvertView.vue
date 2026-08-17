@@ -428,7 +428,7 @@ useWindowFileDrop({
 
 .conversion-panel {
   min-width: 0;
-  padding: 18px;
+  padding: clamp(14px, 2.8dvh, 18px);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
@@ -440,7 +440,7 @@ useWindowFileDrop({
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
+  margin-bottom: clamp(10px, 2.1dvh, 14px);
 }
 
 .panel-heading h3 {
@@ -470,8 +470,9 @@ useWindowFileDrop({
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin: 0 0 12px;
-  padding: 10px 12px;
+  margin: 0 0 clamp(8px, 1.7dvh, 12px);
+  padding-block: clamp(8px, 1.8dvh, 10px);
+  padding-inline: 12px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
@@ -543,8 +544,9 @@ useWindowFileDrop({
 }
 
 .result-line {
-  margin-top: 12px;
-  padding: 10px 12px;
+  margin-top: clamp(8px, 1.7dvh, 12px);
+  padding-block: clamp(8px, 1.8dvh, 10px);
+  padding-inline: 12px;
   color: var(--docsy-text);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);

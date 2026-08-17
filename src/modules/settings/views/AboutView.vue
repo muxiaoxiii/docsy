@@ -50,7 +50,8 @@ function openGitHub() {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: 56px 32px;
+  padding-block: clamp(28px, 6.2dvh, 56px);
+  padding-inline: 32px;
   min-height: 100%;
 }
 
@@ -66,7 +67,8 @@ function openGitHub() {
   align-items: center;
   max-width: 720px;
   width: 100%;
-  padding: 42px 46px 30px;
+  padding-block: clamp(30px, 4.7dvh, 42px) clamp(24px, 3.4dvh, 30px);
+  padding-inline: 46px;
   column-gap: 54px;
   background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
@@ -80,7 +82,7 @@ function openGitHub() {
   align-items: center;
   justify-self: start;
   gap: 14px;
-  margin: 0 0 10px;
+  margin: 0 0 clamp(8px, 1.4dvh, 10px);
 }
 
 .about-logo {
@@ -116,7 +118,7 @@ function openGitHub() {
   grid-area: desc;
   font-size: 15px;
   color: var(--docsy-text);
-  margin: 0 0 24px;
+  margin: 0 0 clamp(18px, 2.7dvh, 24px);
 }
 
 .about-github {
@@ -172,7 +174,7 @@ function openGitHub() {
 
 .about-content :deep(.el-divider) {
   grid-area: divider;
-  margin: 30px 0 22px;
+  margin-block: clamp(22px, 3.4dvh, 30px) clamp(16px, 2.5dvh, 22px);
 }
 
 .about-license {

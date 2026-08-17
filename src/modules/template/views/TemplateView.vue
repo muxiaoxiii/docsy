@@ -348,7 +348,8 @@ const {
 }
 
 .template-view {
-  padding: 20px 24px 36px;
+  padding-block: clamp(14px, 2.4dvh, 20px) clamp(24px, 4.5dvh, 36px);
+  padding-inline: 24px;
   background: var(--docsy-canvas);
 }
 
@@ -356,7 +357,7 @@ const {
   position: sticky;
   top: 0;
   z-index: 8;
-  margin: 0 0 18px;
+  margin: 0 0 clamp(12px, 2.1dvh, 18px);
   padding: 6px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);

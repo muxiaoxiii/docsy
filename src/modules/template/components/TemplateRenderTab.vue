@@ -125,11 +125,25 @@
                 </el-tag>
               </div>
               <div class="fill-field-body">
-                <div v-if="fieldStructureHints(field).length" class="fill-structure-hints">
-                  <span v-for="hint in fieldStructureHints(field)" :key="hint.key" class="fill-structure-hint">
-                    {{ hint.label }}：<code :class="{ empty: hint.empty }">{{ hint.text }}</code>
-                    <em>空值时删除</em>
-                  </span>
+                <div v-if="hasOverallStructure(field)" class="fill-structure-inline">
+                  <el-input
+                    v-if="hasOverallPrefix(field)"
+                    :model-value="getStructureOverride(field).prefix"
+                    size="small"
+                    placeholder="前缀"
+                    @input="(val) => setStructureOverride(field, 'prefix', val)"
+                  >
+                    <template #prepend>前缀</template>
+                  </el-input>
+                  <el-input
+                    v-if="hasOverallSuffix(field)"
+                    :model-value="getStructureOverride(field).suffix"
+                    size="small"
+                    placeholder="后缀"
+                    @input="(val) => setStructureOverride(field, 'suffix', val)"
+                  >
+                    <template #prepend>后缀</template>
+                  </el-input>
                 </div>
                 <template
                   v-if="
@@ -139,7 +153,7 @@
                     effectiveFieldType(field) === 'reference'
                   "
                 >
-                  <div v-if="effectiveFieldType(field) === 'date'" class="date-fill-row">
+                  <div v-if="!fieldIsMultiple(field) && effectiveFieldType(field) === 'date'" class="date-fill-row">
                     <el-date-picker
                       v-if="getEntryValue(field) !== '留空'"
                       :model-value="getEntryValue(field)"
@@ -177,36 +191,77 @@
                       {{ option.label }}
                     </el-checkbox>
                   </el-checkbox-group>
-                  <div v-else-if="effectiveFieldType(field) === 'party_list'" class="party-list-editor">
+                  <div v-else-if="fieldIsMultiple(field)" class="party-list-editor">
                     <div
                       v-for="(item, index) in getPartyListRows(field)"
                       :key="index"
                       class="party-list-row compact"
-                      :class="{ 'no-suffix': !partyFieldUsesSuffix(field) }"
+                      :class="{
+                        'has-prefix': multiShowsPrefix(field),
+                        'has-suffix': multiShowsSuffix(field),
+                        'no-affix': !multiShowsPrefix(field) && !multiShowsSuffix(field),
+                      }"
                     >
                       <span class="party-order">{{ index + 1 }}</span>
+                      <el-input
+                        v-if="multiShowsPrefix(field)"
+                        v-model="item.prefix"
+                        size="small"
+                        placeholder="前缀"
+                        @input="() => commitPartyTempRow(field)"
+                      />
+                      <el-select
+                        v-if="effectiveFieldType(field) === 'select'"
+                        v-model="item.text"
+                        size="small"
+                        filterable
+                        allow-create
+                        default-first-option
+                        placeholder="选择或输入"
+                        @change="() => commitPartyTempRow(field)"
+                      >
+                        <el-option
+                          v-for="opt in selectFieldOptions(field)"
+                          :key="opt.value"
+                          :label="opt.label"
+                          :value="opt.value"
+                        />
+                      </el-select>
+                      <el-date-picker
+                        v-else-if="effectiveFieldType(field) === 'date'"
+                        v-model="item.text"
+                        size="small"
+                        type="date"
+                        value-format="YYYY-MM-DD"
+                        @change="() => commitPartyTempRow(field)"
+                      />
                       <el-autocomplete
+                        v-else
                         v-model="item.text"
                         size="small"
                         placeholder="名称"
                         :fetch-suggestions="(query, cb) => $emit('complete-field', field, query, cb)"
-                        @input="() => {
-                          commitPartyTempRow(field)
-                          $emit('schedule-history-refresh')
-                        }"
+                        @input="
+                          () => {
+                            commitPartyTempRow(field)
+                            $emit('schedule-history-refresh')
+                          }
+                        "
                       />
                       <el-select
-                        v-if="partyFieldUsesSuffix(field)"
+                        v-if="multiShowsSuffix(field)"
                         v-model="item.suffix"
                         size="small"
                         filterable
                         allow-create
                         default-first-option
                         placeholder="后缀"
-                        @change="() => {
-                          commitPartyTempRow(field)
-                          $emit('schedule-history-refresh')
-                        }"
+                        @change="
+                          () => {
+                            commitPartyTempRow(field)
+                            $emit('schedule-history-refresh')
+                          }
+                        "
                       >
                         <el-option
                           v-for="suffix in partySuffixOptions(field)"
@@ -216,6 +271,31 @@
                         />
                       </el-select>
                       <div class="party-row-actions">
+                        <el-popover placement="bottom-end" trigger="click" width="260">
+                          <template #reference>
+                            <el-button size="small" text>…</el-button>
+                          </template>
+                          <div class="item-structure-editor">
+                            <strong>第 {{ index + 1 }} 项结构</strong>
+                            <el-input
+                              v-model="item.prefix"
+                              size="small"
+                              placeholder="无前缀"
+                              @input="() => commitPartyTempRow(field)"
+                            >
+                              <template #prepend>前缀</template>
+                            </el-input>
+                            <el-input
+                              v-model="item.suffix"
+                              size="small"
+                              placeholder="无后缀"
+                              @input="() => commitPartyTempRow(field)"
+                            >
+                              <template #prepend>后缀</template>
+                            </el-input>
+                            <p class="setting-caption">这里只修改当前项目，不会影响其他项目或被引用字段。</p>
+                          </div>
+                        </el-popover>
                         <el-button
                           size="small"
                           text
@@ -242,6 +322,7 @@
                     </div>
                     <div class="party-list-add-row">
                       <el-button size="small" @click="$emit('add-party-item', field)">添加一项</el-button>
+                      <span>连接符：{{ getStructureOverride(field).itemSeparator || '、' }}</span>
                     </div>
                   </div>
                   <div v-else-if="effectiveFieldType(field) === 'reference'" class="reference-fill-editor">
@@ -356,24 +437,17 @@
                         />
                       </el-select>
                     </div>
-                    <el-input
-                      :model-value="getStructureOverride(field).prefix"
-                      size="small"
-                      placeholder="前缀"
-                      @input="(val) => setStructureOverride(field, 'prefix', val)"
-                    >
-                      <template #prepend>前缀</template>
-                    </el-input>
-                    <el-input
-                      v-if="!fieldUsesRepeatableSuffix(field)"
-                      :model-value="getStructureOverride(field).suffix"
-                      size="small"
-                      placeholder="后缀"
-                      @input="(val) => setStructureOverride(field, 'suffix', val)"
-                    >
-                      <template #prepend>后缀</template>
-                    </el-input>
-                    <p v-else class="setting-caption">这是列表项后缀，每一项单独设置；字段整体后缀不在这里修改。</p>
+                    <template v-if="fieldIsMultiple(field)">
+                      <el-input
+                        :model-value="getStructureOverride(field).itemSeparator"
+                        size="small"
+                        placeholder="、"
+                        @input="(val) => setStructureOverride(field, 'itemSeparator', val)"
+                      >
+                        <template #prepend>连接符</template>
+                      </el-input>
+                      <p class="setting-caption">逐项前后缀请在每一项右侧的“…”中单独设置。</p>
+                    </template>
                     <div v-if="isReferenceablePosition(field)" class="setting-row">
                       <span class="setting-label">引用来源</span>
                       <el-select
@@ -436,7 +510,9 @@
             <span v-if="fillPreviewLoading" class="preview-loading-dot" aria-hidden="true"></span>
             <strong>{{ fillPreviewLoading ? '正在加载文档预览' : '暂时无法显示预览' }}</strong>
             <p v-if="!fillPreviewLoading">{{ fillPreviewError || '请重新加载模板正文' }}</p>
-            <el-button v-if="!fillPreviewLoading" size="small" @click="$emit('reload-fill-preview')">重新加载</el-button>
+            <el-button v-if="!fillPreviewLoading" size="small" @click="$emit('reload-fill-preview')"
+              >重新加载</el-button
+            >
           </div>
         </aside>
         <button v-else type="button" class="preview-invitation" @click="$emit('toggle-fill-preview')">
@@ -460,10 +536,9 @@ import {
   typeGroupOf,
   typeGroupSubOptions,
   typeActualOf,
-  partyFieldUsesSuffix,
   partySuffixOptions,
   partyFieldStructureHint,
-  fieldUsesRepeatableSuffix,
+  fieldIsMultiple,
   isEmptyValue,
   displayValue,
   parseReferenceSourceKey,
@@ -473,6 +548,8 @@ import {
   referenceSelectionFor,
   createPartyTempRowStore,
   filenamePreviewText,
+  optionalRulePrefix,
+  optionalRuleSuffix,
 } from '../composables/fieldRowUtils.js'
 
 const props = defineProps({
@@ -749,11 +826,69 @@ function commitPartyTempRow(field) {
 
 function getStructureOverride(field) {
   const key = field?.id || field?.name || ''
-  if (!key) return { prefix: '', suffix: '' }
-  if (!props.structureOverrides[key]) {
-    return { prefix: '', suffix: '' }
+  const defaults = {
+    prefix: defaultOverallPrefix(field),
+    suffix: defaultOverallSuffix(field),
+    itemSeparator: field?.itemSeparator || '、',
+    repeatPrefix: Boolean(field?.repeatPrefix),
+    repeatSuffix:
+      Boolean(field?.repeatSuffix) ||
+      (field?.markRefs || []).some((ref) => Boolean(optionalRuleSuffix(ref.optionalRule))),
   }
-  return props.structureOverrides[key]
+  if (!key) return defaults
+  if (!props.structureOverrides[key]) {
+    return defaults
+  }
+  return { ...defaults, ...props.structureOverrides[key] }
+}
+
+function multiUsesPrefix(field) {
+  return fieldIsMultiple(field) && Boolean(getStructureOverride(field).repeatPrefix)
+}
+
+function multiUsesSuffix(field) {
+  return fieldIsMultiple(field) && Boolean(getStructureOverride(field).repeatSuffix)
+}
+
+function multiShowsPrefix(field) {
+  return multiUsesPrefix(field) || getPartyListRows(field).some((item) => Boolean(item.prefix))
+}
+
+function multiShowsSuffix(field) {
+  return multiUsesSuffix(field) || getPartyListRows(field).some((item) => Boolean(item.suffix))
+}
+
+function structureRules(field) {
+  return (field?.markRefs || []).map((ref) => ref.optionalRule).filter((rule) => rule?.enabled)
+}
+
+function defaultOverallPrefix(field) {
+  if (fieldIsMultiple(field) && field.repeatPrefix) return ''
+  return structureRules(field).map(optionalRulePrefix).find(Boolean) || optionalRulePrefix(field?.optionalRule)
+}
+
+function defaultOverallSuffix(field) {
+  const values = structureRules(field).map(optionalRuleSuffix).filter(Boolean)
+  if (fieldIsMultiple(field) && (field.repeatSuffix || values.length)) return ''
+  return values.at(-1) || optionalRuleSuffix(field?.optionalRule)
+}
+
+function hasOverallPrefix(field) {
+  const key = field?.id || field?.name || ''
+  return Boolean(
+    defaultOverallPrefix(field) || Object.prototype.hasOwnProperty.call(props.structureOverrides[key] || {}, 'prefix'),
+  )
+}
+
+function hasOverallSuffix(field) {
+  const key = field?.id || field?.name || ''
+  return Boolean(
+    defaultOverallSuffix(field) || Object.prototype.hasOwnProperty.call(props.structureOverrides[key] || {}, 'suffix'),
+  )
+}
+
+function hasOverallStructure(field) {
+  return hasOverallPrefix(field) || hasOverallSuffix(field)
 }
 
 function setStructureOverride(field, prop, value) {
@@ -767,9 +902,15 @@ function setStructureOverride(field, prop, value) {
 function referenceFillOptions(field) {
   const options = []
   const seen = new Set()
-  for (const item of props.renderableTemplateFields) {
-    if (item.name === field.name || item.type === 'reference') continue
-    if (item.type === 'party_list') {
+  const candidates = props.renderableTemplateFields.filter(
+    (item) => item.name !== field.name && item.type !== 'reference',
+  )
+  const groupName = String(field.groupName || '').trim()
+  const groupedCandidates = groupName
+    ? candidates.filter((item) => String(item.groupName || '').trim() === groupName)
+    : []
+  for (const item of groupedCandidates.length ? groupedCandidates : candidates) {
+    if (fieldIsMultiple(item)) {
       const values = partyItemsToValues(props.formValues[fieldFormKey(item)] || [])
       if (values.length) {
         const allKey = `field::${item.name}::`
@@ -779,7 +920,8 @@ function referenceFillOptions(field) {
         const key = `field::${item.name}::${index}`
         if (seen.has(key)) return
         seen.add(key)
-        options.push({ key, label: `${fillFieldLabel(item)}第 ${index + 1} 项：${value}` })
+        const group = item.groupName ? `${item.groupName} / ` : ''
+        options.push({ key, label: `${group}${fillFieldLabel(item)}第 ${index + 1} 项：${displayValue(value)}` })
       })
     } else {
       const value = props.formValues[fieldFormKey(item)]
@@ -799,46 +941,6 @@ function referenceFillOptions(field) {
 
 function templateStoredSuggestionItems(field) {
   return (props.historyContext.fieldSuggestions?.[field.id] || []).slice(0, 6)
-}
-
-// ── Structure hints ─────────────────────────────────────────────────────────
-
-function fieldStructureHints(field) {
-  const override = existingStructureOverrideForField(field)
-  const prefixes = override ? [override.prefix ?? ''] : []
-  const suffixes = fieldUsesRepeatableSuffix(field) ? [] : override ? [override.suffix ?? ''] : []
-  return [
-    ...prefixes.filter(Boolean).map((text, index) => ({
-      key: `prefix-${index}-${text}`,
-      label: '前缀',
-      text: displayStructureText(text),
-      empty: !cleanStructureText(text),
-    })),
-    ...suffixes.filter(Boolean).map((text, index) => ({
-      key: `suffix-${index}-${text}`,
-      label: '后缀',
-      text: displayStructureText(text),
-      empty: !cleanStructureText(text),
-    })),
-  ]
-}
-
-function existingStructureOverrideForField(field) {
-  const key = field?.id || field?.name || ''
-  return key ? props.structureOverrides[key] : null
-}
-
-function displayStructureText(text) {
-  const value = cleanStructureText(text)
-  return value || '无'
-}
-
-function cleanStructureText(text) {
-  const value = String(text || '').trim()
-  if (!value) return ''
-  const withoutConnector = value.replace(/^(?:以及|或者|[，,、;；和与及\s])+/u, '')
-  if (!withoutConnector) return ''
-  return withoutConnector
 }
 
 function structureEditorTitle(field) {
@@ -1250,6 +1352,21 @@ p {
   width: 100%;
 }
 
+.fill-structure-inline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-muted);
+}
+
+.item-structure-editor {
+  display: grid;
+  gap: 8px;
+}
+
 .reference-fill-editor {
   display: grid;
   gap: 6px;
@@ -1277,11 +1394,16 @@ p {
 }
 
 .party-list-row.compact {
-  grid-template-columns: 24px minmax(0, 1fr) minmax(92px, 118px);
+  grid-template-columns: 24px minmax(84px, 110px) minmax(0, 1fr) minmax(92px, 118px) auto;
 }
 
-.party-list-row.compact.no-suffix {
-  grid-template-columns: 24px minmax(0, 1fr);
+.party-list-row.compact.has-prefix:not(.has-suffix),
+.party-list-row.compact.has-suffix:not(.has-prefix) {
+  grid-template-columns: 24px minmax(0, 1fr) minmax(92px, 118px) auto;
+}
+
+.party-list-row.compact.no-affix {
+  grid-template-columns: 24px minmax(0, 1fr) auto;
 }
 
 .party-list-row.compact .el-button {
@@ -1541,7 +1663,7 @@ p {
 
   .party-list-row,
   .party-list-row.compact,
-  .party-list-row.compact.no-suffix {
+  .party-list-row.compact.no-affix {
     grid-template-columns: 24px minmax(0, 1fr);
   }
 

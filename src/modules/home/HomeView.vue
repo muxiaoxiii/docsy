@@ -95,13 +95,13 @@ onBeforeUnmount(() => {
 .home-view {
   width: min(1120px, calc(100% - 64px));
   margin: 0 auto;
-  padding: 46px 0 54px;
+  padding-block: clamp(24px, 5.1dvh, 46px) clamp(30px, 6dvh, 54px);
 }
 
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
-  min-height: 300px;
+  min-height: clamp(232px, 34dvh, 300px);
   overflow: hidden;
   background: var(--docsy-surface);
   border: 1px solid var(--docsy-border-subtle);
@@ -114,14 +114,15 @@ onBeforeUnmount(() => {
   flex-direction: column;
   justify-content: center;
   min-width: 0;
-  padding: 48px 54px;
+  padding-block: clamp(26px, 4.7dvh, 48px);
+  padding-inline: clamp(38px, 4.2vw, 54px);
 }
 
 .eyebrow {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 22px;
+  margin-bottom: clamp(16px, 2.5dvh, 22px);
   color: var(--docsy-accent);
   font-size: 10px;
   font-weight: 760;
@@ -145,7 +146,7 @@ onBeforeUnmount(() => {
     -apple-system,
     'PingFang SC',
     sans-serif;
-  font-size: clamp(32px, 4vw, 54px);
+  font-size: clamp(32px, min(4vw, 6dvh), 54px);
   font-weight: 760;
   letter-spacing: -0.045em;
   line-height: 1.08;
@@ -157,14 +158,14 @@ onBeforeUnmount(() => {
   color: var(--docsy-text-muted);
   font-size: 14px;
   line-height: 1.75;
-  margin: 18px 0 0;
+  margin: clamp(14px, 2.2dvh, 18px) 0 0;
 }
 
 .hero-art {
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 300px;
+  min-height: clamp(232px, 34dvh, 300px);
   background: var(--docsy-primary-soft);
   border-left: 1px solid #cadbd4;
 }
@@ -203,14 +204,14 @@ onBeforeUnmount(() => {
 .hero-mascot {
   display: block;
   width: 100%;
-  max-height: 270px;
+  max-height: clamp(210px, 34dvh, 270px);
   object-fit: contain;
   filter: drop-shadow(0 20px 28px rgba(32, 65, 59, 0.18));
   animation: doclet-settle 700ms var(--ease-out) both;
 }
 
 .section {
-  margin-top: 34px;
+  margin-top: clamp(22px, 4dvh, 34px);
 }
 
 .section-heading {
@@ -234,7 +235,7 @@ onBeforeUnmount(() => {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   background: var(--docsy-surface-elevated);
   border-top: 1px solid var(--docsy-border-subtle);
   border-left: 1px solid var(--docsy-border-subtle);
@@ -246,10 +247,10 @@ onBeforeUnmount(() => {
 .home-card {
   position: relative;
   display: flex;
-  grid-column: span 4;
   flex-direction: column;
-  min-height: 184px;
-  padding: 24px 24px 22px;
+  min-height: clamp(136px, 18.5dvh, 184px);
+  padding-block: clamp(18px, 2.8dvh, 24px) clamp(17px, 2.5dvh, 22px);
+  padding-inline: 24px;
   cursor: pointer;
   text-align: left;
   color: var(--docsy-text-strong);
@@ -265,16 +266,13 @@ onBeforeUnmount(() => {
     box-shadow 180ms var(--ease-out);
 }
 
-.home-card:hover {
-  z-index: 1;
-  color: var(--docsy-surface-elevated);
-  background: var(--docsy-primary-hover);
-  transform: translateY(-2px);
-  box-shadow: 0 16px 30px rgba(30, 61, 55, 0.18);
+.home-card:active {
+  transform: translateY(0) scale(0.98);
 }
 
-.home-card:active {
-  transform: translateY(0) scale(0.99);
+.home-card:focus-visible {
+  z-index: 2;
+  outline-offset: -4px;
 }
 
 .card-topline {
@@ -303,17 +301,12 @@ onBeforeUnmount(() => {
     transform 180ms var(--ease-out);
 }
 
-.home-card:hover .home-card-icon {
-  color: var(--docsy-accent-light);
-  transform: translateY(-2px) scale(1.06);
-}
-
 .card-copy {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 22px;
+  margin-top: clamp(16px, 2.5dvh, 22px);
 }
 
 .card-copy strong {
@@ -327,19 +320,11 @@ onBeforeUnmount(() => {
   transition: transform 180ms var(--ease-out);
 }
 
-.home-card:hover .card-arrow {
-  transform: translateX(4px);
-}
-
 .card-description {
   color: var(--docsy-text-muted);
   font-size: 11px;
   line-height: 1.6;
   margin-top: 6px;
-}
-
-.home-card:hover .card-description {
-  color: rgba(255, 255, 255, 0.62);
 }
 
 @keyframes doclet-settle {
@@ -382,10 +367,61 @@ onBeforeUnmount(() => {
   }
 }
 
+/* On desktop-sized windows the home view consumes the main viewport instead
+   of adding a second page scroll. The cards share whatever height remains
+   after the hero and heading; very small windows still fall back to normal
+   document scrolling below the desktop breakpoint. */
+@media (min-width: 681px) {
+  .home-view {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .hero {
+    flex: 0 1 clamp(232px, 34dvh, 300px);
+    min-height: 0;
+  }
+
+  .hero-art {
+    min-height: 0;
+  }
+
+  .section {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .cards {
+    display: grid;
+    min-height: 0;
+    flex: 1;
+    grid-auto-rows: minmax(0, 1fr);
+  }
+
+  .home-card {
+    min-height: 0;
+    padding-block: clamp(12px, 1.9dvh, 24px);
+  }
+
+  .home-card-icon {
+    width: clamp(46px, 6dvh, 64px);
+    height: clamp(46px, 6dvh, 64px);
+  }
+
+  .card-copy {
+    margin-top: clamp(10px, 2dvh, 22px);
+  }
+}
+
 @media (max-width: 900px) {
   .home-view {
     width: min(100% - 36px, 760px);
-    padding-top: 28px;
+    padding-top: clamp(22px, 4dvh, 28px);
   }
 
   .hero {
@@ -393,17 +429,15 @@ onBeforeUnmount(() => {
   }
 
   .hero-copy {
-    padding: 34px;
-  }
-
-  .home-card:nth-child(n) {
-    grid-column: span 6;
+    padding: clamp(26px, 4.5dvh, 34px);
   }
 }
 
 @media (max-width: 680px) {
   .home-view {
     width: min(100% - 28px, 560px);
+    height: auto;
+    overflow: visible;
   }
 
   .hero {
@@ -411,13 +445,32 @@ onBeforeUnmount(() => {
   }
 
   .hero-art {
-    min-height: 210px;
+    min-height: clamp(180px, 28dvh, 210px);
     border-top: 1px solid #cadbd4;
     border-left: 0;
   }
+}
 
-  .home-card:nth-child(n) {
-    grid-column: span 12;
+@media (hover: hover) and (pointer: fine) {
+  .home-card:hover {
+    z-index: 1;
+    color: var(--docsy-surface-elevated);
+    background: var(--docsy-primary-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 16px 30px rgba(30, 61, 55, 0.18);
+  }
+
+  .home-card:hover .home-card-icon {
+    color: var(--docsy-accent-light);
+    transform: translateY(-2px) scale(1.06);
+  }
+
+  .home-card:hover .card-arrow {
+    transform: translateX(4px);
+  }
+
+  .home-card:hover .card-description {
+    color: rgba(255, 255, 255, 0.76);
   }
 }
 </style>

@@ -9,6 +9,9 @@
   --docsy-surface: #fbf7ef;
   --docsy-surface-elevated: #fffdf8;
   --docsy-surface-muted: #f0e9de;
+  --docsy-surface-hover: #f4ecdf;
+  --docsy-surface-active: #e9dfd1;
+  --docsy-surface-muted-hover: var(--docsy-surface-hover);
   --docsy-sidebar: #2d5149;
   --docsy-sidebar-hover: #e5ddd1;
   --docsy-border-subtle: #ded4c5;
@@ -16,13 +19,14 @@
   --docsy-preview-paper: #ffffff;
   --docsy-text-strong: #1f2e2a;
   --docsy-text: #46534e;
-  --docsy-text-muted: #6f7974;
+  --docsy-text-muted: #63706a;
   --docsy-primary: #47776c;
   --docsy-primary-hover: #365f56;
   --docsy-primary-soft: #dce9e4;
   --docsy-accent: #b6653b;
   --docsy-accent-light: #dda47f;
   --docsy-accent-soft: #f7e8dc;
+  --docsy-accent-subtle: var(--docsy-accent-soft);
   --docsy-success: #4f7d5a;
   --docsy-warning: #b77934;
   --docsy-danger: #b5524b;
@@ -31,6 +35,7 @@
   --docsy-shadow-soft: 0 4px 14px rgba(48, 41, 32, 0.032);
   --docsy-radius: 8px;
   --docsy-panel-radius: var(--docsy-radius);
+  --docsy-focus-ring: rgba(71, 119, 108, 0.42);
 
   /* Soft semantic colours for backgrounds and borders */
   --docsy-danger-soft: #fcebeb;
@@ -160,6 +165,27 @@ select {
   font-weight: 500;
 }
 
+:where(button, a, [role='button'], [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: 3px solid var(--docsy-focus-ring);
+  outline-offset: 2px;
+}
+
+:where(input, textarea, select):focus-visible {
+  outline: 2px solid var(--docsy-focus-ring);
+  outline-offset: 1px;
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 2px var(--docsy-focus-ring) !important;
+}
+
+.el-checkbox__input.is-focus .el-checkbox__inner,
+.el-radio__input.is-focus .el-radio__inner {
+  box-shadow: 0 0 0 3px var(--docsy-focus-ring);
+}
+
 .el-table {
   --el-table-border-color: var(--docsy-border-subtle);
   --el-table-bg-color: var(--docsy-surface-elevated);
@@ -205,6 +231,29 @@ select {
 
 .el-empty__description p {
   color: var(--docsy-text-muted);
+}
+
+.el-loading-mask {
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--docsy-surface-elevated) 88%, transparent);
+}
+
+.el-loading-spinner .path {
+  stroke: var(--docsy-primary);
+}
+
+.el-alert {
+  border: 1px solid color-mix(in srgb, currentColor 18%, var(--docsy-border-subtle));
+}
+
+.el-skeleton__item {
+  background: linear-gradient(
+    90deg,
+    var(--docsy-surface-muted) 25%,
+    var(--docsy-surface-hover) 37%,
+    var(--docsy-surface-muted) 63%
+  );
+  background-size: 400% 100%;
 }
 
 .app-main > * {
@@ -263,7 +312,7 @@ select {
     color 0.15s;
 }
 
-.el-button:active {
+.el-button:not(.is-disabled):active {
   transform: scale(0.97);
 }
 

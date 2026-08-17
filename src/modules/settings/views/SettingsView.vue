@@ -533,11 +533,12 @@ onMounted(() => {
 .settings-view {
   max-width: 1120px;
   margin: 0 auto;
-  padding: 34px 32px 48px;
+  padding-block: clamp(22px, 3.8dvh, 34px) clamp(32px, 5.3dvh, 48px);
+  padding-inline: 32px;
 }
 
 .settings-view h2 {
-  margin: 0 0 18px;
+  margin: 0 0 clamp(14px, 2.2dvh, 18px);
   color: var(--docsy-text-strong);
   font-family:
     ui-rounded,
@@ -551,7 +552,7 @@ onMounted(() => {
 }
 
 .settings-section {
-  margin-bottom: 18px;
+  margin-bottom: clamp(14px, 2dvh, 18px);
   border-color: var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
@@ -559,12 +560,14 @@ onMounted(() => {
 }
 
 .settings-section :deep(.el-card__header) {
-  padding: 16px 18px;
+  padding-block: clamp(12px, 1.8dvh, 16px);
+  padding-inline: 18px;
   background: color-mix(in srgb, var(--docsy-surface-muted) 72%, transparent);
 }
 
 .settings-section :deep(.el-card__body) {
-  padding: 18px;
+  padding-block: clamp(14px, 2dvh, 18px);
+  padding-inline: 18px;
 }
 
 .card-header {

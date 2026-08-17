@@ -100,8 +100,11 @@
                 <p>例：标黄"（案号："设为前缀，案号设为文本，标黄"）"设为后缀，三行字段名都填"案号"。</p>
               </section>
               <section>
-                <h4>多项分组与勾选</h4>
-                <p>多项分组仍是一个字段：可增减项目、按顺序用顿号连接，并可被引用到某一项；勾选组只改方框符号，选项文字保留 Word 原文。</p>
+                <h4>多项字段与上位分组</h4>
+                <p>
+                  “多项”表示一个字段可填写多条内容，可增减项目并按设置的连接符生成；“上位分组”只用于限制引用候选和共享规则，两者互不替代。
+                </p>
+                <p>勾选组只改方框符号，选项文字保留 Word 原文。</p>
               </section>
             </div>
           </el-popover>
@@ -172,7 +175,6 @@
           <el-option label="文本" value="text" />
           <el-option label="日期" value="date" />
           <el-option label="下拉选择" value="select" />
-          <el-option label="多项分组" value="party_list" />
           <el-option label="引用" value="reference" />
           <el-option label="互斥勾选组" value="radio_group" />
           <el-option label="多选勾选组" value="checkbox_group" />
@@ -204,9 +206,7 @@
             <el-button
               link
               type="primary"
-              :disabled="
-                row.displayOnly || rowUsage(row) !== 'field' || isMarkerType(row.type) || row.type === 'party_list'
-              "
+              :disabled="row.displayOnly || rowUsage(row) !== 'field' || isMarkerType(row.type)"
               @click="$emit('open-split-dialog', row)"
             >
               拆分
@@ -224,7 +224,7 @@
               <span v-if="row.optionLabel && isMarkerType(row.type)" class="option-preview">
                 {{ row.optionLabel }}
               </span>
-              <span v-if="row.type === 'party_list' && row.partyItems?.length > 1" class="option-preview">
+              <span v-if="fieldIsMultiple(row) && row.partyItems?.length > 1" class="option-preview">
                 已识别 {{ row.partyItems.length }} 项
               </span>
             </div>
@@ -232,8 +232,8 @@
         </el-table-column>
         <el-table-column label="类型" width="168">
           <template #default="{ row }">
-            <span v-if="row.virtualPartyGroup" class="muted">多项分组</span>
-            <span v-else-if="row.displayOnly" class="muted">分组项</span>
+            <span v-if="row.virtualPartyGroup" class="muted">多项字段</span>
+            <span v-else-if="row.displayOnly" class="muted">多项内容</span>
             <span v-else-if="isConnectorRow(row)" class="muted">连接符</span>
             <template v-else>
               <el-select
@@ -277,6 +277,14 @@
               <span>连接符</span>
               <span class="field-label">跟随右侧字段：{{ structureTargetDisplayName(row) }}</span>
             </div>
+            <div v-else-if="rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix'" class="field-cell">
+              <el-input
+                v-model="row.text"
+                size="small"
+                :placeholder="rowUsage(row) === 'prefix' ? '前缀文字' : '后缀文字'"
+              />
+              <span class="field-label">{{ relationSummary(row) }}</span>
+            </div>
             <div v-else-if="row.type === 'reference'" class="field-cell">
               <el-input
                 v-model="row.name"
@@ -306,18 +314,35 @@
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
+        <el-table-column label="多项" width="58" align="center">
+          <template #default="{ row }">
+            <el-checkbox
+              v-if="
+                !row.displayOnly && rowUsage(row) === 'field' && !isMarkerType(row.type) && row.type !== 'reference'
+              "
+              v-model="row.multiple"
+            />
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="关系" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="relation-cell">
-            <el-tag v-if="row.virtualPartyGroup" size="small" type="success">多项分组</el-tag>
-            <el-tag v-else-if="row.displayOnly" size="small" type="success">分组项</el-tag>
-              <el-tag v-else-if="rowUsage(row) === 'prefix'" size="small" type="info">{{ relationSummary(row) }}</el-tag>
-              <el-tag v-else-if="rowUsage(row) === 'suffix'" size="small" type="info">{{ relationSummary(row) }}</el-tag>
+              <el-tag v-if="row.virtualPartyGroup" size="small" type="success">多项字段</el-tag>
+              <el-tag v-else-if="row.displayOnly" size="small" type="success">多项内容</el-tag>
+              <el-tag v-else-if="rowUsage(row) === 'prefix'" size="small" type="info">{{
+                relationSummary(row)
+              }}</el-tag>
+              <el-tag v-else-if="rowUsage(row) === 'suffix'" size="small" type="info">{{
+                relationSummary(row)
+              }}</el-tag>
               <el-tag v-else-if="rowUsage(row) === 'delete_text'" size="small" type="danger">删除文本</el-tag>
               <el-tag v-else-if="row.type === 'reference'" size="small" type="warning">
                 引用 {{ referenceSourceLabel(row) || '未指定' }}
               </el-tag>
-              <el-tag v-else-if="isGroupedField(row)" size="small" type="success">{{ groupedFieldSummary(row) }}</el-tag>
+              <el-tag v-else-if="isGroupedField(row)" size="small" type="success">{{
+                groupedFieldSummary(row)
+              }}</el-tag>
               <span v-else class="muted">-</span>
               <el-popover
                 v-if="!row.displayOnly && row.type !== 'reference' && referenceSuggestion(row)"
@@ -333,14 +358,22 @@
                     与前面的“{{ referenceSuggestion(row).targetLabel }}”文本相同，改为引用后无需重复填写。
                     <span v-if="referenceSuggestion(row).targetKind === 'party_item'">将引用该列表项。</span>
                   </p>
-                  <el-checkbox v-model="row.referenceIncludePrefix" :disabled="!referenceSuggestion(row).prefixRows.length">
+                  <el-checkbox
+                    v-model="row.referenceIncludePrefix"
+                    :disabled="!referenceSuggestion(row).prefixRows.length"
+                  >
                     同时归属前缀
                   </el-checkbox>
-                  <el-checkbox v-model="row.referenceIncludeSuffix" :disabled="!referenceSuggestion(row).suffixRows.length">
+                  <el-checkbox
+                    v-model="row.referenceIncludeSuffix"
+                    :disabled="!referenceSuggestion(row).suffixRows.length"
+                  >
                     同时归属后缀
                   </el-checkbox>
                   <div class="reference-actions">
-                    <el-button size="small" type="primary" @click="applyReferenceSuggestion(row)">确认改为引用</el-button>
+                    <el-button size="small" type="primary" @click="applyReferenceSuggestion(row)"
+                      >确认改为引用</el-button
+                    >
                   </div>
                 </div>
               </el-popover>
@@ -366,6 +399,23 @@
                     <el-form-item label="通用字段名" v-if="rowUsage(row) === 'field'">
                       <el-input v-model="row.semanticKey" :placeholder="`默认跟随字段名：${row.name || '未命名'}`" />
                     </el-form-item>
+                    <el-form-item label="上位分组" v-if="rowUsage(row) === 'field'">
+                      <div class="group-rule-editor">
+                        <el-input v-model="row.groupName" placeholder="如 当事人、代理人；用于引用范围和共享规则" />
+                        <el-button v-if="row.groupName?.trim()" size="small" @click="syncGroupRules(row)"
+                          >同步同组规则</el-button
+                        >
+                      </div>
+                    </el-form-item>
+                    <template v-if="rowUsage(row) === 'field' && row.multiple">
+                      <el-form-item label="连接符">
+                        <el-input v-model="row.itemSeparator" placeholder="默认：、" />
+                      </el-form-item>
+                      <el-form-item label="逐项结构">
+                        <el-checkbox v-model="row.repeatPrefix">每一项使用前缀</el-checkbox>
+                        <el-checkbox v-model="row.repeatSuffix">每一项使用后缀</el-checkbox>
+                      </el-form-item>
+                    </template>
                     <el-form-item label="日期格式" v-if="rowUsage(row) === 'field' && row.type === 'date'">
                       <el-select v-model="row.dateFormat" size="small">
                         <el-option
@@ -401,7 +451,7 @@
                     </template>
 
                     <template v-if="rowUsage(row) === 'field' && !isMarkerType(row.type) && row.type !== 'reference'">
-                      <el-form-item v-if="row.type === 'party_list' && row.partyItems?.length > 1" label="列表成员">
+                      <el-form-item v-if="fieldIsMultiple(row) && row.partyItems?.length > 1" label="已识别内容">
                         <div class="party-detected-items">
                           <el-tag v-for="item in row.partyItems" :key="item" size="small">{{ item }}</el-tag>
                         </div>
@@ -625,6 +675,7 @@
             :class="item.className"
             type="button"
             @pointerdown.capture="$emit('remember-source-preview-selection')"
+            @mousedown.capture.prevent="$emit('remember-source-preview-selection')"
             @click.prevent.stop="$emit('trigger-preview-selection-add', item.type)"
           >
             {{ item.label }}
@@ -633,6 +684,7 @@
             class="legend-token preview-delete-text"
             type="button"
             @pointerdown.capture="$emit('remember-source-preview-selection')"
+            @mousedown.capture.prevent="$emit('remember-source-preview-selection')"
             @click.prevent.stop="$emit('trigger-preview-selection-add', 'delete_text')"
           >
             删除文本
@@ -681,6 +733,7 @@ import {
   referenceSuggestion as referenceSuggestionFn,
   referenceSourceOptions as referenceSourceOptionsFn,
   allReferenceSuggestions as allReferenceSuggestionsFn,
+  fieldIsMultiple,
 } from '../composables/fieldRowUtils.js'
 
 const props = defineProps({
@@ -766,7 +819,9 @@ function onTypeGroupChange(row, group) {
 }
 
 const checkboxLikeCount = computed(() => props.marks.filter((mark) => mark.checkboxLike).length)
-const configuredBuildRows = computed(() => props.fieldRows.filter((row) => rowUsage(row) === 'field' && !row.displayOnly))
+const configuredBuildRows = computed(() =>
+  props.fieldRows.filter((row) => rowUsage(row) === 'field' && !row.displayOnly),
+)
 const configuredFieldCount = computed(() => new Set(configuredBuildRows.value.map((row) => row.name || row.rowId)).size)
 const requiredBuildFieldCount = computed(() => configuredBuildRows.value.filter((row) => row.required).length)
 const specialFieldCount = computed(
@@ -808,6 +863,18 @@ function onNameInput(row) {
 // Display-name edits keep the field name in sync unless it was manually set.
 function onLabelInput(row) {
   if (row && !row._nameManuallySet) row.name = row.label
+}
+
+function syncGroupRules(source) {
+  const group = String(source?.groupName || '').trim()
+  if (!group) return
+  for (const row of props.fieldRows) {
+    if (row === source || rowUsage(row) !== 'field' || String(row.groupName || '').trim() !== group) continue
+    row.multiple = Boolean(source.multiple)
+    row.itemSeparator = source.itemSeparator || '、'
+    row.repeatPrefix = Boolean(source.repeatPrefix)
+    row.repeatSuffix = Boolean(source.repeatSuffix)
+  }
 }
 
 function isGroupedField(row) {
@@ -1511,6 +1578,16 @@ p {
   flex-direction: column;
   gap: 6px;
   width: 100%;
+}
+
+.group-rule-editor {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.group-rule-editor .el-input {
+  min-width: 0;
 }
 
 .select-option-row {

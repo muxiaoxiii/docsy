@@ -194,9 +194,14 @@
           </span>
         </div>
 
-        <div v-if="extracting" class="results-loading">
-          <p>正在抽帧...</p>
-        </div>
+        <WorkspaceEmptyState
+          v-if="extracting"
+          class="result-empty-state"
+          state="loading"
+          :icon-url="videoFramesIconUrl"
+          title="正在抽帧"
+          description="Doclet 正在生成图片，完成后会在这里按顺序显示。"
+        />
 
         <ReorderableImageGrid
           v-else-if="resultImages.length > 0"
@@ -477,7 +482,8 @@ useWindowFileDrop({
 .extract-settings {
   min-width: 0;
   overflow-y: auto;
-  padding: 22px 24px 28px;
+  padding-block: clamp(16px, 3.1dvh, 22px) clamp(20px, 3.9dvh, 28px);
+  padding-inline: 24px;
   border-right: 1px solid var(--docsy-border-subtle);
   background: var(--docsy-surface-elevated);
 }
@@ -499,8 +505,9 @@ useWindowFileDrop({
 }
 
 .results-header {
-  padding: 14px 18px;
-  min-height: 56px;
+  padding-block: clamp(12px, 1.8dvh, 14px);
+  padding-inline: 18px;
+  min-height: clamp(48px, 6.2dvh, 56px);
   border-bottom: 1px solid var(--docsy-border-subtle);
   background: rgba(255, 253, 248, 0.9);
   font-weight: 600;
@@ -517,26 +524,12 @@ useWindowFileDrop({
   color: var(--docsy-text-muted);
 }
 
-.results-loading {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--docsy-text-muted);
-}
-
-.results-loading p {
-  margin-top: 12px;
-  font-size: 13px;
-}
-
 .results-preview {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: clamp(12px, 2.4dvh, 16px);
   overflow: hidden;
 }
 
@@ -547,8 +540,8 @@ useWindowFileDrop({
 }
 
 .section-block {
-  margin-bottom: 20px;
-  padding-bottom: 20px;
+  margin-bottom: clamp(14px, 2.8dvh, 20px);
+  padding-bottom: clamp(14px, 2.8dvh, 20px);
   border-bottom: 1px solid var(--docsy-border-subtle);
 }
 
@@ -584,7 +577,8 @@ useWindowFileDrop({
 .drop-zone {
   border: 1px dashed var(--docsy-border-strong);
   border-radius: var(--docsy-radius);
-  padding: 28px 16px;
+  padding-block: clamp(20px, 3.5dvh, 28px);
+  padding-inline: 16px;
   background: var(--docsy-surface-muted);
   text-align: center;
   cursor: pointer;
@@ -698,7 +692,7 @@ useWindowFileDrop({
   }
 
   .extract-results {
-    min-height: 560px;
+    min-height: clamp(440px, 62dvh, 560px);
   }
 }
 </style>

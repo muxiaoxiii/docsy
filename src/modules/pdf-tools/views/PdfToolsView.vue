@@ -33,7 +33,10 @@
       </el-tab-pane>
 
       <el-tab-pane label="PDF合并" name="merge" lazy>
-        <ToolWorkspaceShell title="PDF 合并" description="按列表顺序合并多个 PDF，输出文件由你选择保存位置。">
+        <ToolWorkspaceShell
+          title="PDF 合并"
+          description="按列表顺序合并多个 PDF；合并时会压平页面注释和电子签章外观以便打印，不保留签章证书和交互。"
+        >
           <template #toolbar>
             <el-button type="primary" @click="selectMergeFiles">添加 PDF 文件</el-button>
           </template>
@@ -1051,7 +1054,8 @@ function splitRangeStatus(row) {
 }
 
 :deep(.pdf-tabs .tool-workspace) {
-  padding: 20px;
+  padding-block: clamp(12px, 2.2dvh, 20px);
+  padding-inline: 20px;
   background: var(--docsy-canvas);
 }
 
@@ -1066,13 +1070,15 @@ function splitRangeStatus(row) {
 
 :deep(.pdf-tabs .workspace-header) {
   min-height: 0;
-  padding: 18px 20px;
+  padding-block: clamp(14px, 2.1dvh, 18px);
+  padding-inline: 20px;
 }
 
 :deep(.pdf-tabs .workspace-toolbar) {
-  min-height: 52px;
-  margin: 12px 0;
-  padding: 9px 12px;
+  min-height: clamp(46px, 5.8dvh, 52px);
+  margin-block: clamp(8px, 1.5dvh, 12px);
+  padding-block: clamp(7px, 1.2dvh, 9px);
+  padding-inline: 12px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: color-mix(in srgb, var(--docsy-surface-muted) 68%, var(--docsy-surface-elevated));
@@ -1080,14 +1086,15 @@ function splitRangeStatus(row) {
 
 :deep(.pdf-tabs .workspace-content) {
   margin-top: 0;
-  padding: 16px;
+  padding: clamp(12px, 2.4dvh, 16px);
   background: color-mix(in srgb, var(--docsy-surface-elevated) 82%, var(--docsy-canvas));
 }
 
 :deep(.pdf-tabs .workspace-actions) {
-  min-height: 58px;
-  margin-top: 12px;
-  padding: 12px 16px;
+  min-height: clamp(50px, 6.5dvh, 58px);
+  margin-top: clamp(8px, 1.5dvh, 12px);
+  padding-block: clamp(10px, 1.5dvh, 12px);
+  padding-inline: 16px;
   box-shadow: none;
 }
 

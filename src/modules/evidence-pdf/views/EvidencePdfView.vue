@@ -8,7 +8,10 @@
         <EvidencePdfWorkbench workflow="split" />
       </el-tab-pane>
       <el-tab-pane label="证据扫描" name="scan" lazy>
-        <ToolWorkspaceShell title="证据扫描" description="扫描文件夹并按子文件夹自动整理、合并证据 PDF。">
+        <ToolWorkspaceShell
+          title="证据扫描"
+          description="扫描文件夹并按子文件夹自动整理、合并证据 PDF；合并时压平签章外观以便打印。"
+        >
           <template #toolbar>
             <el-button type="primary" @click="selectEvidenceFolder">选择证据文件夹</el-button>
             <el-button v-if="evidenceFolder" :loading="scanning" @click="scanEvidence">重新扫描</el-button>
