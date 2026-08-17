@@ -3,367 +3,367 @@
        每个区块独立一张网格，区块内 v-if 行增删只重排本区块，避免整体跳动 -->
   <div class="hf-rule-fields">
     <section class="hf-section">
-    <div class="rule-item section-label">
-      <strong>页眉文字</strong>
-      <div class="section-actions">
-        <el-switch v-model="headerInsertEnabledModel" size="small" />
-        <el-button size="small" circle :disabled="!headerInsertEnabled" @click="addGroup">
-          <el-icon><Plus /></el-icon>
-        </el-button>
-        <UndoRedoButtons
-          :can-undo="headerHistory.canUndo"
-          :can-redo="headerHistory.canRedo"
-          @undo="headerHistory.undo()"
-          @redo="headerHistory.redo()"
-          compact
-        />
-      </div>
-    </div>
-    <template v-if="headerInsertEnabled">
-      <!-- Overlap warnings -->
-      <el-alert
-        v-if="overlapWarnings.length"
-        type="warning"
-        :closable="false"
-        show-icon
-        class="overlap-warnings"
-      >
-        <template #title>{{ overlapWarnings.join('；') }}</template>
-      </el-alert>
-      <!-- Group list (only when >1 group) -->
-      <div v-if="headerGroups.length > 1" class="header-group-list">
-        <div
-          v-for="group in headerGroups"
-          :key="group.id"
-          class="header-group-item"
-          :class="{ active: group.id === selectedHeaderGroupId }"
-          @click="$emit('update:selectedHeaderGroupId', group.id)"
-        >
-          <span class="group-label">
-            <el-icon v-if="group.id === selectedHeaderGroupId"><i-ep-arrow-right /></el-icon>
-            {{ group.label || '页眉' }} · {{ groupModeLabel(group) }}
-          </span>
-          <el-button
-            size="small"
-            link
-            type="danger"
-            :disabled="headerGroups.length <= 1"
-            @click.stop="removeGroup(group.id)"
-          >
-            删除
+      <div class="rule-item section-label">
+        <strong>页眉文字</strong>
+        <div class="section-actions">
+          <el-switch v-model="headerInsertEnabledModel" size="small" />
+          <el-button size="small" circle :disabled="!headerInsertEnabled" @click="addGroup">
+            <el-icon><Plus /></el-icon>
           </el-button>
-        </div>
-      </div>
-      <!-- Settings for selected group -->
-      <div class="hf-section-grid">
-      <div class="rule-item">
-        <label>页眉来源</label>
-        <el-select v-model="headerModeModel">
-          <el-option label="文件名" value="filename" />
-          <el-option label="固定文本" value="custom" />
-          <el-option label="按证据列表名称" value="per_file" />
-        </el-select>
-      </div>
-      <div v-if="headerMode === 'per_file'" class="rule-item">
-        <label>名称前缀</label>
-        <el-input v-model="headerPerFilePrefixModel" placeholder="证据" />
-      </div>
-      <div v-if="headerMode === 'per_file'" class="rule-item">
-        <label>序号类型</label>
-        <el-select v-model="headerPerFileSeqTypeModel">
-          <el-option label="数字（1, 2, 3）" value="numeric" />
-          <el-option label="中文（一, 二, 三）" value="chinese" />
-        </el-select>
-      </div>
-      <div v-if="headerMode === 'per_file'" class="rule-item">
-        <label>序号起始</label>
-        <el-input-number v-model="headerPerFileSeqStartModel" :min="0" :max="9999" size="small" controls-position="right" />
-      </div>
-      <div v-if="headerMode === 'custom'" class="rule-item">
-        <label>页眉文本</label>
-        <div class="text-input-with-info">
-          <el-input v-model="headerTextModel" placeholder="输入文本或模板标记" />
-          <el-tooltip placement="top" :show-after="200" class="template-info-tip">
-            <template #content>
-              <div class="template-help">
-                <p><strong>模板标记（自动替换）：</strong></p>
-                <p><code>[文件名]</code> — 去掉扩展名的文件名</p>
-                <p><code>[序号]</code> — 文件序号（1, 2, 3...）</p>
-                <p><code>[中文序号]</code> — 中文序号（一、二、三...）</p>
-                <p><code>[#]</code> / <code>[##]</code> / <code>[###]</code> — 序号，位数=#个数（01, 001...）</p>
-                <p><code>[日期]</code> — 当前日期（YYYYMMDD）</p>
-                <p><code>[YYYY-MM-DD]</code> — 自定义日期格式</p>
-                <p style="margin-top:6px;color:var(--el-text-color-placeholder);">可与固定文字混合使用，如"证据[#]-[文件名]"</p>
-              </div>
-            </template>
-            <el-icon class="info-icon"><InfoFilled /></el-icon>
-          </el-tooltip>
-        </div>
-      </div>
-      <div class="rule-item">
-        <label>页眉前缀</label><el-input v-model="headerPrefixModel" :disabled="headerMode === 'none'" />
-      </div>
-      <div class="rule-item">
-        <label>页眉后缀</label><el-input v-model="headerSuffixModel" :disabled="headerMode === 'none'" />
-      </div>
-      <TextPlacementFields
-        prefix="页眉"
-        :disabled="headerMode === 'none'"
-        v-model:align="headerAlignModel"
-        v-model:font-size="headerFontSizeModel"
-        v-model:font-family="headerFontFamilyModel"
-        v-model:margin-mm="headerMarginMmModel"
-        v-model:offset-x-mm="headerOffsetXMmModel"
-        v-model:color="headerColorModel"
-        :offset-limit-mm="offsetLimitMm"
-        margin-label="距顶"
-      />
-      <div class="rule-item page-range-row">
-        <label>添加范围</label>
-        <div class="page-range-inputs">
-          <el-checkbox v-model="headerAllPages" size="small">全部页面</el-checkbox>
-          <template v-if="!headerAllPages">
-            <el-input-number
-              v-model="headerPageStartModel"
-              :min="1"
-              :max="9999"
-              size="small"
-              controls-position="right"
-            />
-            <span class="range-sep">–</span>
-            <el-input-number
-              v-model="headerPageEndModel"
-              :min="0"
-              :max="filePages || 9999"
-              size="small"
-              controls-position="right"
-            />
-            <span class="field-hint">结束页 0 = 全部</span>
-          </template>
-        </div>
-      </div>
-      </div>
-    </template>
-    </section>
-
-    <section class="hf-section">
-    <div class="rule-item section-label">
-      <strong>页脚文字</strong>
-      <div class="section-actions">
-        <el-switch v-model="footerInsertEnabledModel" size="small" />
-        <el-button size="small" circle :disabled="!footerInsertEnabled" @click="addFooterTextGroup">
-          <el-icon><Plus /></el-icon>
-        </el-button>
-        <UndoRedoButtons
-          :can-undo="footerTextHistory.canUndo"
-          :can-redo="footerTextHistory.canRedo"
-          @undo="footerTextHistory.undo()"
-          @redo="footerTextHistory.redo()"
-          compact
-        />
-      </div>
-    </div>
-    <template v-if="footerInsertEnabled">
-      <!-- Footer text group list (only when >1 group) -->
-      <div v-if="footerTextGroups.length > 1" class="header-group-list">
-        <div
-          v-for="group in footerTextGroups"
-          :key="group.id"
-          class="header-group-item"
-          :class="{ active: group.id === selectedFooterTextGroupId }"
-          @click="$emit('update:selectedFooterTextGroupId', group.id)"
-        >
-          <span class="group-label">
-            <el-icon v-if="group.id === selectedFooterTextGroupId"><i-ep-arrow-right /></el-icon>
-            {{ group.label || '页脚文字' }} · {{ group.text || '（空）' }}
-          </span>
-          <el-button
-            size="small"
-            link
-            type="danger"
-            :disabled="footerTextGroups.length <= 1"
-            @click.stop="removeFooterTextGroup(group.id)"
-          >
-            删除
-          </el-button>
-        </div>
-      </div>
-      <div class="hf-section-grid">
-      <div class="rule-item">
-        <label>页脚文本</label>
-        <div class="text-input-with-info">
-          <el-input v-model="footerTextContentModel" placeholder="输入文本或模板标记" />
-          <el-tooltip placement="top" :show-after="200" class="template-info-tip">
-            <template #content>
-              <div class="template-help">
-                <p><strong>模板标记（自动替换）：</strong></p>
-                <p><code>[文件名]</code> — 去掉扩展名的文件名</p>
-                <p><code>[序号]</code> — 文件序号（1, 2, 3...）</p>
-                <p><code>[中文序号]</code> — 中文序号（一、二、三...）</p>
-                <p><code>[#]</code> / <code>[##]</code> / <code>[###]</code> — 序号，位数=#个数（01, 001...）</p>
-                <p><code>[日期]</code> — 当前日期（YYYYMMDD）</p>
-                <p><code>[YYYY-MM-DD]</code> — 自定义日期格式</p>
-                <p style="margin-top:6px;color:var(--el-text-color-placeholder);">可与固定文字混合使用，如"证据[#]-[文件名]"</p>
-              </div>
-            </template>
-            <el-icon class="info-icon"><InfoFilled /></el-icon>
-          </el-tooltip>
-        </div>
-      </div>
-      <TextPlacementFields
-        prefix="页脚"
-        v-model:align="footerTextAlignModel"
-        v-model:font-size="footerTextFontSizeModel"
-        v-model:font-family="footerTextFontFamilyModel"
-        v-model:margin-mm="footerTextMarginMmModel"
-        v-model:offset-x-mm="footerTextOffsetXMmModel"
-        v-model:color="footerTextColorModel"
-        :offset-limit-mm="offsetLimitMm"
-        margin-label="距底"
-      />
-      <div class="rule-item page-range-row">
-        <label>添加范围</label>
-        <div class="page-range-inputs">
-          <el-checkbox v-model="footerTextAllPages" size="small">全部页面</el-checkbox>
-          <template v-if="!footerTextAllPages">
-            <el-input-number
-              v-model="footerTextPageStartModel"
-              :min="1"
-              :max="9999"
-              size="small"
-              controls-position="right"
-            />
-            <span class="range-sep">–</span>
-            <el-input-number
-              v-model="footerTextPageEndModel"
-              :min="0"
-              :max="filePages || 9999"
-              size="small"
-              controls-position="right"
-            />
-            <span class="field-hint">结束页 0 = 全部</span>
-          </template>
-        </div>
-      </div>
-      </div>
-    </template>
-    </section>
-
-    <section class="hf-section">
-    <div class="rule-item section-label">
-      <strong>页码</strong>
-      <div class="section-actions">
-        <el-switch v-model="pageNumberEnabledModel" size="small" />
-        <el-button size="small" circle :disabled="!pageNumberEnabled" @click="addPageNumberGroup">
-          <el-icon><Plus /></el-icon>
-        </el-button>
-        <UndoRedoButtons
-          :can-undo="pageNumberHistory.canUndo"
-          :can-redo="pageNumberHistory.canRedo"
-          @undo="pageNumberHistory.undo()"
-          @redo="pageNumberHistory.redo()"
-          compact
-        />
-      </div>
-    </div>
-    <template v-if="pageNumberEnabled">
-      <!-- Page number group list (only when >1 group) -->
-      <div v-if="pageNumberGroups.length > 1" class="header-group-list">
-        <div
-          v-for="group in pageNumberGroups"
-          :key="group.id"
-          class="header-group-item"
-          :class="{ active: group.id === selectedPageNumberGroupId }"
-          @click="$emit('update:selectedPageNumberGroupId', group.id)"
-        >
-          <span class="group-label">
-            <el-icon v-if="group.id === selectedPageNumberGroupId"><i-ep-arrow-right /></el-icon>
-            {{ group.label || '页码' }} · {{ group.template || '{page}/{total}' }}
-          </span>
-          <el-button
-            size="small"
-            link
-            type="danger"
-            :disabled="pageNumberGroups.length <= 1"
-            @click.stop="removePageNumberGroup(group.id)"
-          >
-            删除
-          </el-button>
-        </div>
-      </div>
-      <div class="hf-section-grid">
-      <div class="rule-item">
-        <label>连续方式</label>
-        <el-select v-model="pageNumberSequenceModel">
-          <el-option label="全部文件连续" value="continuous" />
-          <el-option label="每个文件单独编号" value="per-file" />
-        </el-select>
-      </div>
-      <div class="rule-item">
-        <label>页码样式</label>
-        <el-select v-model="pageNumberStyleModel">
-          <el-option
-            v-for="style in PAGE_NUMBER_STYLES"
-            :key="style.value"
-            :value="style.value"
-            :label="`${style.label} · ${style.sample}`"
+          <UndoRedoButtons
+            :can-undo="headerHistory.canUndo"
+            :can-redo="headerHistory.canRedo"
+            @undo="headerHistory.undo()"
+            @redo="headerHistory.redo()"
+            compact
           />
-        </el-select>
-      </div>
-      <div class="rule-item">
-        <label>显示总页数</label>
-        <el-switch v-model="pageNumberShowTotalModel" active-text="开" inactive-text="关" />
-      </div>
-      <div class="rule-item">
-        <label>页码格式</label>
-        <div class="template-presets">
-          <el-radio-group
-            v-model="pageNumberPresetModel"
-            size="small"
-            @change="applyPresetTemplate"
-          >
-            <el-radio-button v-for="p in filteredPageNumberPresets" :key="p.value" :value="p.value">
-              {{ p.label }}
-            </el-radio-button>
-          </el-radio-group>
         </div>
-        <el-input
-          v-model="pageNumberTemplateModel"
-          placeholder="例如 {page}/{total}、-{page}-"
-          size="small"
-          class="template-custom-input"
-        />
       </div>
-      <div class="rule-item">
-        <label>预览</label>
-        <span class="page-number-preview">{{ pageNumberPreviewText }}</span>
+      <template v-if="headerInsertEnabled">
+        <!-- Overlap warnings -->
+        <el-alert v-if="overlapWarnings.length" type="warning" :closable="false" show-icon class="overlap-warnings">
+          <template #title>{{ overlapWarnings.join('；') }}</template>
+        </el-alert>
+        <!-- Group list (only when >1 group) -->
+        <div v-if="headerGroups.length > 1" class="header-group-list">
+          <div
+            v-for="group in headerGroups"
+            :key="group.id"
+            class="header-group-item"
+            :class="{ active: group.id === selectedHeaderGroupId }"
+            @click="$emit('update:selectedHeaderGroupId', group.id)"
+          >
+            <span class="group-label">
+              <el-icon v-if="group.id === selectedHeaderGroupId"><i-ep-arrow-right /></el-icon>
+              {{ group.label || '页眉' }} · {{ groupModeLabel(group) }}
+            </span>
+            <el-button
+              size="small"
+              link
+              type="danger"
+              :disabled="headerGroups.length <= 1"
+              @click.stop="removeGroup(group.id)"
+            >
+              删除
+            </el-button>
+          </div>
+        </div>
+        <!-- Settings for selected group -->
+        <div class="hf-section-grid">
+          <div class="rule-item">
+            <label>页眉来源</label>
+            <el-select v-model="headerModeModel">
+              <el-option label="文件名" value="filename" />
+              <el-option label="固定文本" value="custom" />
+              <el-option label="按证据列表名称" value="per_file" />
+            </el-select>
+          </div>
+          <div v-if="headerMode === 'per_file'" class="rule-item">
+            <label>名称前缀</label>
+            <el-input v-model="headerPerFilePrefixModel" placeholder="证据" />
+          </div>
+          <div v-if="headerMode === 'per_file'" class="rule-item">
+            <label>序号类型</label>
+            <el-select v-model="headerPerFileSeqTypeModel">
+              <el-option label="数字（1, 2, 3）" value="numeric" />
+              <el-option label="中文（一, 二, 三）" value="chinese" />
+            </el-select>
+          </div>
+          <div v-if="headerMode === 'per_file'" class="rule-item">
+            <label>序号起始</label>
+            <el-input-number
+              v-model="headerPerFileSeqStartModel"
+              :min="0"
+              :max="9999"
+              size="small"
+              controls-position="right"
+            />
+          </div>
+          <div v-if="headerMode === 'custom'" class="rule-item">
+            <label>页眉文本</label>
+            <div class="text-input-with-info">
+              <el-input v-model="headerTextModel" placeholder="输入文本或模板标记" />
+              <el-tooltip placement="top" :show-after="200" class="template-info-tip">
+                <template #content>
+                  <div class="template-help">
+                    <p><strong>模板标记（自动替换）：</strong></p>
+                    <p><code>[文件名]</code> — 去掉扩展名的文件名</p>
+                    <p><code>[序号]</code> — 文件序号（1, 2, 3...）</p>
+                    <p><code>[中文序号]</code> — 中文序号（一、二、三...）</p>
+                    <p><code>[#]</code> / <code>[##]</code> / <code>[###]</code> — 序号，位数=#个数（01, 001...）</p>
+                    <p><code>[日期]</code> — 当前日期（YYYYMMDD）</p>
+                    <p><code>[YYYY-MM-DD]</code> — 自定义日期格式</p>
+                    <p style="margin-top: 6px; color: var(--el-text-color-placeholder)">
+                      可与固定文字混合使用，如"证据[#]-[文件名]"
+                    </p>
+                  </div>
+                </template>
+                <el-icon class="info-icon"><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </div>
+          <div class="rule-item">
+            <label>页眉前缀</label><el-input v-model="headerPrefixModel" :disabled="headerMode === 'none'" />
+          </div>
+          <div class="rule-item">
+            <label>页眉后缀</label><el-input v-model="headerSuffixModel" :disabled="headerMode === 'none'" />
+          </div>
+          <TextPlacementFields
+            prefix="页眉"
+            :disabled="headerMode === 'none'"
+            v-model:align="headerAlignModel"
+            v-model:font-size="headerFontSizeModel"
+            v-model:font-family="headerFontFamilyModel"
+            v-model:margin-mm="headerMarginMmModel"
+            v-model:offset-x-mm="headerOffsetXMmModel"
+            v-model:color="headerColorModel"
+            :offset-limit-mm="offsetLimitMm"
+            margin-label="距顶"
+          />
+          <div class="rule-item page-range-row">
+            <label>添加范围</label>
+            <div class="page-range-inputs">
+              <el-checkbox v-model="headerAllPages" size="small">全部页面</el-checkbox>
+              <template v-if="!headerAllPages">
+                <el-input-number
+                  v-model="headerPageStartModel"
+                  :min="1"
+                  :max="9999"
+                  size="small"
+                  controls-position="right"
+                />
+                <span class="range-sep">–</span>
+                <el-input-number
+                  v-model="headerPageEndModel"
+                  :min="0"
+                  :max="filePages || 9999"
+                  size="small"
+                  controls-position="right"
+                />
+                <span class="field-hint">结束页 0 = 全部</span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <section class="hf-section">
+      <div class="rule-item section-label">
+        <strong>页脚文字</strong>
+        <div class="section-actions">
+          <el-switch v-model="footerInsertEnabledModel" size="small" />
+          <el-button size="small" circle :disabled="!footerInsertEnabled" @click="addFooterTextGroup">
+            <el-icon><Plus /></el-icon>
+          </el-button>
+          <UndoRedoButtons
+            :can-undo="footerTextHistory.canUndo"
+            :can-redo="footerTextHistory.canRedo"
+            @undo="footerTextHistory.undo()"
+            @redo="footerTextHistory.redo()"
+            compact
+          />
+        </div>
       </div>
-      <div class="rule-item">
-        <label>页码区域</label>
-        <el-select v-model="pageNumberRegionModel">
-          <el-option label="页脚区域" value="footer" />
-          <el-option label="页眉区域" value="header" />
-        </el-select>
+      <template v-if="footerInsertEnabled">
+        <!-- Footer text group list (only when >1 group) -->
+        <div v-if="footerTextGroups.length > 1" class="header-group-list">
+          <div
+            v-for="group in footerTextGroups"
+            :key="group.id"
+            class="header-group-item"
+            :class="{ active: group.id === selectedFooterTextGroupId }"
+            @click="$emit('update:selectedFooterTextGroupId', group.id)"
+          >
+            <span class="group-label">
+              <el-icon v-if="group.id === selectedFooterTextGroupId"><i-ep-arrow-right /></el-icon>
+              {{ group.label || '页脚文字' }} · {{ group.text || '（空）' }}
+            </span>
+            <el-button
+              size="small"
+              link
+              type="danger"
+              :disabled="footerTextGroups.length <= 1"
+              @click.stop="removeFooterTextGroup(group.id)"
+            >
+              删除
+            </el-button>
+          </div>
+        </div>
+        <div class="hf-section-grid">
+          <div class="rule-item">
+            <label>页脚文本</label>
+            <div class="text-input-with-info">
+              <el-input v-model="footerTextContentModel" placeholder="输入文本或模板标记" />
+              <el-tooltip placement="top" :show-after="200" class="template-info-tip">
+                <template #content>
+                  <div class="template-help">
+                    <p><strong>模板标记（自动替换）：</strong></p>
+                    <p><code>[文件名]</code> — 去掉扩展名的文件名</p>
+                    <p><code>[序号]</code> — 文件序号（1, 2, 3...）</p>
+                    <p><code>[中文序号]</code> — 中文序号（一、二、三...）</p>
+                    <p><code>[#]</code> / <code>[##]</code> / <code>[###]</code> — 序号，位数=#个数（01, 001...）</p>
+                    <p><code>[日期]</code> — 当前日期（YYYYMMDD）</p>
+                    <p><code>[YYYY-MM-DD]</code> — 自定义日期格式</p>
+                    <p style="margin-top: 6px; color: var(--el-text-color-placeholder)">
+                      可与固定文字混合使用，如"证据[#]-[文件名]"
+                    </p>
+                  </div>
+                </template>
+                <el-icon class="info-icon"><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </div>
+          <TextPlacementFields
+            prefix="页脚"
+            v-model:align="footerTextAlignModel"
+            v-model:font-size="footerTextFontSizeModel"
+            v-model:font-family="footerTextFontFamilyModel"
+            v-model:margin-mm="footerTextMarginMmModel"
+            v-model:offset-x-mm="footerTextOffsetXMmModel"
+            v-model:color="footerTextColorModel"
+            :offset-limit-mm="offsetLimitMm"
+            margin-label="距底"
+          />
+          <div class="rule-item page-range-row">
+            <label>添加范围</label>
+            <div class="page-range-inputs">
+              <el-checkbox v-model="footerTextAllPages" size="small">全部页面</el-checkbox>
+              <template v-if="!footerTextAllPages">
+                <el-input-number
+                  v-model="footerTextPageStartModel"
+                  :min="1"
+                  :max="9999"
+                  size="small"
+                  controls-position="right"
+                />
+                <span class="range-sep">–</span>
+                <el-input-number
+                  v-model="footerTextPageEndModel"
+                  :min="0"
+                  :max="filePages || 9999"
+                  size="small"
+                  controls-position="right"
+                />
+                <span class="field-hint">结束页 0 = 全部</span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <section class="hf-section">
+      <div class="rule-item section-label">
+        <strong>页码</strong>
+        <div class="section-actions">
+          <el-switch v-model="pageNumberEnabledModel" size="small" />
+          <el-button size="small" circle :disabled="!pageNumberEnabled" @click="addPageNumberGroup">
+            <el-icon><Plus /></el-icon>
+          </el-button>
+          <UndoRedoButtons
+            :can-undo="pageNumberHistory.canUndo"
+            :can-redo="pageNumberHistory.canRedo"
+            @undo="pageNumberHistory.undo()"
+            @redo="pageNumberHistory.redo()"
+            compact
+          />
+        </div>
       </div>
-      <TextPlacementFields
-        prefix="页码"
-        v-model:align="pageNumberAlignModel"
-        v-model:font-size="pageNumberFontSizeModel"
-        v-model:font-family="pageNumberFontFamilyModel"
-        v-model:margin-mm="pageNumberMarginMmModel"
-        v-model:offset-x-mm="pageNumberOffsetXMmModel"
-        v-model:color="pageNumberColorModel"
-        :offset-limit-mm="offsetLimitMm"
-        :margin-label="pageNumberRegion === 'header' ? '距顶' : '距底'"
-      />
-      <div class="rule-item">
-        <label>分段与例外</label>
-        <el-button @click="$emit('editPageNumberRules')">
-          设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
-        </el-button>
-      </div>
-      </div>
-    </template>
+      <template v-if="pageNumberEnabled">
+        <!-- Page number group list (only when >1 group) -->
+        <div v-if="pageNumberGroups.length > 1" class="header-group-list">
+          <div
+            v-for="group in pageNumberGroups"
+            :key="group.id"
+            class="header-group-item"
+            :class="{ active: group.id === selectedPageNumberGroupId }"
+            @click="$emit('update:selectedPageNumberGroupId', group.id)"
+          >
+            <span class="group-label">
+              <el-icon v-if="group.id === selectedPageNumberGroupId"><i-ep-arrow-right /></el-icon>
+              {{ group.label || '页码' }} · {{ group.template || '{page}/{total}' }}
+            </span>
+            <el-button
+              size="small"
+              link
+              type="danger"
+              :disabled="pageNumberGroups.length <= 1"
+              @click.stop="removePageNumberGroup(group.id)"
+            >
+              删除
+            </el-button>
+          </div>
+        </div>
+        <div class="hf-section-grid">
+          <div class="rule-item">
+            <label>连续方式</label>
+            <el-select v-model="pageNumberSequenceModel">
+              <el-option label="全部文件连续" value="continuous" />
+              <el-option label="每个文件单独编号" value="per-file" />
+            </el-select>
+          </div>
+          <div class="rule-item">
+            <label>页码样式</label>
+            <el-select v-model="pageNumberStyleModel">
+              <el-option
+                v-for="style in PAGE_NUMBER_STYLES"
+                :key="style.value"
+                :value="style.value"
+                :label="`${style.label} · ${style.sample}`"
+              />
+            </el-select>
+          </div>
+          <div class="rule-item">
+            <label>显示总页数</label>
+            <el-switch v-model="pageNumberShowTotalModel" active-text="开" inactive-text="关" />
+          </div>
+          <div class="rule-item">
+            <label>页码格式</label>
+            <div class="template-presets">
+              <el-radio-group v-model="pageNumberPresetModel" size="small" @change="applyPresetTemplate">
+                <el-radio-button v-for="p in filteredPageNumberPresets" :key="p.value" :value="p.value">
+                  {{ p.label }}
+                </el-radio-button>
+              </el-radio-group>
+            </div>
+            <el-input
+              v-model="pageNumberTemplateModel"
+              placeholder="例如 {page}/{total}、-{page}-"
+              size="small"
+              class="template-custom-input"
+            />
+          </div>
+          <div class="rule-item">
+            <label>预览</label>
+            <span class="page-number-preview">{{ pageNumberPreviewText }}</span>
+          </div>
+          <div class="rule-item">
+            <label>页码区域</label>
+            <el-select v-model="pageNumberRegionModel">
+              <el-option label="页脚区域" value="footer" />
+              <el-option label="页眉区域" value="header" />
+            </el-select>
+          </div>
+          <TextPlacementFields
+            prefix="页码"
+            v-model:align="pageNumberAlignModel"
+            v-model:font-size="pageNumberFontSizeModel"
+            v-model:font-family="pageNumberFontFamilyModel"
+            v-model:margin-mm="pageNumberMarginMmModel"
+            v-model:offset-x-mm="pageNumberOffsetXMmModel"
+            v-model:color="pageNumberColorModel"
+            :offset-limit-mm="offsetLimitMm"
+            :margin-label="pageNumberRegion === 'header' ? '距顶' : '距底'"
+          />
+          <div class="rule-item">
+            <label>分段与例外</label>
+            <el-button @click="$emit('editPageNumberRules')">
+              设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
+            </el-button>
+          </div>
+        </div>
+      </template>
     </section>
   </div>
 </template>
@@ -570,32 +570,71 @@ const pageNumberHistory = useHistory({
 
 // Debounced watches: push history when placement params change
 watch(
-  () => [props.headerAlign, props.headerFontSize, props.headerFontFamily, props.headerMarginMm, props.headerOffsetXMm, props.headerColor],
+  () => [
+    props.headerAlign,
+    props.headerFontSize,
+    props.headerFontFamily,
+    props.headerMarginMm,
+    props.headerOffsetXMm,
+    props.headerColor,
+  ],
   debounce(() => headerHistory.push(), 500),
   { deep: true },
 )
 watch(
-  () => [props.footerTextAlign, props.footerTextFontSize, props.footerTextFontFamily, props.footerTextMarginMm, props.footerTextOffsetXMm, props.footerTextColor],
+  () => [
+    props.footerTextAlign,
+    props.footerTextFontSize,
+    props.footerTextFontFamily,
+    props.footerTextMarginMm,
+    props.footerTextOffsetXMm,
+    props.footerTextColor,
+  ],
   debounce(() => footerTextHistory.push(), 500),
   { deep: true },
 )
 watch(
-  () => [props.pageNumberAlign, props.pageNumberFontSize, props.pageNumberFontFamily, props.pageNumberMarginMm, props.pageNumberOffsetXMm, props.pageNumberColor],
+  () => [
+    props.pageNumberAlign,
+    props.pageNumberFontSize,
+    props.pageNumberFontFamily,
+    props.pageNumberMarginMm,
+    props.pageNumberOffsetXMm,
+    props.pageNumberColor,
+  ],
   debounce(() => pageNumberHistory.push(), 500),
   { deep: true },
 )
 
 // Expose undo/redo for parent-level keyboard shortcut dispatch
 function undo() {
-  if (headerHistory.canUndo.value) { headerHistory.undo(); return true }
-  if (footerTextHistory.canUndo.value) { footerTextHistory.undo(); return true }
-  if (pageNumberHistory.canUndo.value) { pageNumberHistory.undo(); return true }
+  if (headerHistory.canUndo.value) {
+    headerHistory.undo()
+    return true
+  }
+  if (footerTextHistory.canUndo.value) {
+    footerTextHistory.undo()
+    return true
+  }
+  if (pageNumberHistory.canUndo.value) {
+    pageNumberHistory.undo()
+    return true
+  }
   return false
 }
 function redo() {
-  if (headerHistory.canRedo.value) { headerHistory.redo(); return true }
-  if (footerTextHistory.canRedo.value) { footerTextHistory.redo(); return true }
-  if (pageNumberHistory.canRedo.value) { pageNumberHistory.redo(); return true }
+  if (headerHistory.canRedo.value) {
+    headerHistory.redo()
+    return true
+  }
+  if (footerTextHistory.canRedo.value) {
+    footerTextHistory.redo()
+    return true
+  }
+  if (pageNumberHistory.canRedo.value) {
+    pageNumberHistory.redo()
+    return true
+  }
   return false
 }
 defineExpose({ undo, redo })
@@ -665,13 +704,11 @@ const pageNumberPresetModel = computed({
   get() {
     const tpl = props.pageNumberTemplate
     const presets = props.pageNumberShowTotal ? PRESETS_WITH_TOTAL : PRESETS_NO_TOTAL
-    return presets.some(p => p.value === tpl) ? tpl : 'custom'
+    return presets.some((p) => p.value === tpl) ? tpl : 'custom'
   },
   set() {},
 })
-const filteredPageNumberPresets = computed(() =>
-  props.pageNumberShowTotal ? PRESETS_WITH_TOTAL : PRESETS_NO_TOTAL
-)
+const filteredPageNumberPresets = computed(() => (props.pageNumberShowTotal ? PRESETS_WITH_TOTAL : PRESETS_NO_TOTAL))
 function applyPresetTemplate(val) {
   if (val && val !== 'custom') pageNumberTemplateModel.value = val
 }
@@ -683,20 +720,19 @@ const pageNumberPreviewText = computed(() => {
 
 // Sync template when showTotal toggles
 let lastTemplateWithTotal = ''
-watch(() => props.pageNumberShowTotal, (showTotal) => {
-  const tpl = props.pageNumberTemplate || '{page}/{total}'
-  if (!showTotal && tpl.includes('{total}')) {
-    lastTemplateWithTotal = tpl
-    const cleaned = tpl
-      .replaceAll('{total}', '')
-      .replaceAll('//', '/')
-      .replace(/\/+$/, '')
-      .replace(/^\//, '')
-    pageNumberTemplateModel.value = cleaned || '{page}'
-  } else if (showTotal && !tpl.includes('{total}')) {
-    pageNumberTemplateModel.value = lastTemplateWithTotal || '{page}/{total}'
-  }
-})
+watch(
+  () => props.pageNumberShowTotal,
+  (showTotal) => {
+    const tpl = props.pageNumberTemplate || '{page}/{total}'
+    if (!showTotal && tpl.includes('{total}')) {
+      lastTemplateWithTotal = tpl
+      const cleaned = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '').replace(/^\//, '')
+      pageNumberTemplateModel.value = cleaned || '{page}'
+    } else if (showTotal && !tpl.includes('{total}')) {
+      pageNumberTemplateModel.value = lastTemplateWithTotal || '{page}/{total}'
+    }
+  },
+)
 
 // Overlap detection
 const overlapWarnings = computed(() => {
@@ -714,7 +750,9 @@ const overlapWarnings = computed(() => {
   for (let i = 0; i < enabledHeader.length; i++) {
     for (let j = i + 1; j < enabledHeader.length; j++) {
       if (Math.abs(enabledHeader[i].marginMm - enabledHeader[j].marginMm) <= 2) {
-        warnings.push(`"${label(enabledHeader[i], '页眉 ' + (i + 1))}" 与 "${label(enabledHeader[j], '页眉 ' + (j + 1))}" 距顶距离接近，可能重叠`)
+        warnings.push(
+          `"${label(enabledHeader[i], '页眉 ' + (i + 1))}" 与 "${label(enabledHeader[j], '页眉 ' + (j + 1))}" 距顶距离接近，可能重叠`,
+        )
       }
     }
   }
@@ -917,8 +955,12 @@ function removePageNumberGroup(id) {
   background: var(--docsy-surface-muted);
   border-radius: var(--docsy-radius);
 }
-.template-presets { margin-bottom: 4px; }
-.template-custom-input { margin-top: 4px; }
+.template-presets {
+  margin-bottom: 4px;
+}
+.template-custom-input {
+  margin-top: 4px;
+}
 .page-range-row {
   grid-column: 1 / -1;
 }

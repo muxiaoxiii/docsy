@@ -90,9 +90,7 @@ function toOverlay(group, total, continuous) {
   //   numberOffset = numberStart - globalStart → page = globalPage + offset = numberStart ✓
   // per-file mode: backend current_page = page_start(1) + index = localPage
   //   numberOffset = numberStart - localPageStart = numberStart - pageStart
-  const offset = continuous
-    ? group.numberStart - group.globalStart
-    : group.numberStart - group.pageStart
+  const offset = continuous ? group.numberStart - group.globalStart : group.numberStart - group.pageStart
   return {
     text: group.rule.template || '{page}/{total}',
     region: group.rule.region || 'footer',
@@ -138,4 +136,3 @@ function toRoman(value) {
   }
   return result
 }
-

@@ -557,7 +557,7 @@ mod tests {
             message: "test".to_string(),
         }];
         let result = apply_merge_if_requested(&merge, &[], &[], &failed).unwrap();
-        assert_eq!(result.enabled, true);
+        assert!(result.enabled);
         assert_eq!(result.status.as_deref(), Some("skipped"));
     }
 

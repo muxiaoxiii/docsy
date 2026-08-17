@@ -200,8 +200,6 @@ describe('previewPageInfo 页尺寸回退链', () => {
     const file = makeFile('无信息')
     const preview = makePreview({ file, rules })
     expect(preview.previewPageInfo.value).toBeNull()
-    expect(preview.previewHeaderStyle.value.fontSize).toBe(
-      `max(8px, ${Number(((10 / 595.28) * 100).toFixed(4))}cqw)`,
-    )
+    expect(preview.previewHeaderStyle.value.fontSize).toBe(`max(8px, ${Number(((10 / 595.28) * 100).toFixed(4))}cqw)`)
   })
 })

@@ -41,8 +41,17 @@ pub fn build_template_docx(
         // every run, including marks the user chose to keep as ordinary text.
         strip_all_yellow_highlights(&mut tree.root);
 
-        // Build a map from (part, paragraph_idx, run_idx) to field info
+        // Build a map from (part, paragraph_idx, run_idx) to field info.
+        // Repair the truncated placeholder siblings produced by older ranged
+        // re-save logic before walking coordinates, so saving an affected
+        // library template permanently heals its package.
         let coord_map = build_coordinate_field_map(fields);
+        super::render::remove_known_placeholder_fragments(
+            &mut tree.root,
+            coord_map
+                .values()
+                .flat_map(|entries| entries.iter().map(|entry| &entry.0)),
+        );
 
         // Walk the tree and wrap runs at the specified coordinates
         wrap_runs_by_coordinates(&mut tree.root, part_name, &coord_map, &mut (0, 0))?;
@@ -333,12 +342,32 @@ fn wrap_paragraph_runs(
         let is_wr = matches!(&children[i], XmlNode::Element { name, .. } if name == "w:r");
         if !is_wr {
             // 库模板“编辑再保存”时，document.xml 里已有上次保存写入的 w:sdt。
-            // 若其中包含本次要包的目标 run，先去掉旧壳（内部 run 原样保留，
-            // 提升为兄弟节点后由主循环重新包新壳），避免嵌套 sdt 导致渲染端
-            // 只认 w:r 而丢掉字段。
+            // 已保存模板的 run 内容已被匿名化为 {{field_id}}。不能再按原文
+            // start/end 切割这段占位符，否则会把开头的 "{{" 包成新 sdt，并把
+            // "field_id}}" 留在文档中。对单 run、单目标的已有 sdt 直接刷新标识。
             if matches!(&children[i], XmlNode::Element { name, .. } if name == "w:sdt")
                 && sdt_hits_target(&children[i], part, p_idx, cursor.1, coord_map)
             {
+                let run_count = text_run_count(&children[i]);
+                let key = (part.to_string(), p_idx, cursor.1);
+                if run_count == 1 {
+                    if let Some(entries) = coord_map.get(&key) {
+                        if entries.len() == 1 {
+                            let (tag, _field_type, is_delete, _start, _end) = &entries[0];
+                            if *is_delete {
+                                children[i] = XmlNode::Text(String::new());
+                            } else {
+                                refresh_existing_sdt(&mut children[i], tag);
+                                i += 1;
+                            }
+                            cursor.1 += 1;
+                            continue;
+                        }
+                    }
+                }
+
+                // 复杂的旧 sdt 结构无法从匿名占位符反推原文范围，此时保留
+                // 旧行为，让后续坐标验证或渲染检查给出明确错误。
                 let sdt = std::mem::replace(&mut children[i], XmlNode::Text(String::new()));
                 let content = sdt_content_children(sdt);
                 children.splice(i..i + 1, content);
@@ -464,6 +493,67 @@ fn wrap_paragraph_runs(
     }
 
     Ok(())
+}
+
+fn text_run_count(node: &XmlNode) -> usize {
+    match node {
+        XmlNode::Element { name, children, .. } if name == "w:r" => usize::from(run_has_text(node)),
+        XmlNode::Element { children, .. } => children.iter().map(text_run_count).sum(),
+        XmlNode::Text(_) => 0,
+    }
+}
+
+/// Keep an already-authored Docsy content control in place when a library
+/// template is edited and saved again. Only its stable tag and anonymous text
+/// are refreshed; the original run properties and surrounding suffix remain.
+fn refresh_existing_sdt(sdt: &mut XmlNode, tag: &str) {
+    let placeholder = format!("{{{{{tag}}}}}");
+    let mut wrote_placeholder = false;
+    refresh_existing_sdt_node(sdt, tag, &placeholder, &mut wrote_placeholder);
+}
+
+fn refresh_existing_sdt_node(
+    node: &mut XmlNode,
+    tag: &str,
+    placeholder: &str,
+    wrote_placeholder: &mut bool,
+) {
+    let XmlNode::Element {
+        name,
+        attrs,
+        children,
+    } = node
+    else {
+        return;
+    };
+
+    if name == "w:tag" {
+        if let Some((_, value)) = attrs.iter_mut().find(|(key, _)| key == "w:val") {
+            *value = tag.to_string();
+        } else {
+            attrs.push(("w:val".to_string(), tag.to_string()));
+        }
+    }
+
+    if name == "w:rPr" {
+        children.retain(|child| !is_yellow_highlight_elem(child));
+    }
+
+    if name == "w:t" {
+        let value = if *wrote_placeholder {
+            String::new()
+        } else {
+            *wrote_placeholder = true;
+            placeholder.to_string()
+        };
+        children.clear();
+        children.push(XmlNode::Text(value));
+        return;
+    }
+
+    for child in children {
+        refresh_existing_sdt_node(child, tag, placeholder, wrote_placeholder);
+    }
 }
 
 fn find_nested_paragraphs(
@@ -1082,6 +1172,69 @@ mod tests {
             rendered_xml.contains("李四"),
             "再保存产物渲染后字段为空: {rendered_xml}"
         );
+    }
+
+    #[test]
+    fn resave_preserves_ranged_sdt_without_splitting_anonymous_placeholder() {
+        let xml = r#"<w:document><w:body><w:p>
+            <w:r><w:rPr><w:highlight w:val="yellow"/><w:u w:val="single"/></w:rPr><w:t>吕晗律师</w:t></w:r>
+        </w:p></w:body></w:document>"#;
+        let fields = vec![TemplateField {
+            id: "lawyer".to_string(),
+            name: "受托人".to_string(),
+            label: "受托人".to_string(),
+            field_type: "text".to_string(),
+            mark_refs: vec![crate::docx_template::TemplateMarkRef {
+                mark_id: "word/document.xml-p0-r0".to_string(),
+                start: Some(0),
+                end: Some(2),
+                tag: "lawyer.ref.1".to_string(),
+                optional_rule: None,
+            }],
+            ..Default::default()
+        }];
+        let parts = vec![("word/document.xml".to_string(), xml.as_bytes().to_vec())];
+
+        let first_index = crate::docx_template::scan::scan_package_index_to_document_index(&[(
+            parts[0].0.as_str(),
+            parts[0].1.as_slice(),
+        )])
+        .unwrap();
+        let first = build_template_docx(&parts, &fields, &first_index).unwrap();
+        let first_xml = String::from_utf8(first[0].1.clone()).unwrap();
+        assert!(first_xml.contains("{{lawyer.ref.1}}"));
+        assert!(first_xml.contains("律师"));
+
+        let second_index = crate::docx_template::scan::scan_package_index_to_document_index(&[(
+            first[0].0.as_str(),
+            first[0].1.as_slice(),
+        )])
+        .unwrap();
+        let second = build_template_docx(&first, &fields, &second_index).unwrap();
+        let second_xml = String::from_utf8(second[0].1.clone()).unwrap();
+
+        assert_eq!(second_xml.matches("{{lawyer.ref.1}}").count(), 1);
+        assert!(!second_xml.contains(">lawyer.ref.1}}</w:t>"));
+        assert!(
+            second_xml.contains("律师"),
+            "静态后缀必须保留: {second_xml}"
+        );
+
+        let damaged_xml = first_xml.replacen(
+            "</w:sdt>",
+            "</w:sdt><w:r><w:t>lawyer.ref.1}}</w:t></w:r>",
+            1,
+        );
+        let damaged = vec![("word/document.xml".to_string(), damaged_xml.into_bytes())];
+        let damaged_index = crate::docx_template::scan::scan_package_index_to_document_index(&[(
+            damaged[0].0.as_str(),
+            damaged[0].1.as_slice(),
+        )])
+        .unwrap();
+        let repaired = build_template_docx(&damaged, &fields, &damaged_index).unwrap();
+        let repaired_xml = String::from_utf8(repaired[0].1.clone()).unwrap();
+        assert_eq!(repaired_xml.matches("{{lawyer.ref.1}}").count(), 1);
+        assert!(!repaired_xml.contains(">lawyer.ref.1}}</w:t>"));
     }
 
     #[test]

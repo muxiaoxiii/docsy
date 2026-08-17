@@ -9,7 +9,8 @@
         :class="blockClass(token)"
         title="点击删除"
         @click="removeToken(idx)"
-      >{{ previewToken(token) }}</span>
+        >{{ previewToken(token) }}</span
+      >
       <span v-if="modelValue.length" class="fn-ext">.docx</span>
       <span v-if="!modelValue.length" class="fn-hint">点击右侧按钮或在中间输入文件名规则</span>
     </div>
@@ -66,8 +67,8 @@
       <span class="fn-btn fn-btn-lit" @click="addPreset('literal', '丨')">丨</span>
 
       <el-dropdown trigger="click" @command="addField" :teleported="false">
-        <span class="fn-btn fn-btn-field" style="min-width: 56px; justify-content: space-between;">
-          <span>字段</span><span style="font-size: 9px;">▾</span>
+        <span class="fn-btn fn-btn-field" style="min-width: 56px; justify-content: space-between">
+          <span>字段</span><span style="font-size: 9px">▾</span>
         </span>
         <template #dropdown>
           <el-dropdown-menu class="fn-field-menu">
@@ -115,14 +116,20 @@ function blockClass(token) {
 
 const textValue = ref('')
 
-watch(() => props.modelValue, (tokens) => {
-  if (inputFocused.value) return
-  textValue.value = tokens.map((t) => {
-    if (t.type === 'field') return `[[${t.value}]]`
-    if (t.type === 'preset') return `[${t.value}]`
-    return t.value
-  }).join('')
-}, { immediate: true })
+watch(
+  () => props.modelValue,
+  (tokens) => {
+    if (inputFocused.value) return
+    textValue.value = tokens
+      .map((t) => {
+        if (t.type === 'field') return `[[${t.value}]]`
+        if (t.type === 'preset') return `[${t.value}]`
+        return t.value
+      })
+      .join('')
+  },
+  { immediate: true },
+)
 
 function commitText() {
   const tokens = []
@@ -146,13 +153,16 @@ const acFields = computed(() => {
   const lastBracket = val.lastIndexOf('[[')
   if (lastBracket < 0) return []
   const query = val.slice(lastBracket + 2).toLowerCase()
-  return props.availableFields.filter((f) =>
-    !query || f.name.toLowerCase().includes(query) || (f.label || '').toLowerCase().includes(query)
-  ).slice(0, 8)
+  return props.availableFields
+    .filter((f) => !query || f.name.toLowerCase().includes(query) || (f.label || '').toLowerCase().includes(query))
+    .slice(0, 8)
 })
 
 watch(textValue, (val) => {
-  if (!inputFocused.value) { showAc.value = false; return }
+  if (!inputFocused.value) {
+    showAc.value = false
+    return
+  }
   const cursor = inputRef.value?.selectionStart || val.length
   showAc.value = val.slice(Math.max(0, cursor - 2), cursor) === '[['
 })
@@ -167,7 +177,10 @@ function insertField(f) {
 // ── Actions ──────────────────────────────────────────────
 
 function removeToken(idx) {
-  emit('update:modelValue', props.modelValue.filter((_, i) => i !== idx))
+  emit(
+    'update:modelValue',
+    props.modelValue.filter((_, i) => i !== idx),
+  )
 }
 
 function addPreset(type, value) {
@@ -180,8 +193,14 @@ function addField(name) {
   emit('update:modelValue', [...props.modelValue, { id: crypto.randomUUID(), type: 'field', value: name }])
 }
 
-function toggleSeqPopover() { seqPopover.value = !seqPopover.value; datePopover.value = false }
-function toggleDatePopover() { datePopover.value = !datePopover.value; seqPopover.value = false }
+function toggleSeqPopover() {
+  seqPopover.value = !seqPopover.value
+  datePopover.value = false
+}
+function toggleDatePopover() {
+  datePopover.value = !datePopover.value
+  seqPopover.value = false
+}
 
 function addAndClose(type, value, which) {
   addPreset(type, value)
@@ -195,7 +214,11 @@ function previewToken(token) {
   if (token.type === 'field') {
     const v = props.sampleValues[token.value]
     if (v != null && v !== '' && v !== false) {
-      if (Array.isArray(v)) return v.map((i) => (typeof i === 'object' ? i.text : i)).filter(Boolean).join('、')
+      if (Array.isArray(v))
+        return v
+          .map((i) => (typeof i === 'object' ? i.text : i))
+          .filter(Boolean)
+          .join('、')
       return String(v)
     }
     return '___'
@@ -227,7 +250,7 @@ function todayShort() {
   return `${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
 }
 function toChinese(n) {
-  const c = ['零','一','二','三','四','五','六','七','八','九','十']
+  const c = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
   if (n <= 10) return c[n]
   if (n < 20) return '十' + c[n - 10]
   if (n < 100) return c[Math.floor(n / 10)] + '十' + (n % 10 ? c[n % 10] : '')
@@ -268,21 +291,51 @@ function toChinese(n) {
   text-overflow: ellipsis;
 }
 
-.fn-block:hover { opacity: 0.7; }
+.fn-block:hover {
+  opacity: 0.7;
+}
 
-.fn-block-template { background: var(--docsy-token-green); color: var(--docsy-token-green-text); }
-.fn-block-date     { background: var(--docsy-token-amber); color: var(--docsy-token-amber-text); }
-.fn-block-seq      { background: var(--docsy-token-purple); color: var(--docsy-token-purple-text); }
-.fn-block-field    { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); }
-.fn-block-literal  { color: var(--docsy-text-muted); }
-.fn-block-preset   { background: var(--docsy-token-amber); color: var(--docsy-token-amber-text); }
+.fn-block-template {
+  background: var(--docsy-token-green);
+  color: var(--docsy-token-green-text);
+}
+.fn-block-date {
+  background: var(--docsy-token-amber);
+  color: var(--docsy-token-amber-text);
+}
+.fn-block-seq {
+  background: var(--docsy-token-purple);
+  color: var(--docsy-token-purple-text);
+}
+.fn-block-field {
+  background: var(--docsy-primary-soft);
+  color: var(--docsy-primary-hover);
+}
+.fn-block-literal {
+  color: var(--docsy-text-muted);
+}
+.fn-block-preset {
+  background: var(--docsy-token-amber);
+  color: var(--docsy-token-amber-text);
+}
 
-.fn-ext { font-size: 11px; color: var(--docsy-text-muted); flex-shrink: 0; }
-.fn-hint { font-size: 11px; color: var(--docsy-text-muted); }
+.fn-ext {
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+  flex-shrink: 0;
+}
+.fn-hint {
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+}
 
 /* ── Input ─────────────────────────────────────────────── */
 
-.fn-input-col { flex: 1; min-width: 80px; position: relative; }
+.fn-input-col {
+  flex: 1;
+  min-width: 80px;
+  position: relative;
+}
 
 .fn-input {
   width: 100%;
@@ -297,8 +350,13 @@ function toChinese(n) {
   box-sizing: border-box;
 }
 
-.fn-input:focus { border-color: var(--docsy-primary); }
-.fn-input::placeholder { color: var(--docsy-text-muted); font-size: 11px; }
+.fn-input:focus {
+  border-color: var(--docsy-primary);
+}
+.fn-input::placeholder {
+  color: var(--docsy-text-muted);
+  font-size: 11px;
+}
 
 .fn-autocomplete {
   position: absolute;
@@ -311,11 +369,17 @@ function toChinese(n) {
   border-radius: var(--docsy-radius);
   max-height: 200px;
   overflow-y: auto;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
-.fn-ac-item { padding: 3px 8px; font-size: 12px; cursor: pointer; }
-.fn-ac-item:hover { background: var(--docsy-primary-soft); }
+.fn-ac-item {
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.fn-ac-item:hover {
+  background: var(--docsy-primary-soft);
+}
 
 /* ── Buttons ───────────────────────────────────────────── */
 
@@ -342,22 +406,52 @@ function toChinese(n) {
   white-space: nowrap;
 }
 
-.fn-btn:hover { opacity: 0.85; }
+.fn-btn:hover {
+  opacity: 0.85;
+}
 
-.fn-btn-template { background: var(--docsy-token-green); color: var(--docsy-token-green-text); border-color: var(--docsy-token-green-border); }
-.fn-btn-date     { background: var(--docsy-token-amber); color: var(--docsy-token-amber-text); border-color: var(--docsy-token-amber-border); }
-.fn-btn-seq      { background: var(--docsy-token-purple); color: var(--docsy-token-purple-text); border-color: var(--docsy-token-purple-border); }
-.fn-btn-field    { background: var(--docsy-primary-soft); color: var(--docsy-primary-hover); border-color: var(--docsy-border-subtle); }
-.fn-btn-lit      { background: var(--docsy-surface-muted); color: var(--docsy-text-muted); border-color: var(--docsy-border-subtle); }
+.fn-btn-template {
+  background: var(--docsy-token-green);
+  color: var(--docsy-token-green-text);
+  border-color: var(--docsy-token-green-border);
+}
+.fn-btn-date {
+  background: var(--docsy-token-amber);
+  color: var(--docsy-token-amber-text);
+  border-color: var(--docsy-token-amber-border);
+}
+.fn-btn-seq {
+  background: var(--docsy-token-purple);
+  color: var(--docsy-token-purple-text);
+  border-color: var(--docsy-token-purple-border);
+}
+.fn-btn-field {
+  background: var(--docsy-primary-soft);
+  color: var(--docsy-primary-hover);
+  border-color: var(--docsy-border-subtle);
+}
+.fn-btn-lit {
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+  border-color: var(--docsy-border-subtle);
+}
 
-.fn-btn-split { padding: 0; display: inline-flex; gap: 0; }
-.fn-btn-main { padding: 0 4px; display: inline-flex; align-items: center; }
+.fn-btn-split {
+  padding: 0;
+  display: inline-flex;
+  gap: 0;
+}
+.fn-btn-main {
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+}
 .fn-btn-arrow {
   font-size: 9px;
   padding: 0 2px;
   display: inline-flex;
   align-items: center;
-  border-left: 1px solid rgba(0,0,0,0.1);
+  border-left: 1px solid rgba(0, 0, 0, 0.1);
   line-height: 1;
 }
 
@@ -376,7 +470,7 @@ function toChinese(n) {
   background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   min-width: 100px;
   padding: 2px 0;
 }
@@ -389,7 +483,9 @@ function toChinese(n) {
   background: var(--docsy-surface-elevated);
 }
 
-.fn-pop-item:hover { background: var(--docsy-primary-soft); }
+.fn-pop-item:hover {
+  background: var(--docsy-primary-soft);
+}
 
 /* ── Field dropdown ────────────────────────────────────── */
 

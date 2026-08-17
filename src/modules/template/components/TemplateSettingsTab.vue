@@ -13,7 +13,10 @@
           <div class="settings-label-vertical">
             <strong>
               多项字段连接符
-              <el-tooltip content="列表字段（当事人、诉讼请求等）填入多个值时，项与项之间使用的分隔符。留空时默认使用顿号&#34;、&#34;。" placement="top">
+              <el-tooltip
+                content="列表字段（当事人、诉讼请求等）填入多个值时，项与项之间使用的分隔符。留空时默认使用顿号&#34;、&#34;。"
+                placement="top"
+              >
                 <el-icon class="info-icon"><InfoFilled /></el-icon>
               </el-tooltip>
             </strong>
@@ -82,7 +85,9 @@
           <h3>模板数据库</h3>
           <p>模板填写历史保存在本地数据库中（含字段值和引用建议来源）。清理后无法恢复。</p>
         </div>
-        <el-button size="small" :loading="templateDatabaseLoading" @click="$emit('refresh-template-database')">刷新</el-button>
+        <el-button size="small" :loading="templateDatabaseLoading" @click="$emit('refresh-template-database')"
+          >刷新</el-button
+        >
       </div>
       <div class="trash-list-container">
         <el-table v-if="templateDatabase.length" :data="templateDatabase" size="small" border>
@@ -95,7 +100,12 @@
           </el-table-column>
           <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" link type="primary" :disabled="templateDatabase.length < 2" @click="openMergeDialog(row)"
+              <el-button
+                size="small"
+                link
+                type="primary"
+                :disabled="templateDatabase.length < 2"
+                @click="openMergeDialog(row)"
                 >合并到…</el-button
               >
               <el-button size="small" link type="danger" @click="$emit('delete-template-database-entry', row)"
@@ -142,12 +152,7 @@
       width="520px"
       @update:model-value="$emit('update:exportDialogVisible', $event)"
     >
-      <el-table
-        :data="exportTemplateList"
-        size="small"
-        border
-        @selection-change="handleExportSelectionChange"
-      >
+      <el-table :data="exportTemplateList" size="small" border @selection-change="handleExportSelectionChange">
         <el-table-column type="selection" width="42" />
         <el-table-column prop="name" label="模板名称" min-width="200" />
         <el-table-column prop="fieldCount" label="字段数" width="80" />
@@ -158,11 +163,7 @@
       </div>
       <template #footer>
         <el-button @click="$emit('update:exportDialogVisible', false)">取消</el-button>
-        <el-button
-          type="primary"
-          :disabled="!exportSelectedPaths.length"
-          @click="$emit('execute-export')"
-        >
+        <el-button type="primary" :disabled="!exportSelectedPaths.length" @click="$emit('execute-export')">
           选择目录并导出
         </el-button>
       </template>
@@ -210,7 +211,10 @@ const emit = defineEmits([
 ])
 
 function handleExportSelectionChange(selection) {
-  emit('update:exportSelectedPaths', selection.map((item) => item.path))
+  emit(
+    'update:exportSelectedPaths',
+    selection.map((item) => item.path),
+  )
 }
 
 // ── Field-history merge ──────────────────────────────────────────────────────

@@ -146,6 +146,40 @@
       </template>
     </el-dialog>
 
+    <el-dialog
+      v-model="batchCompleteVisible"
+      title="批量填写完成"
+      width="min(620px, 92vw)"
+      append-to-body
+      :close-on-click-modal="false"
+    >
+      <el-result
+        :icon="batchCompleteResult.failed ? 'warning' : 'success'"
+        :title="`已生成 ${batchCompleteResult.success} 份文件`"
+        :sub-title="batchCompleteResult.failed ? `其中 ${batchCompleteResult.failed} 份生成失败` : '全部生成完成'"
+      />
+      <div v-if="batchCompleteResult.outputDir" class="batch-complete-path">
+        <span>输出目录</span>
+        <code>{{ batchCompleteResult.outputDir }}</code>
+      </div>
+      <p v-if="batchCompleteResult.rows.length" class="hint-text">
+        本次有 {{ batchCompleteResult.rows.length }} 份填写记录可保存到模板历史。
+      </p>
+      <template #footer>
+        <el-button @click="batchCompleteVisible = false">关闭</el-button>
+        <el-button
+          v-if="batchCompleteResult.rows.length"
+          :disabled="batchCompleteDataSaved"
+          @click="openBatchSaveFromCompletion"
+        >
+          {{ batchCompleteDataSaved ? '数据已保存' : '保存数据' }}
+        </el-button>
+        <el-button v-if="batchCompleteResult.outputDir" type="primary" @click="openBatchOutputDir">
+          打开输出目录
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="batchSaveVisible" title="保存批量填写记录到模板历史" width="min(820px, 94vw)" append-to-body>
       <div class="batch-save-toolbar">
         <el-button size="small" @click="toggleBatchSaveAll(true)">全选</el-button>
@@ -261,6 +295,9 @@ const {
   batchSaveVisible,
   batchSaveRows,
   batchSaveSelected,
+  batchCompleteVisible,
+  batchCompleteResult,
+  batchCompleteDataSaved,
 
   // Build tab events
   selectSourceDocx,
@@ -334,6 +371,8 @@ const {
   toggleBatchSaveRow,
   batchSaveRowSummary,
   submitBatchSave,
+  openBatchOutputDir,
+  openBatchSaveFromCompletion,
 
   // Re-exports
   openPath,
@@ -408,6 +447,26 @@ const {
 
 .dialog-tip {
   margin-bottom: 10px;
+}
+
+.batch-complete-path {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius-sm);
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+}
+
+.batch-complete-path code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--docsy-text-primary);
+  white-space: normal;
 }
 
 @media (max-width: 760px) {

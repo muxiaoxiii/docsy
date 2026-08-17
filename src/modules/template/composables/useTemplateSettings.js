@@ -71,11 +71,10 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
 
   async function clearAllHistory() {
     try {
-      await ElMessageBox.confirm(
-        '确定清空全部填写历史？删除后无法恢复，模板库文件不受影响。',
-        '清空填写历史',
-        { confirmButtonText: '清空', type: 'warning' },
-      )
+      await ElMessageBox.confirm('确定清空全部填写历史？删除后无法恢复，模板库文件不受影响。', '清空填写历史', {
+        confirmButtonText: '清空',
+        type: 'warning',
+      })
     } catch {
       return
     }
@@ -104,11 +103,10 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
 
   async function deleteTemplateDatabaseEntry(row) {
     try {
-      await ElMessageBox.confirm(
-        `删除"${row.name}"的所有填写历史数据？删除后无法恢复。`,
-        '删除模板数据',
-        { confirmButtonText: '删除', type: 'warning' },
-      )
+      await ElMessageBox.confirm(`删除"${row.name}"的所有填写历史数据？删除后无法恢复。`, '删除模板数据', {
+        confirmButtonText: '删除',
+        type: 'warning',
+      })
     } catch {
       return
     }

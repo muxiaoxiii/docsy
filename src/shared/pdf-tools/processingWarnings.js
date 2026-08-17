@@ -9,7 +9,10 @@ export function formatProcessingWarningSummary(results, maxGroups = 5) {
   const grouped = new Map()
 
   for (const result of results || []) {
-    const name = String(result?.inputPath || '').split(/[/\\]/).pop() || '未知文件'
+    const name =
+      String(result?.inputPath || '')
+        .split(/[/\\]/)
+        .pop() || '未知文件'
     for (const warning of result?.warnings || []) {
       const text = String(warning || '').trim()
       if (!text) continue

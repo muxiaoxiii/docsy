@@ -26,7 +26,9 @@ describe('isFirstPageEvidenceCandidate', () => {
   })
 
   it('matches 证据/对比文件 patterns without a backend label', () => {
-    expect(isFirstPageEvidenceCandidate({ text: '证据２', normalizedText: '证据2', pageRange: { start: 1, end: 1 } })).toBe(true)
+    expect(
+      isFirstPageEvidenceCandidate({ text: '证据２', normalizedText: '证据2', pageRange: { start: 1, end: 1 } }),
+    ).toBe(true)
     expect(isFirstPageEvidenceCandidate({ text: '对比文件3', pageRange: { start: 1, end: 1 } })).toBe(true)
     expect(isFirstPageEvidenceCandidate({ text: '证据一', pageRange: { start: 1, end: 1 } })).toBe(true)
   })

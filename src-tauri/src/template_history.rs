@@ -751,8 +751,11 @@ struct FieldAtom {
 }
 
 fn flatten_field_values(field: &TemplateField, value: &Value) -> Vec<FieldAtom> {
-    match field.field_type.as_str() {
-        "checkbox_group" | "party_list" => match value {
+    match (
+        field.multiple || field.field_type == "party_list",
+        field.field_type.as_str(),
+    ) {
+        (true, _) | (_, "checkbox_group") => match value {
             Value::Array(items) => items
                 .iter()
                 .map(|item| FieldAtom {

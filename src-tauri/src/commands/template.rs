@@ -115,6 +115,13 @@ pub async fn render_docx_template(
 }
 
 #[tauri::command]
+pub async fn preview_docx_template(
+    args: crate::docx_template::PreviewTemplateArgs,
+) -> Result<crate::docx_template::DocsytplContent, String> {
+    run_blocking(move || crate::docx_template::engine::preview_docx(args)).await
+}
+
+#[tauri::command]
 pub async fn get_template_history_context(
     template_path: String,
     values: Option<HashMap<String, Value>>,

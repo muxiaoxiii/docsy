@@ -7,7 +7,14 @@ export function reorderTargetIndex(from, target, placement, itemCount) {
   return Math.max(0, Math.min(itemCount - 1, insertion))
 }
 
-export function usePointerReorder({ itemCount, onReorder, itemAttribute = 'data-reorder-index' }) {
+export function usePointerReorder({
+  itemCount,
+  onReorder,
+  onStart,
+  onEnd,
+  onCancel,
+  itemAttribute = 'data-reorder-index',
+}) {
   const dragFrom = ref(-1)
   const dragOver = ref(-1)
   const dragPlacement = ref('before')
@@ -23,6 +30,7 @@ export function usePointerReorder({ itemCount, onReorder, itemAttribute = 'data-
     activeHandle = event?.currentTarget || null
     activeHandle?.setPointerCapture?.(activePointerId)
     event?.preventDefault?.()
+    onStart?.({ from: index })
   }
 
   function move(event) {
@@ -39,13 +47,26 @@ export function usePointerReorder({ itemCount, onReorder, itemAttribute = 'data-
 
   function finish(event) {
     if (dragFrom.value < 0 || (activePointerId !== null && event?.pointerId !== activePointerId)) return
+    const from = dragFrom.value
     const count = Number(typeof itemCount === 'function' ? itemCount() : itemCount || 0)
-    const to = reorderTargetIndex(dragFrom.value, dragOver.value, dragPlacement.value, count)
-    if (to >= 0 && to !== dragFrom.value) onReorder?.({ from: dragFrom.value, to })
-    reset()
+    const to = reorderTargetIndex(from, dragOver.value, dragPlacement.value, count)
+    const reordered = to >= 0 && to !== from
+    try {
+      if (reordered) onReorder?.({ from, to })
+    } finally {
+      clearState()
+      onEnd?.({ from, to, reordered })
+    }
   }
 
   function reset() {
+    const from = dragFrom.value
+    const wasDragging = from >= 0
+    clearState()
+    if (wasDragging) onCancel?.({ from })
+  }
+
+  function clearState() {
     if (activeHandle && activePointerId !== null) {
       try {
         activeHandle.releasePointerCapture?.(activePointerId)

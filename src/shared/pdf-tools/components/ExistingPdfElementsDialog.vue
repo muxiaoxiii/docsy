@@ -1,5 +1,11 @@
 <template>
-  <el-dialog v-model="visibleModel" title="确认原有页眉、页脚和页码" width="min(1080px, 94vw)" append-to-body @click.self="clearSelection">
+  <el-dialog
+    v-model="visibleModel"
+    title="确认原有页眉、页脚和页码"
+    width="min(1080px, 94vw)"
+    append-to-body
+    @click.self="clearSelection"
+  >
     <div class="decision-toolbar">
       <el-select v-model="fileFilter" size="small" placeholder="全部文件" clearable style="width: 200px">
         <el-option v-for="f in fileNames" :key="f" :label="f" :value="f" />
@@ -10,8 +16,12 @@
       <el-button size="small" :disabled="!selectedKeys.length" @click="clearSelection">取消选择</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('keep')">保留</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
-      <el-button size="small" :disabled="!selectedKeys.length" type="danger" @click="applyDecision('delete')">标记删除</el-button>
-      <el-button size="small" :disabled="!selectedKeys.length" type="primary" @click="applyDecision('edit')">标记编辑</el-button>
+      <el-button size="small" :disabled="!selectedKeys.length" type="danger" @click="applyDecision('delete')"
+        >标记删除</el-button
+      >
+      <el-button size="small" :disabled="!selectedKeys.length" type="primary" @click="applyDecision('edit')"
+        >标记编辑</el-button
+      >
     </div>
     <el-table
       :data="filteredRows"
@@ -31,14 +41,33 @@
           <el-checkbox :model-value="allSelected" @change="toggleAll" />
         </template>
         <template #default="{ row }">
-          <el-checkbox v-model="selectedKeys" :value="row.key" />
+          <el-checkbox
+            :model-value="selectedKeys.includes(row.key)"
+            @click.stop.prevent="handleCheckboxClick(row, $event)"
+          />
         </template>
       </el-table-column>
-      <el-table-column column-key="fileName" prop="fileName" label="文件" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }" />
+      <el-table-column
+        column-key="fileName"
+        prop="fileName"
+        label="文件"
+        min-width="180"
+        sortable
+        show-overflow-tooltip
+        :tooltip-props="{ placement: 'right' }"
+      />
       <el-table-column column-key="kind" prop="kind" label="类型" width="86" sortable>
         <template #default="{ row }">{{ elementKindText(row.element.kind) }}</template>
       </el-table-column>
-      <el-table-column column-key="detectedText" prop="detectedText" label="检测文字" min-width="180" sortable show-overflow-tooltip :tooltip-props="{ placement: 'right' }">
+      <el-table-column
+        column-key="detectedText"
+        prop="detectedText"
+        label="检测文字"
+        min-width="180"
+        sortable
+        show-overflow-tooltip
+        :tooltip-props="{ placement: 'right' }"
+      >
         <template #default="{ row }">{{ row.element.detectedText || '-' }}</template>
       </el-table-column>
       <el-table-column column-key="pageStart" prop="pageStart" label="页段" width="90" sortable>
@@ -76,7 +105,9 @@
       v-if="shiftHeld && hoverRowIndex >= 0"
       class="shift-range-tooltip"
       :style="{ left: tooltipPos.x + 12 + 'px', top: tooltipPos.y + 12 + 'px' }"
-    >选取到这</div>
+    >
+      选取到这
+    </div>
     <p class="hint-text">点击行或勾选框切换选中，点击表格外取消全部选择</p>
     <template #footer>
       <el-button @click="visibleModel = false">完成</el-button>
@@ -86,7 +117,12 @@
 
 <script setup>
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
-import { compareDetectedTextRows, elementDecisionText, elementKindText } from '../composables/existingPdfElements.js'
+import {
+  compareDetectedTextRows,
+  elementDecisionText,
+  elementKindText,
+  mergeRangeSelection,
+} from '../composables/existingPdfElements.js'
 import { naturalCompare } from '../composables/useEvidencePdfSession.js'
 
 const props = defineProps({
@@ -106,36 +142,47 @@ const hoverRowIndex = ref(-1)
 const tooltipPos = ref({ x: 0, y: 0 })
 
 // Global shift key tracking
-function onKeyDown(e) { if (e.key === 'Shift') shiftHeld.value = true }
-function onKeyUp(e) { if (e.key === 'Shift') shiftHeld.value = false }
+function onKeyDown(e) {
+  if (e.key === 'Shift') shiftHeld.value = true
+}
+function onKeyUp(e) {
+  if (e.key === 'Shift') shiftHeld.value = false
+}
 window.addEventListener('keydown', onKeyDown)
 window.addEventListener('keyup', onKeyUp)
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
 })
-const fileNames = computed(() => [...new Set(props.rows.map(r => r.fileName))].sort())
+const fileNames = computed(() => [...new Set(props.rows.map((r) => r.fileName))].sort())
 const KIND_ORDER = { header: 0, footerText: 1, pageNumber: 2 }
 function handleSortChange({ prop, order }) {
   sortState.value = { prop: prop || '', order: order || '' }
 }
 function getColumnValue(row, prop) {
   switch (prop) {
-    case 'fileName': return row.fileName || ''
-    case 'kind': return row.element.kind || ''
-    case 'detectedText': return row.element.detectedText || ''
-    case 'pageStart': return row.element.pageStart || 0
-    case 'source': return row.element.source || ''
-    case 'decision': return row.element.decision || ''
-    default: return ''
+    case 'fileName':
+      return row.fileName || ''
+    case 'kind':
+      return row.element.kind || ''
+    case 'detectedText':
+      return row.element.detectedText || ''
+    case 'pageStart':
+      return row.element.pageStart || 0
+    case 'source':
+      return row.element.source || ''
+    case 'decision':
+      return row.element.decision || ''
+    default:
+      return ''
   }
 }
 // Sort priority within each file/kind group: undecided > lowConfidence > decided
 function decisionSortPriority(row) {
   if (!row.element.decision) {
-    return row.lowConfidence ? 1 : 0   // undecided → top, low confidence just below
+    return row.lowConfidence ? 1 : 0 // undecided → top, low confidence just below
   }
-  return 2                              // already decided (keep/ignore/delete/edit) → bottom
+  return 2 // already decided (keep/ignore/delete/edit) → bottom
 }
 const filteredRows = computed(() => {
   let rows = props.rows
@@ -146,24 +193,28 @@ const filteredRows = computed(() => {
       rows = rows.filter((row) => row.element.kind === props.filter)
     }
   }
-  if (fileFilter.value) rows = rows.filter(row => row.fileName === fileFilter.value)
+  if (fileFilter.value) rows = rows.filter((row) => row.fileName === fileFilter.value)
   const { prop, order } = sortState.value
   if (prop && order) {
     const direction = order === 'descending' ? -1 : 1
     return [...rows].sort((a, b) => {
-      const result = prop === 'detectedText'
-        ? compareDetectedTextRows(a, b)
-        : naturalCompare(getColumnValue(a, prop), getColumnValue(b, prop))
+      const result =
+        prop === 'detectedText'
+          ? compareDetectedTextRows(a, b)
+          : naturalCompare(getColumnValue(a, prop), getColumnValue(b, prop))
       return result === 0 ? 0 : result * direction
     })
   }
   // Default sort: by fileName → by kind → by decision priority → by pageStart
   return [...rows].sort((a, b) => {
-    const fa = a.fileName || '', fb = b.fileName || ''
+    const fa = a.fileName || '',
+      fb = b.fileName || ''
     if (fa !== fb) return fa.localeCompare(fb)
-    const ka = KIND_ORDER[a.element.kind] ?? 9, kb = KIND_ORDER[b.element.kind] ?? 9
+    const ka = KIND_ORDER[a.element.kind] ?? 9,
+      kb = KIND_ORDER[b.element.kind] ?? 9
     if (ka !== kb) return ka - kb
-    const pa = decisionSortPriority(a), pb = decisionSortPriority(b)
+    const pa = decisionSortPriority(a),
+      pb = decisionSortPriority(b)
     if (pa !== pb) return pa - pb
     return (a.element.pageStart || 0) - (b.element.pageStart || 0)
   })
@@ -189,9 +240,7 @@ function rowClassName({ row, rowIndex }) {
 function toggleAll(value) {
   if (value) {
     // Select all except low-confidence rows (they must be explicitly chosen)
-    selectedKeys.value = filteredRows.value
-      .filter((row) => !row.lowConfidence)
-      .map((row) => row.key)
+    selectedKeys.value = filteredRows.value.filter((row) => !row.lowConfidence).map((row) => row.key)
   } else {
     selectedKeys.value = []
   }
@@ -200,9 +249,7 @@ function selectAll() {
   toggleAll(true)
 }
 function selectUndecided() {
-  selectedKeys.value = filteredRows.value
-    .filter((row) => !row.element.decision)
-    .map((row) => row.key)
+  selectedKeys.value = filteredRows.value.filter((row) => !row.element.decision).map((row) => row.key)
 }
 function clearSelection() {
   selectedKeys.value = []
@@ -214,7 +261,7 @@ function selectBySequence(row) {
   if (kind === 'pageNumber') {
     // Select all page numbers from same file whose page ranges form a continuous sequence
     const filePageNumbers = filteredRows.value
-      .filter(r => r.element.kind === 'pageNumber' && r.fileName === fileName)
+      .filter((r) => r.element.kind === 'pageNumber' && r.fileName === fileName)
       .sort((a, b) => a.element.pageStart - b.element.pageStart)
     // Build connected groups: pages are "connected" if ranges touch or overlap
     const groups = []
@@ -229,13 +276,13 @@ function selectBySequence(row) {
     }
     if (current.length) groups.push(current)
     // Find the group containing the clicked row
-    const group = groups.find(g => g.some(r => r.key === row.key))
-    if (group) selectedKeys.value = group.map(r => r.key)
+    const group = groups.find((g) => g.some((r) => r.key === row.key))
+    if (group) selectedKeys.value = group.map((r) => r.key)
   } else {
     // For headers/footers: select all with same text from same file
     selectedKeys.value = filteredRows.value
-      .filter(r => r.element.kind === kind && r.fileName === fileName && r.element.detectedText === detectedText)
-      .map(r => r.key)
+      .filter((r) => r.element.kind === kind && r.fileName === fileName && r.element.detectedText === detectedText)
+      .map((r) => r.key)
   }
 }
 function invertSelection() {
@@ -247,20 +294,19 @@ function handleRowClick(row, _column, event) {
   if (!key) return
   const target = event?.target
 
-  const currentIndex = filteredRows.value.findIndex(r => r.key === key)
+  const currentIndex = filteredRows.value.findIndex((r) => r.key === key)
   if (currentIndex < 0) return
 
-  // Shift+click 仅在勾选框区域触发范围选择
-  if (event.shiftKey && lastClickedIndex.value >= 0) {
-    if (target && (target.closest('.el-checkbox') || target.closest('.el-checkbox__input'))) {
-      const start = Math.min(lastClickedIndex.value, currentIndex)
-      const end = Math.max(lastClickedIndex.value, currentIndex)
-      const rangeKeys = filteredRows.value.slice(start, end + 1).map(r => r.key)
-      const selectedSet = new Set(selectedKeys.value)
-      rangeKeys.forEach(k => selectedSet.add(k))
-      selectedKeys.value = [...selectedSet]
-      return
-    }
+  // Shift+点击行的任意位置都扩展选区，且始终包含终点。
+  if (event?.shiftKey && lastClickedIndex.value >= 0) {
+    event.preventDefault()
+    selectedKeys.value = mergeRangeSelection(
+      selectedKeys.value,
+      filteredRows.value,
+      lastClickedIndex.value,
+      currentIndex,
+    )
+    return
   }
 
   // 更新锚点
@@ -273,16 +319,37 @@ function handleRowClick(row, _column, event) {
   event.preventDefault()
   const idx = selectedKeys.value.indexOf(key)
   if (idx >= 0) {
-    selectedKeys.value = selectedKeys.value.filter(k => k !== key)
+    selectedKeys.value = selectedKeys.value.filter((k) => k !== key)
   } else {
     selectedKeys.value = [...selectedKeys.value, key]
   }
+}
+
+function handleCheckboxClick(row, event) {
+  const currentIndex = filteredRows.value.findIndex((item) => item.key === row?.key)
+  if (currentIndex < 0) return
+
+  if ((event?.shiftKey || shiftHeld.value) && lastClickedIndex.value >= 0) {
+    selectedKeys.value = mergeRangeSelection(
+      selectedKeys.value,
+      filteredRows.value,
+      lastClickedIndex.value,
+      currentIndex,
+    )
+    return
+  }
+
+  const selected = new Set(selectedKeys.value)
+  if (selected.has(row.key)) selected.delete(row.key)
+  else selected.add(row.key)
+  selectedKeys.value = [...selected]
+  lastClickedIndex.value = currentIndex
 }
 function handleMouseMove(event) {
   tooltipPos.value = { x: event.clientX, y: event.clientY }
 }
 function handleRowMouseEnter(_row, _column, _cell, _event) {
-  const rowIndex = filteredRows.value.findIndex(r => r.key === _row.key)
+  const rowIndex = filteredRows.value.findIndex((r) => r.key === _row.key)
   if (rowIndex >= 0) hoverRowIndex.value = rowIndex
 }
 function handleRowMouseLeave() {
@@ -297,9 +364,8 @@ function setDecision(row, decision) {
   row.element.decision = decision
   if (decision === 'edit' && row.element.kind === 'pageNumber') {
     const template = String(row.element.normalizedText || '')
-    row.element.editedText = template.includes('{page}') || template.includes('{roman-page}')
-      ? template
-      : row.element.detectedText
+    row.element.editedText =
+      template.includes('{page}') || template.includes('{roman-page}') ? template : row.element.detectedText
   } else if (decision !== 'edit') {
     row.element.editedText = row.element.detectedText
   }

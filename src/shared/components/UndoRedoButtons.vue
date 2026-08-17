@@ -1,22 +1,12 @@
 <template>
   <span class="history-btns" :class="{ compact }">
     <el-tooltip content="撤销 (Ctrl+Z)" :show-after="500" placement="top">
-      <el-button
-        link
-        :size="compact ? 'small' : 'small'"
-        :disabled="!canUndo"
-        @click.stop="$emit('undo')"
-      >
+      <el-button link :size="compact ? 'small' : 'small'" :disabled="!canUndo" @click.stop="$emit('undo')">
         <el-icon :size="iconSize"><RefreshLeft /></el-icon>
       </el-button>
     </el-tooltip>
     <el-tooltip content="重做 (Ctrl+Shift+Z)" :show-after="500" placement="top">
-      <el-button
-        link
-        :size="compact ? 'small' : 'small'"
-        :disabled="!canRedo"
-        @click.stop="$emit('redo')"
-      >
+      <el-button link :size="compact ? 'small' : 'small'" :disabled="!canRedo" @click.stop="$emit('redo')">
         <el-icon :size="iconSize"><RefreshRight /></el-icon>
       </el-button>
     </el-tooltip>
@@ -35,7 +25,7 @@ const props = defineProps({
 
 defineEmits(['undo', 'redo'])
 
-const iconSize = computed(() => props.compact ? 12 : 14)
+const iconSize = computed(() => (props.compact ? 12 : 14))
 </script>
 
 <style scoped>

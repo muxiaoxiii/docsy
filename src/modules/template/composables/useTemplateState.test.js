@@ -40,7 +40,10 @@ vi.mock('../../../core/tauriBridge.js', () => ({
     }
     if (cmd === 'inspect_docx_template') return { ok: true, data: { marks: [], documentText: '', documentRuns: [] } }
     if (cmd === 'get_template_history_context') {
-      return { ok: true, data: { lastValues: {}, fieldSuggestions: {}, semanticSuggestions: {}, associationSuggestions: {} } }
+      return {
+        ok: true,
+        data: { lastValues: {}, fieldSuggestions: {}, semanticSuggestions: {}, associationSuggestions: {} },
+      }
     }
     if (cmd === 'list_template_generation_runs') return { ok: true, data: [] }
     if (cmd === 'render_docx_template') return { ok: true, data: '/t/out.docx' }
@@ -52,7 +55,7 @@ vi.mock('../../../core/tauriBridge.js', () => ({
 
 const { useTemplateState } = await import('./useTemplateState.js')
 const { tauriCallSafe } = await import('../../../core/tauriBridge.js')
-const { open } = await import('@tauri-apps/plugin-dialog')
+const { open, save } = await import('@tauri-apps/plugin-dialog')
 
 function makeField(overrides = {}) {
   return {
@@ -119,7 +122,14 @@ const partyField = makeField({
   semanticKey: '当事人',
   type: 'party_list',
   marks: ['m5'],
-  markRefs: [{ markId: 'm5', start: null, end: null, optionalRule: { enabled: true, removeEmptyPrefix: '', removeEmptySuffix: '律师' } }],
+  markRefs: [
+    {
+      markId: 'm5',
+      start: null,
+      end: null,
+      optionalRule: { enabled: true, removeEmptyPrefix: '', removeEmptySuffix: '律师' },
+    },
+  ],
 })
 
 async function openTpl(state, path, fields) {
@@ -133,11 +143,36 @@ function renderCalls() {
 
 beforeEach(() => {
   tauriCallSafe.mockClear()
+  save.mockClear()
   for (const key of Object.keys(hoisted.manifests)) delete hoisted.manifests[key]
   for (const key of Object.keys(hoisted.contents)) delete hoisted.contents[key]
 })
 
 describe('useTemplateState 填写预览', () => {
+  it('从模板库进入填写页时载入文件名规则，旧模板使用明确默认值', async () => {
+    const configured = useTemplateState()
+    hoisted.manifests['/t/configured.docsytpl'] = {
+      name: '配置模板',
+      fields: [caseField],
+      filenameTemplate: {
+        tokens: [
+          { id: 'name', type: 'preset', value: '模板名' },
+          { id: 'dash', type: 'literal', value: '-' },
+          { id: 'case', type: 'field', value: '案号' },
+        ],
+      },
+    }
+    await configured.openHistoryTemplate('/t/configured.docsytpl')
+    expect(configured.filenameTokens.value.map((token) => token.value)).toEqual(['模板名', '-', '案号'])
+    configured.formValues.fld_text_case = '（2026）京73行初1号'
+    await configured.renderTemplate()
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ defaultPath: '/t/配置模板-（2026）京73行初1号.docx' }))
+
+    const legacy = useTemplateState()
+    await openTpl(legacy, '/t/legacy.docsytpl', [caseField])
+    expect(legacy.filenameTokens.value.map((token) => token.value)).toEqual(['模板名', '-', '日期'])
+  })
+
   it('按稳定 tag 匹配已保存模板，run 序号变化后仍显示正文', async () => {
     const field = makeField({
       id: 'fld_party_list_79d05910',

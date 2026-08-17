@@ -559,7 +559,13 @@ describe('Evidence PDF session helpers', () => {
 
     const items = buildHeaderFooterItems(
       [file],
-      { ...baseRules, headerMode: 'custom', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false },
+      {
+        ...baseRules,
+        headerMode: 'custom',
+        headerInsertEnabled: true,
+        footerInsertEnabled: false,
+        pageNumberEnabled: false,
+      },
       '/out',
     )
     expect(items[0].header.text).toBe('第二组')
@@ -694,7 +700,13 @@ describe('Evidence PDF session helpers', () => {
 
     const items = buildHeaderFooterItems(
       [file],
-      { ...baseRules, headerMode: 'custom', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false },
+      {
+        ...baseRules,
+        headerMode: 'custom',
+        headerInsertEnabled: true,
+        footerInsertEnabled: false,
+        pageNumberEnabled: false,
+      },
       '/out',
     )
 
@@ -724,7 +736,11 @@ describe('Evidence PDF session helpers', () => {
     // Legacy groups without perFileSeqStart keep starting from 1
     const legacyGroup = { ...createDefaultHeaderGroup(), mode: 'per_file' }
     delete legacyGroup.perFileSeqStart
-    const legacyItems = buildHeaderFooterItems(files, { ...rules, _globalApply: true, _globalHeaderGroup: legacyGroup }, '/out')
+    const legacyItems = buildHeaderFooterItems(
+      files,
+      { ...rules, _globalApply: true, _globalHeaderGroup: legacyGroup },
+      '/out',
+    )
     expect(legacyItems[0].header.text).toBe('证据1')
   })
 

@@ -55,12 +55,7 @@
               v-if="group.runs.length > HISTORY_PAGE_SIZE && !expandedHistoryGroups.has(group.templateId)"
               class="history-expand-row"
             >
-              <el-button
-                size="small"
-                text
-                type="primary"
-                @click="$emit('expand-history-group', group.templateId)"
-              >
+              <el-button size="small" text type="primary" @click="$emit('expand-history-group', group.templateId)">
                 展开全部 {{ group.runs.length }} 条
               </el-button>
             </div>

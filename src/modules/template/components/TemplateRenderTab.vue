@@ -497,10 +497,12 @@
               <span>实时预览</span>
               <h3>文档内容</h3>
             </div>
-            <p>未填写字段以方括号标注</p>
+            <p :class="{ 'preview-error-text': fillPreviewError }">
+              {{ fillPreviewLoading ? '正在同步最终 Word 效果' : fillPreviewError || '与最终 Word 使用相同的渲染规则' }}
+            </p>
           </div>
           <DocumentPreview
-            v-if="fillDocumentRuns.length && fillPreviewOverlays.length"
+            v-if="fillDocumentRuns.length"
             :runs="fillDocumentRuns"
             :overlays="fillPreviewOverlays"
             mode="fill"
@@ -1513,6 +1515,10 @@ p {
   margin: 0;
   color: var(--docsy-text-muted);
   font-size: 12px;
+}
+
+.fill-preview-header .preview-error-text {
+  color: var(--el-color-danger);
 }
 
 .fill-preview-text {

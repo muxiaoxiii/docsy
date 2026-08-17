@@ -141,25 +141,6 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     Ok(output_path.display().to_string())
 }
 
-pub fn optimize_to(input: &Path, output: &Path) -> Result<()> {
-    let qpdf = crate::external::QpdfTool;
-    let bin = qpdf.binary_path()?;
-    let mut command = crate::external::hidden_command(&bin);
-    add_optimization_args(&mut command);
-    command.arg(input).arg(output);
-    let command_output = run_cancellable("压缩整理", command)?;
-
-    if !status_is_success(&command_output.status) {
-        anyhow::bail!(
-            "qpdf 压缩整理失败（{}）：{}",
-            bin.display(),
-            crate::external::command_failure_detail(&command_output)
-        );
-    }
-
-    Ok(())
-}
-
 /// 压缩 PDF，并通过回调报告阶段。回调只用于 UI 反馈，不改变处理策略。
 pub fn compress_with_progress<F>(
     input: &str,

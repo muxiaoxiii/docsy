@@ -20,7 +20,6 @@ import {
   isGeneratedConnectorRow,
   isPureConnectorText,
   splitPartyLabelText,
-  splitPartyLabelSegments,
   stableFieldId,
   normalizedReferenceSource,
   structureTargetRow,
@@ -31,23 +30,37 @@ import {
   referenceSourceKey,
   defaultCheckedText,
   defaultUncheckedText,
+  fieldIsMultiple,
 } from './fieldRowUtils.js'
 
 // ── normalizeFieldRows chain ─────────────────────────────────────────────────
 
 export function normalizeFieldRows(rows, documentRuns) {
+  const normalizedRows = rows.map(normalizeLegacyMultipleRow)
   return reorderRowsByDocumentPosition(
     refreshPartyItemsForRows(
-      autoSplitPartyListRows(
-        autoAssignStructureTargets(
-          dropGeneratedConnectorRows(
-            autoSplitLegalCompoundRows(autoSplitKnownSuffixRows(autoSplitLeadingConnectorRows(rows)))
-          )
-        )
-      )
+      autoAssignStructureTargets(
+        dropGeneratedConnectorRows(
+          autoSplitLegalCompoundRows(autoSplitKnownSuffixRows(autoSplitLeadingConnectorRows(normalizedRows))),
+        ),
+      ),
     ),
-    documentRuns
+    documentRuns,
   )
+}
+
+function normalizeLegacyMultipleRow(row) {
+  if (row.type === 'party_list') {
+    row.type = 'text'
+    row.multiple = true
+    row.groupName ||= row.semanticKey || row.name || ''
+  }
+  row.multiple = Boolean(row.multiple)
+  row.itemSeparator ||= '、'
+  row.repeatPrefix = Boolean(row.repeatPrefix)
+  row.repeatSuffix = Boolean(row.repeatSuffix)
+  row.groupName ||= ''
+  return row
 }
 
 function reorderRowsByDocumentPosition(rows, documentRuns) {
@@ -73,39 +86,9 @@ function rowDocumentOrder(row, runOrder) {
 
 function refreshPartyItemsForRows(rows) {
   for (const row of rows) {
-    row.partyItems = row.type === 'party_list' ? splitPartyLabelText(row.text) : []
+    row.partyItems = fieldIsMultiple(row) ? splitPartyLabelText(row.text) : []
   }
   return rows
-}
-
-function autoSplitPartyListRows(rows) {
-  const result = []
-  for (const row of rows) {
-    if (rowUsage(row) !== 'field' || row.type !== 'party_list') {
-      result.push(row)
-      continue
-    }
-    const segments = splitPartyLabelSegments(row.text)
-    if (segments.length <= 1) {
-      result.push(row)
-      continue
-    }
-    for (const [index, segment] of segments.entries()) {
-      const refs = markRefsForTextRange(row, segment.start, segment.end)
-      result.push({
-        ...row,
-        rowId: `${row.rowId}:party-item:${index}`,
-        text: segment.text,
-        label: segment.text,
-        markRefs: refs,
-        charStart: segment.start,
-        charEnd: segment.end,
-        markSegments: markSegmentsFromRefs(refs, segment.text),
-        partyItems: [segment.text],
-      })
-    }
-  }
-  return result
 }
 
 function autoAssignStructureTargets(rows) {
@@ -115,7 +98,9 @@ function autoAssignStructureTargets(rows) {
       if (target) {
         const rule = prefixTargetRule(row.text)
         if (rule && isGeneratedFieldName(target.name)) {
-          target.type = rule.targetType
+          target.type = rule.targetType === 'party_list' ? 'text' : rule.targetType
+          target.multiple = target.multiple || rule.targetType === 'party_list'
+          target.groupName ||= rule.targetSemanticKey || ''
           target.name = rule.targetName
           target.label = rule.targetLabel
           target.semanticKey = rule.targetSemanticKey || rule.targetName
@@ -129,7 +114,9 @@ function autoAssignStructureTargets(rows) {
       if (target) {
         const rule = suffixTargetRule(row.text)
         if (rule && isGeneratedFieldName(target.name)) {
-          target.type = rule.targetType
+          target.type = rule.targetType === 'party_list' ? 'text' : rule.targetType
+          target.multiple = target.multiple || rule.targetType === 'party_list'
+          target.groupName ||= rule.targetSemanticKey || ''
           target.name = rule.targetName
           target.label = rule.targetLabel
           target.semanticKey = rule.targetSemanticKey || rule.targetName
@@ -179,7 +166,6 @@ function splitLeadingConnectorRow(row, rows) {
       ...row,
       rowId: `${row.rowId}:auto-field`,
       text: fieldText,
-      type: fieldType,
       name: fieldName,
       label: fieldLabel,
       semanticKey: inferred.semanticKey || fieldName,
@@ -187,7 +173,10 @@ function splitLeadingConnectorRow(row, rows) {
       charStart: connectorLength,
       charEnd: textLength,
       markSegments: markSegmentsFromRefs(fieldRefs, fieldText),
-      partyItems: fieldType === 'party_list' ? splitPartyLabelText(fieldText) : [],
+      multiple: row.multiple || fieldType === 'party_list',
+      groupName: row.groupName || (fieldType === 'party_list' ? inferred.semanticKey || '' : ''),
+      type: fieldType === 'party_list' ? 'text' : fieldType,
+      partyItems: row.multiple || fieldType === 'party_list' ? splitPartyLabelText(fieldText) : [],
     },
   ]
 }
@@ -233,10 +222,13 @@ function splitKnownSuffixRow(row) {
     ...row,
     rowId: `${row.rowId}:auto-field`,
     text: fieldText,
-    type: suffixRule.targetType,
+    type: suffixRule.targetType === 'party_list' ? 'text' : suffixRule.targetType,
     name: suffixRule.targetName,
     label: suffixRule.targetLabel,
     semanticKey: suffixRule.targetName,
+    multiple: row.multiple || suffixRule.targetType === 'party_list',
+    groupName: row.groupName || suffixRule.targetName,
+    repeatSuffix: row.multiple || suffixRule.targetType === 'party_list',
     markRefs: markRefsForTextRange(row, fieldStart, fieldEnd),
     charStart: fieldStart,
     charEnd: fieldEnd,
@@ -390,6 +382,7 @@ export function inferFieldFromText(text, context, checkboxLike, index) {
 export function markToRow(mark, index) {
   const inferred = inferFieldFromText(mark.text, mark.context, mark.checkboxLike, index)
   const partyItems = inferred.type === 'party_list' ? splitPartyLabelText(mark.text) : []
+  const multiple = inferred.type === 'party_list'
   return {
     rowId: `${mark.id}:${index}`,
     displayId: mark.displayId || mark.id,
@@ -401,10 +394,15 @@ export function markToRow(mark, index) {
     text: mark.text,
     context: mark.context,
     enabled: true,
-    type: inferred.type,
+    type: multiple ? 'text' : inferred.type,
     name: inferred.name,
     label: inferred.label,
     semanticKey: inferred.semanticKey,
+    groupName: multiple ? inferred.semanticKey || inferred.name : '',
+    multiple,
+    itemSeparator: '、',
+    repeatPrefix: false,
+    repeatSuffix: false,
     required: false,
     optionalWhenEmpty: inferred.optionalWhenEmpty,
     optionalScope: inferred.optionalScope,
@@ -497,34 +495,30 @@ export function buildFields(fieldRows) {
   const byKey = new Map()
   const assignedNames = new Set()
   for (const row of rows) {
-    const type = row.type
+    const type = row.type === 'party_list' ? 'text' : row.type
+    const multiple = fieldIsMultiple(row)
     const baseName = effectiveRowName(row, fieldRows)
     // 自动推断产生的同名同类型字段不再静默合并：从 2 开始自动追加序号
     // （日期、日期2…），让每处都能各自填值，无需用户手动改名。
     // 用户手动改成的同名（_nameManuallySet）或从模板库回读的既有字段
     // （_allowSameNameMerge）仍按原逻辑合并为一个 fillAllPositions 字段。
     const currentName =
-      rowUsage(row) !== 'delete_text' && !isMarkerType(type) && !allowsSameNameMerge(row)
+      rowUsage(row) !== 'delete_text' && !isMarkerType(type) && !multiple && !allowsSameNameMerge(row)
         ? uniqueNumberedFieldName(baseName, type, assignedNames)
         : baseName
     const renamed = currentName !== baseName
     const referenceSource = row.type === 'reference' ? normalizedReferenceSource(row) : null
-    const key =
-      rowUsage(row) === 'delete_text'
-        ? `${type}:${row.rowId}`
-        : `${type}:${currentName.trim()}`
+    const key = rowUsage(row) === 'delete_text' ? `${type}:${row.rowId}` : `${type}:${currentName.trim()}`
     if (!byKey.has(key)) {
       byKey.set(key, {
-        id: stableFieldId(
-          rowUsage(row) === 'delete_text' ? row.rowId : currentName,
-          type,
-        ),
+        id: stableFieldId(rowUsage(row) === 'delete_text' ? row.rowId : currentName, type),
         name: rowUsage(row) === 'delete_text' ? `delete_${row.rowId}` : currentName.trim(),
         label:
           renamed && String(row?.label || '').trim() === baseName.trim()
             ? currentName.trim()
             : manifestLabelForRow(row, currentName),
         semanticKey: rowUsage(row) === 'delete_text' ? '' : row.semanticKey.trim() || currentName.trim(),
+        groupName: rowUsage(row) === 'delete_text' ? '' : String(row.groupName || '').trim(),
         type,
         required: row.required,
         marks: [],
@@ -532,7 +526,11 @@ export function buildFields(fieldRows) {
         optionalRule: null,
         options: [],
         fillAllPositions: false,
-        dateFormat: type === 'date' ? (row.dateFormat || 'iso') : '',
+        multiple,
+        itemSeparator: String(row.itemSeparator || '、'),
+        repeatPrefix: Boolean(row.repeatPrefix),
+        repeatSuffix: Boolean(row.repeatSuffix),
+        dateFormat: type === 'date' ? row.dateFormat || 'iso' : '',
         reference:
           row.type === 'reference'
             ? {
@@ -550,7 +548,7 @@ export function buildFields(fieldRows) {
         // single input fills every position with the same value. Do NOT turn
         // the field into a self-referencing 'reference' — that made the fill
         // page render a static label with no input and rendered empty.
-        existing.fillAllPositions = true
+        if (!existing.multiple) existing.fillAllPositions = true
       }
     }
     assignedNames.add(`${type}:${currentName.trim()}`)
@@ -560,6 +558,8 @@ export function buildFields(fieldRows) {
         enabled: true,
         removeEmptyPrefix: row.optionalPrefix || '',
         removeEmptySuffix: row.optionalSuffix || '',
+        defaultPrefix: row.optionalPrefix || '',
+        defaultSuffix: row.optionalSuffix || '',
       }
     }
     if (type === 'select') {
@@ -590,6 +590,10 @@ export function buildFields(fieldRows) {
         ? row.markRefs
         : [{ markId: row.markId, start: row.charStart, end: row.charEnd }]
       const structuralRule = structuralOptionalRuleForRow(row, fieldRows)
+      if (field.multiple) {
+        field.repeatPrefix = field.repeatPrefix || Boolean(row.repeatPrefix)
+        field.repeatSuffix = field.repeatSuffix || Boolean(row.repeatSuffix)
+      }
       for (const markRef of refs) {
         const normalizedRef = { ...markRef }
         if (row.optionalWhenEmpty && row.optionalScope !== 'field') {
@@ -597,6 +601,8 @@ export function buildFields(fieldRows) {
             enabled: true,
             removeEmptyPrefix: row.optionalPrefix || '',
             removeEmptySuffix: row.optionalSuffix || '',
+            defaultPrefix: row.optionalPrefix || '',
+            defaultSuffix: row.optionalSuffix || '',
           }
         } else if (structuralRule.enabled) {
           normalizedRef.optionalRule = structuralRule
@@ -626,7 +632,8 @@ function uniqueNumberedFieldName(name, type, assignedNames) {
 }
 
 function effectiveRowName(row, rows) {
-  if (rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix') return structureTargetRow(row, rows)?.name || row?.name || ''
+  if (rowUsage(row) === 'prefix' || rowUsage(row) === 'suffix')
+    return structureTargetRow(row, rows)?.name || row?.name || ''
   if (isConnectorRow(row)) return connectorTargetName(row, rows)
   return row?.name || ''
 }
@@ -648,21 +655,27 @@ function structureRowTargetsField(structureRow, fieldRow, rows) {
 }
 
 function structuralOptionalRuleForRow(fieldRow, rows) {
-  const prefix = []
-  const suffix = []
+  const sourcePrefix = []
+  const sourceSuffix = []
+  const defaultPrefix = []
+  const defaultSuffix = []
   for (const row of rows) {
     const currentName = effectiveRowName(row, rows)
     if (!row.enabled || !currentName.trim() || currentName.trim() !== fieldRow.name.trim()) continue
     if (rowUsage(row) === 'prefix' && structureRowTargetsField(row, fieldRow, rows)) {
-      prefix.push(row.text)
+      sourcePrefix.push(row.sourceStructureText ?? row.text)
+      defaultPrefix.push(row.text)
     } else if (rowUsage(row) === 'suffix' && structureRowTargetsField(row, fieldRow, rows)) {
-      suffix.push(row.text)
+      sourceSuffix.push(row.sourceStructureText ?? row.text)
+      defaultSuffix.push(row.text)
     }
   }
   return {
-    enabled: Boolean(prefix.length || suffix.length),
-    removeEmptyPrefix: prefix.join(''),
-    removeEmptySuffix: suffix.join(''),
+    enabled: Boolean(sourcePrefix.length || sourceSuffix.length),
+    removeEmptyPrefix: sourcePrefix.join(''),
+    removeEmptySuffix: sourceSuffix.join(''),
+    defaultPrefix: defaultPrefix.join(''),
+    defaultSuffix: defaultSuffix.join(''),
   }
 }
 
@@ -672,7 +685,7 @@ function manifestLabelForRow(row, currentName) {
   // display label so the fill page shows what was marked, not a placeholder.
   if (isGeneratedFieldName(name)) return String(row?.text || '').trim() || name
   if (rowUsage(row) === 'delete_text') return safeExplicitLabel(row, name)
-  if (row.type === 'party_list') return name || row.label?.trim() || row.text
+  if (fieldIsMultiple(row)) return name || row.label?.trim() || row.text
   return safeExplicitLabel(row, name)
 }
 
@@ -718,7 +731,7 @@ export function validateFieldRowsBeforeSave(fieldRows, marks) {
         return `"${row.text}"设为${rowUsage(row) === 'prefix' ? '前缀' : '后缀'}，但找不到同名字段`
       }
       if (targets.some((target) => isMarkerType(target.type))) {
-        return `"${row.text}"不能挂到勾选字段上，请改成文本、日期、下拉或当事人列表字段`
+        return `"${row.text}"不能挂到勾选字段上，请改成文本、日期或下拉字段`
       }
     }
   }
@@ -735,7 +748,7 @@ export function templateSeedValues(fieldRows) {
     const name = row.name.trim()
     const text = String(row.text || '').trim()
     if (!name || !text) continue
-    if (row.type === 'party_list') {
+    if (fieldIsMultiple(row)) {
       if (!partyValues.has(name)) partyValues.set(name, [])
       const items = row.partyItems?.length ? row.partyItems : splitPartyLabelText(text)
       for (const item of items.length ? items : [text]) {

@@ -10,9 +10,7 @@
     >
       <template #toolbar>
         <el-button type="primary" @click="selectFiles">选择 Markdown / Office / PDF 文件</el-button>
-        <el-button type="success" :disabled="converting || !hasPendingFiles" @click="runQueue">
-          开始转换
-        </el-button>
+        <el-button type="success" :disabled="converting || !hasPendingFiles" @click="runQueue"> 开始转换 </el-button>
       </template>
 
       <div class="convert-workspace">
@@ -27,7 +25,8 @@
           <div class="file-convert-options">
             <span class="option-label">转成 Markdown</span>
             <span class="option-hint">
-              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 拖入即转；暂不支持 HTML 转 Markdown（.html 文件会被忽略）。
+              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 拖入即转；暂不支持 HTML 转 Markdown（.html
+              文件会被忽略）。
             </span>
           </div>
           <div class="file-convert-options">
@@ -51,7 +50,6 @@
           </div>
           <div class="pdf-convert-note">
             <span>PDF 当前使用文本层提取，不会改写原件。</span>
-            <span>扫描件、表格、公式和复杂版面将接入可选的本地 AI 文档解析包。</span>
             <div v-if="hasPdfInQueue" class="pdf-page-range">
               <span class="option-label">PDF 页段（本批所有 PDF，留空为全文）</span>
               <el-input-number
@@ -72,7 +70,6 @@
                 controls-position="right"
               />
             </div>
-            <el-tag type="info" effect="plain" class="ai-placeholder-tag">AI 文档解析（可选包，后续提供）</el-tag>
           </div>
           <FileQueuePanel
             :items="files"
@@ -86,7 +83,13 @@
               <span v-if="item.warning" class="queue-warning">{{ item.warning }}</span>
             </template>
             <template #item-actions="{ item, index }">
-              <el-button v-if="item.status === 'done' && item.outputPath" link type="primary" size="small" @click="openOutput(item)">
+              <el-button
+                v-if="item.status === 'done' && item.outputPath"
+                link
+                type="primary"
+                size="small"
+                @click="openOutput(item)"
+              >
                 打开
               </el-button>
               <el-button v-if="item.status !== 'processing'" link type="danger" size="small" @click="removeFile(index)">
@@ -182,13 +185,38 @@ const hasPendingFiles = computed(() => files.value.some((item) => item.status ==
 
 const markdownExtensions = ['md', 'markdown', 'mdown', 'mkdn', 'mdwn', 'mdtxt']
 const officeExtensions = [
-  'doc', 'docx', 'docm', 'xls', 'xlsx', 'xlsm', 'xlsb', 'ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'ppsm',
-  'pot', 'potx', 'potm', 'odt', 'ods', 'odp', 'rtf', 'csv', 'epub',
+  'doc',
+  'docx',
+  'docm',
+  'xls',
+  'xlsx',
+  'xlsm',
+  'xlsb',
+  'ppt',
+  'pptx',
+  'pptm',
+  'pps',
+  'ppsx',
+  'ppsm',
+  'pot',
+  'potx',
+  'potm',
+  'odt',
+  'ods',
+  'odp',
+  'rtf',
+  'csv',
+  'epub',
 ]
 const pdfExtensions = ['pdf']
 
 function extensionOf(path) {
-  return String(path || '').split('.').pop()?.toLowerCase() || ''
+  return (
+    String(path || '')
+      .split('.')
+      .pop()
+      ?.toLowerCase() || ''
+  )
 }
 
 function isMarkdownPath(path) {
@@ -197,7 +225,9 @@ function isMarkdownPath(path) {
 
 function isConvertiblePath(path) {
   const extension = extensionOf(path)
-  return markdownExtensions.includes(extension) || officeExtensions.includes(extension) || pdfExtensions.includes(extension)
+  return (
+    markdownExtensions.includes(extension) || officeExtensions.includes(extension) || pdfExtensions.includes(extension)
+  )
 }
 
 function directionTag(path, outputFormat = fileOfficeFormat.value) {
@@ -216,7 +246,9 @@ function directionTag(path, outputFormat = fileOfficeFormat.value) {
 async function selectFiles() {
   const selected = await open({
     multiple: true,
-    filters: [{ name: 'Markdown / Office / PDF', extensions: [...markdownExtensions, ...officeExtensions, ...pdfExtensions] }],
+    filters: [
+      { name: 'Markdown / Office / PDF', extensions: [...markdownExtensions, ...officeExtensions, ...pdfExtensions] },
+    ],
   })
   if (!selected) return
   await loadFiles(Array.isArray(selected) ? selected : [selected])
@@ -500,12 +532,6 @@ useWindowFileDrop({
 
 .pdf-page-range .el-input-number {
   width: 120px;
-}
-
-.ai-placeholder-tag {
-  justify-self: start;
-  margin-top: 4px;
-  opacity: 0.65;
 }
 
 .option-label {

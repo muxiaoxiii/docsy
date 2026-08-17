@@ -54,14 +54,18 @@ export function useFileOrdering({
   }
 
   function reorderOverlayFiles(from, to) {
-    if (from === to || from < 0 || to < 0 || from >= overlayFiles.value.length || to >= overlayFiles.value.length) return
+    if (from === to || from < 0 || to < 0 || from >= overlayFiles.value.length || to >= overlayFiles.value.length)
+      return
     const selectedPath = selectedOverlayFile.value?.path
     const items = [...overlayFiles.value]
     const [item] = items.splice(from, 1)
     items.splice(to, 0, item)
     overlayFiles.value = items
     selectedOverlayIndex.value = selectedPath
-      ? Math.max(0, items.findIndex((file) => file.path === selectedPath))
+      ? Math.max(
+          0,
+          items.findIndex((file) => file.path === selectedPath),
+        )
       : to
     truePreview.value = null
     refreshPreview()

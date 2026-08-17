@@ -5,7 +5,9 @@ use serde_json::Value;
 
 use crate::docx_template::ooxml::{XmlNode, XmlTree};
 
-use super::{OptionalFieldRule, StructureOverride, TemplateField, TemplateManifest};
+use super::{
+    field_is_multiple, OptionalFieldRule, StructureOverride, TemplateField, TemplateManifest,
+};
 
 type TagTarget<'a> = (&'a TemplateField, Option<usize>);
 type TagMap<'a> = HashMap<String, TagTarget<'a>>;
@@ -30,6 +32,10 @@ pub fn render_docx(
         }
 
         let mut tree = XmlTree::parse(xml_bytes)?;
+        // Clean legacy fragments before rendering as well: an orphan located
+        // between the SDT and its static suffix would otherwise prevent the
+        // affix replacement logic from finding that suffix.
+        remove_known_placeholder_fragments(&mut tree.root, tag_map.keys());
         render_tree(
             &mut tree.root,
             &tag_map,
@@ -42,6 +48,40 @@ pub fn render_docx(
         results.push((part_name.clone(), out_xml.into_bytes()));
     }
     Ok(results)
+}
+
+pub(super) fn remove_known_placeholder_fragments<'a>(
+    node: &mut XmlNode,
+    tags: impl Iterator<Item = &'a String>,
+) {
+    let mut tags = tags.map(String::as_str).collect::<Vec<_>>();
+    tags.sort_unstable_by_key(|tag| std::cmp::Reverse(tag.len()));
+    remove_known_placeholder_fragments_node(node, &tags, false);
+}
+
+fn remove_known_placeholder_fragments_node(node: &mut XmlNode, tags: &[&str], inside_sdt: bool) {
+    match node {
+        XmlNode::Text(value) if !inside_sdt => {
+            for tag in tags {
+                for fragment in [
+                    format!("{{{{{tag}}}}}"),
+                    format!("{tag}}}}}"),
+                    format!("{{{{{tag}"),
+                ] {
+                    if value.contains(&fragment) {
+                        *value = value.replace(&fragment, "");
+                    }
+                }
+            }
+        }
+        XmlNode::Text(_) => {}
+        XmlNode::Element { name, children, .. } => {
+            let inside_sdt = inside_sdt || name == "w:sdt";
+            for child in children {
+                remove_known_placeholder_fragments_node(child, tags, inside_sdt);
+            }
+        }
+    }
 }
 
 fn build_tag_map(manifest: &TemplateManifest) -> TagMap<'_> {
@@ -129,10 +169,13 @@ fn render_tree(
                             let value = value_for_field(values, field, *slot)
                                 .cloned()
                                 .unwrap_or(Value::Null);
-                            let rendered = rendered_base_text(field, *slot, &value, item_separator);
+                            let field_separator =
+                                effective_item_separator(field, overrides, item_separator);
+                            let rendered =
+                                rendered_base_text(field, *slot, &value, &field_separator);
 
                             if rendered.is_empty() {
-                                if field.field_type == "party_list" {
+                                if field_is_multiple(field) {
                                     // Only the list separator is removable here. A comma
                                     // separating legal roles remains unless it is part of
                                     // the explicit optional prefix below.
@@ -142,7 +185,7 @@ fn render_tree(
                                     if rule.enabled {
                                         strip_prefix_before(children, i, &rule.remove_empty_prefix);
                                         strip_suffix_after(children, i, &rule.remove_empty_suffix);
-                                        if field.field_type == "party_list"
+                                        if field_is_multiple(field)
                                             && is_party_role_prefix(&rule.remove_empty_prefix)
                                         {
                                             strip_role_separator_before(children, i);
@@ -150,15 +193,23 @@ fn render_tree(
                                     }
                                 }
                             } else {
-                                apply_party_item_suffix(children, i, field, *slot, &value);
+                                let item_sdt_index = apply_multiple_item_affixes(
+                                    children, i, field, *slot, &value, overrides,
+                                );
                                 // Reference 字段：仅当用户显式设置了覆盖前缀/后缀时才应用，
                                 // 否则保留模板原文（因为引用值来自其他字段）
                                 let is_reference = field.reference.is_some();
                                 let has_explicit_override = overrides.get(&field.id).is_some();
                                 let sdt_index = if is_reference && !has_explicit_override {
-                                    i
+                                    item_sdt_index
                                 } else {
-                                    apply_structure_override(children, i, field, *slot, overrides)
+                                    apply_structure_override(
+                                        children,
+                                        item_sdt_index,
+                                        field,
+                                        *slot,
+                                        overrides,
+                                    )
                                 };
                                 replace_sdt_content(
                                     &mut children[sdt_index],
@@ -166,7 +217,7 @@ fn render_tree(
                                     *slot,
                                     &tag,
                                     &value,
-                                    item_separator,
+                                    &field_separator,
                                 )?;
                                 let sdt = std::mem::replace(
                                     &mut children[sdt_index],
@@ -256,7 +307,7 @@ fn expand_party_rows(
         let Some((field, _)) = tag_map.get(&tag) else {
             continue;
         };
-        if field.field_type != "party_list" {
+        if !field_is_multiple(field) {
             continue;
         }
         let value = value_for_field(values, field, None)
@@ -269,7 +320,11 @@ fn expand_party_rows(
                 let mut item_values = values.clone();
                 item_values.insert(
                     field.id.clone(),
-                    serde_json::json!({ "text": item.text, "suffix": item.suffix }),
+                    serde_json::json!({
+                        "prefix": item.prefix,
+                        "text": item.text,
+                        "suffix": item.suffix
+                    }),
                 );
                 out.extend(expand_party_rows(row, tag_map, &item_values, depth + 1)?);
                 if out.len() > MAX_EXPANDED_ROWS {
@@ -375,7 +430,7 @@ fn rendered_base_text(
     value: &Value,
     item_separator: &str,
 ) -> String {
-    if field.field_type == "party_list" {
+    if field_is_multiple(field) {
         let items = party_items(value);
         // Table-row replication injects a single {text, suffix} object (not an
         // array); it must fill every slot of the replicated row, otherwise
@@ -425,6 +480,30 @@ fn rendered_base_text(
     }
 }
 
+fn effective_item_separator(
+    field: &TemplateField,
+    overrides: &HashMap<String, StructureOverride>,
+    fallback: &str,
+) -> String {
+    overrides
+        .get(&field.id)
+        .and_then(|item| item.item_separator.as_deref())
+        .or_else(|| (!field.item_separator.is_empty()).then_some(field.item_separator.as_str()))
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn default_repeat_suffix(field: &TemplateField) -> bool {
+    field.repeat_suffix
+        || (field_is_multiple(field)
+            && field.mark_refs.iter().any(|mark_ref| {
+                mark_ref
+                    .optional_rule
+                    .as_ref()
+                    .is_some_and(|rule| !rule.effective_suffix().is_empty())
+            }))
+}
+
 fn scalar_value(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
@@ -463,16 +542,36 @@ fn apply_structure_override(
 ) -> usize {
     let override_ = overrides.get(&field.id);
     let rule = optional_rule_for_slot(field, slot);
+    let repeat_prefix = field_is_multiple(field)
+        && override_
+            .and_then(|item| item.repeat_prefix)
+            .unwrap_or(field.repeat_prefix);
+    let repeat_suffix = field_is_multiple(field)
+        && override_
+            .and_then(|item| item.repeat_suffix)
+            .unwrap_or_else(|| default_repeat_suffix(field));
 
     // User override takes priority; fall back to optionalRule prefix/suffix
-    let effective_prefix = override_.and_then(|o| o.prefix.as_deref()).or_else(|| {
-        rule.map(|r| r.remove_empty_prefix.as_str())
-            .filter(|s| !s.is_empty())
-    });
-    let effective_suffix = override_.and_then(|o| o.suffix.as_deref()).or_else(|| {
-        rule.map(|r| r.remove_empty_suffix.as_str())
-            .filter(|s| !s.is_empty())
-    });
+    let effective_prefix = if repeat_prefix {
+        None
+    } else {
+        override_.and_then(|o| o.prefix.as_deref()).or_else(|| {
+            rule.and_then(|item| {
+                (item.default_prefix.is_some() || !item.remove_empty_prefix.is_empty())
+                    .then(|| item.effective_prefix())
+            })
+        })
+    };
+    let effective_suffix = if repeat_suffix {
+        None
+    } else {
+        override_.and_then(|o| o.suffix.as_deref()).or_else(|| {
+            rule.and_then(|item| {
+                (item.default_suffix.is_some() || !item.remove_empty_suffix.is_empty())
+                    .then(|| item.effective_suffix())
+            })
+        })
+    };
 
     let ref_count = field.mark_refs.len();
     let index = slot.unwrap_or(0);
@@ -970,13 +1069,14 @@ fn value_for_field<'a>(
 
 #[derive(Debug, Clone)]
 struct PartyItem {
+    prefix: String,
     text: String,
     suffix: String,
 }
 
 impl PartyItem {
     fn rendered(&self) -> String {
-        format!("{}{}", self.text, self.suffix)
+        format!("{}{}{}", self.prefix, self.text, self.suffix)
     }
 }
 
@@ -986,9 +1086,10 @@ fn render_party_item(
     item: &PartyItem,
     force_inline_suffix: bool,
 ) -> String {
-    let has_static_suffix = optional_rule_for_slot(field, Some(slot))
-        .is_some_and(|rule| !rule.remove_empty_suffix.is_empty());
-    if has_static_suffix && !force_inline_suffix {
+    let has_static_affix = optional_rule_for_slot(field, Some(slot)).is_some_and(|rule| {
+        !rule.remove_empty_prefix.is_empty() || !rule.remove_empty_suffix.is_empty()
+    });
+    if has_static_affix && !force_inline_suffix {
         item.text.clone()
     } else {
         item.rendered()
@@ -1000,6 +1101,7 @@ fn party_items(value: &Value) -> Vec<PartyItem> {
         Value::String(s) if !s.is_empty() => s
             .split('、')
             .map(|text| PartyItem {
+                prefix: String::new(),
                 text: text.to_string(),
                 suffix: String::new(),
             })
@@ -1008,6 +1110,7 @@ fn party_items(value: &Value) -> Vec<PartyItem> {
             .iter()
             .filter_map(|item| match item {
                 Value::String(value) if !value.trim().is_empty() => Some(PartyItem {
+                    prefix: String::new(),
                     text: value.trim().to_string(),
                     suffix: String::new(),
                 }),
@@ -1021,6 +1124,11 @@ fn party_items(value: &Value) -> Vec<PartyItem> {
                         return None;
                     }
                     Some(PartyItem {
+                        prefix: values
+                            .get("prefix")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
                         text: text.to_string(),
                         suffix: values
                             .get("suffix")
@@ -1030,6 +1138,7 @@ fn party_items(value: &Value) -> Vec<PartyItem> {
                     })
                 }
                 Value::Number(value) => Some(PartyItem {
+                    prefix: String::new(),
                     text: value.to_string(),
                     suffix: String::new(),
                 }),
@@ -1051,6 +1160,11 @@ fn party_item_from_object(values: &serde_json::Map<String, Value>) -> Option<Par
         return None;
     }
     Some(PartyItem {
+        prefix: values
+            .get("prefix")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         text: text.to_string(),
         suffix: values
             .get("suffix")
@@ -1060,40 +1174,69 @@ fn party_item_from_object(values: &serde_json::Map<String, Value>) -> Option<Par
     })
 }
 
-fn apply_party_item_suffix(
+fn apply_multiple_item_affixes(
     siblings: &mut Vec<XmlNode>,
     at: usize,
     field: &TemplateField,
     slot: Option<usize>,
     value: &Value,
-) {
-    if field.field_type != "party_list" {
-        return;
+    overrides: &HashMap<String, StructureOverride>,
+) -> usize {
+    if !field_is_multiple(field) {
+        return at;
     }
     let Some(rule) = optional_rule_for_slot(field, slot) else {
-        return;
+        return at;
     };
-    if rule.remove_empty_suffix.is_empty() {
-        return;
-    }
-
     let items = party_items(value);
     let index = slot.unwrap_or(0);
     let count = field.mark_refs.len();
     if index >= items.len() {
-        return;
+        return at;
+    }
+    let override_ = overrides.get(&field.id);
+    let repeat_prefix = override_
+        .and_then(|item| item.repeat_prefix)
+        .unwrap_or(field.repeat_prefix);
+    let repeat_suffix = override_
+        .and_then(|item| item.repeat_suffix)
+        .unwrap_or_else(|| default_repeat_suffix(field));
+    if count <= 1 && items.len() > 1 {
+        if repeat_prefix && !rule.remove_empty_prefix.is_empty() {
+            strip_prefix_before(siblings, at, &rule.remove_empty_prefix);
+        }
+        if repeat_suffix && !rule.remove_empty_suffix.is_empty() {
+            strip_suffix_after(siblings, at, &rule.remove_empty_suffix);
+        }
+        return at;
+    }
+    let mut sdt_index = at;
+    if repeat_prefix
+        && !rule.remove_empty_prefix.is_empty()
+        && replace_prefix_before(
+            siblings,
+            sdt_index,
+            &rule.remove_empty_prefix,
+            &items[index].prefix,
+        )
+    {
+        sdt_index += 1;
+    }
+    if !repeat_suffix || rule.remove_empty_suffix.is_empty() {
+        return sdt_index;
     }
     if index + 1 >= count && items.len() > count.max(1) {
         // Overflow suffixes are already embedded in rendered_base_text.
-        replace_suffix_after(siblings, at, &rule.remove_empty_suffix, "");
-        return;
+        replace_suffix_after(siblings, sdt_index, &rule.remove_empty_suffix, "");
+        return sdt_index;
     }
     replace_suffix_after(
         siblings,
-        at,
+        sdt_index,
         &rule.remove_empty_suffix,
         &items[index].suffix,
     );
+    sdt_index
 }
 
 #[cfg(test)]
@@ -1281,6 +1424,49 @@ mod tests {
     }
 
     #[test]
+    fn generic_multiple_table_rows_keep_each_item_prefix() {
+        let mut field = field("parties", "text");
+        field.multiple = true;
+        field.repeat_prefix = true;
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "parties".to_string(),
+            optional_rule: Some(OptionalFieldRule {
+                enabled: true,
+                remove_empty_prefix: "申请人".to_string(),
+                remove_empty_suffix: String::new(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }];
+        let m = manifest(vec![field]);
+        let mut tree = parse_xml(
+            r#"<w:document><w:body><w:tbl><w:tr><w:tc><w:p>
+                <w:r><w:t>申请人</w:t></w:r>
+                <w:sdt><w:sdtPr><w:tag w:val="parties"/></w:sdtPr><w:sdtContent><w:r><w:t>旧值</w:t></w:r></w:sdtContent></w:sdt>
+            </w:p></w:tc></w:tr></w:tbl></w:body></w:document>"#,
+        );
+        let mut values = HashMap::new();
+        values.insert(
+            "parties".to_string(),
+            serde_json::json!([
+                { "prefix": "原告", "name": "甲公司" },
+                { "prefix": "被告", "name": "乙公司" }
+            ]),
+        );
+
+        render_tree(
+            &mut tree.root,
+            &field_map(&m),
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
+
+        assert_eq!(compact_text(&tree.root), "原告甲公司被告乙公司");
+    }
+
+    #[test]
     fn render_preserves_unrelated_sdt() {
         let mut tree = parse_xml(
             r#"<w:document><w:body>
@@ -1297,6 +1483,79 @@ mod tests {
         render_tree(&mut tree.root, &fm, &vals, &HashMap::new(), "、").unwrap();
         let out = tree.to_xml().unwrap();
         assert!(out.contains("plain text"), "unrelated text preserved");
+    }
+
+    #[test]
+    fn render_removes_known_truncated_placeholder_from_legacy_template() {
+        let mut field = field("lawyer", "text");
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "lawyer.ref.1".to_string(),
+            ..Default::default()
+        }];
+        let package = vec![(
+            "word/document.xml".to_string(),
+            r#"<w:document><w:body><w:p>
+                <w:sdt><w:sdtPr><w:tag w:val="lawyer.ref.1"/></w:sdtPr><w:sdtContent><w:r><w:t>{{lawyer.ref.1}}</w:t></w:r></w:sdtContent></w:sdt>
+                <w:r><w:t>lawyer.ref.1}}</w:t></w:r><w:r><w:t>律师</w:t></w:r>
+            </w:p></w:body></w:document>"#
+                .as_bytes()
+                .to_vec(),
+        )];
+        let m = manifest(vec![field]);
+        let mut values = HashMap::new();
+        values.insert("lawyer".to_string(), Value::String("吕晗".to_string()));
+
+        let rendered = render_docx(&package, &m, &values, &HashMap::new(), "、").unwrap();
+        let out = String::from_utf8(rendered[0].1.clone()).unwrap();
+
+        assert!(out.contains("吕晗"));
+        assert!(out.contains("律师"));
+        assert!(
+            !out.contains("lawyer.ref.1}}"),
+            "孤立占位符残片应清除: {out}"
+        );
+    }
+
+    #[test]
+    fn legacy_fragment_does_not_block_repeated_suffix_replacement() {
+        let mut field = field("lawyer", "text");
+        field.multiple = true;
+        field.repeat_suffix = true;
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "lawyer.ref.1".to_string(),
+            optional_rule: Some(OptionalFieldRule {
+                enabled: true,
+                remove_empty_suffix: "律师".to_string(),
+                default_suffix: Some("律师".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }];
+        let package = vec![(
+            "word/document.xml".to_string(),
+            r#"<w:document><w:body><w:p>
+                <w:sdt><w:sdtPr><w:tag w:val="lawyer.ref.1"/></w:sdtPr><w:sdtContent><w:r><w:t>{{lawyer.ref.1}}</w:t></w:r></w:sdtContent></w:sdt>
+                <w:r><w:t>lawyer.ref.1}}</w:t></w:r><w:r><w:t>律师</w:t></w:r>
+            </w:p></w:body></w:document>"#
+                .as_bytes()
+                .to_vec(),
+        )];
+        let m = manifest(vec![field]);
+        let mut values = HashMap::new();
+        values.insert(
+            "lawyer".to_string(),
+            serde_json::json!([
+                { "name": "吕晗", "suffix": "律师" },
+                { "name": "高海钧", "suffix": "律师" }
+            ]),
+        );
+
+        let rendered = render_docx(&package, &m, &values, &HashMap::new(), "、").unwrap();
+        let tree = XmlTree::parse(&rendered[0].1).unwrap();
+        let text = compact_text(&tree.root);
+
+        assert_eq!(text, "吕晗律师、高海钧律师");
+        assert!(!text.contains("lawyer.ref.1}}"));
     }
 
     #[test]
@@ -1340,6 +1599,76 @@ mod tests {
         assert!(out.contains("李琼律师"));
         assert!(out.contains("吕晗实习律师"));
         assert!(!out.contains("{{lawyers"));
+    }
+
+    #[test]
+    fn generic_multiple_text_field_joins_items_and_repeats_suffix_once() {
+        let mut field = field("lawyers", "text");
+        field.multiple = true;
+        field.item_separator = "、".to_string();
+        field.repeat_suffix = true;
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "lawyers".to_string(),
+            optional_rule: Some(OptionalFieldRule {
+                enabled: true,
+                remove_empty_prefix: String::new(),
+                remove_empty_suffix: "律师".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }];
+        let mut tree = parse_xml(
+            r#"<w:p><w:sdt><w:sdtPr><w:tag w:val="lawyers"/></w:sdtPr><w:sdtContent><w:r><w:t>旧姓名</w:t></w:r></w:sdtContent></w:sdt><w:r><w:t>律师</w:t></w:r></w:p>"#,
+        );
+        let mut values = HashMap::new();
+        values.insert(
+            "lawyers".to_string(),
+            serde_json::json!([
+                { "name": "李月春", "suffix": "律师" },
+                { "name": "吕晗", "suffix": "律师" }
+            ]),
+        );
+
+        render_tree(
+            &mut tree.root,
+            &field_map(&manifest(vec![field])),
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
+
+        assert_eq!(compact_text(&tree.root), "李月春律师、吕晗律师");
+    }
+
+    #[test]
+    fn generic_multiple_text_field_uses_custom_separator() {
+        let mut field = field("parties", "text");
+        field.multiple = true;
+        field.item_separator = "；".to_string();
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "parties".to_string(),
+            ..Default::default()
+        }];
+        let mut tree = parse_xml(
+            r#"<w:p><w:sdt><w:sdtPr><w:tag w:val="parties"/></w:sdtPr><w:sdtContent><w:r><w:t>旧值</w:t></w:r></w:sdtContent></w:sdt></w:p>"#,
+        );
+        let mut values = HashMap::new();
+        values.insert(
+            "parties".to_string(),
+            serde_json::json!(["甲公司", "乙公司"]),
+        );
+
+        render_tree(
+            &mut tree.root,
+            &field_map(&manifest(vec![field])),
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
+
+        assert_eq!(compact_text(&tree.root), "甲公司；乙公司");
     }
 
     #[test]
@@ -1423,6 +1752,7 @@ mod tests {
                     enabled: true,
                     remove_empty_prefix: "原告".to_string(),
                     remove_empty_suffix: String::new(),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -1474,6 +1804,7 @@ mod tests {
                 enabled: true,
                 remove_empty_prefix: "原告".to_string(),
                 remove_empty_suffix: String::new(),
+                ..Default::default()
             }),
             ..Default::default()
         }];
@@ -1488,6 +1819,7 @@ mod tests {
             StructureOverride {
                 prefix: Some("申请人".to_string()),
                 suffix: None,
+                ..Default::default()
             },
         );
 
@@ -1507,6 +1839,68 @@ mod tests {
     }
 
     #[test]
+    fn edited_template_default_affix_replaces_embedded_source_text() {
+        let mut field = field("principal", "text");
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "principal".to_string(),
+            optional_rule: Some(OptionalFieldRule {
+                enabled: true,
+                remove_empty_prefix: "第三人".to_string(),
+                default_prefix: Some("被上诉人".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }];
+        let mut tree = parse_xml(
+            r#"<w:p><w:r><w:t>第三人</w:t></w:r><w:sdt><w:sdtPr><w:tag w:val="principal"/></w:sdtPr><w:sdtContent><w:r><w:t>旧值</w:t></w:r></w:sdtContent></w:sdt></w:p>"#,
+        );
+        let mut values = HashMap::new();
+        values.insert("principal".to_string(), Value::String("甲公司".to_string()));
+
+        render_tree(
+            &mut tree.root,
+            &field_map(&manifest(vec![field])),
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
+
+        assert_eq!(compact_text(&tree.root), "被上诉人甲公司");
+    }
+
+    #[test]
+    fn explicitly_empty_default_affix_removes_embedded_source_text() {
+        let mut field = field("principal", "text");
+        field.mark_refs = vec![super::super::TemplateMarkRef {
+            tag: "principal".to_string(),
+            optional_rule: Some(OptionalFieldRule {
+                enabled: true,
+                remove_empty_prefix: "第三人".to_string(),
+                default_prefix: Some(String::new()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }];
+        let mut tree = parse_xml(
+            r#"<w:p><w:r><w:t>第三人</w:t></w:r><w:sdt><w:sdtPr><w:tag w:val="principal"/></w:sdtPr><w:sdtContent><w:r><w:t>旧值</w:t></w:r></w:sdtContent></w:sdt></w:p>"#,
+        );
+        let mut values = HashMap::new();
+        values.insert("principal".to_string(), Value::String("甲公司".to_string()));
+
+        render_tree(
+            &mut tree.root,
+            &field_map(&manifest(vec![field])),
+            &values,
+            &HashMap::new(),
+            "、",
+        )
+        .unwrap();
+
+        assert_eq!(compact_text(&tree.root), "甲公司");
+    }
+
+    #[test]
     fn table_row_replication_keeps_static_suffix_untouched_when_item_suffix_matches() {
         // 表格行复制路径：条目后缀与静态后缀相同（source == replacement）时，
         // 静态后缀保留一次、不重复，不出现“张三律师律师”。
@@ -1517,6 +1911,7 @@ mod tests {
                 enabled: true,
                 remove_empty_prefix: String::new(),
                 remove_empty_suffix: "律师".to_string(),
+                ..Default::default()
             }),
             ..Default::default()
         }];
@@ -1557,6 +1952,7 @@ mod tests {
                 enabled: true,
                 remove_empty_prefix: String::new(),
                 remove_empty_suffix: "律师".to_string(),
+                ..Default::default()
             }),
             ..Default::default()
         }];
@@ -1596,6 +1992,7 @@ mod tests {
                     enabled: true,
                     remove_empty_prefix: String::new(),
                     remove_empty_suffix: "律师".to_string(),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -1605,6 +2002,7 @@ mod tests {
                     enabled: true,
                     remove_empty_prefix: String::new(),
                     remove_empty_suffix: "实习律师".to_string(),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },

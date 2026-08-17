@@ -4,7 +4,12 @@ import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { logWarn } from '../../../services/appLogger.js'
 import { bboxOverlayStyle, textOverlayStyle } from './pdfPreviewCoordinates.js'
 import { candidateKey } from './useEvidencePdfDetection.js'
-import { buildHeaderFooterItems, expandPlaceholders, buildHeaderTextForGroup, selectedGroupFor } from './useEvidencePdfSession.js'
+import {
+  buildHeaderFooterItems,
+  expandPlaceholders,
+  buildHeaderTextForGroup,
+  selectedGroupFor,
+} from './useEvidencePdfSession.js'
 import { renderPageNumberTemplate } from './pdfPageNumberRules.js'
 
 const TRUE_PREVIEW_DPI = 120
@@ -66,8 +71,7 @@ export function useEvidencePdfPreview({
     const data = previewData.value
     if (data?.widthPt && data?.heightPt) return data
     const file = selectedOverlayFile.value
-    const bbox =
-      file?.existingHeaderBBox || file?.existingFooterBBox || file?.existingPageNumberBBox
+    const bbox = file?.existingHeaderBBox || file?.existingFooterBBox || file?.existingPageNumberBBox
     if (bbox?.width && bbox?.height) {
       return { widthPt: bbox.width, heightPt: bbox.height }
     }
@@ -75,7 +79,13 @@ export function useEvidencePdfPreview({
   })
 
   const previewHeaderText = computed(() => {
-    if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value || !selectedOverlayFile.value || headerMode.value === 'none') return ''
+    if (
+      !insertHeaderFooterEnabled.value ||
+      !headerInsertEnabled.value ||
+      !selectedOverlayFile.value ||
+      headerMode.value === 'none'
+    )
+      return ''
     if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
     const file = selectedOverlayFile.value
     // Mirror buildHeaderFooterItems: global group wins when global apply is on,
@@ -91,8 +101,7 @@ export function useEvidencePdfPreview({
   })
 
   const previewFooterText = computed(() => {
-    if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || !footerInsertEnabled.value)
-      return ''
+    if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || !footerInsertEnabled.value) return ''
     if (!shouldShowLiveFooter(selectedOverlayFile.value)) return ''
     const file = selectedOverlayFile.value
     // Mirror buildHeaderFooterItems' footer branch: global group wins when
@@ -106,9 +115,7 @@ export function useEvidencePdfPreview({
     const group = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
     const template = group && group.enabled !== false ? group.text || rules.footerTextContent : ''
     if (!template) return ''
-    const page = footerContinuous.value
-      ? file.pageStart + previewPage.value - 1
-      : previewPage.value
+    const page = footerContinuous.value ? file.pageStart + previewPage.value - 1 : previewPage.value
     const total = footerContinuous.value ? totalOverlayPages.value : file.pages || 1
     return expandPlaceholders(template, page, total, file, selectedOverlayIndex.value, rules)
   })
@@ -217,7 +224,13 @@ export function useEvidencePdfPreview({
   })
 
   const convertedExistingPreviewOverlays = computed(() => {
-    if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value || !insertHeaderFooterEnabled.value) return []
+    if (
+      !showRulePreviewOverlays.value ||
+      !selectedOverlayFile.value ||
+      truePreview.value ||
+      !insertHeaderFooterEnabled.value
+    )
+      return []
     const items = buildHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value)
     const item = items.find((candidate) => candidate.inputPath === selectedOverlayFile.value.path)
     return (item?.extraOverlays || [])
@@ -232,35 +245,43 @@ export function useEvidencePdfPreview({
         return isPageInDetectedRange(previewPage.value, overlay.pageStart, overlay.pageEnd)
       })
       .map((overlay, index) => {
-      const region = overlay.region === 'header' ? 'header' : 'footer'
-      const pageNumberOverlay = overlay.artifactKind === 'PageNumber'
-      const page = pageNumberOverlay
-        ? (overlay.sequence === 'per-file' ? previewPage.value : selectedOverlayFile.value.pageStart + previewPage.value - 1) +
-          Number(overlay.numberOffset || 0)
-        : footerContinuous.value
-          ? selectedOverlayFile.value.pageStart + previewPage.value - 1
-          : previewPage.value
-      const total = pageNumberOverlay
-        ? Number(overlay.numberTotal || selectedOverlayFile.value.pages || 1)
-        : footerContinuous.value
-          ? totalOverlayPages.value || selectedOverlayFile.value.pages || 1
-          : selectedOverlayFile.value.pages || 1
-      return {
-        key: `${selectedOverlayFile.value.path}-converted-${index}`,
-        region,
-        text: pageNumberOverlay
-          ? renderPageNumberTemplate(overlay.text, page, total, overlay.numberStyle || pageNumberStyle.value)
-          : expandPlaceholders(overlay.text, page, total, selectedOverlayFile.value, selectedOverlayIndex.value, currentRules.value),
-        style: textOverlayStyle(region, previewPageInfo.value, {
-          align: overlay.align,
-          marginMm: overlay.marginMm,
-          fontSize: overlay.fontSize,
-          fontFamily: overlay.fontFamily,
-          offsetXMm: overlay.offsetXMm,
-          color: overlay.color,
-        }),
-      }
-    })
+        const region = overlay.region === 'header' ? 'header' : 'footer'
+        const pageNumberOverlay = overlay.artifactKind === 'PageNumber'
+        const page = pageNumberOverlay
+          ? (overlay.sequence === 'per-file'
+              ? previewPage.value
+              : selectedOverlayFile.value.pageStart + previewPage.value - 1) + Number(overlay.numberOffset || 0)
+          : footerContinuous.value
+            ? selectedOverlayFile.value.pageStart + previewPage.value - 1
+            : previewPage.value
+        const total = pageNumberOverlay
+          ? Number(overlay.numberTotal || selectedOverlayFile.value.pages || 1)
+          : footerContinuous.value
+            ? totalOverlayPages.value || selectedOverlayFile.value.pages || 1
+            : selectedOverlayFile.value.pages || 1
+        return {
+          key: `${selectedOverlayFile.value.path}-converted-${index}`,
+          region,
+          text: pageNumberOverlay
+            ? renderPageNumberTemplate(overlay.text, page, total, overlay.numberStyle || pageNumberStyle.value)
+            : expandPlaceholders(
+                overlay.text,
+                page,
+                total,
+                selectedOverlayFile.value,
+                selectedOverlayIndex.value,
+                currentRules.value,
+              ),
+          style: textOverlayStyle(region, previewPageInfo.value, {
+            align: overlay.align,
+            marginMm: overlay.marginMm,
+            fontSize: overlay.fontSize,
+            fontFamily: overlay.fontFamily,
+            offsetXMm: overlay.offsetXMm,
+            color: overlay.color,
+          }),
+        }
+      })
   })
 
   const headerFooterOverflowWarnings = computed(() => {

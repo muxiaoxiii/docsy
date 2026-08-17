@@ -41,8 +41,22 @@ describe('buildFields 同名同类型字段', () => {
 
   it('两处同名日期字段同样合并为一个 date 字段', () => {
     const rows = [
-      makeRow({ rowId: 'r1', type: 'date', name: '日期', label: '日期', markId: 'm1', markRefs: [{ markId: 'm1', start: null, end: null }] }),
-      makeRow({ rowId: 'r2', type: 'date', name: '日期', label: '日期', markId: 'm2', markRefs: [{ markId: 'm2', start: null, end: null }] }),
+      makeRow({
+        rowId: 'r1',
+        type: 'date',
+        name: '日期',
+        label: '日期',
+        markId: 'm1',
+        markRefs: [{ markId: 'm1', start: null, end: null }],
+      }),
+      makeRow({
+        rowId: 'r2',
+        type: 'date',
+        name: '日期',
+        label: '日期',
+        markId: 'm2',
+        markRefs: [{ markId: 'm2', start: null, end: null }],
+      }),
     ]
     const fields = buildFields(rows)
     expect(fields).toHaveLength(1)
@@ -59,7 +73,13 @@ describe('buildFields 同名同类型字段', () => {
   it('同名但类型不同的行仍是两个独立字段', () => {
     const rows = [
       makeRow({ rowId: 'r1', type: 'text' }),
-      makeRow({ rowId: 'r2', type: 'date', name: '案号', markId: 'm2', markRefs: [{ markId: 'm2', start: null, end: null }] }),
+      makeRow({
+        rowId: 'r2',
+        type: 'date',
+        name: '案号',
+        markId: 'm2',
+        markRefs: [{ markId: 'm2', start: null, end: null }],
+      }),
     ]
     const fields = buildFields(rows)
     expect(fields).toHaveLength(2)
@@ -91,13 +111,28 @@ describe('buildFields 同名同类型字段', () => {
 })
 
 describe('buildFields 自动推断的同名合并', () => {
-  const autoRow = (overrides = {}) =>
-    makeRow({ _nameManuallySet: false, _allowSameNameMerge: false, ...overrides })
+  const autoRow = (overrides = {}) => makeRow({ _nameManuallySet: false, _allowSameNameMerge: false, ...overrides })
 
   it('两处自动推断的同名日期自动加序号（日期、日期2），各自独立填值', () => {
     const rows = [
-      autoRow({ rowId: 'r1', type: 'date', name: '日期', label: '日期', semanticKey: '日期', markId: 'm1', markRefs: [{ markId: 'm1', start: null, end: null }] }),
-      autoRow({ rowId: 'r2', type: 'date', name: '日期', label: '日期', semanticKey: '日期', markId: 'm2', markRefs: [{ markId: 'm2', start: null, end: null }] }),
+      autoRow({
+        rowId: 'r1',
+        type: 'date',
+        name: '日期',
+        label: '日期',
+        semanticKey: '日期',
+        markId: 'm1',
+        markRefs: [{ markId: 'm1', start: null, end: null }],
+      }),
+      autoRow({
+        rowId: 'r2',
+        type: 'date',
+        name: '日期',
+        label: '日期',
+        semanticKey: '日期',
+        markId: 'm2',
+        markRefs: [{ markId: 'm2', start: null, end: null }],
+      }),
     ]
     const fields = buildFields(rows)
     expect(fields).toHaveLength(2)
@@ -111,7 +146,14 @@ describe('buildFields 自动推断的同名合并', () => {
 
   it('三处同名依次编号为 日期、日期2、日期3', () => {
     const rows = ['r1', 'r2', 'r3'].map((rowId, i) =>
-      autoRow({ rowId, type: 'date', name: '日期', label: '日期', markId: `m${i + 1}`, markRefs: [{ markId: `m${i + 1}`, start: null, end: null }] }),
+      autoRow({
+        rowId,
+        type: 'date',
+        name: '日期',
+        label: '日期',
+        markId: `m${i + 1}`,
+        markRefs: [{ markId: `m${i + 1}`, start: null, end: null }],
+      }),
     )
     const fields = buildFields(rows)
     expect(fields.map((f) => f.name)).toEqual(['日期', '日期2', '日期3'])
@@ -119,9 +161,30 @@ describe('buildFields 自动推断的同名合并', () => {
 
   it('序号避开已占用的名字（已有 日期2 时新同名编为 日期3）', () => {
     const rows = [
-      autoRow({ rowId: 'r1', type: 'date', name: '日期', label: '日期', markId: 'm1', markRefs: [{ markId: 'm1', start: null, end: null }] }),
-      autoRow({ rowId: 'r2', type: 'date', name: '日期2', label: '日期2', markId: 'm2', markRefs: [{ markId: 'm2', start: null, end: null }] }),
-      autoRow({ rowId: 'r3', type: 'date', name: '日期', label: '日期', markId: 'm3', markRefs: [{ markId: 'm3', start: null, end: null }] }),
+      autoRow({
+        rowId: 'r1',
+        type: 'date',
+        name: '日期',
+        label: '日期',
+        markId: 'm1',
+        markRefs: [{ markId: 'm1', start: null, end: null }],
+      }),
+      autoRow({
+        rowId: 'r2',
+        type: 'date',
+        name: '日期2',
+        label: '日期2',
+        markId: 'm2',
+        markRefs: [{ markId: 'm2', start: null, end: null }],
+      }),
+      autoRow({
+        rowId: 'r3',
+        type: 'date',
+        name: '日期',
+        label: '日期',
+        markId: 'm3',
+        markRefs: [{ markId: 'm3', start: null, end: null }],
+      }),
     ]
     const fields = buildFields(rows)
     expect(fields.map((f) => f.name)).toEqual(['日期', '日期2', '日期3'])
@@ -129,8 +192,26 @@ describe('buildFields 自动推断的同名合并', () => {
 
   it('勾选组同名行不加序号，仍合并为一个字段的多个选项', () => {
     const rows = [
-      autoRow({ rowId: 'r1', type: 'radio_group', name: '授权', label: '授权', optionId: 'o1', optionLabel: '一般授权', markId: 'm1', markRefs: [{ markId: 'm1', start: null, end: null }] }),
-      autoRow({ rowId: 'r2', type: 'radio_group', name: '授权', label: '授权', optionId: 'o2', optionLabel: '特别授权', markId: 'm2', markRefs: [{ markId: 'm2', start: null, end: null }] }),
+      autoRow({
+        rowId: 'r1',
+        type: 'radio_group',
+        name: '授权',
+        label: '授权',
+        optionId: 'o1',
+        optionLabel: '一般授权',
+        markId: 'm1',
+        markRefs: [{ markId: 'm1', start: null, end: null }],
+      }),
+      autoRow({
+        rowId: 'r2',
+        type: 'radio_group',
+        name: '授权',
+        label: '授权',
+        optionId: 'o2',
+        optionLabel: '特别授权',
+        markId: 'm2',
+        markRefs: [{ markId: 'm2', start: null, end: null }],
+      }),
     ]
     const fields = buildFields(rows)
     expect(fields).toHaveLength(1)
@@ -139,12 +220,101 @@ describe('buildFields 自动推断的同名合并', () => {
 
   it('模板库回读的同名同类型行(_allowSameNameMerge)仍合并为 fillAllPositions', () => {
     const rows = [
-      autoRow({ rowId: 'r1', _allowSameNameMerge: true, markId: 'm1', markRefs: [{ markId: 'm1', start: null, end: null }] }),
-      autoRow({ rowId: 'r2', _allowSameNameMerge: true, markId: 'm2', markRefs: [{ markId: 'm2', start: null, end: null }] }),
+      autoRow({
+        rowId: 'r1',
+        _allowSameNameMerge: true,
+        markId: 'm1',
+        markRefs: [{ markId: 'm1', start: null, end: null }],
+      }),
+      autoRow({
+        rowId: 'r2',
+        _allowSameNameMerge: true,
+        markId: 'm2',
+        markRefs: [{ markId: 'm2', start: null, end: null }],
+      }),
     ]
     const fields = buildFields(rows)
     expect(fields).toHaveLength(1)
     expect(fields[0].fillAllPositions).toBe(true)
     expect(fields[0].marks).toEqual(['m1', 'm2'])
+  })
+
+  it('多项是独立规则：普通文本同名行合并，但不设为 fillAllPositions', () => {
+    const rows = [
+      autoRow({
+        rowId: 'r1',
+        name: '受托人',
+        label: '受托人',
+        semanticKey: '律师',
+        groupName: '代理人',
+        multiple: true,
+        itemSeparator: '、',
+        repeatSuffix: true,
+        markId: 'm1',
+        markRefs: [{ markId: 'm1', start: null, end: null }],
+      }),
+      autoRow({
+        rowId: 'r2',
+        name: '受托人',
+        label: '受托人',
+        semanticKey: '律师',
+        groupName: '代理人',
+        multiple: true,
+        itemSeparator: '、',
+        repeatSuffix: true,
+        markId: 'm2',
+        markRefs: [{ markId: 'm2', start: null, end: null }],
+      }),
+    ]
+
+    const fields = buildFields(rows)
+    expect(fields).toHaveLength(1)
+    expect(fields[0]).toMatchObject({
+      type: 'text',
+      name: '受托人',
+      groupName: '代理人',
+      multiple: true,
+      itemSeparator: '、',
+      repeatSuffix: true,
+      fillAllPositions: false,
+    })
+    expect(fields[0].marks).toEqual(['m1', 'm2'])
+  })
+
+  it('重新编辑模板时保留源前后缀，并单独保存用户修改后的默认文字', () => {
+    const field = makeRow({ rowId: 'field', name: '委托人', label: '委托人' })
+    const rows = [
+      makeRow({
+        rowId: 'prefix',
+        type: 'prefix',
+        text: '被上诉人',
+        sourceStructureText: '第三人',
+        name: '委托人',
+        structureTargetRowId: 'field',
+        markId: '',
+        markRefs: [],
+      }),
+      field,
+      makeRow({
+        rowId: 'suffix',
+        type: 'suffix',
+        text: '作为委托人',
+        sourceStructureText: '委托',
+        name: '委托人',
+        structureTargetRowId: 'field',
+        markId: '',
+        markRefs: [],
+      }),
+    ]
+
+    const fields = buildFields(rows)
+    expect(fields).toHaveLength(1)
+    expect(fields[0].markRefs[0].optionalRule).toEqual({
+      enabled: true,
+      removeEmptyPrefix: '第三人',
+      removeEmptySuffix: '委托',
+      defaultPrefix: '被上诉人',
+      defaultSuffix: '作为委托人',
+    })
   })
 })

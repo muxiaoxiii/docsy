@@ -18,6 +18,9 @@ test-pdf/
 *.db-wal
 .workbuddy/
 .mimocode/
+/.loop/
+/prompt.md
+/log.md
 
 docs/*
 !docs/office-markdown-converter-design.md

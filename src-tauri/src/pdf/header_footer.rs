@@ -12,7 +12,6 @@ use super::content_text;
 use super::normalize::normalize_pdf_to_a4;
 use super::page_info::get_page_infos;
 use super::preview::{render_preview, PreviewResult};
-use super::qpdf;
 use super::{same_path, temp_named_path};
 use crate::util::fs::{set_private_permissions, TempPathGuard};
 
@@ -577,7 +576,7 @@ fn process_job(
     }
     // qpdf 刚生成的临时结果文件，收紧权限（非 unix 为 no-op）
     let _ = set_private_permissions(overlay_output.path());
-    write_optimized_or_copy(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
+    write_overlay_result(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
     // Bookmarks are now written after merge, not during per-file processing
 
     let total_elapsed = job_start.elapsed().as_millis();
@@ -687,14 +686,12 @@ fn plain_text_target_from_config(
     }
 }
 
-fn write_optimized_or_copy(input: &Path, output: &Path) -> Result<()> {
-    match qpdf::optimize_to(input, output) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            fs::copy(input, output).context("复制 PDF 处理结果失败")?;
-            Ok(())
-        }
-    }
+fn write_overlay_result(input: &Path, output: &Path) -> Result<()> {
+    // qpdf --overlay has already written a complete, valid PDF. A second
+    // level-9 Flate recompression is especially expensive for scanned pages
+    // and can make a two-page report take minutes without changing layout.
+    fs::copy(input, output).context("复制 PDF 处理结果失败")?;
+    Ok(())
 }
 
 // 收敛说明：统一委托 crate::util::fs::unique_output_path。与原本地实现的差异仅在
@@ -1124,6 +1121,100 @@ mod tests {
         let _ = fs::remove_file(result.output_path);
         let _ = fs::remove_file(output);
         let _ = fs::remove_file(deleted);
+    }
+
+    #[test]
+    #[ignore = "manual QA: set DOCSY_NORMALIZE_FIXTURE to a representative PDF"]
+    fn manual_normalize_then_overlay_keeps_body_and_header_at_page_top() {
+        let Some(input) = std::env::var_os("DOCSY_NORMALIZE_FIXTURE").map(PathBuf::from) else {
+            return;
+        };
+        if crate::external::QpdfTool.binary_path().is_err() {
+            return;
+        }
+        let output = temp_named_path("docsy_normalize_overlay_manual", "pdf");
+        let result = process_job(
+            &HeaderFooterJob {
+                input_path: input.to_string_lossy().to_string(),
+                output_path: output.to_string_lossy().to_string(),
+                page_start: 1,
+                total_pages: None,
+                normalize_a4: true,
+                a4_orientation: "preserve".to_string(),
+                raster_dpi: default_raster_dpi(),
+                cleanup: CleanupConfig::default(),
+                header: Some(OverlayTextConfig {
+                    text: "DOCSY POSITION TEST".to_string(),
+                    region: "header".to_string(),
+                    font_family: "auto".to_string(),
+                    font_size: 10.0,
+                    margin_mm: 2.0,
+                    align: "center".to_string(),
+                    offset_x_mm: 0.0,
+                    color: "#000000".to_string(),
+                    page_start: None,
+                    page_end: None,
+                    number_style: String::new(),
+                    number_offset: 0,
+                    number_total: None,
+                    artifact_kind: "HeaderText".to_string(),
+                }),
+                footer: None,
+                extra_overlays: Vec::new(),
+                bookmarks: Vec::new(),
+                bookmark_remove_existing: false,
+            },
+            None,
+        )
+        .unwrap();
+
+        let rendered_prefix = temp_named_path("docsy_normalize_overlay_render", "png");
+        let rendered_prefix = rendered_prefix.with_extension("");
+        let render = crate::external::hidden_command("pdftoppm")
+            .arg("-f")
+            .arg("1")
+            .arg("-singlefile")
+            .arg("-png")
+            .arg("-r")
+            .arg("72")
+            .arg(&result.output_path)
+            .arg(&rendered_prefix)
+            .output()
+            .unwrap();
+        assert!(render.status.success());
+        let rendered_png = rendered_prefix.with_extension("png");
+        let (width, height) = image::image_dimensions(&rendered_png).unwrap();
+        assert!(width > 500 && height > 500);
+        assert!(fs::metadata(&rendered_png).unwrap().len() > 10_000);
+
+        let bbox = crate::external::hidden_command("pdftotext")
+            .arg("-f")
+            .arg("1")
+            .arg("-l")
+            .arg("1")
+            .arg("-bbox")
+            .arg(&result.output_path)
+            .arg("-")
+            .output()
+            .unwrap();
+        assert!(bbox.status.success());
+        let html = String::from_utf8_lossy(&bbox.stdout);
+        let word_end = html
+            .find(">DOCSY</word>")
+            .expect("overlay header text missing");
+        let word_start = html[..word_end].rfind("<word ").unwrap();
+        let word = &html[word_start..word_end];
+        let y_start = word.find("yMin=\"").unwrap() + 6;
+        let y_end = word[y_start..].find('"').unwrap() + y_start;
+        let y_min: f32 = word[y_start..y_end].parse().unwrap();
+        assert!(
+            y_min < 30.0,
+            "normalized header drifted from top: yMin={y_min}"
+        );
+
+        let _ = fs::remove_file(result.output_path);
+        let _ = fs::remove_file(output);
+        let _ = fs::remove_file(rendered_png);
     }
 
     #[test]

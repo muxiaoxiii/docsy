@@ -21,12 +21,8 @@ describe('markRefsForTextRange 坐标传播', () => {
       markSegments: [{ markId: 'word/document.xml-p2-r14', text: '李月春律师' }],
     }
 
-    expect(markRefsForTextRange(row, 0, 3)).toEqual([
-      { markId: 'word/document.xml-p2-r14', start: 1, end: 4 },
-    ])
-    expect(markRefsForTextRange(row, 3, 5)).toEqual([
-      { markId: 'word/document.xml-p2-r14', start: 4, end: 6 },
-    ])
+    expect(markRefsForTextRange(row, 0, 3)).toEqual([{ markId: 'word/document.xml-p2-r14', start: 1, end: 4 }])
+    expect(markRefsForTextRange(row, 3, 5)).toEqual([{ markId: 'word/document.xml-p2-r14', start: 4, end: 6 }])
   })
 })
 
@@ -73,7 +69,10 @@ describe('resolveReferenceValueFromSource 引用解析', () => {
 
   it('自动来源(未选择)解析为空', () => {
     expect(
-      resolveReferenceValueFromSource({ mode: 'auto', sourceField: '', sourceSemanticKey: '', sourceIndex: null }, values),
+      resolveReferenceValueFromSource(
+        { mode: 'auto', sourceField: '', sourceSemanticKey: '', sourceIndex: null },
+        values,
+      ),
     ).toBe('')
   })
 
@@ -239,6 +238,39 @@ describe('filenamePreviewText 文件名实时预览', () => {
     const tokens = [{ type: 'preset', value: '模板名' }]
     expect(filenamePreviewText(tokens, { manifestName: '模板A' })).toBe('模板A.docx')
     expect(filenamePreviewText(tokens, {})).toBe('模板.docx')
+  })
+
+  it('只使用可见的字面连接符，不隐式增加分隔符', () => {
+    const tokens = [
+      { type: 'preset', value: '模板名' },
+      { type: 'literal', value: '-' },
+      { type: 'field', value: '法院' },
+    ]
+    expect(
+      filenamePreviewText(tokens, {
+        manifestName: '所函',
+        formValues: { fld_text_fy: '北京知识产权法院' },
+        fields,
+      }),
+    ).toBe('所函-北京知识产权法院.docx')
+
+    expect(
+      filenamePreviewText(
+        [
+          { type: 'preset', value: '模板名' },
+          { type: 'field', value: '法院' },
+        ],
+        {
+          manifestName: '所函',
+          formValues: { fld_text_fy: '北京知识产权法院' },
+          fields,
+        },
+      ),
+    ).toBe('所函北京知识产权法院.docx')
+  })
+
+  it('预览与真实保存使用相同的非法文件名字符替换', () => {
+    expect(filenamePreviewText([{ type: 'literal', value: '案号：2026/08?17' }], {})).toBe('案号：2026_08_17.docx')
   })
 
   it('空 token 列表返回空串', () => {

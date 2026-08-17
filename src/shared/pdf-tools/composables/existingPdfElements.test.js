@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { compareDetectedTextRows, detectedElementFromCandidate, mergeExistingElements } from './existingPdfElements.js'
+import {
+  compareDetectedTextRows,
+  detectedElementFromCandidate,
+  mergeExistingElements,
+  mergeRangeSelection,
+} from './existingPdfElements.js'
 
 const candidate = {
   text: '1/3',
@@ -50,5 +55,11 @@ describe('existingPdfElements', () => {
     const row = (text) => ({ fileName: 'a.pdf', element: { detectedText: text, pageStart: 1 } })
     const sorted = [row('证据10'), row('证据2'), row('证据1')].sort(compareDetectedTextRows)
     expect(sorted.map((r) => r.element.detectedText)).toEqual(['证据1', '证据2', '证据10'])
+  })
+
+  it('keeps both shift-selection endpoints selected', () => {
+    const rows = ['a', 'b', 'c', 'd', 'e'].map((key) => ({ key }))
+    expect(mergeRangeSelection(['a', 'e'], rows, 1, 3)).toEqual(['a', 'e', 'b', 'c', 'd'])
+    expect(mergeRangeSelection([], rows, 3, 1)).toEqual(['b', 'c', 'd'])
   })
 })

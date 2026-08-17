@@ -12,6 +12,9 @@ pub struct PageSize {
     pub height_pt: f32,
     pub raw_width_pt: f32,
     pub raw_height_pt: f32,
+    /// Lower-left corner of the source CropBox/MediaBox in raw page space.
+    pub box_x0: f32,
+    pub box_y0: f32,
     pub rotate: i32,
 }
 
@@ -121,6 +124,8 @@ fn apply_rotation(size: PageSize, rotate: i32) -> PageSize {
             height_pt: size.width_pt,
             raw_width_pt: size.width_pt,
             raw_height_pt: size.height_pt,
+            box_x0: size.box_x0,
+            box_y0: size.box_y0,
             rotate,
         }
     } else {
@@ -129,6 +134,8 @@ fn apply_rotation(size: PageSize, rotate: i32) -> PageSize {
             height_pt: size.height_pt,
             raw_width_pt: size.width_pt,
             raw_height_pt: size.height_pt,
+            box_x0: size.box_x0,
+            box_y0: size.box_y0,
             rotate,
         }
     }
@@ -148,6 +155,8 @@ fn page_size_from_box(value: &Value) -> Option<PageSize> {
         height_pt: (y1 - y0).abs(),
         raw_width_pt: (x1 - x0).abs(),
         raw_height_pt: (y1 - y0).abs(),
+        box_x0: x0.min(x1),
+        box_y0: y0.min(y1),
         rotate: 0,
     })
 }
@@ -170,6 +179,7 @@ mod tests {
         let pages = parse_page_sizes(&value).expect("page sizes should parse");
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].width_pt, 595.28);
+        assert_eq!(pages[0].box_x0, 0.0);
     }
 
     #[test]
@@ -187,6 +197,21 @@ mod tests {
         assert_eq!(pages[0].raw_width_pt, 595.28);
         assert_eq!(pages[0].raw_height_pt, 841.89);
         assert_eq!(pages[0].rotate, 90);
+    }
+
+    #[test]
+    fn preserves_non_zero_page_box_origin() {
+        let value = json!({
+            "pages": [{
+                "object": "3 0 R",
+                "cropBox": [18, 24, 613.28, 865.89]
+            }]
+        });
+        let pages = parse_page_sizes(&value).expect("page sizes should parse");
+        assert_eq!(pages[0].width_pt, 595.28);
+        assert_eq!(pages[0].height_pt, 841.89);
+        assert_eq!(pages[0].box_x0, 18.0);
+        assert_eq!(pages[0].box_y0, 24.0);
     }
 
     #[test]

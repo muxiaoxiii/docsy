@@ -103,7 +103,9 @@ export async function tauriCallSafe(command, args = {}) {
       try {
         const parsed = JSON.parse(message)
         message = parsed.message || parsed.reason || message
-      } catch { /* not JSON, use as-is */ }
+      } catch {
+        /* not JSON, use as-is */
+      }
     }
     const details = {
       message,
@@ -144,7 +146,9 @@ export function userFacingError(error, fallback = '操作失败', maxLength = 22
   }
 
   // Detect which external tool caused the failure and prefix with tool name
-  const toolMatch = message.match(/(?:执行 |使用 )?(qpdf|poppler|pdftoppm|pdftotext|ffmpeg|ffprobe|Word|WPS|LibreOffice)/i)
+  const toolMatch = message.match(
+    /(?:执行 |使用 )?(qpdf|poppler|pdftoppm|pdftotext|ffmpeg|ffprobe|Word|WPS|LibreOffice)/i,
+  )
   let prefix = ''
   if (toolMatch) {
     const tool = toolMatch[1].toLowerCase()

@@ -42,7 +42,7 @@ export function useEvidencePdfDetection({
   registerSnapshotProvider('detection', () => ({
     lastDetectionResults: lastDetectionResults.slice(-20), // 最近20个文件的检测结果
     totalDetected: lastDetectionResults.reduce((sum, r) => sum + r.detectedCount, 0),
-    filesWithDetection: lastDetectionResults.filter(r => r.detectedCount > 0).length,
+    filesWithDetection: lastDetectionResults.filter((r) => r.detectedCount > 0).length,
   }))
   async function detectAllHeaderFooter(options = {}) {
     const silent = Boolean(options.silent)
@@ -177,7 +177,7 @@ export function useEvidencePdfDetection({
       fileName: file.name,
       timestamp: new Date().toISOString(),
       detectedCount: detectedElements.length,
-      detected: detectedElements.map(e => ({
+      detected: detectedElements.map((e) => ({
         kind: e.kind,
         text: e.text?.slice(0, 40),
         pageRange: e.pageRange,
@@ -185,10 +185,12 @@ export function useEvidencePdfDetection({
         confidence: e.confidence,
         decision: e.decision,
       })),
-      headerChoice: header ? { text: header.text?.slice(0, 40), source: header.source, confidence: header.confidence } : null,
+      headerChoice: header
+        ? { text: header.text?.slice(0, 40), source: header.source, confidence: header.confidence }
+        : null,
       footerChoice: footer ? { text: footer.text?.slice(0, 40), source: footer.source } : null,
       pageNumberChoice: pageNumber ? { text: pageNumber.text?.slice(0, 40), source: pageNumber.source } : null,
-      candidateSummary: headerCandidates.map(c => ({
+      candidateSummary: headerCandidates.map((c) => ({
         text: c.text?.slice(0, 30),
         count: c.count,
         repeating: c.repeating,
@@ -391,10 +393,10 @@ export function useEvidencePdfDetection({
   function footerCandidatesNeedReview(file) {
     // Only check existingElements (strong candidates that entered the confirmation dialog)
     const elements = file?.existingElements || []
-    const footerElements = elements.filter(e => e.kind === 'footerText' || e.kind === 'pageNumber')
+    const footerElements = elements.filter((e) => e.kind === 'footerText' || e.kind === 'pageNumber')
     if (footerElements.length === 0) return false
     // Need review if any footer/pageNumber element has no decision yet
-    return footerElements.some(e => !e.decision)
+    return footerElements.some((e) => !e.decision)
   }
 
   function footerCandidateRoleForFile(file, candidate) {
@@ -534,15 +536,11 @@ export function useEvidencePdfDetection({
     // Check if all existing elements have been confirmed (decision: keep/ignore)
     const elements = file.existingElements || []
     if (elements.length > 0) {
-      const allConfirmed = elements.every(
-        (el) => el.decision === 'keep' || el.decision === 'ignore',
-      )
+      const allConfirmed = elements.every((el) => el.decision === 'keep' || el.decision === 'ignore')
       if (allConfirmed) {
         return { text: '已确认', type: 'success' }
       }
-      const anyPending = elements.some(
-        (el) => el.decision == null || el.decision === undefined,
-      )
+      const anyPending = elements.some((el) => el.decision == null || el.decision === undefined)
       if (anyPending) {
         return { text: '待确认', type: 'warning' }
       }

@@ -103,6 +103,15 @@ export function actionableExistingElements(file, kinds = EXISTING_ELEMENT_KINDS)
   )
 }
 
+export function mergeRangeSelection(selectedKeys, rows, startIndex, endIndex) {
+  const start = Math.max(0, Math.min(startIndex, endIndex))
+  const end = Math.min(rows.length - 1, Math.max(startIndex, endIndex))
+  const selected = new Set(selectedKeys)
+  for (const row of rows.slice(start, end + 1)) {
+    if (row?.key) selected.add(row.key)
+  }
+  return [...selected]
+}
 
 // 检测文字排序：拉丁字母开头的文本（专利号等）排在最前，其余按自然序；
 // 同文本再按文件名、页段稳定次序，保证“证据X / 证据X译文”这类同族文本相邻。

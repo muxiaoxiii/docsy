@@ -19,11 +19,6 @@ export const FIELD_TYPE_GROUPS = [
   { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、律所名称。' },
   { value: 'date', label: '日期', description: '日期字段，填写时用日期选择器；可设输出格式或留空手写。' },
   { value: 'select', label: '下拉选择', description: '从预设选项中选择或手动输入，如案由、诉讼阶段。' },
-  {
-    value: 'party_list',
-    label: '多项分组',
-    description: '同一文本字段可填写多项，用于当事人、律师等的顺序、每项后缀和引用；不是独立业务字段。',
-  },
   { value: 'reference', label: '引用', description: '复用前面字段的值；来源由填写时选择或在设置里指定。' },
   {
     value: 'check',
@@ -59,6 +54,7 @@ export const typeHelpItems = FIELD_TYPE_GROUPS
 
 // Map a concrete stored type to its merged group (or itself).
 export function typeGroupOf(type) {
+  if (type === 'party_list') return 'text'
   if (['checkbox', 'radio_group', 'checkbox_group'].includes(type)) return 'check'
   if (type === 'prefix' || type === 'suffix') return 'link'
   if (type === 'delete_text' || type === 'ignore') return 'action'
@@ -86,7 +82,6 @@ export const previewLegendItems = [
   { className: 'preview-text', label: '文本', type: 'text' },
   { className: 'preview-text', label: '下拉选择', type: 'select' },
   { className: 'preview-date', label: '日期', type: 'date' },
-  { className: 'preview-party', label: '多项分组', type: 'party_list' },
   { className: 'preview-reference', label: '引用', type: 'reference' },
   { className: 'preview-checkbox', label: '单个勾选', type: 'checkbox' },
   { className: 'preview-radio', label: '互斥勾选组', type: 'radio_group' },
@@ -117,7 +112,11 @@ export function typeLabel(type) {
 }
 
 export function isPartyFieldRow(row) {
-  return row?.enabled && rowUsage(row) === 'field' && row.type === 'party_list' && row.name?.trim()
+  return row?.enabled && rowUsage(row) === 'field' && fieldIsMultiple(row) && row.name?.trim()
+}
+
+export function fieldIsMultiple(field) {
+  return Boolean(field?.multiple || field?.type === 'party_list')
 }
 
 export function isSelectableFieldRow(row) {
@@ -265,7 +264,7 @@ export function displayValue(value) {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (Array.isArray(value)) return value.map(displayValue).join('、')
   const objectText = value.name || value.label || value.text
-  if (objectText != null) return `${objectText}${value.suffix || ''}`
+  if (objectText != null) return `${value.prefix || ''}${objectText}${value.suffix || ''}`
   return JSON.stringify(value)
 }
 
@@ -325,9 +324,7 @@ export function isPureConnectorText(text) {
 // ── Mark / ref helpers ───────────────────────────────────────────────────────
 
 export function markRefsForTextRange(row, start, end) {
-  const sourceRefs = row.markRefs?.length
-    ? row.markRefs
-    : [{ markId: row.markId, start: null, end: null }]
+  const sourceRefs = row.markRefs?.length ? row.markRefs : [{ markId: row.markId, start: null, end: null }]
   const segments = row.markSegments?.length ? row.markSegments : [{ markId: row.markId, text: row.text }]
   const result = []
   let cursor = 0
@@ -410,7 +407,8 @@ export function makeRangeRow(row, start, end, attrs, suffix) {
     required: false,
     optionalWhenEmpty: false,
     referenceHintSeen: false,
-    partyItems: attrs.type === 'party_list' ? splitPartyLabelText(sliceChars(row.text, start, end)) : [],
+    partyItems:
+      attrs.multiple || attrs.type === 'party_list' ? splitPartyLabelText(sliceChars(row.text, start, end)) : [],
   }
 }
 
@@ -483,8 +481,7 @@ export function isGroupedField(row, rows) {
 export function groupedFieldSummary(row) {
   if (isMarkerType(row.type)) return '同一勾选组'
   // Genuine reference rows point at another field.
-  const sourceName =
-    row?.referenceSourceField || row?.referenceSourceSemanticKey || ''
+  const sourceName = row?.referenceSourceField || row?.referenceSourceSemanticKey || ''
   if (row?.type === 'reference' && sourceName) return `引用：${sourceName}`
   // Same-name same-type rows merge into one fillAllPositions field: a single
   // input fills every document position with the same value.
@@ -539,7 +536,7 @@ export function displayMarkText(row) {
   if (row.virtualPartyGroup) return row.name || row.label || '当事人列表'
   if (row.partyGroupChild) return row.text
   if (isConnectorRow(row)) return `连接符：${row.text}`
-  if (row.type === 'party_list' && row.partyItems?.length > 1) return row.name || row.label || row.text
+  if (fieldIsMultiple(row) && row.partyItems?.length > 1) return row.name || row.label || row.text
   return row.text
 }
 
@@ -623,9 +620,7 @@ export function previewRangesByRun(rows) {
   const occurrenceByRow = new Map()
   for (const row of rows) {
     if (!row.enabled) continue
-    const refs = row.markRefs?.length
-      ? row.markRefs
-      : [{ markId: row.markId, start: row.charStart, end: row.charEnd }]
+    const refs = row.markRefs?.length ? row.markRefs : [{ markId: row.markId, start: row.charStart, end: row.charEnd }]
     for (const ref of refs) {
       if (!ref?.markId) continue
       if (!map.has(ref.markId)) map.set(ref.markId, [])
@@ -662,8 +657,7 @@ export function previewPlainSegment(text, index) {
 export function previewSourceLabel(row) {
   if (rowUsage(row) === 'ignore') return '【保留原文】'
   if (rowUsage(row) === 'delete_text') return `【删除：${row.text}】`
-  if (rowUsage(row) === 'prefix')
-    return `【${isConnectorRow(row) ? '连接符' : '前缀'}：${row.name || '未指定'}】`
+  if (rowUsage(row) === 'prefix') return `【${isConnectorRow(row) ? '连接符' : '前缀'}：${row.name || '未指定'}】`
   if (rowUsage(row) === 'suffix') return `【后缀：${row.name || '未指定'}】`
   if (row.type === 'reference') return `【引用：${row.name || '引用'}】`
   // Display name (label) wins so renaming the display name updates the
@@ -683,10 +677,13 @@ export function previewReplacementText(row, sampleValues = {}, occurrence = 0) {
   if (row.type === 'date' && !isEmptyPreviewValue(value)) return normalizePreviewDate(value)
   if (!isEmptyPreviewValue(value)) {
     if (Array.isArray(value)) {
-      if (row.type === 'party_list' && (row.markRefs || []).length > 1) {
+      if (fieldIsMultiple(row) && (row.markRefs || []).length > 1) {
         return displayPartyValue(value[occurrence])
       }
-      return value.map(displayPartyValue).filter(Boolean).join('、')
+      return value
+        .map(displayPartyValue)
+        .filter(Boolean)
+        .join(row.itemSeparator || '、')
     }
     return String(value)
   }
@@ -730,7 +727,20 @@ function normalizePreviewDate(value) {
 // ── Date formatting (fill values → rendered date forms) ──────────────────────
 
 const CN_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
-const EN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const EN_MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
 const EN_MONTHS_SHORT = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.']
 
 // Parse an entered date value into {y, m, d}; a zero part means "leave blank".
@@ -767,7 +777,10 @@ export function parseDateParts(value) {
 
 function cnNumber(n) {
   if (!n) return ''
-  return String(n).split('').map((c) => CN_DIGITS[Number(c)] ?? c).join('')
+  return String(n)
+    .split('')
+    .map((c) => CN_DIGITS[Number(c)] ?? c)
+    .join('')
 }
 
 function ordinal(n) {
@@ -893,18 +906,19 @@ export function structureOverrideKey(field) {
 
 // ── Party / form helpers ─────────────────────────────────────────────────────
 
-export function partyItemsToValues(value) {
+export function partyItemsToValues(value, options = {}) {
   if (typeof value === 'string') return splitPartyInput(value)
   if (!Array.isArray(value)) return []
   return value
     .map((item) => {
       if (typeof item === 'string') return item.trim()
-      const suffix = String(item?.suffix || '').trim()
+      const prefix = options.includePrefix === false ? '' : String(item?.prefix || '').trim()
+      const suffix = options.includeSuffix === false ? '' : String(item?.suffix || '').trim()
       let text = String(item?.text || '').trim()
       if (suffix && text.endsWith(suffix)) {
         text = text.slice(0, -suffix.length).trim()
       }
-      return suffix ? { name: text, suffix } : text
+      return prefix || suffix ? { name: text, prefix, suffix } : text
     })
     .filter((item) => (typeof item === 'string' ? Boolean(item) : Boolean(item.name)))
 }
@@ -926,16 +940,18 @@ export function createPartyTempRowStore(commit) {
     rowsFor(key, value) {
       if (!Array.isArray(value)) return []
       if (value.length) return value
-      if (!cache.has(key)) cache.set(key, { text: '', suffix: '' })
+      if (!cache.has(key)) cache.set(key, { text: '', prefix: '', suffix: '' })
       return [cache.get(key)]
     },
     // 临时行有内容时提交为正式值；仍为空则不提交（避免写入空行）
     commit(key, value) {
       if (!Array.isArray(value) || value.length) return
       const temp = cache.get(key)
-      if (!temp || (!String(temp.text).trim() && !String(temp.suffix).trim())) return
+      if (!temp || (!String(temp.text).trim() && !String(temp.prefix).trim() && !String(temp.suffix).trim())) return
       cache.delete(key)
-      commit(key, [{ text: temp.text, suffix: temp.suffix }])
+      const row = { text: temp.text, suffix: temp.suffix }
+      if (String(temp.prefix || '').trim()) row.prefix = temp.prefix
+      commit(key, [row])
     },
   }
 }
@@ -963,15 +979,19 @@ export function filenamePreviewText(tokens, { formValues = {}, fields = [], mani
     }
     return token.value || ''
   })
-  return `${parts.join('')}.docx`
+  const filename = parts.join('').replaceAll(/[\\/:*?"<>|]/g, '_')
+  return `${filename}.docx`
 }
 
 export function parsePartyItem(value) {
   if (value && typeof value === 'object') {
-    return {
+    const row = {
       text: String(value.name || value.label || value.text || '').trim(),
       suffix: String(value.suffix || '').trim(),
     }
+    const prefix = String(value.prefix || '').trim()
+    if (prefix) row.prefix = prefix
+    return row
   }
   return {
     text: String(value || '').trim(),
@@ -983,7 +1003,7 @@ export function parsePartyItem(value) {
 // Party items keep their {text, suffix} object form so per-item suffixes
 // (律师/实习律师…) survive a history refill.
 export function inputValueForField(field, value) {
-  if (field?.type === 'party_list' && Array.isArray(value)) {
+  if (fieldIsMultiple(field) && Array.isArray(value)) {
     return value.map((item) => parsePartyItem(item))
   }
   return value
@@ -994,7 +1014,7 @@ export function inputValueForField(field, value) {
 export function displayPartyValue(item) {
   if (item && typeof item === 'object' && !Array.isArray(item)) {
     const name = item.name || item.label || item.text || ''
-    return `${name}${item.suffix || ''}`
+    return `${item.prefix || ''}${name}${item.suffix || ''}`
   }
   return displayValue(item)
 }
@@ -1018,14 +1038,32 @@ export function partyFieldUsesSuffix(field) {
 }
 
 export function fieldUsesRepeatableSuffix(field) {
-  return (
-    field?.type === 'party_list' && (field.markRefs || []).some((markRef) => markRef.optionalRule?.removeEmptySuffix)
-  )
+  if (!fieldIsMultiple(field)) return false
+  if (field?.repeatSuffix) return true
+  return (field?.markRefs || []).some((markRef) => Boolean(optionalRuleSuffix(markRef.optionalRule)))
+}
+
+export function fieldUsesRepeatablePrefix(field) {
+  return fieldIsMultiple(field) && Boolean(field?.repeatPrefix)
+}
+
+export function optionalRulePrefix(rule) {
+  if (rule && Object.prototype.hasOwnProperty.call(rule, 'defaultPrefix')) {
+    return String(rule.defaultPrefix ?? '')
+  }
+  return String(rule?.removeEmptyPrefix || '')
+}
+
+export function optionalRuleSuffix(rule) {
+  if (rule && Object.prototype.hasOwnProperty.call(rule, 'defaultSuffix')) {
+    return String(rule.defaultSuffix ?? '')
+  }
+  return String(rule?.removeEmptySuffix || '')
 }
 
 export function partySuffixOptions(field) {
   return Array.from(
-    new Set((field.markRefs || []).map((markRef) => markRef.optionalRule?.removeEmptySuffix).filter(Boolean)),
+    new Set((field.markRefs || []).map((markRef) => optionalRuleSuffix(markRef.optionalRule)).filter(Boolean)),
   )
 }
 
@@ -1036,11 +1074,17 @@ export function defaultPartySuffix(field, index) {
 }
 
 export function partyFieldStructureHint(field) {
-  const suffixes = Array.from(
-    new Set((field.markRefs || []).map((markRef) => markRef.optionalRule?.removeEmptySuffix).filter(Boolean)),
+  if (!fieldIsMultiple(field)) return ''
+  const prefixes = Array.from(
+    new Set((field.markRefs || []).map((markRef) => optionalRulePrefix(markRef.optionalRule)).filter(Boolean)),
   )
-  if (!suffixes.length) return ''
-  return `可为每一项选择或输入后缀，默认来自模板：${suffixes.join('、')}。`
+  const suffixes = Array.from(
+    new Set((field.markRefs || []).map((markRef) => optionalRuleSuffix(markRef.optionalRule)).filter(Boolean)),
+  )
+  const parts = []
+  if (field.repeatPrefix && prefixes.length) parts.push(`逐项前缀：${prefixes.join('、')}`)
+  if (field.repeatSuffix && suffixes.length) parts.push(`逐项后缀：${suffixes.join('、')}`)
+  return parts.length ? `${parts.join('；')}。` : ''
 }
 
 export function isRenderableField(field) {
@@ -1054,7 +1098,7 @@ export function fillFieldLabel(field) {
 
 export function previewFieldLabel(row) {
   if (isGeneratedFieldName(row.name)) return row.name.trim()
-  if (row.type === 'party_list') return row.name.trim()
+  if (fieldIsMultiple(row)) return row.name.trim()
   return row.label || row.name.trim()
 }
 
@@ -1143,9 +1187,7 @@ export function findPartCharRange(text, part, cursor = 0) {
 export function fieldNameOptions(rows) {
   return Array.from(
     new Set(
-      rows
-        .filter((row) => row.enabled && rowUsage(row) === 'field' && row.name.trim())
-        .map((row) => row.name.trim()),
+      rows.filter((row) => row.enabled && rowUsage(row) === 'field' && row.name.trim()).map((row) => row.name.trim()),
     ),
   )
 }
@@ -1220,7 +1262,7 @@ function findReferenceTarget(row, text, rowIndex, fieldRows) {
         label: item.name || item.label || item.text,
       }
     }
-    if (item.type === 'party_list') {
+    if (fieldIsMultiple(item)) {
       const itemIndex = (item.partyItems || []).findIndex((party) => normalizeComparableText(party) === text)
       if (itemIndex >= 0) {
         const sourceIndex = partySourceIndexForRow(item, rowIndex, partyTotalsBeforeRow, fieldRows) + itemIndex
@@ -1239,7 +1281,7 @@ function findReferenceTarget(row, text, rowIndex, fieldRows) {
 function partySourceTotalsBefore(rowIndex, fieldRows) {
   const totals = new Map()
   for (const item of fieldRows.slice(0, Math.max(0, rowIndex))) {
-    if (!item.enabled || rowUsage(item) !== 'field' || item.type !== 'party_list') continue
+    if (!item.enabled || rowUsage(item) !== 'field' || !fieldIsMultiple(item)) continue
     const name = item.name?.trim()
     if (!name) continue
     totals.set(name, (totals.get(name) || 0) + Math.max(1, item.partyItems?.length || 0))
@@ -1254,8 +1296,7 @@ function partySourceIndexForRow(row, rowIndex, totalsBeforeRow, fieldRows) {
   for (let index = Math.max(0, rowIndex) - 1; index >= 0; index -= 1) {
     const item = fieldRows[index]
     if (item === row) return cursor - Math.max(1, item.partyItems?.length || 0)
-    if (!item.enabled || rowUsage(item) !== 'field' || item.type !== 'party_list' || item.name?.trim() !== name)
-      continue
+    if (!item.enabled || rowUsage(item) !== 'field' || !fieldIsMultiple(item) || item.name?.trim() !== name) continue
     cursor -= Math.max(1, item.partyItems?.length || 0)
   }
   return 0
@@ -1294,31 +1335,38 @@ export function referenceSuggestion(row, fieldRows) {
 
 export function referenceSourceOptions(row, fieldRows) {
   if (!row || rowUsage(row) !== 'field' || row.type !== 'reference') return []
-  const options = [
-    { key: referenceSourceKey('auto'), label: '填写时选择' },
-  ]
+  const options = [{ key: referenceSourceKey('auto'), label: '填写时选择' }]
   if (row.semanticKey?.trim()) {
-    options.push({ key: referenceSourceKey('semantic', row.semanticKey.trim()), label: `通用字段名：${row.semanticKey.trim()}` })
+    options.push({
+      key: referenceSourceKey('semantic', row.semanticKey.trim()),
+      label: `通用字段名：${row.semanticKey.trim()}`,
+    })
   }
   const rowIndex = fieldRows.indexOf(row)
   const seen = new Set()
-  for (let i = 0; i < rowIndex; i += 1) {
-    const item = fieldRows[i]
-    if (!item.enabled || rowUsage(item) !== 'field' || isMarkerType(item.type)) continue
+  const candidates = fieldRows
+    .slice(0, Math.max(0, rowIndex))
+    .filter((item) => item.enabled && rowUsage(item) === 'field' && !isMarkerType(item.type))
+  const groupName = String(row.groupName || '').trim()
+  const groupedCandidates = groupName
+    ? candidates.filter((item) => String(item.groupName || '').trim() === groupName)
+    : []
+  for (const item of groupedCandidates.length ? groupedCandidates : candidates) {
     const name = (item.name || '').trim()
     if (!name || seen.has(name)) continue
     seen.add(name)
-    if (item.type === 'party_list' && item.partyItems?.length > 1) {
+    const groupPrefix = item.groupName?.trim() ? `${item.groupName.trim()} / ` : ''
+    if (fieldIsMultiple(item) && item.partyItems?.length > 1) {
       for (let p = 0; p < item.partyItems.length; p += 1) {
         options.push({
           key: referenceSourceKey('field', name, p),
-          label: `${item.label || name} · 第 ${p + 1} 项`,
+          label: `${groupPrefix}${item.label || name} · 第 ${p + 1} 项`,
         })
       }
     } else {
       options.push({
         key: referenceSourceKey('field', name),
-        label: item.label || name,
+        label: `${groupPrefix}${item.label || name}`,
       })
     }
   }

@@ -97,19 +97,21 @@ export function setSelectedGroup(file, kind, id) {
 /** Strip {total}/{range} from a page-number template when the total is hidden. */
 export function pageNumberTemplateWithShowTotal(template, showTotal) {
   if (showTotal === false) {
-    return String(template || '{page}')
-      .replaceAll('{range}', '{page}')
-      // Strip Chinese total pattern: 共{total}页
-      .replace(/共\s*\{total\}\s*页/g, '')
-      // Strip English 'of {total}' pattern
-      .replace(/\bof\s*\{total\}/gi, '')
-      // Strip remaining {total}
-      .replaceAll('{total}', '')
-      // Clean up trailing punctuation/spaces
-      .replace(/[，,]\s*$/, '')
-      .replace(/\s+$/, '')
-      .replaceAll('//', '/')
-      .replace(/\/+$/, '')
+    return (
+      String(template || '{page}')
+        .replaceAll('{range}', '{page}')
+        // Strip Chinese total pattern: 共{total}页
+        .replace(/共\s*\{total\}\s*页/g, '')
+        // Strip English 'of {total}' pattern
+        .replace(/\bof\s*\{total\}/gi, '')
+        // Strip remaining {total}
+        .replaceAll('{total}', '')
+        // Clean up trailing punctuation/spaces
+        .replace(/[，,]\s*$/, '')
+        .replace(/\s+$/, '')
+        .replaceAll('//', '/')
+        .replace(/\/+$/, '')
+    )
   }
   return template
 }
@@ -244,7 +246,10 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
   const kinds = [
     { kind: 'header', enabled: rules.headerInsertEnabled !== false },
     { kind: 'footerText', enabled: rules.footerInsertEnabled !== false },
-    { kind: 'pageNumber', enabled: rules._globalApply ? true : (rules.pageNumberEnabled ?? rules.footerEnabled) !== false },
+    {
+      kind: 'pageNumber',
+      enabled: rules._globalApply ? true : (rules.pageNumberEnabled ?? rules.footerEnabled) !== false,
+    },
   ]
 
   const newEnabled = rules.insertHeaderFooterEnabled !== false
@@ -287,30 +292,31 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
     }
 
     // 2. New extra enabled groups (not the selected one) — only when insert enabled
-    if (newEnabled && enabled) for (const g of allGroups) {
-      if (g.id === selectedId || g.enabled === false) continue
-      if (kind === 'header' && g.mode === 'none') continue
-      let effectiveExtraGroup = g
-      if (kind === 'header' && rules.headerMode !== undefined) {
-        effectiveExtraGroup = { ...g, mode: rules.headerMode }
-      } else if (kind === 'pageNumber' && rules.pageNumberSequence) {
-        effectiveExtraGroup = { ...g, sequence: rules.pageNumberSequence }
+    if (newEnabled && enabled)
+      for (const g of allGroups) {
+        if (g.id === selectedId || g.enabled === false) continue
+        if (kind === 'header' && g.mode === 'none') continue
+        let effectiveExtraGroup = g
+        if (kind === 'header' && rules.headerMode !== undefined) {
+          effectiveExtraGroup = { ...g, mode: rules.headerMode }
+        } else if (kind === 'pageNumber' && rules.pageNumberSequence) {
+          effectiveExtraGroup = { ...g, sequence: rules.pageNumberSequence }
+        }
+        const text = contentRowText(file, index, kind, effectiveExtraGroup, rules)
+        if (kind === 'footerText' && !text) continue
+        rows.push({
+          kind,
+          source: 'new',
+          status: 'pending-add',
+          id: `${kind}-${g.id}`,
+          text,
+          group: g,
+          // Same effective-sequence override as the selected group above
+          sequence: kind === 'pageNumber' ? effectiveExtraGroup.sequence : undefined,
+          pageStart: g.pageStart || 1,
+          pageEnd: g.pageEnd || 0,
+        })
       }
-      const text = contentRowText(file, index, kind, effectiveExtraGroup, rules)
-      if (kind === 'footerText' && !text) continue
-      rows.push({
-        kind,
-        source: 'new',
-        status: 'pending-add',
-        id: `${kind}-${g.id}`,
-        text,
-        group: g,
-        // Same effective-sequence override as the selected group above
-        sequence: kind === 'pageNumber' ? effectiveExtraGroup.sequence : undefined,
-        pageStart: g.pageStart || 1,
-        pageEnd: g.pageEnd || 0,
-      })
-    }
 
     // 3. Existing detected elements (skip ignored — user says "not a header/footer")
     const existingKind = kind === 'footerText' ? 'footerText' : kind
@@ -517,10 +523,16 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     // header while page-number overlays continue to render.
     const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
     const headerInsertEnabled = rules._globalApply
-      ? (rules.headerInsertEnabled !== false && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none')
+      ? rules.headerInsertEnabled !== false &&
+        headerGroup &&
+        headerGroup.enabled !== false &&
+        headerModeValue !== 'none'
       : rules.headerInsertEnabled !== false
     const footerInsertEnabled = rules._globalApply
-      ? (rules.footerInsertEnabled !== false && footerTextGroup && footerTextGroup.enabled !== false && Boolean(footerTextGroup.text || rules.footerTextContent))
+      ? rules.footerInsertEnabled !== false &&
+        footerTextGroup &&
+        footerTextGroup.enabled !== false &&
+        Boolean(footerTextGroup.text || rules.footerTextContent)
       : rules.footerInsertEnabled !== false
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const header =
@@ -532,8 +544,10 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       suffixText: rules.fileSuffixText || 'processed',
     })
     const pageNumberEnabled = rules._globalApply
-      ? (pageNumberGroup && pageNumberGroup.enabled !== false)
-      : (legacyFooterMode ? false : (rules.pageNumberEnabled ?? rules.footerEnabled ?? true))
+      ? pageNumberGroup && pageNumberGroup.enabled !== false
+      : legacyFooterMode
+        ? false
+        : (rules.pageNumberEnabled ?? rules.footerEnabled ?? true)
     const pageNumberSequence =
       rules.pageNumberSequence ??
       (rules.footerContinuous === false ? 'per-file' : undefined) ??
@@ -600,10 +614,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             enabled: true,
             totalPages: pnTotal,
             sequence: pnSequence,
-            template: pageNumberTemplateWithShowTotal(
-              g.template || '{page}/{total}',
-              rules.pageNumberShowTotal,
-            ),
+            template: pageNumberTemplateWithShowTotal(g.template || '{page}/{total}', rules.pageNumberShowTotal),
             style: g.style || 'arabic',
             region: g.region || 'footer',
             align: g.align || rules.footerAlign || 'center',
@@ -645,19 +656,28 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       header: header ? overlayConfigForFile(file, 'header', header, rules, headerGroup) : null,
       footer:
         legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
-          ? (footerInsertEnabled ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules) : null)
-          : footerInsertEnabled && footerTextGroup && footerTextGroup.enabled !== false && (footerTextGroup.text || rules.footerTextContent)
-            ? footerTextOverlayConfigForGroup(resolveTextTemplate(footerTextGroup.text || rules.footerTextContent, file, index, rules), footerTextGroup, rules)
+          ? footerInsertEnabled
+            ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules)
+            : null
+          : footerInsertEnabled &&
+              footerTextGroup &&
+              footerTextGroup.enabled !== false &&
+              (footerTextGroup.text || rules.footerTextContent)
+            ? footerTextOverlayConfigForGroup(
+                resolveTextTemplate(footerTextGroup.text || rules.footerTextContent, file, index, rules),
+                footerTextGroup,
+                rules,
+              )
             : null,
       extraOverlays,
       bookmarks: rules.bookmarkEnabled
-        ? [{
-            enabled: true,
-            label: rules.bookmarkLabelSource === 'filename'
-              ? stripPdf(file.name)
-              : header || stripPdf(file.name),
-            pageIndex: 0,
-          }]
+        ? [
+            {
+              enabled: true,
+              label: rules.bookmarkLabelSource === 'filename' ? stripPdf(file.name) : header || stripPdf(file.name),
+              pageIndex: 0,
+            },
+          ]
         : [],
       bookmarkRemoveExisting: rules.bookmarkRemoveExisting || false,
     }
@@ -712,9 +732,7 @@ function buildArtifactTargets(file, kinds) {
   return file.existingElements
     .filter(
       (element) =>
-        kinds.includes(element.kind) &&
-        element.source === 'artifact' &&
-        ['delete', 'edit'].includes(element.decision),
+        kinds.includes(element.kind) && element.source === 'artifact' && ['delete', 'edit'].includes(element.decision),
     )
     .map((element) => ({
       artifactId: element.artifactId || null,
@@ -790,7 +808,7 @@ function overlayConfigForFile(file, region, text, rules, group = null) {
         pageStart: existingPageStart(file, region) || 1,
         pageEnd: existingPageEnd(file, region) || file.pages || 1,
       }
-    : (g.pageStart > 1 || (g.pageEnd && g.pageEnd > 0))
+    : g.pageStart > 1 || (g.pageEnd && g.pageEnd > 0)
       ? { ...base, pageStart: g.pageStart || 1, pageEnd: g.pageEnd || file.pages || 1 }
       : base
   if (!useDetectedPlacement || !bbox || !bbox.width || !bbox.height) return scopedBase
@@ -825,9 +843,7 @@ function convertedExistingOverlays(file, rules) {
   if (Array.isArray(file.existingElements) && file.existingElements.length) {
     return file.existingElements
       .filter(
-        (element) =>
-          element.decision === 'edit' &&
-          (element.source !== 'artifact' || !canEditArtifactInPlace(element)),
+        (element) => element.decision === 'edit' && (element.source !== 'artifact' || !canEditArtifactInPlace(element)),
       )
       .map((element) => overlayConfigForDetectedElement(element, rules))
       .filter(Boolean)
@@ -1070,7 +1086,11 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
   }
 }
 
-export function buildOverlayOutputPath(inputPath, outputDir = '', { suffixEnabled = true, suffixText = 'processed' } = {}) {
+export function buildOverlayOutputPath(
+  inputPath,
+  outputDir = '',
+  { suffixEnabled = true, suffixText = 'processed' } = {},
+) {
   const name = fileName(inputPath)
   const stem = stripPdf(name)
   const dir = outputDir || `${parentDir(inputPath)}/_docsy_pdf_processed`

@@ -352,9 +352,7 @@ pub fn convert_pdf_text_layer(
     };
     if pages_with_text == 0 {
         let _ = std::fs::remove_file(&output_path);
-        anyhow::bail!(
-            "没有读取到可靠的 PDF 文本层。该文件可能是扫描件；请使用后续的本地 AI 文档解析包处理。"
-        );
+        anyhow::bail!("没有读取到可靠的 PDF 文本层。该文件可能是扫描件，当前无法转换为 Markdown。");
     }
 
     let input_size = std::fs::metadata(&input_path)
@@ -364,7 +362,7 @@ pub fn convert_pdf_text_layer(
         .with_context(|| format!("输出文件生成失败: {}", output_path.display()))?
         .len();
     let mut warning = format!(
-        "已从 {pages_with_text} 页可靠文本生成 Markdown；这是文本层提取，扫描件、表格和复杂版面请使用本地 AI 文档解析。"
+        "已从 {pages_with_text} 页可靠文本生成 Markdown；表格、公式和复杂版面可能无法完整保留。"
     );
     if !empty_pages.is_empty() {
         let list = empty_pages

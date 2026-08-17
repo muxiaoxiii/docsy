@@ -8,11 +8,21 @@ import { fileName, parentDir, stripExtension } from '../../../core/filePath.js'
 import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { ensureExtension } from './fieldRowUtils.js'
 
-export function useBatchFill(templatePath, templateManifest, normalizeValues, normalizeStructureOverrides, itemSeparatorSetting, loadTemplateHistoryRuns) {
+export function useBatchFill(
+  templatePath,
+  templateManifest,
+  normalizeValues,
+  normalizeStructureOverrides,
+  itemSeparatorSetting,
+  loadTemplateHistoryRuns,
+) {
   const batchProcessing = ref(false)
   const batchSaveVisible = ref(false)
   const batchSaveRows = ref([])
   const batchSaveSelected = ref([])
+  const batchCompleteVisible = ref(false)
+  const batchCompleteResult = ref({ success: 0, failed: 0, outputDir: '', rows: [] })
+  const batchCompleteDataSaved = ref(false)
 
   async function handleBatchCommand(command) {
     if (command === 'export') {
@@ -44,7 +54,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
       return
     }
     ElMessage.success('字段表已导出')
-    ElMessage.info('若模板有填写历史，第 3 行为最近一次填写示例（标"否"不会生成数据）；需要可复制一行后填写')
+    ElMessage.info('第 2 行是填写说明，第 3 行是表头；若有历史，第 4 行是不会生成文件的示例。多项可按记录编号纵向续行')
     const openResult = await openPath(result.data)
     if (!openResult.ok) {
       ElMessage.warning('字段表已导出但无法自动打开，请到保存目录查看')
@@ -108,30 +118,28 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
     }
 
     const r = result.data
-    const outputDirText = typeof outputDir === 'string' ? outputDir : ''
-    const lines = [`批量填写完成：成功 ${r.success} 份` + (r.failed > 0 ? `，失败 ${r.failed} 份` : '')]
-    if (outputDirText) lines.push(`输出目录：${outputDirText}`)
-    if (r.rows?.length) lines.push(`本次生成了 ${r.rows.length} 行填写数据，可保存到模板填写历史`)
-
-    let saveData = false
-    try {
-      await ElMessageBox.confirm(lines.join('\n'), '批量填写完成', {
-        confirmButtonText: outputDirText ? '打开输出目录' : '完成',
-        cancelButtonText: r.rows?.length ? '保存数据' : '',
-        type: 'success',
-        customStyle: { whiteSpace: 'pre-line' },
-      })
-      if (outputDirText) {
-        const openResult = await openPath(outputDirText)
-        if (!openResult.ok) {
-          ElMessage.warning('无法打开输出目录，请手动查看')
-        }
-      }
-    } catch {
-      saveData = true
+    batchCompleteResult.value = {
+      success: r.success || 0,
+      failed: r.failed || 0,
+      outputDir: typeof outputDir === 'string' ? outputDir : '',
+      rows: r.rows || [],
     }
-    if (saveData && r.rows?.length) {
-      openBatchSaveDialog(r.rows)
+    batchCompleteDataSaved.value = false
+    batchCompleteVisible.value = true
+  }
+
+  async function openBatchOutputDir() {
+    const outputDir = batchCompleteResult.value.outputDir
+    if (!outputDir) return
+    const openResult = await openPath(outputDir)
+    if (!openResult.ok) {
+      ElMessage.warning('无法打开输出目录，请手动查看')
+    }
+  }
+
+  function openBatchSaveFromCompletion() {
+    if (batchCompleteResult.value.rows.length) {
+      openBatchSaveDialog(batchCompleteResult.value.rows)
     }
   }
 
@@ -157,9 +165,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
 
   function invertBatchSaveSelection() {
     const selected = new Set(batchSaveSelected.value)
-    batchSaveSelected.value = batchSaveRows.value
-      .map((row) => row.key)
-      .filter((key) => !selected.has(key))
+    batchSaveSelected.value = batchSaveRows.value.map((row) => row.key).filter((key) => !selected.has(key))
   }
 
   function toggleBatchSaveRow(key) {
@@ -175,7 +181,11 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
     const values = row.values || {}
     const parts = Object.values(values)
       .map((value) => {
-        if (Array.isArray(value)) return value.map((item) => (item?.text ?? item?.name ?? '')).filter(Boolean).join('、')
+        if (Array.isArray(value))
+          return value
+            .map((item) => item?.text ?? item?.name ?? '')
+            .filter(Boolean)
+            .join('、')
         if (value && typeof value === 'object') return value.text ?? value.name ?? ''
         return String(value ?? '')
       })
@@ -199,6 +209,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
     if (result.ok) {
       ElMessage.success(`已保存 ${result.data} 行填写记录到模板历史`)
       batchSaveVisible.value = false
+      batchCompleteDataSaved.value = true
       if (loadTemplateHistoryRuns) loadTemplateHistoryRuns()
     } else {
       ElMessage.error(userFacingError(result.error, '保存填写记录失败'))
@@ -214,7 +225,7 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
       lines.push('')
     }
 
-    lines.push(`共 ${v.totalRows} 行数据，${v.validRows} 行有效。`)
+    lines.push(`共 ${v.totalRows} 份记录，${v.validRows} 份有效。`)
 
     if (v.warnings.length) {
       lines.push('')
@@ -287,7 +298,12 @@ export function useBatchFill(templatePath, templateManifest, normalizeValues, no
     batchSaveVisible,
     batchSaveRows,
     batchSaveSelected,
+    batchCompleteVisible,
+    batchCompleteResult,
+    batchCompleteDataSaved,
     handleBatchCommand,
+    openBatchOutputDir,
+    openBatchSaveFromCompletion,
     openBatchSaveDialog,
     toggleBatchSaveAll,
     invertBatchSaveSelection,

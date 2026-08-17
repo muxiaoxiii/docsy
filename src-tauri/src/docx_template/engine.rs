@@ -211,34 +211,13 @@ pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
     let output_path = unique_docx_output_path(std::path::Path::new(&args.output_path))?;
     let (manifest, pkg) = package::read_docsytpl_package(template_path)?;
     ensure_template_package_safe(&pkg)?;
-
-    let xml_parts: Vec<(String, Vec<u8>)> = pkg
-        .iter()
-        .filter(|(name, _)| is_word_xml_part(name))
-        .map(|(name, data)| (name.clone(), data.clone()))
-        .collect();
-
-    let rendered_parts = render::render_docx(
-        &xml_parts,
+    let out_pkg = render_template_package(
+        &pkg,
         &manifest,
         &args.values,
         &args.structure_overrides,
         &args.item_separator,
     )?;
-
-    let mut out_pkg = HashMap::new();
-    for (part_name, xml_data) in rendered_parts {
-        out_pkg.insert(part_name, xml_data);
-    }
-    for (name, data) in &pkg {
-        if name == "manifest.json" || !copy_template_package_entry(name) {
-            continue;
-        }
-        if !is_word_xml_part(name) && !out_pkg.contains_key(name) {
-            out_pkg.insert(name.clone(), data.clone());
-        }
-    }
-    prune_dangling_package_refs(&mut out_pkg);
 
     package::write_docx_package(&output_path, &out_pkg)?;
 
@@ -255,6 +234,62 @@ pub fn render_docx(args: RenderTemplateArgs, source: &str) -> Result<String> {
         );
     }
     Ok(output_path_str)
+}
+
+/// Render with the same OOXML pipeline as final generation, then expose the
+/// resulting text runs for the HTML preview without writing a temporary docx.
+pub fn preview_docx(args: super::PreviewTemplateArgs) -> Result<super::DocsytplContent> {
+    let template_path = std::path::Path::new(&args.template_path);
+    let (manifest, pkg) = package::read_docsytpl_package(template_path)?;
+    ensure_template_package_safe(&pkg)?;
+    let rendered_pkg = render_template_package(
+        &pkg,
+        &manifest,
+        &args.values,
+        &args.structure_overrides,
+        &args.item_separator,
+    )?;
+    let (document_runs, _marks, document_text) = scan_package_to_runs_and_marks(&rendered_pkg)?;
+    Ok(super::DocsytplContent {
+        document_text,
+        document_runs,
+    })
+}
+
+fn render_template_package(
+    pkg: &HashMap<String, Vec<u8>>,
+    manifest: &super::TemplateManifest,
+    values: &HashMap<String, serde_json::Value>,
+    structure_overrides: &HashMap<String, super::StructureOverride>,
+    item_separator: &str,
+) -> Result<HashMap<String, Vec<u8>>> {
+    let xml_parts: Vec<(String, Vec<u8>)> = pkg
+        .iter()
+        .filter(|(name, _)| is_word_xml_part(name))
+        .map(|(name, data)| (name.clone(), data.clone()))
+        .collect();
+    let rendered_parts = render::render_docx(
+        &xml_parts,
+        manifest,
+        values,
+        structure_overrides,
+        item_separator,
+    )?;
+
+    let mut out_pkg = HashMap::new();
+    for (part_name, xml_data) in rendered_parts {
+        out_pkg.insert(part_name, xml_data);
+    }
+    for (name, data) in pkg {
+        if name == "manifest.json" || !copy_template_package_entry(name) {
+            continue;
+        }
+        if !is_word_xml_part(name) && !out_pkg.contains_key(name) {
+            out_pkg.insert(name.clone(), data.clone());
+        }
+    }
+    prune_dangling_package_refs(&mut out_pkg);
+    Ok(out_pkg)
 }
 
 fn copy_template_package_entry(name: &str) -> bool {
@@ -358,11 +393,12 @@ pub fn scan_package_to_runs_and_marks(
 ) -> Result<(Vec<TemplateTextRun>, Vec<TemplateMark>, String)> {
     use crate::docx_template::scan;
 
-    let xml_parts: Vec<_> = pkg
+    let mut xml_parts: Vec<_> = pkg
         .iter()
         .filter(|(name, _)| is_word_xml_part(name))
         .map(|(name, data)| (name.as_str(), data.as_slice()))
         .collect();
+    xml_parts.sort_by_key(|(name, _)| word_preview_part_order(name));
 
     let doc_index = scan::scan_package_index_to_document_index(&xml_parts)?;
 
@@ -425,6 +461,19 @@ pub fn scan_package_to_runs_and_marks(
     }
 
     Ok((runs, marks, flat_text))
+}
+
+fn word_preview_part_order(name: &str) -> (u8, &str) {
+    let rank = if name == "word/document.xml" {
+        0
+    } else if name.starts_with("word/header") {
+        1
+    } else if name.starts_with("word/footer") {
+        2
+    } else {
+        3
+    };
+    (rank, name)
 }
 
 #[cfg(test)]
@@ -593,6 +642,17 @@ mod tests {
             "case_no".to_string(),
             serde_json::Value::String("(2026)沪01民初999号".to_string()),
         );
+
+        let preview = preview_docx(crate::docx_template::PreviewTemplateArgs {
+            template_path: saved.output_path.clone(),
+            values: values.clone(),
+            structure_overrides: HashMap::new(),
+            item_separator: "、".to_string(),
+        })
+        .unwrap();
+        assert!(preview.document_text.contains("新姓名"));
+        assert!(preview.document_text.contains("沪01民初999号"));
+        assert!(preview.document_runs.iter().any(|run| run.bold));
 
         let render_args = RenderTemplateArgs {
             item_separator: "、".to_string(),

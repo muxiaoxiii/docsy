@@ -1,5 +1,5 @@
 <template>
-  <div class="hf-workbench" :class="{ 'is-evidence-dragging': evidenceDragging }">
+  <div class="hf-workbench" :class="{ 'is-evidence-dragging': evidenceDragging, 'is-list-reordering': listReordering }">
     <div v-if="evidenceDragging" class="evidence-drop-overlay">
       <div class="evidence-drop-message">松开以导入 PDF 文件</div>
     </div>
@@ -397,7 +397,8 @@
           size="small"
           border
           highlight-current-row
-          @row-click="selectMergedImportRange"
+          :row-class-name="mergedReorderRowClass"
+          @row-click="handleMergedImportRowClick"
           @sort-change="sortMergedImportItems"
         >
           <el-table-column width="42" align="center">
@@ -493,7 +494,8 @@
         ref="overlayTableRef"
         class="overlay-table"
         highlight-current-row
-        @row-click="selectPreviewRow"
+        :row-class-name="overlayReorderRowClass"
+        @row-click="handlePreviewRowClick"
         @sort-change="sortOverlayFiles"
         @expand-change="handleExpandChange"
       >
@@ -759,7 +761,7 @@
       <div class="preview-head">
         <div>
           <h3>位置预览</h3>
-          <p class="hint">{{ previewHint }}</p>
+          <p class="hint">{{ listReordering ? '正在调整顺序，松手后更新预览' : previewHint }}</p>
         </div>
         <div class="preview-controls">
           <template v-if="mergedImportPlan">
@@ -998,6 +1000,7 @@ watch(overlaying, (active) => {
 })
 const quickCleanupRunning = ref(false)
 const evidenceDragging = ref(false)
+const listReordering = ref(false)
 const OPTIMIZE_SIZE_KEY = 'docsy.evidencePdf.optimizeSize'
 const optimizeSizeEnabled = ref(window.localStorage.getItem(OPTIMIZE_SIZE_KEY) !== '0')
 watch(optimizeSizeEnabled, (value) => {
@@ -1480,15 +1483,24 @@ watch(existingElementsVisible, (visible) => {
 
 applyWorkflowDefaults()
 const {
+  dragFrom: overlayDragFrom,
+  dragOver: overlayDragOver,
+  dragPlacement: overlayDragPlacement,
   start: startOverlayReorder,
   move: moveOverlayReorder,
   finish: finishOverlayReorder,
   reset: resetOverlayReorder,
 } = usePointerReorder({
   itemCount: () => overlayFiles.value.length,
+  onStart: () => beginListReorder(),
   onReorder: ({ from, to }) => reorderOverlayFiles(from, to),
+  onEnd: ({ reordered }) => finishListReorder({ changed: reordered }),
+  onCancel: () => finishListReorder(),
 })
 const {
+  dragFrom: mergedDragFrom,
+  dragOver: mergedDragOver,
+  dragPlacement: mergedDragPlacement,
   start: startMergedReorder,
   move: moveMergedReorder,
   finish: finishMergedReorder,
@@ -1496,7 +1508,10 @@ const {
 } = usePointerReorder({
   itemCount: () => mergedImportPlan.value?.items?.length || 0,
   itemAttribute: 'data-merged-reorder-index',
+  onStart: () => beginListReorder(),
   onReorder: ({ from, to }) => reorderMergedImportItems(from, to),
+  onEnd: () => finishListReorder(),
+  onCancel: () => finishListReorder(),
 })
 const hasSourceSplitRanges = computed(() => overlayFiles.value.some((file) => Number(file.sourcePageStart || 0) > 0))
 const hasMergedBatchImports = computed(
@@ -1736,8 +1751,10 @@ const currentRules = computed(() => ({
   // Global group: shared group instances used by ALL files when enabled (gated by main switch)
   _globalApply: insertHeaderFooterEnabled.value && globalApplyEnabled.value,
   _globalHeaderGroup: insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalHeaderGroup.value : null,
-  _globalFooterTextGroup: insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalFooterTextGroup.value : null,
-  _globalPageNumberGroup: insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalPageNumberGroup.value : null,
+  _globalFooterTextGroup:
+    insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalFooterTextGroup.value : null,
+  _globalPageNumberGroup:
+    insertHeaderFooterEnabled.value && globalApplyEnabled.value ? globalPageNumberGroup.value : null,
   footerEnabled: insertHeaderFooterEnabled.value && footerEnabled.value,
   footerText: footerText.value,
   footerContinuous: footerContinuous.value,
@@ -1806,7 +1823,7 @@ const {
   refreshPreview,
   safeRefreshPreview,
   movePreviewPage,
-  selectPreviewRow,
+  selectPreviewRow: selectPreviewRowNow,
   renderTruePreview,
   handlePreviewLoaded,
   handlePreviewError,
@@ -3014,8 +3031,6 @@ function reorderOverlayFiles(from, to) {
         items.findIndex((file) => file.path === selectedPath),
       )
     : to
-  truePreview.value = null
-  refreshPreview()
 }
 
 function reorderMergedImportItems(from, to) {
@@ -3024,6 +3039,44 @@ function reorderMergedImportItems(from, to) {
   const [item] = items.splice(from, 1)
   items.splice(to, 0, item)
   selectedMergedImportIndex.value = to
+}
+
+let suppressReorderClickUntil = 0
+
+function beginListReorder() {
+  listReordering.value = true
+}
+
+function finishListReorder({ changed = false } = {}) {
+  listReordering.value = false
+  // pointerup 后浏览器还会派发一次 click，这次 click 不应切换预览文件。
+  suppressReorderClickUntil = Date.now() + 250
+  // 排序不改变 PDF 底图：实时预览只更新叠加层，避免重新调用后端渲染。
+  if (changed) truePreview.value = null
+}
+
+function handlePreviewRowClick(row) {
+  if (listReordering.value || Date.now() < suppressReorderClickUntil) return
+  selectPreviewRowNow(row)
+}
+
+function handleMergedImportRowClick(row) {
+  if (listReordering.value || Date.now() < suppressReorderClickUntil) return
+  selectMergedImportRange(row)
+}
+
+function reorderRowClass(rowIndex, from, over, placement) {
+  if (rowIndex === from) return 'is-reorder-dragging'
+  if (rowIndex !== over || from === over) return ''
+  return placement === 'after' ? 'is-reorder-after' : 'is-reorder-before'
+}
+
+function overlayReorderRowClass({ rowIndex }) {
+  return reorderRowClass(rowIndex, overlayDragFrom.value, overlayDragOver.value, overlayDragPlacement.value)
+}
+
+function mergedReorderRowClass({ rowIndex }) {
+  return reorderRowClass(rowIndex, mergedDragFrom.value, mergedDragOver.value, mergedDragPlacement.value)
 }
 
 function removeOverlayFile(index) {
@@ -3889,6 +3942,23 @@ h3 {
 .overlay-table {
   margin-top: 0;
   width: 100%;
+}
+
+.hf-workbench :deep(.el-table__row.is-reorder-dragging > td.el-table__cell) {
+  opacity: 0.55;
+  background: var(--docsy-primary-soft);
+}
+
+.hf-workbench :deep(.el-table__row.is-reorder-before > td.el-table__cell) {
+  box-shadow: inset 0 3px 0 var(--docsy-primary);
+}
+
+.hf-workbench :deep(.el-table__row.is-reorder-after > td.el-table__cell) {
+  box-shadow: inset 0 -3px 0 var(--docsy-primary);
+}
+
+.hf-workbench.is-list-reordering :deep(.el-table__row) {
+  cursor: default;
 }
 /* Force auto-width columns to shrink when empty */
 .overlay-table .el-table__body {

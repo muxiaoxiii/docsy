@@ -140,6 +140,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         template::permanently_delete_template,
         template::inspect_docsytpl,
         template::inspect_docsytpl_content,
+        template::preview_docx_template,
         template::render_docx_template,
         template::get_template_history_context,
         template::list_template_generation_runs,

@@ -26,15 +26,27 @@
       <div class="rule-grid">
         <div class="rule-item">
           <label>前缀</label>
-          <el-input :model-value="splitNamePrefix" @update:model-value="$emit('update:splitNamePrefix', $event)" placeholder="可选" />
+          <el-input
+            :model-value="splitNamePrefix"
+            @update:model-value="$emit('update:splitNamePrefix', $event)"
+            placeholder="可选"
+          />
         </div>
         <div class="rule-item">
           <label>后缀</label>
-          <el-input :model-value="splitNameSuffix" @update:model-value="$emit('update:splitNameSuffix', $event)" placeholder="例如 [YYYYMMDD]、-[YYYYMMDD]、[##]" />
+          <el-input
+            :model-value="splitNameSuffix"
+            @update:model-value="$emit('update:splitNameSuffix', $event)"
+            placeholder="例如 [YYYYMMDD]、-[YYYYMMDD]、[##]"
+          />
         </div>
         <div class="rule-item">
           <label>日期值</label>
-          <el-input :model-value="splitNameDateValue" @update:model-value="$emit('update:splitNameDateValue', $event)" placeholder="YYYYMMDD" />
+          <el-input
+            :model-value="splitNameDateValue"
+            @update:model-value="$emit('update:splitNameDateValue', $event)"
+            placeholder="YYYYMMDD"
+          />
         </div>
         <div class="rule-item">
           <label>分隔符</label>
@@ -48,23 +60,25 @@
         </div>
         <div class="rule-item" v-if="splitNameSeparator === 'custom'">
           <label>自定义分隔符</label>
-          <el-input :model-value="splitNameCustomSeparator" @update:model-value="$emit('update:splitNameCustomSeparator', $event)" placeholder="输入分隔符" />
+          <el-input
+            :model-value="splitNameCustomSeparator"
+            @update:model-value="$emit('update:splitNameCustomSeparator', $event)"
+            placeholder="输入分隔符"
+          />
         </div>
       </div>
     </div>
     <div class="split-cleanup-options">
       <div class="block-title">拆分后处理</div>
-      <el-checkbox :model-value="splitCleanupHeader" @update:model-value="$emit('update:splitCleanupHeader', $event)">删除页眉区内容</el-checkbox>
-      <el-checkbox :model-value="splitCleanupFooter" @update:model-value="$emit('update:splitCleanupFooter', $event)">删除原页码/页脚区内容</el-checkbox>
+      <el-checkbox :model-value="splitCleanupHeader" @update:model-value="$emit('update:splitCleanupHeader', $event)"
+        >删除页眉区内容</el-checkbox
+      >
+      <el-checkbox :model-value="splitCleanupFooter" @update:model-value="$emit('update:splitCleanupFooter', $event)"
+        >删除原页码/页脚区内容</el-checkbox
+      >
       <span class="split-cleanup-note">仅在拆分输出文件时执行，不修改导入的合并 PDF。</span>
     </div>
-    <el-alert
-      v-if="mergedImportWarnings.length"
-      type="warning"
-      :closable="false"
-      show-icon
-      class="import-plan-warning"
-    >
+    <el-alert v-if="mergedImportWarnings.length" type="warning" :closable="false" show-icon class="import-plan-warning">
       <template #title>{{ mergedImportWarnings.join('；') }}</template>
     </el-alert>
     <el-table
@@ -102,22 +116,12 @@
       </el-table-column>
       <el-table-column label="起始页" prop="pageStart" sortable="custom" width="108">
         <template #default="{ row }">
-          <el-input-number
-            v-model="row.pageStart"
-            :min="1"
-            :max="plan.totalPages || 999999"
-            size="small"
-          />
+          <el-input-number v-model="row.pageStart" :min="1" :max="plan.totalPages || 999999" size="small" />
         </template>
       </el-table-column>
       <el-table-column label="结束页" prop="pageEnd" sortable="custom" width="108">
         <template #default="{ row }">
-          <el-input-number
-            v-model="row.pageEnd"
-            :min="1"
-            :max="plan.totalPages || 999999"
-            size="small"
-          />
+          <el-input-number v-model="row.pageEnd" :min="1" :max="plan.totalPages || 999999" size="small" />
         </template>
       </el-table-column>
       <el-table-column label="页数" prop="pageCount" sortable="custom" width="64">
@@ -133,9 +137,7 @@
       <el-table-column label="操作" width="148">
         <template #default="{ row, $index }">
           <el-button link type="primary" size="small" @click.stop="$emit('select-range', row)">跳转</el-button>
-          <el-button link type="primary" size="small" @click.stop="$emit('insert-range-after', $index)"
-            >续段</el-button
-          >
+          <el-button link type="primary" size="small" @click.stop="$emit('insert-range-after', $index)">续段</el-button>
           <el-button link type="danger" size="small" @click.stop="$emit('remove-range', $index)">删除</el-button>
         </template>
       </el-table-column>

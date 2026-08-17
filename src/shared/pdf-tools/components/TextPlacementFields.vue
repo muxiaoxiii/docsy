@@ -22,7 +22,7 @@
   </div>
   <div class="rule-item">
     <label>{{ prefix }}{{ marginLabel }} mm</label
-    ><el-input-number v-model="marginMmModel" :min="3" :max="60" :disabled="disabled" />
+    ><el-input-number v-model="marginMmModel" :min="0" :max="80" :step="0.5" :disabled="disabled" />
   </div>
   <div class="rule-item">
     <label>{{ prefix }}水平偏移 mm</label

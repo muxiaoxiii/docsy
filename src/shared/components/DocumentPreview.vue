@@ -1,32 +1,24 @@
 <template>
-  <div class="document-preview" @mouseup="onMouseUp" @keyup="onKeyUp">
-    <template v-for="run in runs" :key="run.id">
+  <article class="document-preview" @mouseup="onMouseUp" @keyup="onKeyUp">
+    <p v-for="paragraph in paragraphs" :key="paragraph.key" class="preview-paragraph">
       <span
-        v-if="getOverlay(run)"
-        class="preview-overlay"
-        :class="[`overlay-${getOverlay(run)?.type || 'text'}`, { filled: getOverlay(run)?.filled }]"
-        :data-run-id="run.id"
-        :data-start="getOverlay(run)?.start"
-        :data-end="getOverlay(run)?.end"
-        @click="onOverlayClick(getOverlay(run))"
+        v-for="segment in paragraph.segments"
+        :key="segment.id"
+        :class="segmentClasses(segment)"
+        :data-run-id="segment.runId"
+        :data-start="segment.start"
+        :data-end="segment.end"
+        @click="onOverlayClick(segment.overlay)"
       >
-        {{ getOverlay(run)?.label || run.text }}
+        {{ segment.text }}
       </span>
-      <span
-        v-else
-        class="preview-run"
-        :class="formatClasses(run)"
-        :data-run-id="run.id"
-        :data-start="0"
-        :data-end="run.text.length"
-        >{{ run.text }}</span
-      >
-    </template>
-  </div>
+    </p>
+  </article>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import { buildPreviewParagraphs } from './documentPreviewModel.js'
 
 const props = defineProps({
   runs: { type: Array, default: () => [] },
@@ -36,26 +28,20 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'click-overlay'])
 
-// Build overlay lookup: runId → overlay
-const overlayMap = computed(() => {
-  const map = new Map()
-  for (const ov of props.overlays) {
-    map.set(ov.runId, ov)
-  }
-  return map
-})
+const paragraphs = computed(() => buildPreviewParagraphs(props.runs, props.overlays, props.mode))
 
-function getOverlay(run) {
-  if (props.mode === 'original') return null
-  return overlayMap.value.get(run.id) || null
-}
-
-function formatClasses(run) {
-  return {
-    'fmt-bold': run.bold,
-    'fmt-italic': run.italic,
-    'fmt-underline': run.underline,
-  }
+function segmentClasses(segment) {
+  const overlay = segment.overlay
+  return [
+    overlay ? 'preview-overlay' : 'preview-run',
+    overlay ? `overlay-${overlay.type || 'text'}` : '',
+    {
+      filled: Boolean(overlay?.filled),
+      'fmt-bold': segment.bold,
+      'fmt-italic': segment.italic,
+      'fmt-underline': segment.underline,
+    },
+  ]
 }
 
 function onMouseUp() {
@@ -72,7 +58,7 @@ function onKeyUp() {
 }
 
 function onOverlayClick(overlay) {
-  if (overlay?.clickable !== false) {
+  if (overlay && overlay.clickable !== false) {
     emit('click-overlay', overlay)
   }
 }
@@ -83,7 +69,6 @@ function onOverlayClick(overlay) {
   font-family: 'SimSun', '宋体', serif;
   font-size: 14px;
   line-height: 1.8;
-  white-space: pre-wrap;
   word-break: break-all;
   padding: 22px 26px;
   background: var(--docsy-preview-paper, #fff);
@@ -93,6 +78,12 @@ function onOverlayClick(overlay) {
   max-height: 500px;
   overflow-y: auto;
   user-select: text;
+}
+
+.preview-paragraph {
+  min-height: 1.8em;
+  margin: 0;
+  white-space: pre-wrap;
 }
 
 .preview-run {
@@ -132,7 +123,7 @@ function onOverlayClick(overlay) {
   color: var(--el-color-danger);
 }
 
-.overlay-filled {
+.preview-overlay.filled {
   background: rgba(103, 194, 58, 0.2);
   color: var(--el-color-success);
 }

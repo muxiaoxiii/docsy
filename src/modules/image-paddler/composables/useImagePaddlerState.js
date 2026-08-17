@@ -64,7 +64,9 @@ export function useImagePaddlerState() {
     return analysis.value?.recommended?.orientation || 'portrait'
   })
   const resolvedOrientationLabel = computed(() => (resolvedOrientation.value === 'landscape' ? '横向' : '竖向'))
-  const orderedImages = computed(() => reorderImages(analysis.value?.images || [], layoutGrid.value, settings.order_mode))
+  const orderedImages = computed(() =>
+    reorderImages(analysis.value?.images || [], layoutGrid.value, settings.order_mode),
+  )
   const previewImages = computed(() => orderedImages.value.slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
   const previewSlots = computed(() => {
     const slots = [...previewImages.value]

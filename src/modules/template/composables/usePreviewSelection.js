@@ -17,6 +17,7 @@ import {
   splitPartyLabelText,
   referenceSourceKey,
   typeLabel,
+  fieldIsMultiple,
 } from './fieldRowUtils.js'
 import { inferFieldFromText } from './useFieldNormalization.js'
 
@@ -75,8 +76,7 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
           text: range.occurrence === 0 ? previewSourceLabel(range.row) : '',
           deleted: range.occurrence > 0,
         })
-        const previewEachPartyItem =
-          range.row.type === 'party_list' && Array.isArray(sampleValues[range.row.name])
+        const previewEachPartyItem = fieldIsMultiple(range.row) && Array.isArray(sampleValues[range.row.name])
         let replacementText =
           range.occurrence === 0 || previewEachPartyItem
             ? previewReplacementText(range.row, sampleValues, range.occurrence)
@@ -161,11 +161,36 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
   }
 
   function resolvePreviewSelection(range) {
-    const sourceRoot = sourcePreviewRef.value
+    const sourceRoot = previewElement(sourcePreviewRef.value)
     if (sourceRoot && rangeIntersectsRoot(range, sourceRoot)) return resolveSourcePreviewRange(sourceRoot, range)
-    const documentRoot = documentPreviewRef.value
-    if (documentRoot && rangeIntersectsRoot(range, documentRoot)) return resolveDocumentPreviewRange(documentRoot, range)
+    const documentRoot = previewElement(documentPreviewRef.value)
+    if (documentRoot && rangeIntersectsRoot(range, documentRoot))
+      return resolveDocumentPreviewRange(documentRoot, range)
+
+    // A component ref can briefly be unavailable while the preview is being
+    // expanded. Resolve the nearest preview root from the live selection as a
+    // fallback so the action button does not lose an otherwise valid range.
+    const selectedNode = previewSelectionNode(range)
+    const fallbackRoot = selectedNode?.closest?.('.source-preview-text, .document-preview')
+    if (fallbackRoot?.classList?.contains('source-preview-text')) {
+      return resolveSourcePreviewRange(fallbackRoot, range)
+    }
+    if (fallbackRoot?.classList?.contains('document-preview')) {
+      return resolveDocumentPreviewRange(fallbackRoot, range)
+    }
     return { text: '', refs: [], context: '' }
+  }
+
+  function previewElement(value) {
+    if (value?.nodeType === 1 || value?.nodeType === 9) return value
+    if (value?.value && value.value !== value) return previewElement(value.value)
+    return null
+  }
+
+  function previewSelectionNode(range) {
+    const node = range?.commonAncestorContainer
+    if (!node) return null
+    return node.nodeType === 1 ? node : node.parentElement
   }
 
   function resolveSourcePreviewRange(root, range) {
@@ -237,6 +262,7 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
   }
 
   function rangeIntersectsRoot(range, root) {
+    if (!root?.contains) return false
     if (root.contains(range.commonAncestorContainer)) return true
     return root.contains(range.startContainer) || root.contains(range.endContainer)
   }
@@ -361,7 +387,10 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
     const inferred = inferFieldFromText(selection.text, selection.context, false, fieldRows.value.length)
     const inferredField = options.inferred || inferred
     const isStructure = ['prefix', 'suffix', 'delete_text', 'ignore'].includes(usageType)
-    const effectiveType = isStructure ? usageType : usageType || inferredField.type || 'text'
+    const inferredMultiple = inferredField.type === 'party_list'
+    const effectiveType = isStructure
+      ? usageType
+      : usageType || (inferredMultiple ? 'text' : inferredField.type) || 'text'
     const manualMeta = manualFieldMeta(selection.text, effectiveType, inferredField)
     const refs = options.refs || selection.refs
     const text = options.text ?? selection.text
@@ -379,6 +408,11 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
       name: isStructure ? options.structureName || '' : manualMeta.name,
       label: isStructure ? options.structureLabel || typeLabel(usageType) : manualMeta.label,
       semanticKey: isStructure ? '' : manualMeta.semanticKey,
+      groupName: isStructure ? '' : inferredMultiple ? inferredField.semanticKey || inferredField.name : '',
+      multiple: inferredMultiple,
+      itemSeparator: '、',
+      repeatPrefix: false,
+      repeatSuffix: false,
       userSelectedType: isStructure ? '' : effectiveType,
       markSegments: markSegmentsFromRefs(refs, text),
       required: false,
@@ -390,7 +424,7 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
       optionLabel: '',
       checkedText: defaultCheckedText(text),
       uncheckedText: defaultUncheckedText(text),
-      partyItems: effectiveType === 'party_list' ? splitPartyLabelText(text) : [],
+      partyItems: inferredMultiple ? splitPartyLabelText(text) : [],
       referenceHintSeen: true,
       referenceIncludePrefix: true,
       referenceIncludeSuffix: true,
@@ -404,7 +438,10 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
   }
 
   function manualFieldMeta(text, effectiveType, inferredField) {
-    if (inferredField?.type === effectiveType && !['prefix', 'suffix', 'ignore', 'delete_text'].includes(effectiveType)) {
+    if (
+      (inferredField?.type === effectiveType || (inferredField?.type === 'party_list' && effectiveType === 'text')) &&
+      !['prefix', 'suffix', 'ignore', 'delete_text'].includes(effectiveType)
+    ) {
       return {
         name: inferredField.name,
         label: inferredField.label,
@@ -412,9 +449,6 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
       }
     }
     const fallbackName = String(text || '').trim() || `字段${fieldRows.value.length + 1}`
-    if (effectiveType === 'party_list') {
-      return { name: fallbackName, label: fallbackName, semanticKey: '当事人' }
-    }
     if (effectiveType === 'date') {
       return { name: '日期', label: '日期', semanticKey: '日期' }
     }

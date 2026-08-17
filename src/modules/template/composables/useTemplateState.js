@@ -40,6 +40,10 @@ import {
   displayPartyValue,
   inputValueForField,
   resolveReferenceValueFromSource,
+  fieldIsMultiple,
+  filenamePreviewText,
+  optionalRulePrefix,
+  optionalRuleSuffix,
 } from './fieldRowUtils.js'
 import { usePreviewSelection } from './usePreviewSelection.js'
 import { registerSnapshotProvider } from '../../../shared/diagnostics.js'
@@ -48,11 +52,6 @@ const typeHelpItems = [
   { value: 'text', label: '文本', description: '普通可替换文字，如法院、案号、律所名称。' },
   { value: 'date', label: '日期', description: '日期字段，填写时用日期选择器，生成时输出中文日期格式。' },
   { value: 'select', label: '下拉选择', description: '从预设选项中选择或手动输入，如案由、诉讼阶段。' },
-  {
-    value: 'party_list',
-    label: '多项分组',
-    description: '同一文本字段可填写多项，用于当事人、律师等的顺序、每项后缀和引用；不是独立业务字段。',
-  },
   { value: 'reference', label: '引用', description: '复用前面字段的值；来源由填写时选择或在设置里指定。' },
   { value: 'checkbox', label: '单个勾选', description: '一个独立方框，只控制是否勾选。' },
   { value: 'radio_group', label: '互斥勾选组', description: '多个方框只能选一个，如一般授权/特别授权。' },
@@ -317,17 +316,7 @@ export function useTemplateState() {
     if (!templateManifest.value?.fields) return
     const manifestField = templateManifest.value.fields.find((f) => f.id === field.id)
     if (!manifestField) return
-    const skip = [
-      'reference',
-      'party_list',
-      'checkbox',
-      'radio_group',
-      'checkbox_group',
-      'prefix',
-      'suffix',
-      'delete_text',
-      'ignore',
-    ]
+    const skip = ['reference', 'checkbox', 'radio_group', 'checkbox_group', 'prefix', 'suffix', 'delete_text', 'ignore']
     if (skip.includes(type)) return
     if (manifestField.type === type) return
     manifestField.type = type
@@ -346,6 +335,7 @@ export function useTemplateState() {
   let historyContextRequestSeq = 0
   let inspectSourceRequestSeq = 0
   let editTemplateRequestSeq = 0
+  let fillPreviewRequestSeq = 0
 
   const groupedHistoryRuns = computed(() => groupHistoryRuns(historyRuns.value))
   const templatePreview = computed(() =>
@@ -714,7 +704,7 @@ export function useTemplateState() {
           label: item.name || item.label || item.text,
         }
       }
-      if (item.type === 'party_list') {
+      if (fieldIsMultiple(item)) {
         const itemIndex = (item.partyItems || []).findIndex((party) => normalizeComparableText(party) === text)
         if (itemIndex >= 0) {
           const sourceIndex = partySourceIndexForRow(item, rowIndex, partyTotalsBeforeRow) + itemIndex
@@ -733,7 +723,7 @@ export function useTemplateState() {
   function partySourceTotalsBefore(rowIndex) {
     const totals = new Map()
     for (const item of fieldRows.value.slice(0, Math.max(0, rowIndex))) {
-      if (!item.enabled || rowUsage(item) !== 'field' || item.type !== 'party_list') continue
+      if (!item.enabled || rowUsage(item) !== 'field' || !fieldIsMultiple(item)) continue
       const name = item.name?.trim()
       if (!name) continue
       totals.set(name, (totals.get(name) || 0) + Math.max(1, item.partyItems?.length || 0))
@@ -748,8 +738,7 @@ export function useTemplateState() {
     for (let index = Math.max(0, rowIndex) - 1; index >= 0; index -= 1) {
       const item = fieldRows.value[index]
       if (item === row) return cursor - Math.max(1, item.partyItems?.length || 0)
-      if (!item.enabled || rowUsage(item) !== 'field' || item.type !== 'party_list' || item.name?.trim() !== name)
-        continue
+      if (!item.enabled || rowUsage(item) !== 'field' || !fieldIsMultiple(item) || item.name?.trim() !== name) continue
       cursor -= Math.max(1, item.partyItems?.length || 0)
     }
     return 0
@@ -788,6 +777,7 @@ export function useTemplateState() {
     row.name = referenceFieldNameForRow(row)
     row.label = row.name
     row.semanticKey = target.semanticKey || target.name
+    row.groupName = target.groupName || ''
     row.required = false
     row.partyItems = []
     if (suggestion.targetKind === 'party_item') {
@@ -1081,7 +1071,12 @@ export function useTemplateState() {
         ),
         text: orderedRows.map((row) => row.text).join(''),
         context: orderedRows[0].context,
-        type: groupType.value,
+        type: groupType.value === 'party_list' ? 'text' : groupType.value,
+        multiple: groupType.value === 'party_list' || orderedRows.some((row) => fieldIsMultiple(row)),
+        groupName: orderedRows.find((row) => row.groupName)?.groupName || '',
+        itemSeparator: orderedRows.find((row) => row.itemSeparator)?.itemSeparator || '、',
+        repeatPrefix: orderedRows.some((row) => row.repeatPrefix),
+        repeatSuffix: orderedRows.some((row) => row.repeatSuffix),
         name,
         label: label || name,
         semanticKey: orderedRows.find((row) => row.semanticKey)?.semanticKey || '',
@@ -1217,7 +1212,10 @@ export function useTemplateState() {
     const inferred = inferFieldFromText(selection.text, selection.context, false, fieldRows.value.length)
     const inferredField = options.inferred || inferred
     const isStructure = ['prefix', 'suffix', 'delete_text', 'ignore'].includes(usageType)
-    const effectiveType = isStructure ? usageType : usageType || inferredField.type || 'text'
+    const inferredMultiple = inferredField.type === 'party_list'
+    const effectiveType = isStructure
+      ? usageType
+      : usageType || (inferredMultiple ? 'text' : inferredField.type) || 'text'
     const manualMeta = manualFieldMeta(selection.text, effectiveType, inferredField)
     const refs = options.refs || selection.refs
     const text = options.text ?? selection.text
@@ -1235,6 +1233,11 @@ export function useTemplateState() {
       name: isStructure ? options.structureName || '' : manualMeta.name,
       label: isStructure ? options.structureLabel || typeLabel(usageType) : manualMeta.label,
       semanticKey: isStructure ? '' : manualMeta.semanticKey,
+      groupName: isStructure ? '' : inferredMultiple ? inferredField.semanticKey || inferredField.name : '',
+      multiple: inferredMultiple,
+      itemSeparator: '、',
+      repeatPrefix: false,
+      repeatSuffix: false,
       userSelectedType: isStructure ? '' : effectiveType,
       markSegments: markSegmentsFromRefs(refs, text),
       required: false,
@@ -1246,7 +1249,7 @@ export function useTemplateState() {
       optionLabel: '',
       checkedText: defaultCheckedText(text),
       uncheckedText: defaultUncheckedText(text),
-      partyItems: effectiveType === 'party_list' ? splitPartyLabelText(text) : [],
+      partyItems: inferredMultiple ? splitPartyLabelText(text) : [],
       referenceHintSeen: true,
       referenceIncludePrefix: true,
       referenceIncludeSuffix: true,
@@ -1271,9 +1274,6 @@ export function useTemplateState() {
       }
     }
     const fallbackName = String(text || '').trim() || `字段${fieldRows.value.length + 1}`
-    if (effectiveType === 'party_list') {
-      return { name: fallbackName, label: fallbackName, semanticKey: '当事人' }
-    }
     if (effectiveType === 'date') {
       return { name: '日期', label: '日期', semanticKey: '日期' }
     }
@@ -1330,7 +1330,7 @@ export function useTemplateState() {
     } else if (row.type === 'select') {
       if (!row.selectOptions) row.selectOptions = []
     }
-    row.partyItems = row.type === 'party_list' ? splitPartyLabelText(row.text) : []
+    row.partyItems = fieldIsMultiple(row) ? splitPartyLabelText(row.text) : []
   }
 
   function splitPartyLabelText(text) {
@@ -1580,7 +1580,7 @@ export function useTemplateState() {
       const name = row.name.trim()
       const text = String(row.text || '').trim()
       if (!name || !text) continue
-      if (row.type === 'party_list') {
+      if (fieldIsMultiple(row)) {
         if (!partyValues.has(name)) partyValues.set(name, [])
         const items = row.partyItems?.length ? row.partyItems : splitPartyLabelText(text)
         for (const item of items.length ? items : [text]) {
@@ -1736,8 +1736,7 @@ export function useTemplateState() {
           })
         }
       } else if (field.type === 'select') {
-        // Select field: one row with options
-        rows.push(createSimpleFieldRow(field, field.options || [], null))
+        appendEditableFieldPositions(rows, field, field.options || [])
       } else if (field.name?.startsWith('delete_')) {
         // Delete text field: one row per markRef
         const refs = field.markRefs || []
@@ -1749,66 +1748,91 @@ export function useTemplateState() {
           }
         }
       } else if (field.type === 'reference') {
-        // Reference field: one row per markRef (preserve positions)
-        const refs = field.markRefs || []
-        if (refs.length <= 1) {
-          const row = createSimpleFieldRow(field, [], refs[0] || null)
-          if (field.reference) {
-            row.referenceSourceMode = field.reference.sourceMode || 'auto'
-            row.referenceSourceField = field.reference.sourceField || ''
-            row.referenceSourceSemanticKey = field.reference.sourceSemanticKey || ''
-            row.referenceSourceIndex = field.reference.sourceIndex ?? null
-            row.referenceSourceKey = referenceSourceKey(
-              row.referenceSourceMode,
-              row.referenceSourceField || row.referenceSourceSemanticKey,
-              row.referenceSourceIndex,
-            )
-          }
-          rows.push(row)
-        } else {
-          for (let i = 0; i < refs.length; i++) {
-            const row = createSimpleFieldRow(field, [], refs[i])
-            row.rowId = `edit:${field.id}:ref${i}`
-            if (field.reference) {
-              row.referenceSourceMode = field.reference.sourceMode || 'auto'
-              row.referenceSourceField = field.reference.sourceField || ''
-              row.referenceSourceSemanticKey = field.reference.sourceSemanticKey || ''
-              row.referenceSourceIndex = field.reference.sourceIndex ?? null
-              row.referenceSourceKey = referenceSourceKey(
-                row.referenceSourceMode,
-                row.referenceSourceField || row.referenceSourceSemanticKey,
-                row.referenceSourceIndex,
-              )
-            }
-            rows.push(row)
-          }
-        }
+        appendEditableFieldPositions(rows, field, [])
       } else {
-        // Regular field (text, date, party_list): one row per document position.
-        const refs = field.markRefs || []
-        const byParagraph = new Map()
-        for (const ref of refs) {
-          const m = /-p(\d+)-r(\d+)$/.exec(ref?.markId || '')
-          const pid = m ? Number(m[1]) : -1
-          if (!byParagraph.has(pid)) byParagraph.set(pid, [])
-          byParagraph.get(pid).push(ref)
-        }
-        if (byParagraph.size === 0) {
-          const row = createSimpleFieldRow(field, [], refs[0] || null)
-          row._fromManifestRef = true
-          rows.push(row)
-        } else {
-          for (const paraRefs of byParagraph.values()) {
-            const row = createSimpleFieldRow(field, [], paraRefs[0] || null)
-            row.markRefs = paraRefs
-            row._fromManifestRef = true
-            rows.push(row)
-          }
-        }
+        appendEditableFieldPositions(rows, field, [])
       }
     }
 
     return rows
+  }
+
+  function appendEditableFieldPositions(rows, field, options) {
+    const groups = groupManifestRefsByPosition(field)
+    const positions = groups.length ? groups : [[]]
+    positions.forEach((refs, index) => {
+      const row = createSimpleFieldRow(field, options, refs[0] || null, index)
+      row.rowId = `edit:${field.id}:position${index}`
+      row.markRefs = refs
+      row._fromManifestRef = true
+      applyManifestReferenceToRow(row, field)
+
+      const refRule = refs.find((ref) => ref.optionalRule)?.optionalRule
+      const fieldRule = field.optionalRule || null
+      const prefixRule = refRule || (index === 0 ? fieldRule : null)
+      const suffixRule = refRule || (index + 1 === positions.length ? fieldRule : null)
+      appendEditableStructureRow(rows, row, prefixRule, 'prefix', index)
+      rows.push(row)
+      appendEditableStructureRow(rows, row, suffixRule, 'suffix', index)
+    })
+  }
+
+  function groupManifestRefsByPosition(field) {
+    const refs = field.markRefs || []
+    if (field.multiple || field.type === 'party_list' || field.type === 'reference') {
+      return refs.map((ref) => [ref])
+    }
+    const groups = []
+    const byParagraph = new Map()
+    refs.forEach((ref, index) => {
+      const match = /-p(\d+)-r\d+$/.exec(ref?.markId || '')
+      const key = match ? `paragraph:${match[1]}` : `mark:${ref.markId || index}`
+      if (!byParagraph.has(key)) {
+        const group = []
+        byParagraph.set(key, group)
+        groups.push(group)
+      }
+      byParagraph.get(key).push(ref)
+    })
+    return groups
+  }
+
+  function applyManifestReferenceToRow(row, field) {
+    if (field.type !== 'reference' || !field.reference) return
+    row.referenceSourceMode = field.reference.sourceMode || 'auto'
+    row.referenceSourceField = field.reference.sourceField || ''
+    row.referenceSourceSemanticKey = field.reference.sourceSemanticKey || ''
+    row.referenceSourceIndex = field.reference.sourceIndex ?? null
+    row.referenceSourceKey = referenceSourceKey(
+      row.referenceSourceMode,
+      row.referenceSourceField || row.referenceSourceSemanticKey,
+      row.referenceSourceIndex,
+    )
+  }
+
+  function appendEditableStructureRow(rows, target, rule, usage, index) {
+    if (!rule?.enabled) return
+    const source = usage === 'prefix' ? rule.removeEmptyPrefix || '' : rule.removeEmptySuffix || ''
+    const text = usage === 'prefix' ? optionalRulePrefix(rule) : optionalRuleSuffix(rule)
+    if (!source && !text) return
+    rows.push({
+      ...target,
+      rowId: `${target.rowId}:${usage}`,
+      displayId: '',
+      markId: '',
+      markRefs: [],
+      text,
+      sourceStructureText: source,
+      type: usage,
+      label: `${target.label || target.name}${usage === 'prefix' ? '前缀' : '后缀'}`,
+      semanticKey: '',
+      groupName: '',
+      multiple: false,
+      required: false,
+      structureTargetRowId: target.rowId,
+      structureTargetIndex: index,
+      partyItems: [],
+    })
   }
 
   function createSimpleFieldRow(field, options, markRef, refIndex) {
@@ -1825,10 +1849,15 @@ export function useTemplateState() {
       text: field.label || field.name,
       context: '',
       enabled: true,
-      type: field.type,
+      type: field.type === 'party_list' ? 'text' : field.type,
       name: field.name,
       label: field.label,
       semanticKey: field.semanticKey,
+      groupName: field.groupName || '',
+      multiple: Boolean(field.multiple || field.type === 'party_list'),
+      itemSeparator: field.itemSeparator || '、',
+      repeatPrefix: Boolean(field.repeatPrefix),
+      repeatSuffix: Boolean(field.repeatSuffix),
       dateFormat: field.type === 'date' ? field.dateFormat || 'iso' : '',
       _nameManuallySet: Boolean(field.name && field.label && field.name !== field.label),
       _fromManifestRef: true,
@@ -1924,16 +1953,7 @@ export function useTemplateState() {
     templateManifest.value = manifest
     templateName.value = manifest.name || item.name || ''
 
-    // Set default filename tokens if not configured
-    if (!manifest.filenameTemplate?.tokens?.length) {
-      filenameTokens.value = [
-        { id: crypto.randomUUID(), type: 'preset', value: '模板名' },
-        { id: crypto.randomUUID(), type: 'literal', value: '-' },
-        { id: crypto.randomUUID(), type: 'preset', value: '日期' },
-      ]
-    } else {
-      filenameTokens.value = manifest.filenameTemplate.tokens
-    }
+    loadFilenameTokens(manifest)
 
     // Load document content so full-text and preview buttons work
     const contentResult = await tauriCallSafe('inspect_docsytpl_content', { path: item.path })
@@ -1973,6 +1993,7 @@ export function useTemplateState() {
     }
     templatePath.value = path
     templateManifest.value = result.data
+    loadFilenameTokens(result.data)
     clearStructureOverrides()
     resetFormValues((result.data.fields || []).filter(isRenderableField))
 
@@ -1981,6 +2002,17 @@ export function useTemplateState() {
 
     await loadHistoryContext(false)
     return true
+  }
+
+  function loadFilenameTokens(manifest) {
+    const savedTokens = manifest?.filenameTemplate?.tokens
+    filenameTokens.value = savedTokens?.length
+      ? savedTokens.map((token) => ({ ...token }))
+      : [
+          { id: crypto.randomUUID(), type: 'preset', value: '模板名' },
+          { id: crypto.randomUUID(), type: 'literal', value: '-' },
+          { id: crypto.randomUUID(), type: 'preset', value: '日期' },
+        ]
   }
 
   // Opening a template from the history tab should land on the fill form.
@@ -2008,8 +2040,8 @@ export function useTemplateState() {
         formValues[key] = []
       } else if (field.type === 'date') {
         formValues[key] = todayText()
-      } else if (field.type === 'party_list') {
-        formValues[key] = [{ text: '', suffix: '' }]
+      } else if (fieldIsMultiple(field)) {
+        formValues[key] = [{ text: '', prefix: '', suffix: '' }]
       } else if (field.type === 'reference') {
         const source = fixedReferenceSource(field.reference)
         referenceSelections[key] =
@@ -2025,26 +2057,62 @@ export function useTemplateState() {
 
   async function loadFillPreviewContent(path = templatePath.value, requestSeq = templateOpenRequestSeq) {
     if (!path) return
-    fillPreviewLoading.value = true
-    fillPreviewError.value = ''
-    const contentResult = await tauriCallSafe('inspect_docsytpl_content', { path })
-    if (requestSeq !== templateOpenRequestSeq || path !== templatePath.value) return
-    fillPreviewLoading.value = false
-    if (contentResult.ok) {
-      fillDocumentRuns.value = contentResult.data.documentRuns || []
-      if (!fillDocumentRuns.value.length) fillPreviewError.value = '模板中没有可预览的正文内容'
-    } else {
-      fillDocumentRuns.value = []
-      fillPreviewError.value = userFacingError(contentResult.error, '文档预览加载失败')
-    }
-    if (fillPreviewVisible.value) buildFillPreview()
+    await buildFillPreview(path, requestSeq)
   }
 
   function reloadFillPreview() {
     return loadFillPreviewContent()
   }
 
-  function buildFillPreview() {
+  async function buildFillPreview(path = templatePath.value, templateRequestSeq = templateOpenRequestSeq) {
+    if (!path || !templateManifest.value) return
+    // Keep a fast local representation available while the real OOXML render
+    // is running. The backend result replaces it and is the source of truth.
+    buildLocalFillPreview()
+    const requestSeq = ++fillPreviewRequestSeq
+    fillPreviewLoading.value = true
+    fillPreviewError.value = ''
+    const result = await tauriCallSafe('preview_docx_template', {
+      args: {
+        templatePath: path,
+        values: normalizeValues(),
+        structureOverrides: normalizeStructureOverrides(),
+        itemSeparator: itemSeparatorSetting.value || '、',
+      },
+    })
+    if (
+      requestSeq !== fillPreviewRequestSeq ||
+      templateRequestSeq !== templateOpenRequestSeq ||
+      path !== templatePath.value
+    ) {
+      return
+    }
+    fillPreviewLoading.value = false
+    const renderedRuns = result.data?.documentRuns
+    if (result.ok && Array.isArray(renderedRuns)) {
+      fillDocumentRuns.value = renderedRuns
+      fillPreviewText.value = result.data?.documentText || ''
+      fillPreviewOverlays.value = []
+      if (!renderedRuns.length) fillPreviewError.value = '模板中没有可预览的正文内容'
+      return
+    }
+
+    // Browser-only development and damaged templates may not support the
+    // render command. Keep the structured source preview as a fallback, while
+    // clearly reporting that it is not the final-render result.
+    const contentResult = await tauriCallSafe('inspect_docsytpl_content', { path })
+    if (requestSeq !== fillPreviewRequestSeq || path !== templatePath.value) return
+    if (contentResult.ok) {
+      fillDocumentRuns.value = contentResult.data?.documentRuns || []
+      buildLocalFillPreview()
+    }
+    fillPreviewError.value = result.ok ? '' : userFacingError(result.error, '实时预览生成失败')
+    if (!fillDocumentRuns.value.length && !fillPreviewError.value) {
+      fillPreviewError.value = '模板中没有可预览的正文内容'
+    }
+  }
+
+  function buildLocalFillPreview() {
     const runs = fillDocumentRuns.value
     const manifest = templateManifest.value
     if (!runs?.length || !manifest?.fields?.length) {
@@ -2069,6 +2137,7 @@ export function useTemplateState() {
       }
     }
 
+    const normalizedValues = normalizeValues()
     const parts = []
     const overlays = []
     let lastParagraph = null
@@ -2083,20 +2152,21 @@ export function useTemplateState() {
       const matched = (storedTag && tagToField.get(storedTag)) || markToField.get(run.id)
       if (matched) {
         const { field, refIndex } = matched
-        const paraKey = `${field.id}:${run.paragraphIndex}:${field.type === 'party_list' ? refIndex : 'field'}`
+        const paraKey = `${field.id}:${run.paragraphIndex}:${fieldIsMultiple(field) ? refIndex : 'field'}`
         if (renderedFieldAtParagraph.has(paraKey)) continue
         renderedFieldAtParagraph.add(paraKey)
-        let value = formValues[field.id] ?? formValues[field.name] ?? formValues[`fill:${field.name}`]
-        if (field.type === 'reference' && isEmptyValue(value)) {
-          value = resolveReferenceValueFromSource(fixedReferenceSource(field.reference), normalizeValuesForReferenceSources())
-        }
+        const slotKey = refIndex > 0 ? `${field.id}#${refIndex}` : field.id
+        const value = normalizedValues[slotKey] ?? normalizedValues[field.id] ?? normalizedValues[field.name]
         let displayValue
         let isFilled = false
         if (!isEmptyValue(value) && value !== false) {
-          if (field.type === 'party_list' && Array.isArray(value) && (field.markRefs || []).length > 1) {
+          if (fieldIsMultiple(field) && Array.isArray(value) && (field.markRefs || []).length > 1) {
             displayValue = displayPartyValue(value[refIndex])
           } else if (Array.isArray(value)) {
-            displayValue = value.map(displayPartyValue).filter(Boolean).join('、')
+            displayValue = value
+              .map(displayPartyValue)
+              .filter(Boolean)
+              .join(field.itemSeparator || '、')
           } else {
             displayValue = String(value)
           }
@@ -2125,20 +2195,27 @@ export function useTemplateState() {
     fillPreviewOverlays.value = overlays
   }
 
-  // Debounced watcher: update preview when formValues change and preview is visible
+  // Debounced watcher: every input that affects final OOXML also refreshes the
+  // HTML preview. Stale backend results are discarded by fillPreviewRequestSeq.
   let fillPreviewTimer = null
   watch(
-    () => JSON.stringify(formValues),
+    [
+      () => JSON.stringify(formValues),
+      () => JSON.stringify(referenceSelections),
+      () => JSON.stringify(structureOverrides),
+      () => JSON.stringify(typeOverrides),
+      () => itemSeparatorSetting.value,
+    ],
     () => {
       if (!fillPreviewVisible.value) return
       if (fillPreviewTimer) window.clearTimeout(fillPreviewTimer)
-      fillPreviewTimer = window.setTimeout(() => buildFillPreview(), 200)
+      fillPreviewTimer = window.setTimeout(() => void buildFillPreview(), 250)
     },
   )
 
   // Build preview immediately when panel opens
   watch(fillPreviewVisible, (visible) => {
-    if (visible) buildFillPreview()
+    if (visible) void buildFillPreview()
   })
 
   async function loadHistoryContext(applyLastValues = false) {
@@ -2277,7 +2354,12 @@ export function useTemplateState() {
       ElMessage.warning(`请先填写必填字段：${missing.join('、')}`)
       return
     }
-    const defaultName = `${stripExtension(fileName(templatePath.value), /\.docsytpl$/i)}-output.docx`
+    const previewName = filenamePreviewText(filenameTokens.value, {
+      formValues,
+      fields: renderableTemplateFields.value,
+      manifestName: templateManifest.value?.template?.name || templateManifest.value?.name || '',
+    })
+    const defaultName = previewName || `${stripExtension(fileName(templatePath.value), /\.docsytpl$/i)}-output.docx`
     const outputPath = await save({
       defaultPath: `${parentDir(templatePath.value)}/${defaultName}`,
       filters: [{ name: 'Word 文档', extensions: ['docx'] }],
@@ -2318,7 +2400,12 @@ export function useTemplateState() {
     batchSaveVisible,
     batchSaveRows,
     batchSaveSelected,
+    batchCompleteVisible,
+    batchCompleteResult,
+    batchCompleteDataSaved,
     handleBatchCommand,
+    openBatchOutputDir,
+    openBatchSaveFromCompletion,
     toggleBatchSaveAll,
     invertBatchSaveSelection,
     toggleBatchSaveRow,
@@ -2343,8 +2430,8 @@ export function useTemplateState() {
       const key = fieldFormKey(field)
       const value = formValues[key]
       let normalizedValue
-      if (effectiveFieldType(field) === 'party_list') {
-        normalizedValue = partyItemsToValues(value)
+      if (fieldIsMultiple(field)) {
+        normalizedValue = multipleItemsToValues(field, value)
       } else if (effectiveFieldType(field) === 'date') {
         normalizedValue = formatDateValue(value, field.dateFormat)
       } else if (effectiveFieldType(field) === 'reference') {
@@ -2396,8 +2483,8 @@ export function useTemplateState() {
     for (const field of renderableTemplateFields.value) {
       const key = fieldFormKey(field)
       let value
-      if (effectiveFieldType(field) === 'party_list') {
-        value = partyItemsToValues(formValues[key])
+      if (fieldIsMultiple(field)) {
+        value = multipleItemsToValues(field, formValues[key])
       } else if (effectiveFieldType(field) === 'reference') {
         value = resolveReferenceValueFromSource(currentReferenceSource(field), sourceValues)
       } else {
@@ -2421,18 +2508,23 @@ export function useTemplateState() {
 
   function normalizeStructureOverrides() {
     const result = {}
-    for (const [name, override] of Object.entries(structureOverrides)) {
-      const field = fieldByStructureOverrideKey(name)
+    for (const field of templateManifest.value?.fields || []) {
+      const name = structureOverrideKey(field)
+      if (!name) continue
+      const override = structureOverrides[name] || {}
+      if (!fieldIsMultiple(field) && !structureOverrides[name]) continue
+      const inferredRepeatSuffix =
+        Boolean(field.repeatSuffix) ||
+        (field.markRefs || []).some((markRef) => Boolean(optionalRuleSuffix(markRef.optionalRule)))
       result[name] = {
-        prefix: override.prefix ?? '',
-        suffix: fieldUsesRepeatableSuffix(field) ? '' : (override.suffix ?? ''),
+        prefix: Object.prototype.hasOwnProperty.call(override, 'prefix') ? override.prefix : undefined,
+        suffix: Object.prototype.hasOwnProperty.call(override, 'suffix') ? override.suffix : undefined,
+        itemSeparator: override.itemSeparator ?? field.itemSeparator ?? '、',
+        repeatPrefix: Boolean(override.repeatPrefix ?? field.repeatPrefix),
+        repeatSuffix: Boolean(override.repeatSuffix ?? inferredRepeatSuffix),
       }
     }
     return result
-  }
-
-  function fieldByStructureOverrideKey(key) {
-    return (templateManifest.value?.fields || []).find((field) => structureOverrideKey(field) === key)
   }
 
   function addSemanticAliasValue(values, field, value) {
@@ -2462,10 +2554,9 @@ export function useTemplateState() {
     const values = {}
     for (const field of renderableTemplateFields.value) {
       if (field.type === 'reference') continue
-      const value =
-        field.type === 'party_list'
-          ? partyItemsToValues(formValues[fieldFormKey(field)] || [])
-          : formValues[fieldFormKey(field)]
+      const value = fieldIsMultiple(field)
+        ? multipleItemsToValues(field, formValues[fieldFormKey(field)] || [])
+        : formValues[fieldFormKey(field)]
       values[field.id] = value
       if (!(field.name in values)) values[field.name] = value
       addSemanticAliasValue(values, field, value)
@@ -2498,9 +2589,14 @@ export function useTemplateState() {
       formValues[key] = splitPartyInput(String(current || '')).map(parsePartyItem)
     }
     if (!formValues[key].length) {
-      formValues[key].push({ text: '', suffix: defaultPartySuffix(field, 0) })
+      formValues[key].push({
+        text: '',
+        prefix: defaultPartyPrefix(field, 0),
+        suffix: defaultPartySuffix(field, 0),
+      })
     }
     formValues[key].forEach((item, index) => {
+      if (!item.prefix && partyFieldUsesPrefix(field)) item.prefix = defaultPartyPrefix(field, index)
       if (!item.suffix && partyFieldUsesSuffix(field)) item.suffix = defaultPartySuffix(field, index)
     })
     return formValues[key]
@@ -2510,15 +2606,40 @@ export function useTemplateState() {
     return fieldUsesRepeatableSuffix(field)
   }
 
+  function partyFieldUsesPrefix(field) {
+    return fieldIsMultiple(field) && Boolean(getStructureOverrideValue(field, 'repeatPrefix', field?.repeatPrefix))
+  }
+
   function fieldUsesRepeatableSuffix(field) {
-    return (
-      field?.type === 'party_list' && (field.markRefs || []).some((markRef) => markRef.optionalRule?.removeEmptySuffix)
+    const inferredDefault =
+      Boolean(field?.repeatSuffix) ||
+      (field?.markRefs || []).some((markRef) => Boolean(optionalRuleSuffix(markRef.optionalRule)))
+    return fieldIsMultiple(field) && Boolean(getStructureOverrideValue(field, 'repeatSuffix', inferredDefault))
+  }
+
+  function getStructureOverrideValue(field, prop, fallback) {
+    const key = structureOverrideKey(field)
+    return key && structureOverrides[key]?.[prop] != null ? structureOverrides[key][prop] : fallback
+  }
+
+  function multipleItemsToValues(field, value) {
+    const items = partyItemsToValues(value)
+    if (field?.type !== 'date') return items
+    return items.map((item) => {
+      if (typeof item === 'string') return formatDateValue(item, field.dateFormat)
+      return { ...item, name: formatDateValue(item.name, field.dateFormat) }
+    })
+  }
+
+  function partyPrefixOptions(field) {
+    return Array.from(
+      new Set((field.markRefs || []).map((markRef) => optionalRulePrefix(markRef.optionalRule)).filter(Boolean)),
     )
   }
 
   function partySuffixOptions(field) {
     return Array.from(
-      new Set((field.markRefs || []).map((markRef) => markRef.optionalRule?.removeEmptySuffix).filter(Boolean)),
+      new Set((field.markRefs || []).map((markRef) => optionalRuleSuffix(markRef.optionalRule)).filter(Boolean)),
     )
   }
 
@@ -2528,12 +2649,21 @@ export function useTemplateState() {
     return options[index] || options[0]
   }
 
+  function defaultPartyPrefix(field, index) {
+    const options = partyPrefixOptions(field)
+    if (!options.length) return ''
+    return options[index] || options[0]
+  }
+
   function parsePartyItem(value) {
     if (value && typeof value === 'object') {
-      return {
+      const row = {
         text: String(value.name || value.label || value.text || '').trim(),
         suffix: String(value.suffix || '').trim(),
       }
+      const prefix = String(value.prefix || '').trim()
+      if (prefix) row.prefix = prefix
+      return row
     }
     return {
       text: String(value || '').trim(),
@@ -2543,7 +2673,11 @@ export function useTemplateState() {
 
   function addPartyItem(field) {
     const rows = partyListRows(field)
-    rows.push({ text: '', suffix: defaultPartySuffix(field, rows.length) })
+    rows.push({
+      text: '',
+      prefix: defaultPartyPrefix(field, rows.length),
+      suffix: defaultPartySuffix(field, rows.length),
+    })
     scheduleHistoryRefresh()
   }
 
@@ -2555,7 +2689,7 @@ export function useTemplateState() {
   function removePartyItem(field, index) {
     const rows = partyListRows(field)
     rows.splice(index, 1)
-    if (!rows.length) rows.push({ text: '', suffix: '' })
+    if (!rows.length) rows.push({ text: '', prefix: '', suffix: '' })
     scheduleHistoryRefresh()
   }
 
@@ -2722,16 +2856,13 @@ export function useTemplateState() {
 
   function handleUpdateStructureOverride(key, prop, value) {
     if (!structureOverrides[key]) {
-      structureOverrides[key] = { prefix: '', suffix: '' }
+      structureOverrides[key] = {}
     }
     structureOverrides[key][prop] = value
   }
 
   function toggleFillPreview() {
     fillPreviewVisible.value = !fillPreviewVisible.value
-    if (fillPreviewVisible.value && !fillDocumentRuns.value.length && !fillPreviewLoading.value) {
-      void reloadFillPreview()
-    }
   }
 
   // ── Return ──────────────────────────────────────────────────────────────────
@@ -2807,6 +2938,9 @@ export function useTemplateState() {
     batchSaveVisible,
     batchSaveRows,
     batchSaveSelected,
+    batchCompleteVisible,
+    batchCompleteResult,
+    batchCompleteDataSaved,
 
     // Build tab events
     selectSourceDocx,
@@ -2881,6 +3015,8 @@ export function useTemplateState() {
     toggleBatchSaveRow,
     batchSaveRowSummary,
     submitBatchSave,
+    openBatchOutputDir,
+    openBatchSaveFromCompletion,
 
     // Re-exports for template event handlers
     openPath,

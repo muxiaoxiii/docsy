@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::engine;
-use super::{RenderTemplateArgs, TemplateField, TemplateManifest};
+use super::{field_is_multiple, RenderTemplateArgs, TemplateField, TemplateManifest};
 
 // ── Export ──────────────────────────────────────────────────────────────────
 
@@ -16,6 +16,10 @@ use super::{RenderTemplateArgs, TemplateField, TemplateManifest};
 /// not be rendered (filled from the last recorded values).
 const GENERATE_COL_LABEL: &str = "是否生成";
 const SAMPLE_ROW_FLAG: &str = "否";
+const RECORD_ID_COL_LABEL: &str = "记录编号";
+const RECORD_ID_META: &str = "__docsy_record_id";
+const INSTRUCTION_PREFIX: &str = "#填写说明：";
+const FILL_INSTRUCTION: &str = "#填写说明：相同记录编号的连续行属于同一份文档；普通字段只填写首行；多项字段可在后续行继续填写，每个非空单元格生成一项；空白多项不会生成。请勿修改表头和隐藏行。";
 
 /// A spreadsheet column is not always an independently fillable field. A
 /// repeatable field has a second column for its per-item suffixes, while a
@@ -23,6 +27,7 @@ const SAMPLE_ROW_FLAG: &str = "否";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BatchColumnKind {
     Value,
+    PartyPrefix,
     PartySuffix,
     ReferenceAuto,
 }
@@ -31,6 +36,7 @@ impl BatchColumnKind {
     fn as_str(self) -> &'static str {
         match self {
             Self::Value => "value",
+            Self::PartyPrefix => "party_prefix",
             Self::PartySuffix => "party_suffix",
             Self::ReferenceAuto => "reference_auto",
         }
@@ -38,6 +44,7 @@ impl BatchColumnKind {
 
     fn from_str(value: &str) -> Self {
         match value {
+            "party_prefix" => Self::PartyPrefix,
             "party_suffix" => Self::PartySuffix,
             "reference_auto" => Self::ReferenceAuto,
             _ => Self::Value,
@@ -45,7 +52,7 @@ impl BatchColumnKind {
     }
 
     fn accepts_input(self) -> bool {
-        matches!(self, Self::Value | Self::PartySuffix)
+        matches!(self, Self::Value | Self::PartyPrefix | Self::PartySuffix)
     }
 }
 
@@ -85,7 +92,13 @@ fn batch_columns(manifest: &TemplateManifest) -> Vec<BatchColumn<'_>> {
             field,
             kind: BatchColumnKind::Value,
         });
-        if field.field_type == "party_list" {
+        if field_is_multiple(field) && field.repeat_prefix {
+            columns.push(BatchColumn {
+                field,
+                kind: BatchColumnKind::PartyPrefix,
+            });
+        }
+        if field_is_multiple(field) && batch_repeats_suffix(field) {
             columns.push(BatchColumn {
                 field,
                 kind: BatchColumnKind::PartySuffix,
@@ -93,6 +106,17 @@ fn batch_columns(manifest: &TemplateManifest) -> Vec<BatchColumn<'_>> {
         }
     }
     columns
+}
+
+fn batch_repeats_suffix(field: &TemplateField) -> bool {
+    field.repeat_suffix
+        || (field_is_multiple(field)
+            && field.mark_refs.iter().any(|reference| {
+                reference
+                    .optional_rule
+                    .as_ref()
+                    .is_some_and(|rule| !rule.effective_suffix().is_empty())
+            }))
 }
 
 fn field_label(field: &TemplateField) -> &str {
@@ -128,6 +152,7 @@ fn batch_column_label(column: BatchColumn<'_>) -> String {
             format!("{}（引用来源待选择）", field_label(column.field))
         }
         BatchColumnKind::Value => field_label(column.field).to_string(),
+        BatchColumnKind::PartyPrefix => format!("{}（每项前缀）", field_label(column.field)),
         BatchColumnKind::PartySuffix => format!("{}（每项后缀）", field_label(column.field)),
         BatchColumnKind::ReferenceAuto => format!(
             "{}（引用：{}，自动带入）",
@@ -139,9 +164,10 @@ fn batch_column_label(column: BatchColumn<'_>) -> String {
 
 /// Export template fields as an xlsx fill sheet.
 /// Row 1 (hidden): metadata — template_id | field_id | field_type per column
-/// Row 2: field labels (user-visible headers) + "是否生成" column
-/// Row 3: sample row filled from the most recent recorded values (flag "否")
-/// Row 4+: empty data rows
+/// Row 2: visible instructions (ignored by the importer)
+/// Row 3: field labels + "是否生成" column
+/// Row 4: optional sample row (flag "否")
+/// Row 5+: user data. Repeated record ids and continuation rows are grouped.
 pub fn export_fields_xlsx(
     manifest: &TemplateManifest,
     default_values: &HashMap<String, serde_json::Value>,
@@ -163,10 +189,12 @@ pub fn export_fields_xlsx(
     let mut wb = Workbook::new();
     let ws = wb.add_worksheet();
 
-    // Row 0 (hidden): metadata
+    // Row 0 (hidden): metadata. The first visible column is a stable record id
+    // used to group vertical continuation rows into one generated document.
     ws.set_row_hidden(0)?;
+    ws.write_string(0, 0, RECORD_ID_META)?;
     for (col, column) in columns.iter().enumerate() {
-        let col = col as u16;
+        let col = col as u16 + 1;
         let meta = format!(
             "{}\t{}\t{}\t{}",
             manifest.template.id,
@@ -177,38 +205,48 @@ pub fn export_fields_xlsx(
         ws.write_string(0, col, &meta)?;
     }
 
-    // Row 1: field labels + generate flag column
-    for (col, column) in columns.iter().enumerate() {
-        ws.write_string(1, col as u16, batch_column_label(*column))?;
-    }
-    ws.write_string(1, columns.len() as u16, GENERATE_COL_LABEL)?;
+    // Row 1: user-facing instructions. The leading # is also understood by
+    // the importer, so this row can never become a generated record.
+    ws.write_string(1, 0, FILL_INSTRUCTION)?;
 
-    // Row 2: sample row from the last recorded values (flag "否", not rendered)
+    // Row 2: field labels + generate flag column
+    ws.write_string(2, 0, RECORD_ID_COL_LABEL)?;
+    for (col, column) in columns.iter().enumerate() {
+        ws.write_string(2, col as u16 + 1, batch_column_label(*column))?;
+    }
+    ws.write_string(2, columns.len() as u16 + 1, GENERATE_COL_LABEL)?;
+
+    // Row 3: sample row from the last recorded values (flag "否", not rendered)
     if !sample_values.is_empty() {
+        ws.write_string(3, 0, "示例001")?;
         for (col, column) in columns.iter().enumerate() {
             let sample = match column.kind {
                 BatchColumnKind::Value => sample_values
                     .get(&column.field.id)
                     .map(|value| value_to_display_for_column(value, column.kind)),
+                BatchColumnKind::PartyPrefix => sample_values
+                    .get(&column.field.id)
+                    .map(|value| party_affixes_to_display(value, "prefix")),
                 BatchColumnKind::PartySuffix => sample_values
                     .get(&column.field.id)
-                    .map(party_suffixes_to_display),
+                    .map(|value| party_affixes_to_display(value, "suffix")),
                 BatchColumnKind::ReferenceAuto => {
                     Some(format!("自动带入：{}", reference_description(column.field)))
                 }
             };
             if let Some(value) = sample {
-                ws.write_string(2, col as u16, value)?;
+                ws.write_string(3, col as u16 + 1, value)?;
             }
         }
-        ws.write_string(2, columns.len() as u16, SAMPLE_ROW_FLAG)?;
+        ws.write_string(3, columns.len() as u16 + 1, SAMPLE_ROW_FLAG)?;
     }
 
     // Auto-fit column widths (approximate)
+    ws.set_column_width(0, 14)?;
     for (col, column) in columns.iter().enumerate() {
         let label_len = batch_column_label(*column).chars().count();
         let width = (label_len as f64 * 2.0 + 4.0).clamp(10.0, 40.0);
-        ws.set_column_width(col as u16, width)?;
+        ws.set_column_width(col as u16 + 1, width)?;
     }
 
     let path = PathBuf::from(output_path);
@@ -275,7 +313,7 @@ fn value_to_display_for_column(value: &serde_json::Value, kind: BatchColumnKind)
     }
 }
 
-fn party_suffixes_to_display(value: &serde_json::Value) -> String {
+fn party_affixes_to_display(value: &serde_json::Value, key: &str) -> String {
     let serde_json::Value::Array(items) = value else {
         return String::new();
     };
@@ -283,13 +321,80 @@ fn party_suffixes_to_display(value: &serde_json::Value) -> String {
         .iter()
         .map(|item| {
             item.as_object()
-                .and_then(|obj| obj.get("suffix"))
+                .and_then(|obj| obj.get(key))
                 .and_then(|value| value.as_str())
                 .unwrap_or("")
                 .to_string()
         })
         .collect::<Vec<_>>()
         .join("、")
+}
+
+fn sheet_header_row(rows: &[Vec<calamine::Data>]) -> usize {
+    let instruction = rows
+        .get(1)
+        .and_then(|row| row.first())
+        .map(cell_to_string)
+        .unwrap_or_default();
+    if instruction.trim_start().starts_with(INSTRUCTION_PREFIX) {
+        2
+    } else {
+        1
+    }
+}
+
+fn collect_record_groups(
+    rows: &[Vec<calamine::Data>],
+    data_start: usize,
+    record_id_col: Option<usize>,
+    generate_col: Option<usize>,
+    col_map: &[(usize, &TemplateField, BatchColumnKind)],
+) -> Vec<Vec<usize>> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut group_by_id: HashMap<String, usize> = HashMap::new();
+
+    for (row_idx, row) in rows.iter().enumerate().skip(data_start) {
+        if generate_col.is_some_and(|col| {
+            row.get(col)
+                .map(cell_to_string)
+                .is_some_and(|value| value.trim() == SAMPLE_ROW_FLAG)
+        }) {
+            continue;
+        }
+        let populated = col_map
+            .iter()
+            .filter(|(_, _, kind)| kind.accepts_input())
+            .filter_map(|(col, field, kind)| {
+                let value = row.get(*col).map(cell_to_string).unwrap_or_default();
+                (!value.trim().is_empty()).then_some((*field, *kind))
+            })
+            .collect::<Vec<_>>();
+        if populated.is_empty() {
+            continue;
+        }
+
+        let explicit_id = record_id_col
+            .and_then(|col| row.get(col))
+            .map(cell_to_string)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let continuation_only = populated.iter().all(|(field, _)| field_is_multiple(field));
+
+        if !explicit_id.is_empty() {
+            if let Some(group_index) = group_by_id.get(&explicit_id).copied() {
+                groups[group_index].push(row_idx);
+            } else {
+                group_by_id.insert(explicit_id, groups.len());
+                groups.push(vec![row_idx]);
+            }
+        } else if continuation_only && !groups.is_empty() {
+            groups.last_mut().expect("checked non-empty").push(row_idx);
+        } else {
+            groups.push(vec![row_idx]);
+        }
+    }
+    groups
 }
 
 // ── Validation ──────────────────────────────────────────────────────────────
@@ -357,6 +462,8 @@ pub fn validate_imported_xlsx(
     if rows.len() < 2 {
         anyhow::bail!("Excel 文件至少需要 2 行（表头 + 数据）");
     }
+    let header_row = sheet_header_row(&rows);
+    let data_start = header_row + 1;
 
     // Parse metadata from row 0 (hidden row)
     let meta_row = &rows[0];
@@ -364,6 +471,8 @@ pub fn validate_imported_xlsx(
     let mut template_id_match = true;
     let mut id_mismatch_warning: Option<String> = None;
     let mut generate_col_idx: Option<usize> = None;
+    let mut record_id_col_idx: Option<usize> = None;
+    let mut group_col_map: Vec<(usize, &TemplateField, BatchColumnKind)> = Vec::new();
     let renderable: Vec<&TemplateField> = manifest
         .fields
         .iter()
@@ -372,6 +481,10 @@ pub fn validate_imported_xlsx(
 
     for (col_idx, meta_cell) in meta_row.iter().enumerate() {
         let meta_str = cell_to_string(meta_cell);
+        if meta_str == RECORD_ID_META {
+            record_id_col_idx = Some(col_idx);
+            continue;
+        }
         let parts: Vec<&str> = meta_str.split('\t').collect();
         if parts.len() >= 3 {
             let tpl_id = parts[0];
@@ -386,6 +499,15 @@ pub fn validate_imported_xlsx(
             }
 
             let matched_field = renderable.iter().find(|f| f.id == field_id);
+            if let Some(field) = matched_field {
+                let kind = parts
+                    .get(3)
+                    .map(|value| BatchColumnKind::from_str(value))
+                    .unwrap_or(BatchColumnKind::Value);
+                if kind.accepts_input() {
+                    group_col_map.push((col_idx, *field, kind));
+                }
+            }
             column_mapping.push(ColumnMapping {
                 col: col_idx,
                 field_id: field_id.to_string(),
@@ -398,7 +520,7 @@ pub fn validate_imported_xlsx(
         } else {
             // No metadata — try matching by label from row 1
             let label = cell_to_string(
-                &rows[1]
+                &rows[header_row]
                     .get(col_idx)
                     .cloned()
                     .unwrap_or(calamine::Data::Empty),
@@ -410,6 +532,9 @@ pub fn validate_imported_xlsx(
             let matched_field = renderable
                 .iter()
                 .find(|f| f.label == label || f.name == label);
+            if let Some(field) = matched_field {
+                group_col_map.push((col_idx, *field, BatchColumnKind::Value));
+            }
             column_mapping.push(ColumnMapping {
                 col: col_idx,
                 field_id: matched_field.map(|f| f.id.clone()).unwrap_or_default(),
@@ -419,6 +544,13 @@ pub fn validate_imported_xlsx(
                     .unwrap_or_else(|| "text".to_string()),
                 matched: matched_field.is_some(),
             });
+        }
+    }
+    for (col, cell) in rows[header_row].iter().enumerate() {
+        match cell_to_string(cell).trim() {
+            GENERATE_COL_LABEL => generate_col_idx = Some(col),
+            RECORD_ID_COL_LABEL if record_id_col_idx.is_none() => record_id_col_idx = Some(col),
+            _ => {}
         }
     }
 
@@ -448,7 +580,8 @@ pub fn validate_imported_xlsx(
         }
     }
 
-    // Validate data rows (starting from row 2, skipping metadata row 0 and header row 1)
+    // Validate grouped records. Continuation rows contribute only to multi
+    // fields; required scalar fields are checked on the record as a whole.
     let mut errors = Vec::new();
 
     // Missing required fields are fatal errors
@@ -470,31 +603,38 @@ pub fn validate_imported_xlsx(
     let field_by_id: HashMap<&str, &TemplateField> =
         renderable.iter().map(|f| (f.id.as_str(), *f)).collect();
 
-    for (row_idx, row) in rows.iter().enumerate().skip(2) {
-        // Skip sample rows (the "是否生成" flag is "否")
-        if let Some(generate_col) = generate_col_idx {
-            let flag = row
-                .get(generate_col)
-                .cloned()
-                .unwrap_or(calamine::Data::Empty);
-            if cell_to_string(&flag).trim() == SAMPLE_ROW_FLAG {
-                continue;
-            }
-        }
+    let groups = collect_record_groups(
+        &rows,
+        data_start,
+        record_id_col_idx,
+        generate_col_idx,
+        &group_col_map,
+    );
+    for group in groups {
+        let row_idx = group[0];
         let mut row_valid = true;
         for mapping in &column_mapping {
             if !mapping.matched {
                 continue;
             }
-            let cell_value = row
-                .get(mapping.col)
-                .cloned()
-                .unwrap_or(calamine::Data::Empty);
-            let text = cell_to_string(&cell_value);
+            let kind = group_col_map
+                .iter()
+                .find(|(col, _, _)| *col == mapping.col)
+                .map(|(_, _, kind)| *kind)
+                .unwrap_or(BatchColumnKind::ReferenceAuto);
+            if kind != BatchColumnKind::Value {
+                continue;
+            }
+            let texts = group
+                .iter()
+                .filter_map(|index| rows.get(*index).and_then(|row| row.get(mapping.col)))
+                .map(cell_to_string)
+                .filter(|value| !value.trim().is_empty())
+                .collect::<Vec<_>>();
 
             // Check required fields
             if let Some(field) = field_by_id.get(mapping.field_id.as_str()) {
-                if field.required && text.trim().is_empty() {
+                if field.required && texts.is_empty() {
                     errors.push(BatchValidationError {
                         row: row_idx,
                         col: mapping.col,
@@ -503,31 +643,47 @@ pub fn validate_imported_xlsx(
                     });
                     row_valid = false;
                 }
+                if !field_is_multiple(field) {
+                    let mut distinct = texts
+                        .iter()
+                        .map(|value| value.trim())
+                        .filter(|value| !value.is_empty())
+                        .collect::<Vec<_>>();
+                    distinct.sort_unstable();
+                    distinct.dedup();
+                    if distinct.len() > 1 {
+                        errors.push(BatchValidationError {
+                            row: row_idx,
+                            col: mapping.col,
+                            field_name: field.label.clone(),
+                            message: format!(
+                                "同一记录的普通字段“{}”填写了不同内容，请只在首行填写",
+                                field.label
+                            ),
+                        });
+                        row_valid = false;
+                    }
+                }
             }
 
             // Type-specific validation
-            if !text.trim().is_empty() && mapping.field_type == "date" && !is_valid_date_text(&text)
-            {
-                errors.push(BatchValidationError {
-                    row: row_idx,
-                    col: mapping.col,
-                    field_name: mapping.field_name.clone(),
-                    message: format!("日期格式不正确：{}", text),
-                });
-                row_valid = false;
+            if mapping.field_type == "date" {
+                for text in texts {
+                    if !is_valid_date_text(&text) {
+                        errors.push(BatchValidationError {
+                            row: row_idx,
+                            col: mapping.col,
+                            field_name: mapping.field_name.clone(),
+                            message: format!("日期格式不正确：{}", text),
+                        });
+                        row_valid = false;
+                    }
+                }
             }
         }
-        // Skip fully empty rows
-        let has_data = column_mapping.iter().any(|m| {
-            let cell = row.get(m.col).cloned().unwrap_or(calamine::Data::Empty);
-            !cell_to_string(&cell).trim().is_empty()
-        });
-
-        if has_data {
-            total_data_rows += 1;
-            if row_valid {
-                valid_rows += 1;
-            }
+        total_data_rows += 1;
+        if row_valid {
+            valid_rows += 1;
         }
     }
 
@@ -832,6 +988,8 @@ pub fn batch_render(
     if rows.len() < 3 {
         anyhow::bail!("Excel 文件至少需要 3 行（元数据 + 表头 + 数据）");
     }
+    let header_row = sheet_header_row(&rows);
+    let data_start = header_row + 1;
 
     // Parse column mapping from metadata row
     let meta_row = &rows[0];
@@ -843,8 +1001,13 @@ pub fn batch_render(
 
     let mut col_map: Vec<(usize, &TemplateField, BatchColumnKind)> = Vec::new();
     let mut generate_col_idx: Option<usize> = None;
+    let mut record_id_col_idx: Option<usize> = None;
     for (col_idx, meta_cell) in meta_row.iter().enumerate() {
         let meta_str = cell_to_string(meta_cell);
+        if meta_str == RECORD_ID_META {
+            record_id_col_idx = Some(col_idx);
+            continue;
+        }
         let parts: Vec<&str> = meta_str.split('\t').collect();
         if parts.len() >= 3 {
             let field_id = parts[1];
@@ -859,7 +1022,7 @@ pub fn batch_render(
             }
         } else {
             let label = cell_to_string(
-                &rows[1]
+                &rows[header_row]
                     .get(col_idx)
                     .cloned()
                     .unwrap_or(calamine::Data::Empty),
@@ -867,6 +1030,13 @@ pub fn batch_render(
             if label == GENERATE_COL_LABEL {
                 generate_col_idx = Some(col_idx);
             }
+        }
+    }
+    for (col, cell) in rows[header_row].iter().enumerate() {
+        match cell_to_string(cell).trim() {
+            GENERATE_COL_LABEL => generate_col_idx = Some(col),
+            RECORD_ID_COL_LABEL if record_id_col_idx.is_none() => record_id_col_idx = Some(col),
+            _ => {}
         }
     }
 
@@ -886,38 +1056,22 @@ pub fn batch_render(
         rows: Vec::new(),
     };
 
-    for (row_idx, row) in rows.iter().enumerate().skip(2) {
-        // Skip sample rows (the "是否生成" flag is "否")
-        if let Some(generate_col) = generate_col_idx {
-            let flag = row
-                .get(generate_col)
-                .cloned()
-                .unwrap_or(calamine::Data::Empty);
-            if cell_to_string(&flag).trim() == SAMPLE_ROW_FLAG {
-                continue;
-            }
-        }
-        // Check if row has any data
-        let has_data = col_map.iter().any(|(col, _, kind)| {
-            if *kind != BatchColumnKind::Value {
-                return false;
-            }
-            let cell = row.get(*col).cloned().unwrap_or(calamine::Data::Empty);
-            !cell_to_string(&cell).trim().is_empty()
-        });
-        if !has_data {
-            continue;
-        }
-
-        // Skip rows that had validation errors
-        if skip_rows.contains(&row_idx) {
+    let groups = collect_record_groups(
+        &rows,
+        data_start,
+        record_id_col_idx,
+        generate_col_idx,
+        &col_map,
+    );
+    for group in groups {
+        let row_idx = group[0];
+        if group.iter().any(|index| skip_rows.contains(index)) {
             continue;
         }
 
         result.total += 1;
 
-        // Build values HashMap from this row
-        let values = build_row_values(row, &col_map, manifest);
+        let values = build_group_values(&rows, &group, &col_map, manifest);
 
         // Generate output filename
         let filename = generate_filename(name_pattern, &values, manifest, result.success + 1);
@@ -937,7 +1091,7 @@ pub fn batch_render(
                 result.outputs.push(path.clone());
                 result.rows.push(BatchRenderRow {
                     output_path: path,
-                    values: build_row_values(row, &col_map, manifest),
+                    values: build_group_values(&rows, &group, &col_map, manifest),
                 });
                 result.success += 1;
             }
@@ -954,38 +1108,32 @@ pub fn batch_render(
     Ok(result)
 }
 
-fn build_row_values(
-    row: &[calamine::Data],
+fn build_group_values(
+    rows: &[Vec<calamine::Data>],
+    row_indices: &[usize],
     col_map: &[(usize, &TemplateField, BatchColumnKind)],
     manifest: &TemplateManifest,
 ) -> HashMap<String, serde_json::Value> {
     let mut values = HashMap::new();
-    let mut party_names: HashMap<&str, Vec<String>> = HashMap::new();
-    let mut party_suffixes: HashMap<&str, Vec<String>> = HashMap::new();
-
-    for (col, field, kind) in col_map {
-        let cell = row.get(*col).cloned().unwrap_or(calamine::Data::Empty);
-        let text = cell_to_string(&cell);
-
-        if field.field_type == "party_list" {
-            let parts = text
-                .split('、')
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .collect::<Vec<_>>();
-            match kind {
-                BatchColumnKind::Value => {
-                    party_names.insert(field.id.as_str(), parts);
-                }
-                BatchColumnKind::PartySuffix => {
-                    party_suffixes.insert(field.id.as_str(), parts);
-                }
-                BatchColumnKind::ReferenceAuto => {}
-            }
+    for field in manifest
+        .fields
+        .iter()
+        .filter(|field| is_renderable(&field.field_type) && !field_is_multiple(field))
+    {
+        let Some((col, _, kind)) = col_map.iter().find(|(_, candidate, kind)| {
+            candidate.id == field.id && *kind == BatchColumnKind::Value
+        }) else {
+            continue;
+        };
+        if *kind == BatchColumnKind::ReferenceAuto {
             continue;
         }
-
+        let text = row_indices
+            .iter()
+            .filter_map(|index| rows.get(*index).and_then(|row| row.get(*col)))
+            .map(cell_to_string)
+            .find(|value| !value.trim().is_empty())
+            .unwrap_or_default();
         let value = match field.field_type.as_str() {
             "checkbox" => {
                 let trimmed = text.trim().to_lowercase();
@@ -1047,31 +1195,99 @@ fn build_row_values(
     for field in manifest
         .fields
         .iter()
-        .filter(|field| field.field_type == "party_list")
+        .filter(|field| field_is_multiple(field))
     {
-        let names = party_names.remove(field.id.as_str()).unwrap_or_default();
-        if names.is_empty() {
+        let separator = if field.item_separator.is_empty() {
+            "、"
+        } else {
+            field.item_separator.as_str()
+        };
+        let value_col = col_map
+            .iter()
+            .find(|(_, candidate, kind)| {
+                candidate.id == field.id && *kind == BatchColumnKind::Value
+            })
+            .map(|(col, _, _)| *col);
+        let prefix_col = col_map
+            .iter()
+            .find(|(_, candidate, kind)| {
+                candidate.id == field.id && *kind == BatchColumnKind::PartyPrefix
+            })
+            .map(|(col, _, _)| *col);
+        let suffix_col = col_map
+            .iter()
+            .find(|(_, candidate, kind)| {
+                candidate.id == field.id && *kind == BatchColumnKind::PartySuffix
+            })
+            .map(|(col, _, _)| *col);
+        let Some(value_col) = value_col else {
             continue;
-        }
-        let suffixes = party_suffixes.remove(field.id.as_str()).unwrap_or_default();
-        let defaults = default_party_suffixes(field);
-        let items = names
-            .into_iter()
-            .enumerate()
-            .map(|(index, name)| {
-                let suffix = suffixes
-                    .get(index)
+        };
+        let default_prefixes = default_party_prefixes(field);
+        let default_suffixes = default_party_suffixes(field);
+        let mut items = Vec::new();
+        for row_index in row_indices {
+            let Some(row) = rows.get(*row_index) else {
+                continue;
+            };
+            let names = row
+                .get(value_col)
+                .map(cell_to_string)
+                .unwrap_or_default()
+                .split(separator)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            if names.is_empty() {
+                continue;
+            }
+            let prefixes = split_affix_cell(row, prefix_col, separator);
+            let suffixes = split_affix_cell(row, suffix_col, separator);
+            for (local_index, name) in names.into_iter().enumerate() {
+                let item_index = items.len();
+                let prefix = prefixes
+                    .get(local_index)
+                    .filter(|value| !value.is_empty())
                     .cloned()
-                    .or_else(|| defaults.get(index).cloned())
+                    .or_else(|| default_prefixes.get(item_index).cloned())
+                    .or_else(|| default_prefixes.first().cloned())
+                    .unwrap_or_default();
+                let suffix = suffixes
+                    .get(local_index)
+                    .filter(|value| !value.is_empty())
+                    .cloned()
+                    .or_else(|| default_suffixes.get(item_index).cloned())
+                    .or_else(|| default_suffixes.first().cloned())
                     .unwrap_or_default();
                 let normalized_name = if !suffix.is_empty() && name.ends_with(&suffix) {
                     name[..name.len() - suffix.len()].trim().to_string()
                 } else {
                     name
                 };
-                serde_json::json!({ "name": normalized_name, "suffix": suffix })
-            })
-            .collect::<Vec<_>>();
+                let normalized_name = if !prefix.is_empty() && normalized_name.starts_with(&prefix)
+                {
+                    normalized_name[prefix.len()..].trim().to_string()
+                } else {
+                    normalized_name
+                };
+                let normalized_name = if field.field_type == "date" && !field.date_format.is_empty()
+                {
+                    format_date_value(&normalized_name, &field.date_format)
+                } else {
+                    normalized_name
+                };
+                let item = if prefix.is_empty() {
+                    serde_json::json!({ "name": normalized_name, "suffix": suffix })
+                } else {
+                    serde_json::json!({ "name": normalized_name, "prefix": prefix, "suffix": suffix })
+                };
+                items.push(item);
+            }
+        }
+        if items.is_empty() {
+            continue;
+        }
         let value = serde_json::Value::Array(items);
         values.insert(field.id.clone(), value.clone());
         if !field.name.is_empty() {
@@ -1102,13 +1318,41 @@ fn build_row_values(
     values
 }
 
+fn split_affix_cell(row: &[calamine::Data], col: Option<usize>, separator: &str) -> Vec<String> {
+    col.and_then(|index| row.get(index))
+        .map(cell_to_string)
+        .unwrap_or_default()
+        .split(separator)
+        .map(|value| value.trim().to_string())
+        .collect()
+}
+
+#[cfg(test)]
+fn build_row_values(
+    row: &[calamine::Data],
+    col_map: &[(usize, &TemplateField, BatchColumnKind)],
+    manifest: &TemplateManifest,
+) -> HashMap<String, serde_json::Value> {
+    build_group_values(&[row.to_vec()], &[0], col_map, manifest)
+}
+
 fn default_party_suffixes(field: &TemplateField) -> Vec<String> {
     field
         .mark_refs
         .iter()
         .filter_map(|reference| reference.optional_rule.as_ref())
-        .map(|rule| rule.remove_empty_suffix.trim().to_string())
+        .map(|rule| rule.effective_suffix().trim().to_string())
         .filter(|suffix| !suffix.is_empty())
+        .collect()
+}
+
+fn default_party_prefixes(field: &TemplateField) -> Vec<String> {
+    field
+        .mark_refs
+        .iter()
+        .filter_map(|reference| reference.optional_rule.as_ref())
+        .map(|rule| rule.effective_prefix().trim().to_string())
+        .filter(|prefix| !prefix.is_empty())
         .collect()
 }
 
@@ -1185,11 +1429,6 @@ fn generate_filename(
                 "使用 filenameTemplate 生成文件名",
                 serde_json::json!({ "index": index, "token_count": ft.tokens.len() }),
             );
-            let sep = if ft.separator.is_empty() {
-                "-".to_string()
-            } else {
-                ft.separator.clone()
-            };
             let parts: Vec<String> = ft
                 .tokens
                 .iter()
@@ -1220,7 +1459,10 @@ fn generate_filename(
                     _ => token.value.clone(),
                 })
                 .collect();
-            let raw = parts.join(&sep);
+            // FilenameTokenInput and filenamePreviewText concatenate visible
+            // tokens exactly. The generated filename must use the same rule:
+            // punctuation only exists when it is a literal token in preview.
+            let raw = parts.concat();
             let clean = sanitize_filename(&raw);
             if clean.trim().is_empty() || clean == ".docx" {
                 return format!("{}-{}.docx", manifest.template.name, index);
@@ -1392,6 +1634,89 @@ mod tests {
     }
 
     #[test]
+    fn filename_literal_separators_are_not_duplicated() {
+        let fields = vec![test_field("请求人", "text"), test_field("受托人", "text")];
+        let mut manifest = test_manifest(fields);
+        manifest.template.name = "行政裁决所函".to_string();
+        manifest.filename_template = Some(super::super::FilenameTemplate {
+            separator: "-".to_string(),
+            tokens: vec![
+                super::super::FilenameToken {
+                    id: "1".to_string(),
+                    token_type: "preset".to_string(),
+                    value: "模板名".to_string(),
+                },
+                super::super::FilenameToken {
+                    id: "2".to_string(),
+                    token_type: "literal".to_string(),
+                    value: "-".to_string(),
+                },
+                super::super::FilenameToken {
+                    id: "3".to_string(),
+                    token_type: "field".to_string(),
+                    value: "请求人".to_string(),
+                },
+                super::super::FilenameToken {
+                    id: "4".to_string(),
+                    token_type: "literal".to_string(),
+                    value: "-".to_string(),
+                },
+                super::super::FilenameToken {
+                    id: "5".to_string(),
+                    token_type: "field".to_string(),
+                    value: "受托人".to_string(),
+                },
+            ],
+        });
+        let values = HashMap::from([
+            (
+                "请求人".to_string(),
+                serde_json::Value::String("隆基绿能".to_string()),
+            ),
+            (
+                "受托人".to_string(),
+                serde_json::Value::String("吕晗律师".to_string()),
+            ),
+        ]);
+
+        assert_eq!(
+            generate_filename("", &values, &manifest, 1),
+            "行政裁决所函-隆基绿能-吕晗律师.docx"
+        );
+    }
+
+    #[test]
+    fn filename_value_tokens_match_preview_without_hidden_separator() {
+        let fields = vec![test_field("请求人", "text")];
+        let mut manifest = test_manifest(fields);
+        manifest.template.name = "所函".to_string();
+        manifest.filename_template = Some(super::super::FilenameTemplate {
+            separator: "-".to_string(),
+            tokens: vec![
+                super::super::FilenameToken {
+                    id: "1".to_string(),
+                    token_type: "preset".to_string(),
+                    value: "模板名".to_string(),
+                },
+                super::super::FilenameToken {
+                    id: "2".to_string(),
+                    token_type: "field".to_string(),
+                    value: "请求人".to_string(),
+                },
+            ],
+        });
+        let values = HashMap::from([(
+            "请求人".to_string(),
+            serde_json::Value::String("甲公司".to_string()),
+        )]);
+
+        assert_eq!(
+            generate_filename("", &values, &manifest, 1),
+            "所函甲公司.docx"
+        );
+    }
+
+    #[test]
     fn checkbox_truth_table_includes_cn_check_marks() {
         let field = test_field("c", "checkbox");
         // "√" 与 "☒"（带叉勾选框）均为勾选，与 scan.rs CHECKBOX_CHARS 对齐
@@ -1497,6 +1822,68 @@ mod tests {
                 { "name": "李月春", "suffix": "实习律师" }
             ]))
         );
+    }
+
+    #[test]
+    fn vertical_continuation_rows_build_one_record_with_multiple_items() {
+        let court = test_field("court", "text");
+        let mut lawyers = test_field("lawyers", "text");
+        lawyers.multiple = true;
+        lawyers.repeat_suffix = true;
+        lawyers.mark_refs = vec![super::super::TemplateMarkRef {
+            optional_rule: Some(super::super::OptionalFieldRule {
+                enabled: true,
+                remove_empty_suffix: "律师".to_string(),
+                default_suffix: Some("律师".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }];
+        let manifest = test_manifest(vec![court, lawyers]);
+        let columns = vec![
+            (1, &manifest.fields[0], BatchColumnKind::Value),
+            (2, &manifest.fields[1], BatchColumnKind::Value),
+            (3, &manifest.fields[1], BatchColumnKind::PartySuffix),
+        ];
+        let rows = vec![
+            vec![
+                calamine::Data::String("001".into()),
+                calamine::Data::String("最高人民法院".into()),
+                calamine::Data::String("李月春".into()),
+                calamine::Data::String("律师".into()),
+            ],
+            vec![
+                calamine::Data::Empty,
+                calamine::Data::Empty,
+                calamine::Data::String("吕晗".into()),
+                calamine::Data::String("实习律师".into()),
+            ],
+        ];
+        let groups = collect_record_groups(&rows, 0, Some(0), None, &columns);
+        assert_eq!(groups, vec![vec![0, 1]]);
+
+        let values = build_group_values(&rows, &groups[0], &columns, &manifest);
+        assert_eq!(
+            values.get("court"),
+            Some(&serde_json::Value::String("最高人民法院".into()))
+        );
+        assert_eq!(
+            values.get("lawyers"),
+            Some(&serde_json::json!([
+                { "name": "李月春", "suffix": "律师" },
+                { "name": "吕晗", "suffix": "实习律师" }
+            ]))
+        );
+    }
+
+    #[test]
+    fn instruction_row_is_not_treated_as_the_header() {
+        let rows = vec![
+            vec![calamine::Data::String(RECORD_ID_META.into())],
+            vec![calamine::Data::String(FILL_INSTRUCTION.into())],
+            vec![calamine::Data::String(RECORD_ID_COL_LABEL.into())],
+        ];
+        assert_eq!(sheet_header_row(&rows), 2);
     }
 
     #[test]

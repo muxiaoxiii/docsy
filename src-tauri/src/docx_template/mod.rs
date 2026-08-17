@@ -124,6 +124,10 @@ pub struct TemplateField {
     pub label: String,
     #[serde(default)]
     pub semantic_key: String,
+    /// Optional in-template group used to scope reference candidates and
+    /// shared rules (for example 原告/被告/第三人 -> 当事人).
+    #[serde(default)]
+    pub group_name: String,
     #[serde(rename = "type")]
     pub field_type: String,
     #[serde(default)]
@@ -144,6 +148,19 @@ pub struct TemplateField {
     /// split across multiple runs with different formatting).
     #[serde(default)]
     pub fill_all_positions: bool,
+    /// Whether this field accepts an ordered list of values. This is
+    /// independent from the value type; text/date/select fields can all be
+    /// multi-value fields.
+    #[serde(default)]
+    pub multiple: bool,
+    #[serde(default = "default_item_separator")]
+    pub item_separator: String,
+    /// Default affix mode for the fill form. Users can override these per
+    /// generation without mutating the template.
+    #[serde(default)]
+    pub repeat_prefix: bool,
+    #[serde(default)]
+    pub repeat_suffix: bool,
     /// Date rendering format for date fields: iso (2026-08-05), cn (2026年8月5日),
     /// cn_full (二零二六年八月五日), en_long (August 5, 2026), en_short (Aug. 5, 2026),
     /// en_dmy (5 August 2026), en_ordinal (2026 August 5th), blank (留空: 年 月 日).
@@ -183,10 +200,36 @@ pub struct TemplateMarkRef {
 pub struct OptionalFieldRule {
     #[serde(default)]
     pub enabled: bool,
+    /// Text currently present in the embedded Word document. Rendering uses
+    /// this value to locate and remove/replace the structural prefix.
     #[serde(default)]
     pub remove_empty_prefix: String,
+    /// Text currently present in the embedded Word document. Rendering uses
+    /// this value to locate and remove/replace the structural suffix.
     #[serde(default)]
     pub remove_empty_suffix: String,
+    /// Editable default shown to the user. `None` means an older manifest and
+    /// falls back to the source prefix; `Some("")` means explicitly removed.
+    #[serde(default)]
+    pub default_prefix: Option<String>,
+    /// Editable default shown to the user. `None` means an older manifest and
+    /// falls back to the source suffix; `Some("")` means explicitly removed.
+    #[serde(default)]
+    pub default_suffix: Option<String>,
+}
+
+impl OptionalFieldRule {
+    pub fn effective_prefix(&self) -> &str {
+        self.default_prefix
+            .as_deref()
+            .unwrap_or(&self.remove_empty_prefix)
+    }
+
+    pub fn effective_suffix(&self) -> &str {
+        self.default_suffix
+            .as_deref()
+            .unwrap_or(&self.remove_empty_suffix)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -284,6 +327,18 @@ pub struct RenderTemplateArgs {
     pub item_separator: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTemplateArgs {
+    pub template_path: String,
+    #[serde(default)]
+    pub values: HashMap<String, Value>,
+    #[serde(default)]
+    pub structure_overrides: HashMap<String, StructureOverride>,
+    #[serde(default = "default_item_separator")]
+    pub item_separator: String,
+}
+
 fn default_item_separator() -> String {
     "、".to_string()
 }
@@ -295,6 +350,16 @@ pub struct StructureOverride {
     pub prefix: Option<String>,
     #[serde(default)]
     pub suffix: Option<String>,
+    #[serde(default)]
+    pub item_separator: Option<String>,
+    #[serde(default)]
+    pub repeat_prefix: Option<bool>,
+    #[serde(default)]
+    pub repeat_suffix: Option<bool>,
+}
+
+pub(super) fn field_is_multiple(field: &TemplateField) -> bool {
+    field.multiple || field.field_type == "party_list"
 }
 
 pub(super) fn normalize_manifest_options(manifest: &mut TemplateManifest) {

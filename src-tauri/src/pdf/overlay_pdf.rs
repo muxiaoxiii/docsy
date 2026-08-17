@@ -222,6 +222,8 @@ mod tests {
             height_pt: 842.0,
             raw_width_pt: 595.0,
             raw_height_pt: 842.0,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 0,
         }
     }
@@ -307,6 +309,8 @@ mod tests {
             height_pt: 842.0,
             raw_width_pt: 595.0,
             raw_height_pt: 842.0,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 0,
         }];
         let header = OverlayTextConfig {
@@ -411,6 +415,8 @@ mod tests {
             height_pt: 842.0,
             raw_width_pt: 595.0,
             raw_height_pt: 842.0,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 0,
         }];
         let config = |text: &str| OverlayTextConfig {
@@ -458,6 +464,8 @@ mod tests {
             height_pt: 300.0,
             raw_width_pt: 400.0,
             raw_height_pt: 300.0,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 0,
         }];
         let footer = OverlayTextConfig {

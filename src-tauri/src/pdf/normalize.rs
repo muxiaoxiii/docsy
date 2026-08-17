@@ -1,10 +1,9 @@
 use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use std::path::{Path, PathBuf};
 
 use super::page_info::{get_page_infos, PageSize, A4_HEIGHT_PT, A4_WIDTH_PT};
-use super::qpdf;
 use super::temp_named_path;
 
 pub fn normalize_pdf_to_a4(input: &Path, _dpi: u32, orientation: &str) -> Result<PathBuf> {
@@ -24,17 +23,10 @@ pub fn normalize_pdf_to_a4(input: &Path, _dpi: u32, orientation: &str) -> Result
 
     let output = temp_named_path("docsy_a4_normalized", "pdf");
     doc.save(&output).context("写入 A4 规范化 PDF 失败")?;
-    let optimized = temp_named_path("docsy_a4_normalized_opt", "pdf");
-    match qpdf::optimize_to(&output, &optimized) {
-        Ok(()) => {
-            let _ = std::fs::remove_file(&output);
-            Ok(optimized)
-        }
-        Err(_) => {
-            let _ = std::fs::remove_file(&optimized);
-            Ok(output)
-        }
-    }
+    // The caller immediately feeds this file into qpdf overlay. Recompressing
+    // large scan streams here would decode the same images twice and does not
+    // improve coordinate correctness or PDF validity.
+    Ok(output)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,10 +71,14 @@ fn a4_transform(source: &PageSize, orientation: &str) -> A4Transform {
     ];
     let rotate_matrix = unrotate_matrix(source);
     let forced_matrix = forced_orientation_matrix(source, orientation);
+    let origin_matrix = [1.0, 0.0, 0.0, 1.0, -source.box_x0, -source.box_y0];
     A4Transform {
         page_w,
         page_h,
-        matrix: multiply_matrix(multiply_matrix(fit_matrix, forced_matrix), rotate_matrix),
+        matrix: multiply_matrix(
+            multiply_matrix(multiply_matrix(fit_matrix, forced_matrix), rotate_matrix),
+            origin_matrix,
+        ),
     }
 }
 
@@ -144,35 +140,62 @@ fn normalize_page_content(
     page_id: ObjectId,
     transform: &A4Transform,
 ) -> Result<()> {
-    let content = doc
-        .get_and_decode_page_content(page_id)
-        .context("无法解码 PDF 页面内容流，已停止 A4 规范化以避免裁切原文")?;
-    if content.operations.is_empty() {
+    let contents = doc
+        .get_object(page_id)
+        .context("读取 PDF 页面对象失败")?
+        .as_dict()
+        .context("PDF 页面对象不是字典")?
+        .get(b"Contents")
+        .ok()
+        .cloned();
+    let Some(contents) = contents else {
         return Ok(());
+    };
+
+    let prefix = Content {
+        operations: vec![
+            Operation::new("q", vec![]),
+            Operation::new(
+                "cm",
+                vec![
+                    pdf_number(transform.matrix[0]),
+                    pdf_number(transform.matrix[1]),
+                    pdf_number(transform.matrix[2]),
+                    pdf_number(transform.matrix[3]),
+                    pdf_number(transform.matrix[4]),
+                    pdf_number(transform.matrix[5]),
+                ],
+            ),
+        ],
     }
+    .encode()
+    .context("编码 A4 规范化前置内容流失败")?;
+    let suffix = Content {
+        operations: vec![Operation::new("Q", vec![])],
+    }
+    .encode()
+    .context("编码 A4 规范化后置内容流失败")?;
+    let prefix_id = doc.add_object(Stream::new(Dictionary::new(), prefix));
+    let suffix_id = doc.add_object(Stream::new(Dictionary::new(), suffix));
 
-    let mut operations = vec![
-        Operation::new("q", vec![]),
-        Operation::new(
-            "cm",
-            vec![
-                pdf_number(transform.matrix[0]),
-                pdf_number(transform.matrix[1]),
-                pdf_number(transform.matrix[2]),
-                pdf_number(transform.matrix[3]),
-                pdf_number(transform.matrix[4]),
-                pdf_number(transform.matrix[5]),
-            ],
+    let mut wrapped = vec![Object::Reference(prefix_id)];
+    match contents {
+        Object::Array(items) => wrapped.extend(
+            items
+                .into_iter()
+                .filter(|item| !matches!(item, Object::Null)),
         ),
-    ];
-    operations.extend(content.operations);
-    operations.push(Operation::new("Q", vec![]));
+        Object::Null => {}
+        Object::Stream(stream) => wrapped.push(Object::Reference(doc.add_object(stream))),
+        other => wrapped.push(other),
+    }
+    wrapped.push(Object::Reference(suffix_id));
 
-    let encoded = Content { operations }
-        .encode()
-        .context("编码 A4 规范化内容流失败")?;
-    doc.change_page_content(page_id, encoded)
-        .context("写回 A4 规范化内容流失败")?;
+    doc.get_object_mut(page_id)
+        .context("读取 PDF 页面对象失败")?
+        .as_dict_mut()
+        .context("PDF 页面对象不是字典")?
+        .set("Contents", Object::Array(wrapped));
     Ok(())
 }
 
@@ -188,8 +211,13 @@ fn set_page_box(doc: &mut Document, page_id: ObjectId, width: f32, height: f32) 
         pdf_number(width),
         pdf_number(height),
     ]);
-    page.set("MediaBox", box_object.clone());
-    page.set("CropBox", box_object);
+    // qpdf sizes overlay/underlay forms against the destination page boxes.
+    // Leaving a source-sized TrimBox/ArtBox/BleedBox while only enlarging the
+    // MediaBox and CropBox makes an A4 overlay get scaled back into the old
+    // content area. A normalized page must expose one consistent A4 box.
+    for name in ["MediaBox", "CropBox", "TrimBox", "BleedBox", "ArtBox"] {
+        page.set(name, box_object.clone());
+    }
     page.remove(b"Rotate");
     Ok(())
 }
@@ -201,6 +229,23 @@ fn pdf_number(value: f32) -> Object {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::external::ExternalTool;
+    use crate::pdf::header_footer::OverlayTextConfig;
+    use crate::pdf::overlay_font::mm_to_pt;
+    use crate::pdf::overlay_pdf::build_overlay_pdf;
+    use lopdf::dictionary;
+
+    fn page_size(width: f32, height: f32) -> PageSize {
+        PageSize {
+            width_pt: width,
+            height_pt: height,
+            raw_width_pt: width,
+            raw_height_pt: height,
+            box_x0: 0.0,
+            box_y0: 0.0,
+            rotate: 0,
+        }
+    }
 
     #[test]
     fn a4_normalize_does_not_upscale_small_pages() {
@@ -209,6 +254,8 @@ mod tests {
             height_pt: 400.0,
             raw_width_pt: 300.0,
             raw_height_pt: 400.0,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 0,
         };
         assert_eq!(fit_scale_to_a4(&source, "portrait"), 1.0);
@@ -221,6 +268,8 @@ mod tests {
             height_pt: A4_HEIGHT_PT * 2.0,
             raw_width_pt: A4_WIDTH_PT * 2.0,
             raw_height_pt: A4_HEIGHT_PT * 2.0,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 0,
         };
         assert!((fit_scale_to_a4(&source, "portrait") - 0.5).abs() < 0.001);
@@ -233,6 +282,8 @@ mod tests {
             height_pt: 595.0,
             raw_width_pt: 595.0,
             raw_height_pt: 842.0,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 90,
         };
         let transform = a4_transform(&source, "preserve");
@@ -252,6 +303,8 @@ mod tests {
             height_pt: A4_WIDTH_PT,
             raw_width_pt: A4_HEIGHT_PT,
             raw_height_pt: A4_WIDTH_PT,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 0,
         };
         let transform = a4_transform(&source, "portrait");
@@ -271,6 +324,8 @@ mod tests {
             height_pt: A4_HEIGHT_PT,
             raw_width_pt: A4_WIDTH_PT,
             raw_height_pt: A4_HEIGHT_PT,
+            box_x0: 0.0,
+            box_y0: 0.0,
             rotate: 0,
         };
         let transform = a4_transform(&source, "landscape");
@@ -281,5 +336,211 @@ mod tests {
         );
         assert!(transform.matrix[1] < 0.0);
         assert!(transform.matrix[2] > 0.0);
+    }
+
+    #[test]
+    fn non_zero_source_origin_is_translated_before_centering() {
+        let mut source = page_size(300.0, 400.0);
+        source.box_x0 = 18.0;
+        source.box_y0 = 24.0;
+        let transform = a4_transform(&source, "portrait");
+        let x = transform.matrix[0] * source.box_x0
+            + transform.matrix[2] * source.box_y0
+            + transform.matrix[4];
+        let y = transform.matrix[1] * source.box_x0
+            + transform.matrix[3] * source.box_y0
+            + transform.matrix[5];
+        assert!((x - (A4_WIDTH_PT - 300.0) / 2.0).abs() < 0.01);
+        assert!((y - (A4_HEIGHT_PT - 400.0) / 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn normalization_wraps_original_stream_without_reencoding_it() {
+        let mut doc = Document::with_version("1.7");
+        let original_bytes = b"q 1 0 0 1 20 30 cm /Original Do Q".to_vec();
+        let content_id = doc.add_object(Stream::new(Dictionary::new(), original_bytes.clone()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Contents" => content_id,
+            "MediaBox" => vec![0.into(), 0.into(), 300.into(), 400.into()],
+        });
+        let transform = a4_transform(&page_size(300.0, 400.0), "portrait");
+
+        normalize_page_content(&mut doc, page_id, &transform).unwrap();
+
+        let page = doc.get_dictionary(page_id).unwrap();
+        let contents = page.get(b"Contents").unwrap().as_array().unwrap();
+        assert_eq!(contents.len(), 3);
+        assert_eq!(contents[1].as_reference().unwrap(), content_id);
+        assert_eq!(
+            doc.get_object(content_id)
+                .unwrap()
+                .as_stream()
+                .unwrap()
+                .content,
+            original_bytes
+        );
+
+        let prefix_id = contents[0].as_reference().unwrap();
+        let prefix = doc.get_object(prefix_id).unwrap().as_stream().unwrap();
+        let operations = Content::decode(&prefix.content).unwrap().operations;
+        assert_eq!(operations[0].operator, "q");
+        assert_eq!(operations[1].operator, "cm");
+
+        let suffix_id = contents[2].as_reference().unwrap();
+        let suffix = doc.get_object(suffix_id).unwrap().as_stream().unwrap();
+        let operations = Content::decode(&suffix.content).unwrap().operations;
+        assert_eq!(operations[0].operator, "Q");
+    }
+
+    #[test]
+    fn normalized_page_dimensions_drive_the_following_overlay_coordinates() {
+        if crate::external::QpdfTool.binary_path().is_err() {
+            return;
+        }
+        let input = temp_named_path("docsy_normalize_overlay_input", "pdf");
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tj", vec![Object::string_literal("body text")]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(Dictionary::new(), content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => Dictionary::new(),
+            "MediaBox" => vec![18.into(), 24.into(), 318.into(), 424.into()],
+            "CropBox" => vec![18.into(), 24.into(), 318.into(), 424.into()],
+            "TrimBox" => vec![18.into(), 24.into(), 318.into(), 424.into()],
+            "BleedBox" => vec![18.into(), 24.into(), 318.into(), 424.into()],
+            "ArtBox" => vec![18.into(), 24.into(), 318.into(), 424.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.save(&input).unwrap();
+
+        let normalized = normalize_pdf_to_a4(&input, 200, "portrait").unwrap();
+        let page_infos = get_page_infos(&normalized.to_string_lossy()).unwrap();
+        assert_eq!(page_infos.len(), 1);
+        assert!((page_infos[0].width_pt - A4_WIDTH_PT).abs() < 0.1);
+        assert!((page_infos[0].height_pt - A4_HEIGHT_PT).abs() < 0.1);
+        assert_eq!(page_infos[0].box_x0, 0.0);
+        assert_eq!(page_infos[0].box_y0, 0.0);
+
+        let normalized_doc = Document::load(&normalized).unwrap();
+        let normalized_page = normalized_doc.get_pages().into_values().next().unwrap();
+        let normalized_page_dict = normalized_doc.get_dictionary(normalized_page).unwrap();
+        for name in [
+            &b"MediaBox"[..],
+            &b"CropBox"[..],
+            &b"TrimBox"[..],
+            &b"BleedBox"[..],
+            &b"ArtBox"[..],
+        ] {
+            let values = normalized_page_dict.get(name).unwrap().as_array().unwrap();
+            let number = |object: &Object| match object {
+                Object::Real(value) => *value,
+                Object::Integer(value) => *value as f32,
+                _ => panic!("page box coordinate must be numeric"),
+            };
+            assert!((number(&values[0]) - 0.0).abs() < 0.1);
+            assert!((number(&values[1]) - 0.0).abs() < 0.1);
+            assert!((number(&values[2]) - A4_WIDTH_PT).abs() < 0.1);
+            assert!((number(&values[3]) - A4_HEIGHT_PT).abs() < 0.1);
+        }
+
+        let header = OverlayTextConfig {
+            text: "Header".to_string(),
+            region: "header".to_string(),
+            font_family: "auto".to_string(),
+            font_size: 10.0,
+            margin_mm: 2.0,
+            align: "center".to_string(),
+            offset_x_mm: 0.0,
+            color: "#000000".to_string(),
+            page_start: None,
+            page_end: None,
+            number_style: String::new(),
+            number_offset: 0,
+            number_total: None,
+            artifact_kind: "HeaderText".to_string(),
+        };
+        let (overlay, _) = build_overlay_pdf(Some(&header), None, &[], &page_infos, 1, 1).unwrap();
+        let overlay_path = temp_named_path("docsy_normalize_overlay_layer", "pdf");
+        let output_path = temp_named_path("docsy_normalize_overlay_result", "pdf");
+        std::fs::write(&overlay_path, &overlay).unwrap();
+        let qpdf = crate::external::QpdfTool.binary_path().unwrap();
+        let status = crate::external::hidden_command(qpdf)
+            .arg(&normalized)
+            .arg("--overlay")
+            .arg(&overlay_path)
+            .arg("--")
+            .arg(&output_path)
+            .status()
+            .unwrap();
+        assert!(crate::pdf::qpdf::status_is_success(&status));
+
+        let output_doc = Document::load(&output_path).unwrap();
+        let output_page = output_doc.get_pages().into_values().next().unwrap();
+        let output_ops = output_doc
+            .get_and_decode_page_content(output_page)
+            .unwrap()
+            .operations;
+        let overlay_matrix = output_ops
+            .iter()
+            .rfind(|operation| operation.operator == "cm")
+            .expect("qpdf overlay transform missing");
+        let matrix_number = |index: usize| match &overlay_matrix.operands[index] {
+            Object::Real(value) => *value,
+            Object::Integer(value) => *value as f32,
+            _ => panic!("overlay matrix operand must be numeric"),
+        };
+        assert!((matrix_number(0) - 1.0).abs() < 0.001);
+        assert!((matrix_number(3) - 1.0).abs() < 0.001);
+        assert!(matrix_number(4).abs() < 0.001);
+        assert!(matrix_number(5).abs() < 0.001);
+
+        let overlay_doc = Document::load_mem(&overlay).unwrap();
+        let overlay_page = overlay_doc.get_pages().into_values().next().unwrap();
+        let operations = overlay_doc
+            .get_and_decode_page_content(overlay_page)
+            .unwrap()
+            .operations;
+        let tm = operations.iter().find(|op| op.operator == "Tm").unwrap();
+        let y = match &tm.operands[5] {
+            Object::Real(value) => *value,
+            Object::Integer(value) => *value as f32,
+            _ => panic!("expected numeric text position"),
+        };
+        assert!((y - (A4_HEIGHT_PT - mm_to_pt(2.0))).abs() < 0.1);
+
+        let normalized_ops = normalized_doc
+            .get_and_decode_page_content(normalized_page)
+            .unwrap()
+            .operations;
+        assert!(normalized_ops
+            .iter()
+            .any(|operation| operation.operator == "Tj"));
+
+        let _ = std::fs::remove_file(input);
+        let _ = std::fs::remove_file(normalized);
+        let _ = std::fs::remove_file(overlay_path);
+        let _ = std::fs::remove_file(output_path);
     }
 }
