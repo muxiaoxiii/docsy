@@ -703,7 +703,12 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
         anyhow::bail!("没有可合并的 PDF");
     }
 
-    let status = crate::external::hidden_command(qpdf_bin)
+    let mut command = crate::external::hidden_command(qpdf_bin);
+    // Keep the evidence merge aligned with the standalone PDF merge: flatten
+    // the existing appearance first, then apply the lossless structural
+    // optimization so its resources are not mistaken for unreachable data.
+    super::qpdf::add_merge_args(&mut command);
+    let status = command
         .arg("--empty")
         .arg("--pages")
         .args(inputs)

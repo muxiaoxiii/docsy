@@ -119,7 +119,10 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     let output_path = unique_available_path(Path::new(output));
 
     let mut cmd = crate::external::hidden_command(&bin);
-    add_optimization_args(&mut cmd);
+    // Merging is a print-oriented operation. Flatten annotation appearances
+    // before the structural optimization so signature/stamp graphics become
+    // reachable page content before unused resources are removed.
+    add_merge_args(&mut cmd);
     cmd.arg("--empty").arg("--pages");
     for input in inputs {
         cmd.arg(input);
@@ -387,6 +390,24 @@ pub(crate) fn add_optimization_args(command: &mut std::process::Command) {
         .arg("--recompress-flate")
         .arg("--compression-level=9")
         .arg("--remove-unreferenced-resources=yes");
+}
+
+/// Keep page appearance stable for printable outputs.
+///
+/// qpdf uses each annotation's existing appearance stream, so this preserves
+/// vector/text/image quality while making signature and stamp graphics part of
+/// the page content. It intentionally gives up annotation interactivity and
+/// signature validity, which is the desired boundary for print-only outputs.
+pub(crate) fn add_print_preservation_args(command: &mut std::process::Command) {
+    command.arg("--flatten-annotations=all");
+}
+
+/// Merge with print-safe appearance preservation and the existing lossless
+/// structural optimization. Keep flattening first so resources used by a
+/// signature/stamp appearance are visible to the resource cleanup pass.
+pub(crate) fn add_merge_args(command: &mut std::process::Command) {
+    add_print_preservation_args(command);
+    add_optimization_args(command);
 }
 
 fn unique_available_path(path: &Path) -> PathBuf {
