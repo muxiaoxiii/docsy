@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   effectivePageNumberRule,
+  exceptionsForKind,
   formatPageNumber,
+  normalizeInsertException,
   pageNumberOverlaysForFile,
   renderPageNumberTemplate,
 } from './pdfPageNumberRules.js'
@@ -171,5 +173,32 @@ describe('PDF page number rules', () => {
     expect(overlays[0].numberStyle).toBe('arabic')
     expect(overlays[1].numberStyle).toBe('roman-upper')
     expect(overlays[2].numberStyle).toBe('arabic')
+  })
+
+  it('normalizeInsertException defaults legacy entries to pageNumber kind', () => {
+    const legacy = normalizeInsertException({ scope: { type: 'global', start: 2, end: 4 }, overrides: { enabled: false } })
+    expect(legacy.kinds).toEqual(['pageNumber'])
+    expect(legacy.scope).toMatchObject({ type: 'global', start: 2, end: 4, fileIds: [] })
+
+    const multi = normalizeInsertException({
+      kinds: ['header', 'pageNumber'],
+      scope: { type: 'file', start: 1, end: 1, fileIds: ['f1'] },
+      overrides: { headerText: 'X' },
+    })
+    expect(multi.kinds).toEqual(['header', 'pageNumber'])
+    expect(multi.overrides.headerText).toBe('X')
+  })
+
+  it('exceptionsForKind filters shared exceptions by checked kind', () => {
+    const shared = [
+      { kinds: ['header'], scope: { type: 'global', start: 1, end: 1 }, overrides: { enabled: false } },
+      { kinds: ['pageNumber'], scope: { type: 'global', start: 2, end: 2 }, overrides: { enabled: false } },
+      { kinds: ['header', 'pageNumber'], scope: { type: 'global', start: 3, end: 3 }, overrides: { enabled: false } },
+      // 旧数据没有 kinds：按页码例外处理
+      { scope: { type: 'global', start: 4, end: 4 }, overrides: { enabled: false } },
+    ]
+    expect(exceptionsForKind(shared, 'header').map((e) => e.scope.start)).toEqual([1, 3])
+    expect(exceptionsForKind(shared, 'pageNumber').map((e) => e.scope.start)).toEqual([2, 3, 4])
+    expect(exceptionsForKind(shared, 'footerText')).toEqual([])
   })
 })

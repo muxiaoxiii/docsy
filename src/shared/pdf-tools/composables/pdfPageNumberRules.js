@@ -65,12 +65,31 @@ function fileStableId(file) {
   return String(file?.id || file?.path || '')
 }
 
-function exceptionMatches(exception, file, globalPage, localPage) {
+// 例外是否作用于指定文件（仅看 fileIds，不看页范围）
+export function exceptionTargetsFile(exception, file) {
+  const fileIds = exception?.scope?.fileIds || []
+  return !fileIds.length || fileIds.includes(fileStableId(file))
+}
+
+export function exceptionMatches(exception, file, globalPage, localPage) {
+  if (!exceptionTargetsFile(exception, file)) return false
   const scope = exception.scope || {}
-  const fileIds = scope.fileIds || []
-  if (fileIds.length && !fileIds.includes(fileStableId(file))) return false
   const coordinate = scope.type === 'file' ? localPage : globalPage
   return coordinate >= Number(scope.start || 1) && coordinate <= Number(scope.end || scope.start || 1)
+}
+
+/**
+ * 统一插入例外：页眉/页脚文字/页码共用一张列表，kinds 勾选决定作用类型。
+ * 旧数据没有 kinds 字段时按页码例外处理（它们原本只存在于页码规则上）。
+ */
+export function normalizeInsertException(entry, index = 0) {
+  const base = normalizePageNumberException(entry, index)
+  const kinds = Array.isArray(entry?.kinds) && entry.kinds.length ? [...entry.kinds] : ['pageNumber']
+  return { ...base, kinds }
+}
+
+export function exceptionsForKind(exceptions, kind) {
+  return (exceptions || []).map((entry, index) => normalizeInsertException(entry, index)).filter((entry) => entry.kinds.includes(kind))
 }
 
 export function effectivePageNumberRule(baseRule, globalPage, localPage, file = null) {

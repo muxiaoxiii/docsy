@@ -896,4 +896,157 @@ describe('Evidence PDF session helpers', () => {
     // The raw group keeps the file's own value so in-place editing still works
     expect(pn.group.sequence).toBe('continuous')
   })
+
+  it('hides the main header on an exception page range and segments the rest', () => {
+    const file = { ...createEvidenceFile('/case/合同.pdf'), pages: 5 }
+    const items = buildHeaderFooterItems(
+      [file],
+      {
+        ...baseRules,
+        footerEnabled: false,
+        insertExceptions: [
+          { kinds: ['header'], scope: { type: 'global', start: 2, end: 3, fileIds: [] }, overrides: { enabled: false } },
+        ],
+      },
+      '/out',
+    )
+
+    // 主项让位给分段；第 1 页和第 4-5 页各一段 HeaderText
+    expect(items[0].header).toBeNull()
+    const segments = items[0].extraOverlays.filter((o) => o.artifactKind === 'HeaderText')
+    expect(segments).toHaveLength(2)
+    expect(segments[0]).toMatchObject({ pageStart: 1, pageEnd: 1, text: '证据1' })
+    expect(segments[1]).toMatchObject({ pageStart: 4, pageEnd: 5, text: '证据1' })
+  })
+
+  it('overrides header text inside the exception range only', () => {
+    const file = { ...createEvidenceFile('/case/合同.pdf'), pages: 3 }
+    const items = buildHeaderFooterItems(
+      [file],
+      {
+        ...baseRules,
+        footerEnabled: false,
+        insertExceptions: [
+          {
+            kinds: ['header'],
+            scope: { type: 'global', start: 2, end: 2, fileIds: [] },
+            overrides: { headerText: '补充[文件名]', align: 'center' },
+          },
+        ],
+      },
+      '/out',
+    )
+
+    const segments = items[0].extraOverlays.filter((o) => o.artifactKind === 'HeaderText')
+    expect(segments).toHaveLength(3)
+    expect(segments[1]).toMatchObject({ pageStart: 2, pageEnd: 2, text: '补充合同', align: 'center' })
+    expect(segments[0].align).toBe('right')
+  })
+
+  it('hides footer text for the scoped file only', () => {
+    const keep = { ...createEvidenceFile('/case/合同.pdf'), pages: 2 }
+    const hidden = { ...createEvidenceFile('/case/付款.pdf'), pages: 2 }
+    const items = buildHeaderFooterItems(
+      [keep, hidden],
+      {
+        ...baseRules,
+        headerInsertEnabled: false,
+        footerInsertEnabled: true,
+        pageNumberEnabled: false,
+        footerTextContent: '机密',
+        insertExceptions: [
+          {
+            kinds: ['footerText'],
+            scope: { type: 'file', start: 1, end: 2, fileIds: ['/case/付款.pdf'] },
+            overrides: { enabled: false },
+          },
+        ],
+      },
+      '/out',
+    )
+
+    expect(items[0].footer?.text).toBe('机密')
+    // 被隐藏的文件：主项为 null 且没有任何 FooterText 分段
+    expect(items[1].footer).toBeNull()
+    expect(items[1].extraOverlays.filter((o) => o.artifactKind === 'FooterText')).toHaveLength(0)
+  })
+
+  it('applies a multi-kind exception to both header and page number', () => {
+    const file = { ...createEvidenceFile('/case/合同.pdf'), pages: 3 }
+    const items = buildHeaderFooterItems(
+      [file],
+      {
+        ...baseRules,
+        pageNumberEnabled: true,
+        insertExceptions: [
+          {
+            kinds: ['header', 'pageNumber'],
+            scope: { type: 'global', start: 1, end: 1, fileIds: [] },
+            overrides: { enabled: false, count: false },
+          },
+        ],
+      },
+      '/out',
+    )
+
+    const headerSegments = items[0].extraOverlays.filter((o) => o.artifactKind === 'HeaderText')
+    expect(items[0].header).toBeNull()
+    expect(headerSegments).toHaveLength(1)
+    expect(headerSegments[0]).toMatchObject({ pageStart: 2, pageEnd: 3 })
+    // 页码第 1 页不显示且不计数：第 2 页编号 1，总页数 2
+    const pn = items[0].extraOverlays.filter((o) => o.artifactKind === 'PageNumber')
+    expect(pn).toHaveLength(1)
+    expect(pn[0]).toMatchObject({ pageStart: 2, pageEnd: 3, numberOffset: -1, numberTotal: 2 })
+  })
+
+  it('still applies legacy per-group page number exceptions alongside shared ones', () => {
+    const file = { ...createEvidenceFile('/case/合同.pdf'), pages: 3 }
+    file.pageNumberGroups = [
+      {
+        ...createDefaultPageNumberGroup(),
+        exceptions: [{ scope: { type: 'global', start: 1, end: 1, fileIds: [] }, overrides: { enabled: false, count: true } }],
+      },
+    ]
+    const items = buildHeaderFooterItems(
+      [file],
+      {
+        ...baseRules,
+        headerInsertEnabled: false,
+        pageNumberEnabled: true,
+        insertExceptions: [
+          {
+            kinds: ['pageNumber'],
+            scope: { type: 'global', start: 3, end: 3, fileIds: [] },
+            overrides: { enabled: false, count: true },
+          },
+        ],
+      },
+      '/out',
+    )
+
+    // 旧例外隐藏第 1 页（仍计数）、共享例外隐藏第 3 页：只有第 2 页出页码
+    const pn = items[0].extraOverlays.filter((o) => o.artifactKind === 'PageNumber')
+    expect(pn).toHaveLength(1)
+    expect(pn[0]).toMatchObject({ pageStart: 2, pageEnd: 2 })
+  })
+
+  it('does not let exceptions reach outside the group base page range', () => {
+    const file = { ...createEvidenceFile('/case/合同.pdf'), pages: 5 }
+    file.headerGroups = [{ ...createDefaultHeaderGroup(), mode: 'per_file', pageStart: 2, pageEnd: 4 }]
+    const items = buildHeaderFooterItems(
+      [file],
+      {
+        ...baseRules,
+        footerEnabled: false,
+        insertExceptions: [
+          { kinds: ['header'], scope: { type: 'global', start: 1, end: 5, fileIds: [] }, overrides: { enabled: false } },
+        ],
+      },
+      '/out',
+    )
+
+    // 基础范围 2-4 全部隐藏，范围外的第 1、5 页本来就没有页眉
+    expect(items[0].header).toBeNull()
+    expect(items[0].extraOverlays.filter((o) => o.artifactKind === 'HeaderText')).toHaveLength(0)
+  })
 })

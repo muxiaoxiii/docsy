@@ -378,9 +378,9 @@
             :margin-label="pageNumberRegion === 'header' ? '距顶' : '距底'"
           />
           <div class="rule-item">
-            <label>高级设置</label>
+            <label>分段与例外</label>
             <el-button @click="$emit('editPageNumberRules')">
-              页段与例外{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
+              设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
             </el-button>
           </div>
         </div>
@@ -968,6 +968,25 @@ function removePageNumberGroup(id) {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 8px 12px;
+  align-items: start;
+}
+/* 网格内每个选项项：统一结构和对齐 */
+.hf-section-grid :deep(.rule-item) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 58px;
+  justify-content: center;
+}
+.hf-section-grid :deep(.rule-item label) {
+  font-size: 12px;
+  color: var(--docsy-text);
+  line-height: 1.3;
+}
+.hf-section-grid :deep(.field-hint) {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--docsy-text-muted);
 }
 .section-label {
   display: flex;
@@ -976,6 +995,11 @@ function removePageNumberGroup(id) {
   margin-top: 4px;
   padding-top: 8px;
   border-top: 1px solid var(--docsy-border-subtle);
+}
+.section-label strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--docsy-text-strong);
 }
 .section-actions {
   display: flex;

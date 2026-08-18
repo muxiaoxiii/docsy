@@ -2,7 +2,7 @@ import { expandSplitNameTokens } from './splitFileName.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { toChineseNumber } from '../../../core/numberFormat.js'
 import { ptToMm } from '../../../core/unitConversion.js'
-import { pageNumberOverlaysForFile } from './pdfPageNumberRules.js'
+import { pageNumberOverlaysForFile, exceptionMatches, exceptionsForKind, normalizeInsertException } from './pdfPageNumberRules.js'
 
 export { fileName, parentDir, stripPdf, toChineseNumber }
 
@@ -491,6 +491,59 @@ function groupAppliesToFile(group, file) {
   return fileIds.includes(id)
 }
 
+/**
+ * 把页眉/页脚文字 overlay 按共享例外拆成页段。
+ * 返回 null 表示没有例外命中该文件，调用方走原有单配置路径；
+ * 返回数组（可能为空 = 范围内全部隐藏）时，每段带自己的 pageStart/pageEnd 和覆盖字段。
+ */
+export function textOverlaySegmentsForFile(file, index, baseConfig, group, exceptions, rules = {}) {
+  const pages = Number(file?.pages || 0)
+  if (!pages || !exceptions?.length || !baseConfig) return null
+  const normalized = exceptions.map((entry, entryIndex) => normalizeInsertException(entry, entryIndex))
+  const relevant = normalized.filter((entry) => {
+    const fileIds = entry.scope.fileIds || []
+    return !fileIds.length || fileIds.includes(String(file?.id || file?.path || ''))
+  })
+  if (!relevant.length) return null
+  const rangeStart = Math.max(1, Number(group?.pageStart || 1))
+  const rangeEnd = Number(group?.pageEnd || 0) > 0 ? Math.min(Number(group.pageEnd), pages) : pages
+  if (rangeStart > rangeEnd) return null
+  const textKey = baseConfig.region === 'header' ? 'headerText' : 'footerText'
+  const segments = []
+  let active = null
+  const pushActive = () => {
+    if (!active || active.hidden) return
+    segments.push({
+      ...baseConfig,
+      text: active.text,
+      align: active.merged.align || baseConfig.align,
+      fontSize: active.merged.fontSize ?? baseConfig.fontSize,
+      color: active.merged.color || baseConfig.color,
+      pageStart: active.pageStart,
+      pageEnd: active.pageEnd,
+    })
+  }
+  for (let localPage = rangeStart; localPage <= rangeEnd; localPage += 1) {
+    const globalPage = Number(file.pageStart || 1) + localPage - 1
+    const merged = relevant
+      .filter((entry) => exceptionMatches(entry, file, globalPage, localPage))
+      .reduce((result, entry) => ({ ...result, ...(entry.overrides || {}) }), {})
+    const hidden = merged.enabled === false
+    const text = merged[textKey] ? resolveTextTemplate(merged[textKey], file, index, rules) : baseConfig.text
+    const signature = hidden
+      ? 'hide'
+      : JSON.stringify({ text, align: merged.align || '', fontSize: merged.fontSize ?? '', color: merged.color || '' })
+    if (active && active.signature === signature) {
+      active.pageEnd = localPage
+      continue
+    }
+    pushActive()
+    active = { signature, hidden, merged, text, pageStart: localPage, pageEnd: localPage }
+  }
+  pushActive()
+  return segments
+}
+
 export function canWriteHeader(file) {
   return Boolean(file?.path)
 }
@@ -549,6 +602,11 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
   const rangedFiles = assignPageRanges(files)
   const total = totalPages(rangedFiles)
   const numberingDefaults = { ...createDefaultNumberingDefaults(), ...(rules.numberingDefaults || {}) }
+  // 统一插入例外：按类型分发给三类规则；页码额外合并规则上残留的旧 exceptions
+  const sharedExceptions = Array.isArray(rules.insertExceptions) ? rules.insertExceptions : []
+  const headerExceptions = exceptionsForKind(sharedExceptions, 'header')
+  const footerTextExceptions = exceptionsForKind(sharedExceptions, 'footerText')
+  const pageNumberSharedExceptions = exceptionsForKind(sharedExceptions, 'pageNumber')
   return rangedFiles.map((file, index) => {
     const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
     // When global apply is ON, infer enabled state from group content
@@ -649,7 +707,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             marginMm: pageNumberGroup.marginMm ?? rules.footerMarginMm ?? 10,
             offsetXMm: pageNumberGroup.offsetXMm ?? rules.footerOffsetXMm ?? 0,
             color: pageNumberGroup.color || rules.footerColor || '#000000',
-            exceptions: pageNumberGroup.exceptions || pageNumberGroup.overrides || [],
+            exceptions: [...(pageNumberGroup.exceptions || pageNumberGroup.overrides || []), ...pageNumberSharedExceptions],
           })
         : []
     const extraOverlays = [...convertedExistingOverlays(file, rules), ...mainPageNumberOverlays]
@@ -664,7 +722,12 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
           rules,
         )
         if (groupText) {
-          extraOverlays.push(overlayConfigForGroup(file, 'header', groupText, g))
+          const baseConfig = overlayConfigForGroup(file, 'header', groupText, g)
+          const segments = headerExceptions.length
+            ? textOverlaySegmentsForFile(file, index, baseConfig, g, headerExceptions, rules)
+            : null
+          if (segments) extraOverlays.push(...segments)
+          else extraOverlays.push(baseConfig)
         }
       }
     }
@@ -675,7 +738,12 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         if (g.text) {
           const resolvedText = resolveTextTemplate(g.text, file, index, rules)
           if (resolvedText) {
-            extraOverlays.push(footerTextOverlayConfigForGroup(resolvedText, g, rules))
+            const baseConfig = footerTextOverlayConfigForGroup(resolvedText, g, rules)
+            const segments = footerTextExceptions.length
+              ? textOverlaySegmentsForFile(file, index, baseConfig, g, footerTextExceptions, rules)
+              : null
+            if (segments) extraOverlays.push(...segments)
+            else extraOverlays.push(baseConfig)
           }
         }
       }
@@ -703,11 +771,38 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             marginMm: g.marginMm ?? rules.footerMarginMm ?? 10,
             offsetXMm: g.offsetXMm ?? rules.footerOffsetXMm ?? 0,
             color: g.color || rules.footerColor || '#000000',
-            exceptions: g.exceptions || g.overrides || [],
+            exceptions: [...(g.exceptions || g.overrides || []), ...pageNumberSharedExceptions],
           }),
         )
       }
     }
+    // 主项页眉/页脚文字：有例外命中时拆成页段走 extraOverlays，主项字段置 null
+    const mainHeaderConfig = header ? overlayConfigForFile(file, 'header', header, rules, headerGroup) : null
+    const mainHeaderSegments =
+      mainHeaderConfig && headerExceptions.length
+        ? textOverlaySegmentsForFile(file, index, mainHeaderConfig, headerGroup, headerExceptions, rules)
+        : null
+    if (mainHeaderSegments) extraOverlays.push(...mainHeaderSegments)
+    const mainFooterConfig =
+      legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
+        ? footerInsertEnabled
+          ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules)
+          : null
+        : footerInsertEnabled &&
+            footerTextGroup &&
+            footerTextGroup.enabled !== false &&
+            (footerTextGroup.text || rules.footerTextContent)
+          ? footerTextOverlayConfigForGroup(
+              resolveTextTemplate(footerTextGroup.text || rules.footerTextContent, file, index, rules),
+              footerTextGroup,
+              rules,
+            )
+          : null
+    const mainFooterSegments =
+      mainFooterConfig && footerTextExceptions.length
+        ? textOverlaySegmentsForFile(file, index, mainFooterConfig, footerTextGroup, footerTextExceptions, rules)
+        : null
+    if (mainFooterSegments) extraOverlays.push(...mainFooterSegments)
     file.outputPath = outputPath
     return {
       inputPath: file.path,
@@ -735,22 +830,8 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         headerReplacement: existingHeaderReplacement,
         footerReplacement: existingFooterReplacement,
       },
-      header: header ? overlayConfigForFile(file, 'header', header, rules, headerGroup) : null,
-      footer:
-        legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
-          ? footerInsertEnabled
-            ? overlayConfigForFile(file, 'footer', file.footer ?? rules.footerText, rules)
-            : null
-          : footerInsertEnabled &&
-              footerTextGroup &&
-              footerTextGroup.enabled !== false &&
-              (footerTextGroup.text || rules.footerTextContent)
-            ? footerTextOverlayConfigForGroup(
-                resolveTextTemplate(footerTextGroup.text || rules.footerTextContent, file, index, rules),
-                footerTextGroup,
-                rules,
-              )
-            : null,
+      header: mainHeaderSegments ? null : mainHeaderConfig,
+      footer: mainFooterSegments ? null : mainFooterConfig,
       extraOverlays,
       bookmarks: rules.bookmarkEnabled
         ? [

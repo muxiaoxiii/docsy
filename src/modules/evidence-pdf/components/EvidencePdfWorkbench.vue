@@ -211,20 +211,25 @@
 
       <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title-row">
-          <div class="block-title">插入新页眉、页脚文字和页码</div>
-          <div class="block-actions">
+          <div class="block-title">插入新页眉、页脚、页码</div>
+        </div>
+        <div class="hf-control-bar">
+          <div class="hf-control-left">
+            <span class="hf-control-label">证据编号起始</span>
+            <el-input-number v-model="numberingDefaults.evidenceStart" :min="0" :max="9999" size="small" controls-position="right" style="width: 120px" />
+            <el-tooltip content="各条页眉规则默认跟随；也可在规则内单独覆盖。页码起始在各页码规则内设置" placement="top">
+              <el-icon class="hf-control-info"><InfoFilled /></el-icon>
+            </el-tooltip>
+          </div>
+          <div class="hf-control-center">
             <el-button size="small" :disabled="!insertHeaderFooterEnabled" @click="pageNumberRulesVisible = true">
-              高级设置{{ totalPageNumberExceptionCount ? `（${totalPageNumberExceptionCount}）` : '' }}
+              分段与例外{{ totalPageNumberExceptionCount ? `（${totalPageNumberExceptionCount}）` : '' }}
             </el-button>
+          </div>
+          <div class="hf-control-right">
             <el-checkbox v-model="globalApplyEnabled" size="small">全局应用</el-checkbox>
             <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
           </div>
-        </div>
-        <div v-if="insertHeaderFooterEnabled" class="numbering-defaults">
-          <div class="numbering-defaults-title">
-            <strong>证据编号</strong><span>各条页眉规则默认跟随；也可在规则内单独覆盖。页码起始在各页码规则内设置</span>
-          </div>
-          <div class="rule-item"><label>证据序号起始</label><el-input-number v-model="numberingDefaults.evidenceStart" :min="0" :max="9999" /></div>
         </div>
         <HeaderFooterRuleFields
           v-if="insertHeaderFooterEnabled"
@@ -274,7 +279,7 @@
           v-model:page-number-margin-mm="footerMarginMm"
           v-model:page-number-offset-x-mm="footerOffsetXMm"
           v-model:page-number-color="footerColor"
-          :page-number-override-count="selectedPageNumberExceptions.length"
+          :page-number-override-count="pageNumberKindExceptionCount"
           v-model:page-number-show-total="pageNumberShowTotal"
           :page-number-sample-page="previewSamplePage"
           :page-number-sample-total="previewSampleTotal"
@@ -322,11 +327,11 @@
 
       <div v-if="showProcessingControls && outputMode !== 'files_only'" class="rule-block">
         <div class="block-title">PDF 书签</div>
-        <div class="rule-grid bookmark-rule-grid">
-          <div class="rule-item">
+          <div class="rule-grid bookmark-rule-grid">
+          <div class="rule-item rule-item--control-only">
             <el-checkbox v-model="bookmarkEnabled">添加书签</el-checkbox>
           </div>
-          <div class="rule-item">
+          <div class="rule-item rule-item--control-only">
             <el-checkbox v-model="bookmarkRemoveExisting">删除已有书签</el-checkbox>
           </div>
           <div v-if="bookmarkEnabled" class="rule-item">
@@ -795,7 +800,7 @@
         v-model:page-number-margin-mm="footerMarginMm"
         v-model:page-number-offset-x-mm="footerOffsetXMm"
         v-model:page-number-color="footerColor"
-        :page-number-override-count="selectedPageNumberExceptions.length"
+        :page-number-override-count="pageNumberKindExceptionCount"
         v-model:page-number-show-total="pageNumberShowTotal"
         :page-number-sample-page="previewSamplePage"
         :page-number-sample-total="previewSampleTotal"
@@ -810,6 +815,7 @@
     </el-dialog>
     <PageNumberRuleDialog
       v-model:visible="pageNumberRulesVisible"
+      v-model:exceptions="insertExceptions"
       v-model:groups="pageNumberGroupsModel"
       v-model:selected-group-id="selectedPageNumberGroupId"
       v-model:header-groups="headerGroupsModel"
@@ -924,7 +930,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { Delete, Bottom, Rank, RefreshLeft, Top } from '@element-plus/icons-vue'
+import { Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -1390,9 +1396,19 @@ const footerText = ref('{page}/{total}')
 const footerContinuous = ref(true)
 // pageNumberSequence, pageNumberStyle, pageNumberRegion are computed from selectedPageNumberGroup above
 const pageNumberRulesVisible = ref(false)
+// 统一插入例外：页眉/页脚文字/页码共用，kinds 勾选决定作用类型
+const insertExceptions = ref([])
 const selectedPageNumberExceptions = computed(() => selectedPageNumberGroup.value?.exceptions || [])
-const totalPageNumberExceptionCount = computed(() =>
-  pageNumberGroupsModel.value.reduce((total, group) => total + Number(group.exceptions?.length || 0), 0),
+const totalPageNumberExceptionCount = computed(
+  () =>
+    insertExceptions.value.length +
+    pageNumberGroupsModel.value.reduce((total, group) => total + Number(group.exceptions?.length || 0), 0),
+)
+// 页码区块"分段与例外"计数：共享列表中勾选页码的行 + 选中规则上未迁移的旧例外
+const pageNumberKindExceptionCount = computed(
+  () =>
+    insertExceptions.value.filter((entry) => (entry.kinds || []).includes('pageNumber')).length +
+    selectedPageNumberExceptions.value.length,
 )
 // footerAlign..footerColor are page number placement, backed by selectedPageNumberGroup
 const footerAlign = computed({
@@ -1542,6 +1558,7 @@ function processingPresetSnapshot() {
     pageNumberEnabled: footerEnabled.value,
     pageNumberShowTotal: pageNumberShowTotal.value,
     numberingDefaults: numberingDefaults.value,
+    insertExceptions: insertExceptions.value,
     headerGroups: headerGroupsModel.value,
     footerTextGroups: footerTextGroupsModel.value,
     pageNumberGroups: pageNumberGroupsModel.value,
@@ -1579,6 +1596,7 @@ function applyProcessingPresetSettings(settings) {
     evidenceStart: Number(presetNumbering.evidenceStart ?? 1),
     pageStart: Number(presetNumbering.pageStart ?? 1),
   }
+  insertExceptions.value = Array.isArray(value.insertExceptions) ? cloneData(value.insertExceptions) : []
   const headerValues = value.headerGroups?.length ? value.headerGroups : [createDefaultHeaderGroup()]
   const footerValues = value.footerTextGroups?.length ? value.footerTextGroups : [createDefaultFooterTextGroup()]
   const pageValues = value.pageNumberGroups?.length ? value.pageNumberGroups : [createDefaultPageNumberGroup()]
@@ -1618,9 +1636,12 @@ function applySelectedProcessingPreset() {
   const preset = selectedProcessingPreset()
   if (!preset) return
   const availableFileIds = new Set(overlayFiles.value.map((file) => String(file.id || file.path || '')))
-  const referencedFileIds = (preset.settings?.pageNumberGroups || []).flatMap((group) =>
-    (group.exceptions || []).flatMap((entry) => entry.scope?.fileIds || []),
-  )
+  const referencedFileIds = [
+    ...(preset.settings?.pageNumberGroups || []).flatMap((group) =>
+      (group.exceptions || []).flatMap((entry) => entry.scope?.fileIds || []),
+    ),
+    ...(preset.settings?.insertExceptions || []).flatMap((entry) => entry.scope?.fileIds || []),
+  ]
   const missingFileCount = referencedFileIds.filter((id) => !availableFileIds.has(String(id))).length
   applyProcessingPresetSettings(preset.settings)
   ElMessage.success(`已应用“${preset.name}”，设置会用于本次处理`)
@@ -2116,6 +2137,7 @@ const currentRules = computed(() => ({
   pageNumberColor: footerColor.value,
   numberingDefaults: numberingDefaults.value,
   pageNumberShowTotal: pageNumberShowTotal.value,
+  insertExceptions: insertHeaderFooterEnabled.value ? insertExceptions.value : [],
   selectedHeaderGroupId: selectedHeaderGroupId.value,
   selectedFooterTextGroupId: selectedFooterTextGroupId.value,
   selectedPageNumberGroupId: selectedPageNumberGroupId.value,
@@ -3936,8 +3958,7 @@ h3 {
   color: var(--docsy-text-strong);
 }
 
-.preset-label span,
-.numbering-defaults-title span {
+.preset-label span {
   font-size: 12px;
   color: var(--docsy-text-muted);
 }
@@ -3946,28 +3967,58 @@ h3 {
   width: min(280px, 100%);
 }
 
-.numbering-defaults {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+.hf-control-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 10px;
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-muted);
+}
+
+.hf-control-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.hf-control-center {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.hf-control-right {
+  display: flex;
+  align-items: center;
   gap: 10px;
-  align-items: end;
-  margin-bottom: 12px;
-  padding: 10px;
-  border-left: 3px solid var(--el-color-primary-light-5);
-  background: var(--docsy-surface-elevated);
+  flex-shrink: 0;
 }
 
-.numbering-defaults-title {
-  align-self: center;
+.hf-control-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--docsy-text);
+  white-space: nowrap;
 }
 
-.numbering-defaults-title strong,
-.numbering-defaults-title span {
-  display: block;
+.hf-control-info {
+  font-size: 14px;
+  color: var(--docsy-text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+
+.hf-control-info:hover {
+  color: var(--docsy-text-strong);
 }
 
 .block-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   margin-bottom: 10px;
   color: var(--docsy-text-strong);
@@ -4112,17 +4163,26 @@ h3 {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 8px 12px;
+  align-items: start;
 }
 
 .rule-item {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-height: 58px;
+  justify-content: center;
 }
 
 .rule-item label {
   font-size: 12px;
   color: var(--docsy-text);
+  line-height: 1.3;
+}
+
+/* Checkbox-only items: center vertically to align with controls in labeled items */
+.rule-item--control-only {
+  justify-content: center;
 }
 
 .field-hint {
@@ -4350,6 +4410,11 @@ h3 {
   flex-wrap: wrap;
   gap: 8px 16px;
   align-items: center;
+}
+
+.bookmark-rule-grid .rule-item {
+  min-height: 32px;
+  justify-content: center;
 }
 
 .content-subrows {
