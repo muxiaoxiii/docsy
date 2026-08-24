@@ -1,1 +1,5 @@
-{"items": []}
+{
+  "items": [
+    { "src": "assets/screenshots/home.png", "alt": "首页" }
+  ]
+}
