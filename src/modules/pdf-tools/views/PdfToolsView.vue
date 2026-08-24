@@ -143,30 +143,9 @@
 
           <div v-if="splitFile" class="split-main">
             <section class="split-list-panel">
-              <div class="split-cleanup-panel">
-                <div class="split-cleanup-title">拆分后处理</div>
-                <el-checkbox v-model="splitCleanupHeader">删除页眉区内容</el-checkbox>
-                <el-checkbox v-model="splitCleanupFooter">删除原页码/页脚区内容</el-checkbox>
-                <div v-if="splitCleanupHeader || splitCleanupFooter" class="split-cleanup-zones">
-                  <el-input-number
-                    v-if="splitCleanupHeader"
-                    v-model="splitCleanupHeaderHeightMm"
-                    :min="6"
-                    :max="60"
-                    :step="1"
-                    size="small"
-                  />
-                  <span v-if="splitCleanupHeader">页眉区 mm</span>
-                  <el-input-number
-                    v-if="splitCleanupFooter"
-                    v-model="splitCleanupFooterHeightMm"
-                    :min="6"
-                    :max="60"
-                    :step="1"
-                    size="small"
-                  />
-                  <span v-if="splitCleanupFooter">页脚区 mm</span>
-                </div>
+              <div class="split-options-row">
+                <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
+                <span class="split-option-note">拆分时自动移除无可视内容的空白页（分隔页、扫描背面等）。</span>
               </div>
               <el-alert v-if="splitWarnings.length" type="warning" :closable="false" show-icon class="split-warning">
                 <template #title>页段需要核对（{{ splitWarnings.length }}）</template>
@@ -510,10 +489,7 @@ const splittingMerged = ref(false)
 const splitPreviewPage = ref(1)
 const splitTotalPages = ref(1)
 const splitRunWarnings = ref([])
-const splitCleanupHeader = ref(false)
-const splitCleanupFooter = ref(false)
-const splitCleanupHeaderHeightMm = ref(18)
-const splitCleanupFooterHeightMm = ref(18)
+const removeBlankPages = ref(false)
 const splitWarnings = computed(() => [
   ...splitRangeWarnings(splitRanges.value, splitTotalPages.value),
   ...splitRunWarnings.value,
@@ -996,12 +972,7 @@ async function doSplitMerged() {
       inputPath: splitFile.value,
       outputDir: splitOutputDir.value,
       items: splitRanges.value,
-      cleanup: {
-        headerEnabled: splitCleanupHeader.value,
-        footerEnabled: splitCleanupFooter.value,
-        headerHeightMm: splitCleanupHeaderHeightMm.value,
-        footerHeightMm: splitCleanupFooterHeightMm.value,
-      },
+      removeBlankPages: removeBlankPages.value,
     },
   })
   if (result.ok) {
@@ -1009,9 +980,14 @@ async function doSplitMerged() {
     splitRunWarnings.value = result.data.warnings || []
     const failed = result.data.failed?.length || 0
     const outputs = result.data.outputs?.length || 0
+    const removedBlanks = (result.data.outputs || []).reduce(
+      (sum, output) => sum + Number(output.removedBlankPages || 0),
+      0,
+    )
+    const blankSuffix = removedBlanks > 0 ? `（已删除 ${removedBlanks} 个空白页）` : ''
     failed
-      ? ElMessage.warning(`已拆分 ${outputs} 个，失败 ${failed} 个`)
-      : ElMessage.success(`已拆分 ${outputs} 个 PDF`)
+      ? ElMessage.warning(`已拆分 ${outputs} 个，失败 ${failed} 个${blankSuffix}`)
+      : ElMessage.success(`已拆分 ${outputs} 个 PDF${blankSuffix}`)
   } else {
     ElMessage.error(userFacingError(result.error, 'PDF 拆分失败，请确认文件未损坏且页码范围正确'))
   }
@@ -1217,7 +1193,7 @@ h3 {
   margin: 10px 0;
 }
 
-.split-cleanup-panel {
+.split-options-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1229,18 +1205,8 @@ h3 {
   background: var(--docsy-surface-muted);
 }
 
-.split-cleanup-title {
-  color: var(--docsy-text-strong);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.split-cleanup-zones {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  color: var(--docsy-text);
+.split-option-note {
+  color: var(--docsy-text-muted);
   font-size: 12px;
 }
 

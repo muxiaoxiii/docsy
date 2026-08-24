@@ -442,11 +442,10 @@
             </div>
           </div>
         </div>
-        <div class="split-cleanup-options">
-          <div class="block-title">拆分后处理</div>
-          <el-checkbox v-model="splitCleanupHeader">删除页眉区内容</el-checkbox>
-          <el-checkbox v-model="splitCleanupFooter">删除原页码/页脚区内容</el-checkbox>
-          <span class="split-cleanup-note">仅在拆分输出文件时执行，不修改导入的合并 PDF。</span>
+        <div class="split-options-row">
+          <div class="block-title">拆分选项</div>
+          <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
+          <span class="split-option-note">拆分时自动移除无可视内容的空白页（分隔页、扫描背面等），输出页数可能少于页段页数。</span>
         </div>
         <el-alert
           v-if="mergedImportWarnings.length"
@@ -1102,8 +1101,7 @@ const splitNameSeparator = ref('-')
 const splitNameCustomSeparator = ref('')
 const headerFooterSettingsVisible = ref(false)
 const splitReplacementOutputDir = ref('')
-const splitCleanupHeader = ref(false)
-const splitCleanupFooter = ref(false)
+const removeBlankPages = ref(false)
 
 const existingBookmarkCount = ref(0)
 const existingBookmarkAlertVisible = ref(true)
@@ -2262,8 +2260,7 @@ const {
   splitNameSeparator,
   splitNameCustomSeparator,
   splitReplacementOutputDir,
-  splitCleanupHeader,
-  splitCleanupFooter,
+  removeBlankPages,
   previewMaxPage,
   cleanupHeaderHeightMm,
   cleanupFooterHeightMm,
@@ -4229,7 +4226,7 @@ h3 {
   margin-bottom: 10px;
 }
 
-.split-cleanup-options {
+.split-options-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -4241,7 +4238,7 @@ h3 {
   background: var(--docsy-surface-muted);
 }
 
-.split-cleanup-note {
+.split-option-note {
   color: var(--docsy-text-muted);
   font-size: 12px;
 }

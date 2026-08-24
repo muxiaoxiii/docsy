@@ -33,8 +33,7 @@ export function useEvidencePdfMergedImport({
   splitNameSeparator,
   splitNameCustomSeparator,
   splitReplacementOutputDir,
-  splitCleanupHeader,
-  splitCleanupFooter,
+  removeBlankPages,
   _workflowMode,
   _insertHeaderFooterEnabled,
   _headerMode,
@@ -224,12 +223,7 @@ export function useEvidencePdfMergedImport({
           inputPath: mergedImportPlan.value.inputPath,
           outputDir: mergedImportPlan.value.outputDir,
           items,
-          cleanup: {
-            headerEnabled: Boolean(splitCleanupHeader?.value),
-            footerEnabled: Boolean(splitCleanupFooter?.value),
-            headerHeightMm: cleanupHeaderHeightMm.value,
-            footerHeightMm: cleanupFooterHeightMm.value,
-          },
+          removeBlankPages: Boolean(removeBlankPages?.value),
         },
       })
       if (!split.ok) {
@@ -275,12 +269,17 @@ export function useEvidencePdfMergedImport({
 
       const failed = split.data.failed?.length || 0
       const warnings = split.data.warnings || []
+      const removedBlanks = (outputs || []).reduce(
+        (sum, output) => sum + Number(output.removedBlankPages || 0),
+        0,
+      )
+      const blankSuffix = removedBlanks > 0 ? `（已删除 ${removedBlanks} 个空白页）` : ''
       if (failed) {
-        ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个`)
+        ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个${blankSuffix}`)
       } else if (warnings.length) {
-        ElMessage.warning(`已生成 ${outputs.length} 个证据，需核对页段提示`)
+        ElMessage.warning(`已生成 ${outputs.length} 个证据，需核对页段提示${blankSuffix}`)
       } else {
-        ElMessage.success(`已生成 ${outputs.length} 个证据`)
+        ElMessage.success(`已生成 ${outputs.length} 个证据${blankSuffix}`)
       }
     } finally {
       splittingMergedImport.value = false
