@@ -424,7 +424,7 @@ fn apply_merge_if_requested(
             fs::create_dir_all(parent).context("创建合并 PDF 输出目录失败")?;
         }
     }
-    let output = qpdf::merge(&inputs, &merge.output_path)?;
+    let output = qpdf::merge(&inputs, &merge.output_path, false)?;
 
     let merge_bookmarks = collect_merge_bookmarks(items, results);
     let remove_existing = items

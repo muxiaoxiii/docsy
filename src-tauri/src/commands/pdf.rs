@@ -130,8 +130,13 @@ pub async fn unlock_pdf(input: String) -> Result<UnlockResult, String> {
 }
 
 #[tauri::command]
-pub async fn merge_pdfs(inputs: Vec<String>, output: String) -> Result<String, String> {
-    run_blocking(move || crate::pdf::qpdf::merge(&inputs, &output)).await
+pub async fn merge_pdfs(
+    inputs: Vec<String>,
+    output: String,
+    duplex_separate: Option<bool>,
+) -> Result<String, String> {
+    let duplex = duplex_separate.unwrap_or(false);
+    run_blocking(move || crate::pdf::qpdf::merge(&inputs, &output, duplex)).await
 }
 
 #[tauri::command]

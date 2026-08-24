@@ -49,6 +49,10 @@
             @reorder="reorderMergeFiles"
           />
           <template #actions>
+            <div class="merge-options">
+              <el-checkbox v-model="duplexSeparate">双面打印分隔模式</el-checkbox>
+              <span class="merge-option-hint">文件页数为奇数时在末尾补一页空白，让每份文件独立占满双面打印的整张纸</span>
+            </div>
             <el-button type="success" @click="doMerge" :loading="merging" :disabled="mergeFiles.length < 2">
               合并为一个 PDF
             </el-button>
@@ -488,6 +492,7 @@ async function batchUnlock() {
 
 const mergeFiles = ref([])
 const merging = ref(false)
+const duplexSeparate = ref(false)
 const extractFile = ref('')
 const extractOutputDir = ref('')
 const extractPageText = ref('')
@@ -684,6 +689,7 @@ async function doMerge() {
     const result = await tauriCallSafe('merge_pdfs', {
       inputs: mergeFiles.value.map((file) => file.path),
       output: outputPath,
+      duplexSeparate: duplexSeparate.value,
     })
     result.ok
       ? ElMessage.success('合并完成')
@@ -1332,5 +1338,20 @@ h3 {
   font-size: 13px;
   color: var(--docsy-text);
   white-space: nowrap;
+}
+.merge-options {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-right: auto;
+}
+.merge-options .el-checkbox {
+  margin-right: 0;
+}
+.merge-option-hint {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>

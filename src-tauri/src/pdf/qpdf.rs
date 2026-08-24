@@ -113,7 +113,7 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
     })
 }
 
-pub fn merge(inputs: &[String], output: &str) -> Result<String> {
+pub fn merge(inputs: &[String], output: &str, duplex_separate: bool) -> Result<String> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let output_path = unique_available_path(Path::new(output));
@@ -124,8 +124,22 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     // reachable page content before unused resources are removed.
     add_merge_args(&mut cmd);
     cmd.arg("--empty").arg("--pages");
+
+    // 双面打印分隔模式：奇数页文件末尾补一页同尺寸空白页，让每份文件
+    // 都占满整张纸，避免两份文件拼在同一张纸的正反面。
+    // 空白页临时文件由守卫持有，合并命令运行期间保持存在，结束后自动清理。
+    let mut blank_guards: Vec<crate::util::fs::TempPathGuard> = Vec::new();
     for input in inputs {
         cmd.arg(input);
+        if duplex_separate {
+            let count = page_count(input)
+                .with_context(|| format!("读取文件页数失败（双面打印分隔模式）：{input}"))?;
+            if count % 2 == 1 {
+                let blank = make_blank_page_for(input)?;
+                cmd.arg(blank.path()).arg("1");
+                blank_guards.push(blank);
+            }
+        }
     }
     cmd.arg("--").arg(&output_path);
 
@@ -139,6 +153,16 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     }
 
     Ok(output_path.display().to_string())
+}
+
+/// 生成与 `input` 最后一页同尺寸的空白页，用于双面打印分隔。
+fn make_blank_page_for(input: &str) -> Result<crate::util::fs::TempPathGuard> {
+    let pages = super::page_info::get_page_infos(input)
+        .with_context(|| format!("读取文件页面尺寸失败（双面打印分隔模式）：{input}"))?;
+    let last = pages
+        .last()
+        .with_context(|| format!("文件没有可补空白页的页面（双面打印分隔模式）：{input}"))?;
+    super::blank::write_blank_page(last)
 }
 
 /// 压缩 PDF，并通过回调报告阶段。回调只用于 UI 反馈，不改变处理策略。
@@ -491,5 +515,74 @@ mod tests {
         assert!(status_is_success(&exit_status(0)));
         assert!(status_is_success(&exit_status(3)));
         assert!(!status_is_success(&exit_status(2)));
+    }
+
+    /// 双面打印分隔模式端到端验证：奇数页文件末尾补空白页。
+    /// 依赖真实 qpdf 二进制，未安装时静默跳过。
+    #[test]
+    fn merge_with_duplex_separate_pads_odd_files() {
+        let qpdf = crate::external::QpdfTool;
+        if qpdf.binary_path().is_err() {
+            return;
+        }
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("docsy-merge-test-{}-{stamp}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("测试目录创建失败");
+
+        let size = crate::pdf::page_info::PageSize {
+            width_pt: 595.28,
+            height_pt: 841.89,
+            raw_width_pt: 595.28,
+            raw_height_pt: 841.89,
+            box_x0: 0.0,
+            box_y0: 0.0,
+            rotate: 0,
+        };
+        let blank_guard = crate::pdf::blank::write_blank_page(&size).expect("空白页生成失败");
+        let blank = blank_guard.path().display().to_string();
+
+        let one = dir.join("one.pdf");
+        let two = dir.join("two.pdf");
+        let three = dir.join("three.pdf");
+        for (pages, path) in [(1, &one), (2, &two), (3, &three)] {
+            let mut cmd = crate::external::hidden_command(&qpdf.binary_path().unwrap());
+            cmd.arg("--empty").arg("--pages");
+            for _ in 0..pages {
+                cmd.arg(&blank).arg("1");
+            }
+            cmd.arg("--").arg(path);
+            let output = run_cancellable("测试建页", cmd).expect("qpdf 建页失败");
+            assert!(status_is_success(&output.status), "qpdf 建页退出码异常");
+        }
+        assert_eq!(page_count(one.to_str().unwrap()).unwrap(), 1);
+        assert_eq!(page_count(two.to_str().unwrap()).unwrap(), 2);
+        assert_eq!(page_count(three.to_str().unwrap()).unwrap(), 3);
+
+        let inputs = vec![
+            one.display().to_string(),
+            two.display().to_string(),
+            three.display().to_string(),
+        ];
+
+        // 分隔模式：1+1（空白）、2、3+1（空白）→ 8 页
+        let output = dir.join("duplex.pdf");
+        let merged = merge(&inputs, output.to_str().unwrap(), true).expect("分隔模式合并失败");
+        assert_eq!(
+            page_count(&merged).unwrap(),
+            8,
+            "双面分隔后总页数应为偶数且每文件独立成纸"
+        );
+
+        // 普通模式保持原页数：1+2+3 → 6 页
+        let output = dir.join("plain.pdf");
+        let merged = merge(&inputs, output.to_str().unwrap(), false).expect("普通合并失败");
+        assert_eq!(page_count(&merged).unwrap(), 6, "普通模式不应补空白页");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
