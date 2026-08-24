@@ -1,5 +1,11 @@
 {
   "items": [
-    { "src": "assets/screenshots/home.png", "alt": "首页" }
+    { "src": "assets/screenshots/home.png", "alt": "首页" },
+    { "src": "assets/screenshots/shot-evidence.png", "alt": "分项证据页眉页脚处理" },
+    { "src": "assets/screenshots/shot-pdf-tools.png", "alt": "PDF 工具 · PDF 合并" },
+    { "src": "assets/screenshots/shot-convert.png", "alt": "文档转换 · Office 与 Markdown 互转" },
+    { "src": "assets/screenshots/shot-video.png", "alt": "视频抽帧" },
+    { "src": "assets/screenshots/shot-image.png", "alt": "图片排版" },
+    { "src": "assets/screenshots/shot-template.png", "alt": "文书模板批量生成" }
   ]
 }
