@@ -1,8 +1,7 @@
 # Docsy 下载站 Caddy 配置
 #
-# 把下面这行里的 docsy.example.com 换成你的真实域名，
-# Caddy 首次启动会自动申请并续期 HTTPS 证书。
-docsy.example.com {
+# 域名：docsy.muxiaoxi.top（A 记录指向 NAS，Caddy 自动申请并续期 HTTPS）
+docsy.muxiaoxi.top {
 	# 站点根目录（容器内路径，对应宿主机 ./public）
 	root * /srv/www
 

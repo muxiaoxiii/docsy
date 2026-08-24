@@ -8,11 +8,17 @@
         <div class="card-header">
           <span>外部工具状态</span>
           <div class="card-header-actions">
+            <el-button size="small" @click="openToolsPage">外部工具下载页面</el-button>
             <el-button size="small" :loading="checkingTools" @click="checkTools">重新检测</el-button>
             <el-button size="small" @click="openManagedToolsDir">打开 Docsy 工具目录</el-button>
           </div>
         </div>
       </template>
+      <el-alert type="warning" :closable="false" show-icon class="tools-risk-alert">
+        <template #title>风险提示：请从官方渠道下载外部工具</template>
+        只使用官方源或官网下载页列出的镜像，不要使用第三方打包版本；下载后注意核对 SHA256 校验值（Docsy
+        自动安装时会强制校验）。第三方工具的使用风险由您自行承担。
+      </el-alert>
       <p class="section-desc">
         qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；Word 文件转 PDF 会优先使用 Microsoft
         Word，失败后使用 LibreOffice。如果某个工具出现问题（如 qpdf
@@ -153,6 +159,7 @@
 <script setup>
 import { computed, ref, reactive, onMounted } from 'vue'
 import { openExternalUrl, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { DOCSY_TOOLS_URL } from '../../../core/siteConfig.js'
 import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Message } from '@element-plus/icons-vue'
@@ -493,6 +500,10 @@ async function openManagedToolsDir() {
   }
 }
 
+function openToolsPage() {
+  openExternalUrl(DOCSY_TOOLS_URL)
+}
+
 async function removeManagedTool(tool) {
   try {
     await ElMessageBox.confirm(
@@ -718,6 +729,21 @@ onMounted(() => {
   font-size: 13px;
   color: var(--docsy-text-muted);
   margin: 0 0 12px;
+}
+
+.tools-risk-alert {
+  margin-bottom: 12px;
+  border-radius: var(--docsy-radius);
+}
+
+.tools-risk-alert :deep(.el-alert__title) {
+  font-size: 13px;
+}
+
+.tools-risk-alert :deep(.el-alert__content) {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--docsy-text);
 }
 
 @media (max-width: 760px) {

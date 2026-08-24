@@ -158,6 +158,119 @@ def build_releases(api_json, assets_dir: Path, proxy: str) -> list:
     return releases
 
 
+# ============================================================
+# 外部工具数据（与 app 内 src-tauri/src/external/managed.rs 保持一致）
+# 版本/校验值来自 app 内置工具清单；官方地址来自各项目官方 GitHub Releases。
+# ============================================================
+
+# ghproxy 系列镜像前缀（国内加速 GitHub 下载，与 app 内置 mirrors 一致）
+GH_MIRROR_PREFIXES = [
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+    "https://gh-proxy.net/",
+]
+
+# 各工具在 docsy 中的用途（与设置页 tools 列表一致）
+TOOL_PURPOSE = {
+    "qpdf": "PDF 合并、拆分、叠加和结构处理",
+    "poppler": "PDF 预览渲染和页眉页脚文本检测",
+    "ffmpeg": "视频信息读取、抽帧和时间戳水印",
+}
+
+# macOS 无官方预编译包，官方推荐 Homebrew
+MACOS_BREW = {
+    "qpdf": {
+        "command": "brew install qpdf",
+        "url": "https://formulae.brew.sh/formula/qpdf",
+        "note": "推荐方式：Docsy 会自动检测系统已安装的 qpdf",
+    },
+    "poppler": {
+        "command": "brew install poppler",
+        "url": "https://formulae.brew.sh/formula/poppler",
+        "note": "推荐方式：Docsy 会自动检测系统已安装的 Poppler",
+    },
+    "ffmpeg": {
+        "command": "brew install ffmpeg",
+        "url": "https://formulae.brew.sh/formula/ffmpeg",
+        "note": "时间戳水印需要 drawtext 滤镜，Homebrew 官方 ffmpeg 已包含；Docsy 会自动检测",
+    },
+}
+
+# Windows 官方包（与 managed.rs embedded_windows_package_spec 一致）
+WINDOWS_PACKAGE = {
+    "qpdf": {
+        "version": "12.3.2",
+        "file": "qpdf-12.3.2-msvc64.zip",
+        "size": 24536601,
+        "sha256": "8941870a604e7c87ed24566b038d46c24ce76616254d2383c578f60c0677f202",
+        "url": "https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip",
+        "page": "https://github.com/qpdf/qpdf/releases",
+        "note": "官方 msvc64 压缩包；也可以在 Docsy 设置页直接「下载安装到 Docsy」自动安装",
+    },
+    "poppler": {
+        "version": "26.02.0-0",
+        "file": "Release-26.02.0-0.zip",
+        "size": 16138240,
+        "sha256": "993e4a94376ed712fafc7058d724ea0b943d118bbd2305cd9ed55174eb85cda5",
+        "url": "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip",
+        "page": "https://github.com/oschwartz10612/poppler-windows/releases",
+        "note": "Poppler 社区 Windows 打包（官方推荐）；也可以让 Docsy 自动安装",
+    },
+    "ffmpeg": {
+        "version": "9.0（master 滚动版）",
+        "file": "ffmpeg-master-latest-win64-gpl.zip",
+        "size": 170641785,
+        "sha256": "",
+        "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+        "page": "https://github.com/BtbN/FFmpeg-Builds/releases",
+        "note": "BtbN 官方构建（GPL 版，含 drawtext 滤镜）；滚动更新无固定校验值，也可以让 Docsy 自动安装",
+    },
+}
+
+TOOL_ORDER = ["qpdf", "poppler", "ffmpeg"]
+
+
+def build_tools() -> dict:
+    """生成外部工具数据：工具 × 系统 → 版本/官方地址/镜像/说明。"""
+    tools = {}
+    for name in TOOL_ORDER:
+        brew = MACOS_BREW[name]
+        pkg = WINDOWS_PACKAGE[name]
+        entries = [
+            {
+                "platform": "macos",
+                "os": "macOS（Apple 芯片 / Intel）",
+                "type": "brew",
+                "version": "Homebrew 最新版",
+                "command": brew["command"],
+                "url": brew["url"],
+                "size": None,
+                "sha256": "",
+                "mirror_url": "",
+                "note": brew["note"],
+            },
+            {
+                "platform": "windows",
+                "os": "Windows 10 / 11（64 位）",
+                "type": "zip",
+                "version": pkg["version"],
+                "command": "",
+                "url": pkg["url"],
+                "size": pkg["size"],
+                "sha256": pkg["sha256"],
+                "mirror_url": GH_MIRROR_PREFIXES[0] + pkg["url"],
+                "note": pkg["note"],
+            },
+        ]
+        tools[name] = {
+            "label": name,
+            "purpose": TOOL_PURPOSE[name],
+            "page": pkg["page"],
+            "entries": entries,
+        }
+    return tools
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="生成 Docsy 下载站数据")
     parser.add_argument("--api-json", required=True, help="GitHub Releases API JSON 文件")
@@ -195,9 +308,18 @@ def main() -> int:
         json.dumps(changelog_entries, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
+    tools_data = {
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "github_url": GITHUB_RELEASES_URL,
+        "tools": build_tools(),
+    }
+    (out_dir / "tools.json").write_text(
+        json.dumps(tools_data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
     log(
         f"完成：{len(releases)} 个版本，{sum(len(r['assets']) for r in releases)} 个安装包，"
-        f"{len(changelog_entries)} 条更新日志"
+        f"{len(changelog_entries)} 条更新日志，{len(tools_data['tools'])} 个外部工具"
     )
     return 0
 

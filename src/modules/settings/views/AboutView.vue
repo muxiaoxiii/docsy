@@ -18,6 +18,15 @@
         github.com/muxiaoxiii/docsy
       </button>
 
+      <button type="button" class="about-site" @click="openSite">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6" />
+          <path d="M11 13l9 -9" />
+          <path d="M15 4h5v5" />
+        </svg>
+        访问官网 docsy.muxiaoxi.top
+      </button>
+
       <div class="about-qr">
         <span class="about-qr-label">小红书</span>
         <img src="../../../assets/docsy-qrcode.png" alt="小红书二维码" class="about-qr-img" />
@@ -37,11 +46,16 @@
 
 <script setup>
 import { open } from '@tauri-apps/plugin-shell'
+import { DOCSY_SITE_URL } from '../../../core/siteConfig.js'
 
 const version = import.meta.env.PACKAGE_VERSION || '开发版'
 
 function openGitHub() {
   open('https://github.com/muxiaoxiii/docsy')
+}
+
+function openSite() {
+  open(DOCSY_SITE_URL)
 }
 </script>
 
@@ -62,6 +76,7 @@ function openGitHub() {
     'brand qr'
     'desc qr'
     'github qr'
+    'site qr'
     'divider divider'
     'legal legal';
   align-items: center;
@@ -145,6 +160,34 @@ function openGitHub() {
   border-color: var(--docsy-primary);
 }
 
+.about-site {
+  grid-area: site;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--docsy-primary);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-primary-soft);
+  color: var(--docsy-primary-hover);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.about-site:hover {
+  background: color-mix(in srgb, var(--docsy-primary-soft) 70%, var(--docsy-primary));
+  color: var(--docsy-surface-elevated);
+}
+
+.about-site svg {
+  flex-shrink: 0;
+}
+
 .about-qr {
   grid-area: qr;
   display: flex;
@@ -203,6 +246,7 @@ function openGitHub() {
       'brand'
       'desc'
       'github'
+      'site'
       'qr'
       'divider'
       'legal';
@@ -211,7 +255,8 @@ function openGitHub() {
   }
 
   .about-brand,
-  .about-github {
+  .about-github,
+  .about-site {
     justify-self: center;
   }
 

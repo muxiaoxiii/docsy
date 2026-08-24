@@ -1,19 +1,25 @@
 # Docsy 下载站（软件主页）
 
-Docsy 的软件主页与下载镜像站。解决国内用户从 GitHub 下载安装包困难的问题。
+Docsy 的软件主页与下载镜像站，部署在 **https://docsy.muxiaoxi.top**（Caddy 自动 HTTPS）。
+解决国内用户从 GitHub 下载安装包困难的问题。
 
-- 页面：软件介绍 + 下载（最新版 / 历史版本 / SHA256 校验）+ 更新日志
-- 部署：极空间（或任意支持 Docker Compose 的 NAS）上跑一个 Caddy 容器，自动 HTTPS
+- 页面：
+  - `index.html` 软件主页（介绍 + 下载 + 软件截图 + 更新日志）
+  - `tools.html` 外部工具下载页（qpdf / Poppler / FFmpeg 的系统-版本对照 + 官方地址 + 风险提示）
+- 部署：极空间（或任意支持 Docker Compose 的 NAS）上跑一个 Caddy 容器
 - 同步：GitHub Actions 发布时推送（主通道）+ NAS 定时任务拉取（兜底）
 
 ```
 site/
 ├── public/                  # 静态站点（部署后挂载给 Caddy）
-│   ├── index.html           # 主页
+│   ├── index.html           # 软件主页
+│   ├── tools.html           # 外部工具下载页
 │   ├── css/ js/ assets/     # 样式、脚本、图片（logo/吉祥物/图标）
-│   ├── data/                # releases.json + changelog.json（脚本生成）
+│   ├── data/                # releases.json / changelog.json / tools.json（脚本生成）
+│   │                        # screenshots.json（软件截图清单，手动维护）
+│   ├── assets/screenshots/  # 软件截图图片（放入后登记到 screenshots.json）
 │   └── downloads/           # 安装包（同步脚本拉取，不入仓库）
-├── Caddyfile                # Caddy 配置（替换域名）
+├── Caddyfile                # Caddy 配置（域名 docsy.muxiaoxi.top）
 ├── docker-compose.yml       # 一键部署
 └── scripts/
     ├── build-data.py        # 生成数据 + 补下载安装包（CI 与 NAS 共用）
@@ -39,15 +45,10 @@ docsy-site/
 > 仓库里的 `site/public/downloads/` 已包含最新版安装包（beta26）。
 > 部署后也可以手动运行同步脚本补齐/更新，见下文"四、同步安装包"。
 
-### 2. 修改域名
+### 2. 确认域名
 
-编辑 `Caddyfile`，把第一行的 `docsy.example.com` 换成你的真实域名：
-
-```
-docsy.example.com {
-```
-
-同时把该域名的 **A 记录** 解析到 NAS 的公网 IP（你已经完成域名解析这一步）。
+`Caddyfile` 里已配置域名 **docsy.muxiaoxi.top**，无需修改（如果换域名，改第一行即可）。
+把该域名的 **A 记录** 解析到 NAS 的公网 IP（已完成域名解析这一步）。
 
 ### 3. 创建容器项目
 
@@ -133,6 +134,9 @@ Caddy 会：
 - `public/data/releases.json`：版本列表、安装包文件名/大小/SHA256/下载地址，
   页面据此渲染下载按钮与历史版本
 - `public/data/changelog.json`：由 CHANGELOG.md 解析生成，页面渲染更新日志
+- `public/data/tools.json`：外部工具（qpdf/Poppler/FFmpeg）的系统-版本对照与
+  官方下载地址，`tools.html` 据此渲染；数据与 app 内置工具清单
+  （`src-tauri/src/external/managed.rs`）保持一致
 - `public/downloads/`：安装包本体；文件名以 `Docsy_` 开头
 - 两个同步通道（Actions 推送 / NAS 拉取）都调用同一个 `build-data.py`，
   重复文件按"同名 + 同大小"跳过，不会重复下载
@@ -146,6 +150,18 @@ python3 site/scripts/build-data.py \
   --changelog CHANGELOG.md \
   --out site/public/data
 ```
+
+### 添加软件截图
+
+1. 把截图（建议 1200px 左右宽、PNG/WebP）放入 `public/assets/screenshots/`
+2. 在 `public/data/screenshots.json` 的 `items` 里登记：
+   ```json
+   { "items": [
+     { "src": "assets/screenshots/home.png", "alt": "首页" },
+     { "src": "assets/screenshots/evidence.png", "alt": "证据处理" }
+   ] }
+   ```
+3. 主页「软件截图」区会自动显示；`items` 为空时该区自动隐藏
 
 ---
 

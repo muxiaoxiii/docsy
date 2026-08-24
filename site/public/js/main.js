@@ -311,6 +311,32 @@
     update();
   }
 
+  /* ---------- 软件截图 ---------- */
+
+  function renderScreenshots(items) {
+    var section = document.getElementById('screenshots');
+    var grid = document.getElementById('shot-grid');
+    if (!section || !grid || !items || !items.length) return;
+    var html = '';
+    items.forEach(function (item) {
+      var src = typeof item === 'string' ? item : item.src;
+      var alt = typeof item === 'string' ? '' : item.alt || '';
+      if (!src) return;
+      html +=
+        '<figure class="shot-cell">' +
+        '<img src="' + escapeHtml(src) + '" alt="' + escapeHtml(alt) + '" loading="lazy" />' +
+        (alt ? '<figcaption>' + escapeHtml(alt) + '</figcaption>' : '') +
+        '</figure>';
+    });
+    if (!html) return;
+    grid.innerHTML = html;
+    section.hidden = false;
+    /* 截图区从隐藏变为显示，直接标记内部元素可见 */
+    section.querySelectorAll('.reveal').forEach(function (el) {
+      el.classList.add('is-visible');
+    });
+  }
+
   /* ---------- 数据加载 ---------- */
 
   function loadJson(url) {
@@ -332,10 +358,14 @@
     Promise.all([
       loadJson('data/releases.json'),
       loadJson('data/changelog.json'),
+      loadJson('data/screenshots.json').catch(function () {
+        return null;
+      }),
     ])
       .then(function (results) {
         renderDownloads(results[0].releases || []);
         renderChangelog(results[1] || []);
+        if (results[2] && results[2].items) renderScreenshots(results[2].items);
       })
       .catch(function () {
         /* 回退数据已在首屏渲染，静默即可 */

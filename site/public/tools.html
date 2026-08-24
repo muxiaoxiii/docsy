@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>外部工具下载 · Docsy</title>
+  <meta
+    name="description"
+    content="Docsy 依赖的外部工具（qpdf、Poppler、FFmpeg）官方下载地址与安装指引：macOS 用 Homebrew，Windows 用官方压缩包，附 SHA256 校验值。"
+  />
+  <meta property="og:title" content="外部工具下载 · Docsy" />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="Docsy 首页">
+        <img src="assets/docsy-logo.png" alt="" width="36" height="29" />
+        <span class="brand-name">Docsy</span>
+      </a>
+      <nav class="nav-links" aria-label="主导航">
+        <a href="index.html#features">功能</a>
+        <a href="index.html#download">下载</a>
+        <a href="tools.html" aria-current="page">外部工具</a>
+        <a href="index.html#changelog">更新日志</a>
+      </nav>
+      <a class="nav-gh" href="https://github.com/muxiaoxiii/docsy" target="_blank" rel="noopener">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4 -4.3 -2.5 -6 -3m12 5v-3.5c0 -1 .1 -1.4 -.5 -2c2.8 -.3 5.5 -1.4 5.5 -6a4.6 4.6 0 0 0 -1.3 -3.2a4.2 4.2 0 0 0 -.1 -3.2s-1.1 -.3 -3.5 1.3a12.3 12.3 0 0 0 -6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0 -.1 3.2a4.6 4.6 0 0 0 -1.3 3.2c0 4.6 2.7 5.7 5.5 6" /></svg>
+        <span>GitHub</span>
+      </a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-head">
+      <div class="page-head-inner reveal">
+        <p class="hero-badge">Docsy 外部依赖</p>
+        <h1>外部工具下载</h1>
+        <p class="page-head-sub">
+          qpdf、Poppler、FFmpeg 是 Docsy 处理 PDF 和视频时使用的引擎。
+          按下面的对照表选择你系统的版本，从官方源下载；也可以直接在 Docsy
+          设置页一键安装。
+        </p>
+      </div>
+    </section>
+
+    <section class="tools-section">
+      <div class="tools-risk reveal" role="alert">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.24 3.957l-6.422 11.154a2 2 0 0 0 1.74 2.89h12.884a2 2 0 0 0 1.74 -2.89l-6.422 -11.154a2 2 0 0 0 -3.48 0" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
+        <div>
+          <strong>风险提示</strong>
+          <p>
+            请只从本页列出的官方来源下载工具，不要使用来历不明的第三方打包版本。
+            下载后建议核对文件 SHA256 校验值；Docsy 自动安装时会强制校验。
+            使用第三方工具的风险由您自行承担。
+          </p>
+        </div>
+      </div>
+
+      <div id="tool-list" class="tool-cards">
+        <div class="tool-card reveal">
+          <div class="tool-card-loading">正在加载工具信息…</div>
+        </div>
+      </div>
+
+      <div class="install-guide reveal">
+        <h2>如何安装到 Docsy</h2>
+        <ol class="guide-steps">
+          <li>
+            <strong>方式一（推荐）：系统安装</strong>
+            <p>macOS 用 Homebrew：<code class="code-inline">brew install qpdf poppler ffmpeg</code>，Docsy 会自动检测。Windows 可用 winget 或官方安装包。</p>
+          </li>
+          <li>
+            <strong>方式二：Docsy 一键安装</strong>
+            <p>打开 Docsy 设置 → 外部工具状态，工具未安装时点击「下载安装到 Docsy」，由 Docsy 下载、校验并安装到工具目录。</p>
+          </li>
+          <li>
+            <strong>方式三：本地安装（离线）</strong>
+            <p>下载本页的 zip 包，在设置页点击「本地安装」选择该文件；或解压后把可执行文件放入 Docsy 工具目录（设置页可见路径）。</p>
+          </li>
+        </ol>
+      </div>
+
+      <div class="install-guide reveal">
+        <h2>文档转换工具（Word / WPS / LibreOffice）</h2>
+        <p class="guide-note">
+          Word 文件转 PDF 时，Docsy 优先使用 Microsoft Word，失败后使用 LibreOffice。
+          这些是完整办公软件，请从官方渠道安装：
+        </p>
+        <ul class="guide-links">
+          <li>Microsoft Word：<a href="https://www.microsoft.com/microsoft-365/word" target="_blank" rel="noopener">microsoft.com</a></li>
+          <li>WPS：<a href="https://www.wps.cn/" target="_blank" rel="noopener">wps.cn</a></li>
+          <li>LibreOffice：<a href="https://www.libreoffice.org/download/" target="_blank" rel="noopener">libreoffice.org</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <img src="assets/docsy-logo.png" alt="" width="40" height="32" />
+        <div>
+          <strong>Docsy</strong>
+          <p>本地优先的文档处理工具箱</p>
+        </div>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/muxiaoxiii/docsy" target="_blank" rel="noopener">GitHub 仓库</a>
+        <a href="https://github.com/muxiaoxiii/docsy/releases" target="_blank" rel="noopener">全部版本</a>
+        <a href="https://github.com/muxiaoxiii/docsy/issues" target="_blank" rel="noopener">问题反馈</a>
+      </div>
+      <p class="footer-legal">基于 MIT 协议开源 · 由木小樨开发维护</p>
+    </div>
+  </footer>
+
+  <script src="js/tools.js"></script>
+</body>
+</html>
