@@ -356,7 +356,6 @@ import {
   insertRangeAfter,
   navigatePage,
   parsePageSelection,
-  removeRangeAt,
   setRangeEnd,
   setRangeStart,
 } from '../../../core/pdfUtils.js'
@@ -963,7 +962,18 @@ function insertSplitRangeAfter(index) {
 }
 
 function removeSplitRange(index) {
-  selectedSplitRangeIndex.value = removeRangeAt(splitRanges.value, index, selectedSplitRangeIndex.value)
+  const items = splitRanges.value
+  if (index < 0 || index >= items.length) return
+  const [removed] = items.splice(index, 1)
+  // 删除页段后不留页面空洞：删的是首页段则并入下一段，否则并入上一个页段
+  if (removed && items.length) {
+    if (index === 0) {
+      items[0].pageStart = Math.min(Number(items[0].pageStart || 1), Number(removed.pageStart || 1))
+    } else {
+      items[index - 1].pageEnd = Math.max(Number(items[index - 1].pageEnd || 0), Number(removed.pageEnd || 0))
+    }
+  }
+  selectedSplitRangeIndex.value = Math.min(selectedSplitRangeIndex.value, Math.max(0, items.length - 1))
 }
 
 function reorderSplitRanges(from, to) {

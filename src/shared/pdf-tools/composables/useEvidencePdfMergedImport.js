@@ -7,7 +7,6 @@ import {
   buildRangeAfter,
   insertRangeAfter,
   pageCount,
-  removeRangeAt,
   setRangeEnd,
   setRangeStart,
 } from '../../../core/pdfUtils.js'
@@ -15,8 +14,6 @@ import { createEvidenceFile, sortByNatural } from './useEvidencePdfSession.js'
 import { formatSplitFileName } from './splitFileName.js'
 import { splitRangeWarnings } from './usePdfSplitRanges.js'
 import { headerFooterDetectionZoneMm } from './useEvidencePdfDetection.js'
-
-const MERGED_IMPORT_AUTO_SCAN_PAGES = 300
 
 export function useEvidencePdfMergedImport({
   overlayFiles,
@@ -89,17 +86,12 @@ export function useEvidencePdfMergedImport({
       const countResult = await tauriCallSafe('get_pdf_page_count', { input })
       const totalPages = countResult.ok ? Number(countResult.data || 0) : 0
       knownTotalPages = Math.max(1, totalPages || 1)
-      if (totalPages > MERGED_IMPORT_AUTO_SCAN_PAGES) {
-        ElMessage.warning(
-          `该 PDF 共 ${totalPages} 页，为避免卡顿，先自动识别前 ${MERGED_IMPORT_AUTO_SCAN_PAGES} 页；后续页段可手动补充。`,
-        )
-      }
       const headerScanMm = headerFooterDetectionZoneMm(cleanupHeaderHeightMm.value)
       const footerScanMm = headerFooterDetectionZoneMm(cleanupFooterHeightMm.value)
       const inspect = await tauriCallSafe('inspect_merged_evidence_pdf', {
         args: {
           inputPath: input,
-          maxPages: MERGED_IMPORT_AUTO_SCAN_PAGES,
+          maxPages: knownTotalPages,
           headerZoneMm: headerScanMm,
           footerZoneMm: footerScanMm,
         },
@@ -406,11 +398,21 @@ export function useEvidencePdfMergedImport({
 
   function removeMergedImportRange(index) {
     if (!mergedImportPlan.value) return
-    selectedMergedImportIndex.value = removeRangeAt(
-      mergedImportPlan.value.items,
-      index,
-      selectedMergedImportIndex.value,
-    )
+    const items = mergedImportPlan.value.items
+    if (index < 0 || index >= items.length) return
+    const [removed] = items.splice(index, 1)
+    // 删除页段后不留页面空洞：删的是首页段则并入下一段，否则并入上一个页段
+    if (removed && items.length) {
+      if (index === 0) {
+        items[0].pageStart = Math.min(Number(items[0].pageStart || 1), Number(removed.pageStart || 1))
+      } else {
+        items[index - 1].pageEnd = Math.max(
+          Number(items[index - 1].pageEnd || 0),
+          Number(removed.pageEnd || 0),
+        )
+      }
+    }
+    selectedMergedImportIndex.value = Math.min(selectedMergedImportIndex.value, Math.max(0, items.length - 1))
   }
 
   function sortMergedImportItems({ prop, order }) {
@@ -458,7 +460,6 @@ export function useEvidencePdfMergedImport({
   return {
     mergedImportWarnings,
     selectedMergedImportRange,
-    MERGED_IMPORT_AUTO_SCAN_PAGES,
     importMergedPdfAsEvidence,
     importMergedPdfsForBatch,
     executeMergedImportPlan,

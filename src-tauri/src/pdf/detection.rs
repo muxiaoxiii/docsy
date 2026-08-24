@@ -16,7 +16,8 @@ use std::time::Instant;
 // Full bbox XML plus content-stream inspection is intentionally bounded. A
 // merged evidence file can have thousands of scanned pages, and keeping every
 // page's XML/text/object sample in memory is not safe for a desktop workflow.
-const MAX_SPLIT_ANALYSIS_PAGES: u32 = 600;
+// 3000 页覆盖绝大多数合并证据文件；超过时前端会提示先分析前 N 页。
+const MAX_SPLIT_ANALYSIS_PAGES: u32 = 3000;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -340,9 +341,12 @@ pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestio
         footer_zone_ratio: 0.03,
         header_zone_mm: args.header_zone_mm,
         footer_zone_mm: args.footer_zone_mm,
-        scan_artifacts: false,
+        // 与分项证据处理保持同一套三层检测：启用 artifact 层，
+        // 否则 docsy 生成的"证据N"页眉（PDF artifact）无法参与切分，
+        // 只剩逐页文本对比，容易切得乱七八糟。
+        scan_artifacts: true,
     })?;
-    let items = build_split_suggestions_from_pages(&detection.pages);
+    let items = build_split_suggestions(&detection);
     let items = augment_splits_with_page_number_boundaries(items, &detection.pages);
     let header_pages = count_split_header_pages(&detection.pages);
     let page_number_footer_pages = count_page_number_footers(&detection.pages);
@@ -355,7 +359,7 @@ pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestio
     );
     if max_pages < total_pages {
         warnings.push(format!(
-            "为避免大文件卡顿，本次只自动识别前 {max_pages} 页；后续页段请手动补充或分批处理"
+            "文件共 {total_pages} 页，本次只自动识别前 {max_pages} 页；后续页段请手动补充或分批处理"
         ));
     }
     Ok(SplitSuggestionResult {
@@ -1740,6 +1744,142 @@ fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSugge
     items
 }
 
+/// 基于三层检测结果生成拆分建议（与分项证据处理共用同一套候选）。
+///
+/// 优先级：每页先找覆盖它的页眉候选（artifact 优先，其次重复内容候选），
+/// 候选的 page_range 直接来自检测结果，天然携带稳定边界；没有任何页眉
+/// 候选时（例如第三方合并的 PDF），回退到逐页第一条页眉文本对比。
+fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionItem> {
+    let header_candidates: Vec<&HeaderFooterCandidate> = detection
+        .header_candidates
+        .iter()
+        .filter(|candidate| candidate.region == "header")
+        .filter(|candidate| !candidate.labels.iter().any(|label| label == "page-number"))
+        .collect();
+
+    if header_candidates.is_empty() {
+        return build_split_suggestions_from_pages(&detection.pages);
+    }
+
+    // 预计算规范化页眉文本的出现页数，避免逐页重复做正则规范化。
+    let mut header_text_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for page in &detection.pages {
+        let mut seen = BTreeSet::new();
+        for line in &page.headers {
+            let normalized = normalize_header_footer_text(&line.text);
+            if seen.insert(normalized.clone()) {
+                *header_text_counts.entry(normalized).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut items = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_source = "fallback".to_string();
+    let mut current_start = 1_u32;
+    let mut previous_page = 0_u32;
+
+    for page in &detection.pages {
+        let header = split_header_identity(&header_candidates, page, &header_text_counts);
+        if previous_page == 0 {
+            current_start = page.page;
+            if let Some((name, source)) = header {
+                current_name = Some(name);
+                current_source = source;
+            } else {
+                current_name = Some("目录".to_string());
+                current_source = "fallback".to_string();
+            }
+            previous_page = page.page;
+            continue;
+        }
+
+        if let Some((new_name, source)) = header {
+            if current_name.as_deref() != Some(new_name.as_str()) {
+                let name = current_name
+                    .take()
+                    .unwrap_or_else(|| format!("文件{}", items.len() + 1));
+                let (has_total, sequence_form) =
+                    page_number_meta_for_range(&detection.pages, current_start, previous_page);
+                items.push(SplitSuggestionItem {
+                    name,
+                    page_start: current_start,
+                    page_end: previous_page,
+                    source: current_source.clone(),
+                    has_total,
+                    sequence_form,
+                });
+                current_start = page.page;
+                current_name = Some(new_name);
+                current_source = source;
+            }
+        }
+        previous_page = page.page;
+    }
+
+    if previous_page > 0 {
+        let name = current_name.unwrap_or_else(|| format!("文件{}", items.len() + 1));
+        let (has_total, sequence_form) =
+            page_number_meta_for_range(&detection.pages, current_start, previous_page);
+        items.push(SplitSuggestionItem {
+            name,
+            page_start: current_start,
+            page_end: previous_page,
+            source: current_source,
+            has_total,
+            sequence_form,
+        });
+    }
+
+    items
+}
+
+/// 返回某页的页眉身份 (文本, source)。
+///
+/// 候选覆盖优先：同一页被多个候选覆盖时，取 artifact > 重复内容 > 普通候选，
+/// 同优先级取出现次数多、置信度高的。无候选覆盖时，只接受"证据N/对比文件N"
+/// 这类强信号或整篇重复出现的页眉行，避免正文噪声把页段切碎。
+fn split_header_identity(
+    candidates: &[&HeaderFooterCandidate],
+    page: &PageDetection,
+    header_text_counts: &BTreeMap<String, usize>,
+) -> Option<(String, String)> {
+    let covering = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.page_range.start <= page.page && page.page <= candidate.page_range.end
+        })
+        .min_by(|left, right| {
+            split_candidate_rank(left)
+                .cmp(&split_candidate_rank(right))
+                .then_with(|| right.count.cmp(&left.count))
+                .then_with(|| right.confidence.total_cmp(&left.confidence))
+        });
+    if let Some(candidate) = covering {
+        return Some((candidate.text.clone(), candidate.source.clone()));
+    }
+
+    let text = best_split_header(page)?;
+    let normalized = normalize_header_footer_text(&text);
+    if is_evidence_label_text(&normalized)
+        || header_text_counts.get(&normalized).copied().unwrap_or(0) >= 2
+    {
+        return Some((text, "header".to_string()));
+    }
+    None
+}
+
+/// 候选身份优先级：数值越小越优先。
+fn split_candidate_rank(candidate: &HeaderFooterCandidate) -> u8 {
+    if candidate.source == "artifact" {
+        0
+    } else if candidate.repeating {
+        1
+    } else {
+        2
+    }
+}
+
 /// Extract page-number has_total and sequence_form from the footers of a page range.
 fn page_number_meta_for_range(
     pages: &[PageDetection],
@@ -2447,6 +2587,204 @@ mod tests {
         assert_eq!(items[0].page_start, 1);
         assert_eq!(items[0].page_end, 1);
         assert_eq!(items[1].name, "证据8-1");
+    }
+
+    #[test]
+    fn split_suggestions_use_artifact_candidate_ranges() {
+        let page = |page: u32, header: &str| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![TextLineDetection {
+                text: header.to_string(),
+                normalized_text: header.to_string(),
+                bbox: BBox {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 10.0,
+                    y1: 10.0,
+                    page,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+            }],
+            footers: vec![],
+        };
+        let candidate = |text: &str, start: u32, end: u32| HeaderFooterCandidate {
+            text: text.to_string(),
+            normalized_text: text.to_string(),
+            region: "header".to_string(),
+            page_range: PageRange { start, end },
+            count: (end - start + 1) as usize,
+            repeating: true,
+            position_stable: true,
+            position_spread: 0.0,
+            sequence_stable: true,
+            labels: vec![],
+            confidence: 1.0,
+            bbox: BBox {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 10.0,
+                y1: 10.0,
+                page: start,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+            source: "artifact".to_string(),
+            artifact_id: None,
+            docsy_kind: None,
+            sequence_form: None,
+            has_total: None,
+        };
+        let detection = DetectionResult {
+            input_path: "/tmp/merged.pdf".to_string(),
+            pages_analyzed: 6,
+            artifact: ArtifactSummary::default(),
+            pages: vec![
+                page(1, "证据一"),
+                page(2, "证据一"),
+                page(3, "证据二"),
+                page(4, "证据二"),
+                page(5, "证据三"),
+                page(6, "证据三"),
+            ],
+            header_candidates: vec![
+                candidate("证据一", 1, 2),
+                candidate("证据二", 3, 4),
+                candidate("证据三", 5, 6),
+            ],
+            footer_candidates: vec![],
+        };
+        let items = build_split_suggestions(&detection);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].name, "证据一");
+        assert_eq!((items[0].page_start, items[0].page_end), (1, 2));
+        assert_eq!(items[0].source, "artifact");
+        assert_eq!(items[1].name, "证据二");
+        assert_eq!((items[1].page_start, items[1].page_end), (3, 4));
+        assert_eq!(items[2].name, "证据三");
+        assert_eq!((items[2].page_start, items[2].page_end), (5, 6));
+    }
+
+    #[test]
+    fn split_suggestions_fallback_accepts_evidence_label_once() {
+        // 无候选（header_candidates 为空）时走文本路径；
+        // "证据9" 只出现在一页（首页规则），也应识别为页段边界。
+        let page = |page: u32, header: Option<&str>| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: header
+                .map(|text| {
+                    vec![TextLineDetection {
+                        text: text.to_string(),
+                        normalized_text: normalize_header_footer_text(text),
+                        bbox: BBox {
+                            x0: 0.0,
+                            y0: 0.0,
+                            x1: 10.0,
+                            y1: 10.0,
+                            page,
+                            width: 595.0,
+                            height: 842.0,
+                        },
+                        font_size: None,
+                    }]
+                })
+                .unwrap_or_default(),
+            footers: vec![],
+        };
+        let detection = DetectionResult {
+            input_path: "/tmp/merged.pdf".to_string(),
+            pages_analyzed: 5,
+            artifact: ArtifactSummary::default(),
+            pages: vec![
+                page(1, Some("证据8")),
+                page(2, Some("证据8")),
+                page(3, Some("证据9")),
+                page(4, Some("证据9")),
+                page(5, None),
+            ],
+            header_candidates: vec![],
+            footer_candidates: vec![],
+        };
+        let items = build_split_suggestions(&detection);
+        assert_eq!(items.len(), 2);
+        assert_eq!((items[0].page_start, items[0].page_end), (1, 2));
+        assert_eq!((items[1].page_start, items[1].page_end), (3, 5));
+    }
+
+    #[test]
+    fn split_suggestions_ignore_single_page_noise_header() {
+        // 候选存在但不覆盖第 2 页，且该页页眉是只出现一次的非证据文本：
+        // 不应产生切分点（避免正文噪声把页段切碎）。
+        let page = |page: u32, header: &str| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![TextLineDetection {
+                text: header.to_string(),
+                normalized_text: header.to_string(),
+                bbox: BBox {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 10.0,
+                    y1: 10.0,
+                    page,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+            }],
+            footers: vec![],
+        };
+        let candidate = |text: &str, start: u32, end: u32| HeaderFooterCandidate {
+            text: text.to_string(),
+            normalized_text: text.to_string(),
+            region: "header".to_string(),
+            page_range: PageRange { start, end },
+            count: (end - start + 1) as usize,
+            repeating: true,
+            position_stable: true,
+            position_spread: 0.0,
+            sequence_stable: true,
+            labels: vec![],
+            confidence: 1.0,
+            bbox: BBox {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 10.0,
+                y1: 10.0,
+                page: start,
+                width: 595.0,
+                height: 842.0,
+            },
+            font_size: None,
+            source: "artifact".to_string(),
+            artifact_id: None,
+            docsy_kind: None,
+            sequence_form: None,
+            has_total: None,
+        };
+        let detection = DetectionResult {
+            input_path: "/tmp/merged.pdf".to_string(),
+            pages_analyzed: 4,
+            artifact: ArtifactSummary::default(),
+            pages: vec![
+                page(1, "证据一"),
+                page(2, "一次性噪声页眉"),
+                page(3, "证据一"),
+                page(4, "证据一"),
+            ],
+            header_candidates: vec![candidate("证据一", 1, 4)],
+            footer_candidates: vec![],
+        };
+        let items = build_split_suggestions(&detection);
+        assert_eq!(items.len(), 1);
+        assert_eq!((items[0].page_start, items[0].page_end), (1, 4));
     }
 
     #[test]

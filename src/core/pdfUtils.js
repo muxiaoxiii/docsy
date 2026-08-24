@@ -46,11 +46,6 @@ export function insertRangeAfter(items, index, maxPage, options = {}) {
   return item
 }
 
-export function removeRangeAt(items, index, currentIndex = 0) {
-  items.splice(index, 1)
-  return Math.min(currentIndex, Math.max(0, items.length - 1))
-}
-
 export function parsePageSelection(input, maxPage = 0) {
   const value = String(input || '').trim()
   if (!value) return []
