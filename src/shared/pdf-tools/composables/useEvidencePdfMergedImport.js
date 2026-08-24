@@ -6,9 +6,10 @@ import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import {
   buildRangeAfter,
   insertRangeAfter,
+  insertRangeAtPage,
   pageCount,
-  setRangeEnd,
-  setRangeStart,
+  smartSetRangeEnd,
+  smartSetRangeStart,
 } from '../../../core/pdfUtils.js'
 import { createEvidenceFile, sortByNatural } from './useEvidencePdfSession.js'
 import { formatSplitFileName } from './splitFileName.js'
@@ -375,11 +376,59 @@ export function useEvidencePdfMergedImport({
   }
 
   function setSelectedMergedRangeStart() {
-    setRangeStart(selectedMergedImportRange.value, previewPage.value)
+    const items = mergedImportPlan.value?.items
+    if (!items) return
+    const index = items.indexOf(selectedMergedImportRange.value)
+    if (index < 0) return
+    // 智能调整：改起始页后自动与前一段无缝衔接，前段被吃空则自动并入
+    const newIndex = smartSetRangeStart(items, index, previewPage.value, mergedImportPlan.value.totalPages)
+    selectedMergedImportIndex.value = newIndex
   }
 
   function setSelectedMergedRangeEnd() {
-    setRangeEnd(selectedMergedImportRange.value, previewPage.value)
+    const items = mergedImportPlan.value?.items
+    if (!items) return
+    const index = items.indexOf(selectedMergedImportRange.value)
+    if (index < 0) return
+    // 智能调整：改结束页后自动与后一段无缝衔接，后段被吃空则自动并入
+    const newIndex = smartSetRangeEnd(items, index, previewPage.value, mergedImportPlan.value.totalPages)
+    selectedMergedImportIndex.value = newIndex
+  }
+
+  // 预览区「添加新页段」：以当前预览页为起始页插入新页段，
+  // 结束页与后续页段接续；边界页提出一页，段中页承接段尾，末段到最后一页。
+  function addMergedImportRangeFromPage() {
+    const plan = mergedImportPlan.value
+    if (!plan) return
+    const items = plan.items
+    const newIndex = insertRangeAtPage(items, previewPage.value, plan.totalPages, {
+      name: `文件${items.length + 1}`,
+      extra: { source: 'manual' },
+    })
+    if (newIndex < 0) {
+      ElMessage.info('当前页已是最后一个独立页段，无需新增')
+      return
+    }
+    selectedMergedImportIndex.value = newIndex
+    const item = items[newIndex]
+    previewPage.value = Math.min(previewMaxPage.value, Math.max(1, Number(item.pageStart || 1)))
+    truePreview.value = null
+    refreshPreview()
+  }
+
+  // 计划表格内直接修改起始页/结束页后，同样走智能无缝调整
+  function onMergedRangeStartChanged(index, value) {
+    const items = mergedImportPlan.value?.items
+    if (!items || index < 0) return
+    const newIndex = smartSetRangeStart(items, index, value, mergedImportPlan.value.totalPages)
+    selectedMergedImportIndex.value = newIndex
+  }
+
+  function onMergedRangeEndChanged(index, value) {
+    const items = mergedImportPlan.value?.items
+    if (!items || index < 0) return
+    const newIndex = smartSetRangeEnd(items, index, value, mergedImportPlan.value.totalPages)
+    selectedMergedImportIndex.value = newIndex
   }
 
   function addMergedImportRange() {
@@ -476,6 +525,9 @@ export function useEvidencePdfMergedImport({
     selectMergedImportRange,
     setSelectedMergedRangeStart,
     setSelectedMergedRangeEnd,
+    addMergedImportRangeFromPage,
+    onMergedRangeStartChanged,
+    onMergedRangeEndChanged,
     addMergedImportRange,
     insertMergedImportRangeAfter,
     removeMergedImportRange,

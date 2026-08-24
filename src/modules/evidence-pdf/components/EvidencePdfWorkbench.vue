@@ -492,22 +492,24 @@
             <template #default="{ row, $index }">{{ splitOutputNamePreview(row, $index) }}.pdf</template>
           </el-table-column>
           <el-table-column label="起始页" prop="pageStart" sortable="custom" width="108">
-            <template #default="{ row }">
+            <template #default="{ row, $index }">
               <el-input-number
                 v-model="row.pageStart"
                 :min="1"
                 :max="mergedImportPlan.totalPages || 999999"
                 size="small"
+                @change="(value) => onMergedRangeStartChanged($index, value)"
               />
             </template>
           </el-table-column>
           <el-table-column label="结束页" prop="pageEnd" sortable="custom" width="108">
-            <template #default="{ row }">
+            <template #default="{ row, $index }">
               <el-input-number
                 v-model="row.pageEnd"
                 :min="1"
                 :max="mergedImportPlan.totalPages || 999999"
                 size="small"
+                @change="(value) => onMergedRangeEndChanged($index, value)"
               />
             </template>
           </el-table-column>
@@ -852,6 +854,7 @@
             <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd"
               >设为结束页</el-button
             >
+            <el-button size="small" type="primary" plain @click="addMergedImportRangeFromPage">添加新页段</el-button>
           </template>
           <el-input-number
             v-model="previewPage"
@@ -2233,6 +2236,9 @@ const {
   selectMergedImportRange,
   setSelectedMergedRangeStart,
   setSelectedMergedRangeEnd,
+  addMergedImportRangeFromPage,
+  onMergedRangeStartChanged,
+  onMergedRangeEndChanged,
   addMergedImportRange,
   insertMergedImportRangeAfter,
   removeMergedImportRange,
