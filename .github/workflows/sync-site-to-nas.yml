@@ -1,0 +1,66 @@
+# Docsy 发布自动同步到 NAS 下载站（主同步通道）
+#
+# 触发方式：
+#   - 每次发布新版本（release published）自动执行
+#   - 可手动触发（Actions 页面 Run workflow）
+#
+# 需要配置以下仓库 Secrets（Settings → Secrets and variables → Actions）：
+#   NAS_HOST       NAS 的 SSH 地址（域名或 DDNS 域名，不要带协议）
+#   NAS_PORT       SSH 端口（默认 22）
+#   NAS_USER       SSH 用户名
+#   NAS_SSH_KEY    SSH 私钥（需在 NAS 的 authorized_keys 里登记公钥）
+#   NAS_PATH       site/public 同步目标绝对路径，例如 /volume1/docker/docsy-site/public
+#
+# 若 NAS 无法从 GitHub Actions 网络直连（例如家宽无公网入站），
+# 可跳过本工作流，只使用 NAS 定时任务兜底方案（site/scripts/sync-releases.sh）。
+
+name: Sync site to NAS
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release assets
+        run: |
+          gh release download "${{ github.event.release.tag_name || github.ref_name }}" \
+            --dir site/public/downloads \
+            --pattern 'Docsy_*' \
+            --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build site data
+        run: |
+          gh release view "${{ github.event.release.tag_name || github.ref_name }}" \
+            --json tag_name,published_at,assets \
+            --jq '[.]' > /tmp/release.json
+          python3 site/scripts/build-data.py \
+            --api-json /tmp/release.json \
+            --assets-dir site/public/downloads \
+            --changelog CHANGELOG.md \
+            --out site/public/data
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Deploy to NAS (scp)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.NAS_HOST }}
+          port: ${{ secrets.NAS_PORT }}
+          username: ${{ secrets.NAS_USER }}
+          key: ${{ secrets.NAS_SSH_KEY }}
+          source: "site/public/*"
+          target: ${{ secrets.NAS_PATH }}
+          strip_components: 2
+          timeout: 120s

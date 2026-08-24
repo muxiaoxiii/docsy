@@ -1,0 +1,35 @@
+# Docsy 下载站 Caddy 配置
+#
+# 把下面这行里的 docsy.example.com 换成你的真实域名，
+# Caddy 首次启动会自动申请并续期 HTTPS 证书。
+docsy.example.com {
+	# 站点根目录（容器内路径，对应宿主机 ./public）
+	root * /srv/www
+
+	# 静态资源与数据
+	encode gzip
+	file_server
+
+	# 下载目录：安装包以附件形式下载，不直接打开
+	handle /downloads/* {
+		header Content-Disposition "attachment"
+		file_server
+	}
+
+	# 基础安全响应头
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	# 常规缓存：数据 JSON 不缓存，避免版本信息滞后
+	@data path /data/*
+	header @data Cache-Control "no-store"
+
+	log {
+		output stdout
+		format console
+	}
+}

@@ -27,3 +27,7 @@ docs/*
 !docs/pdf-markdown-converter-design.md
 !docs/PDF页眉页脚编号规则与预设方案.md
 Archived/
+
+# 下载站安装包（由同步脚本从 GitHub Releases 拉取，不纳入仓库）
+site/public/downloads/*
+!site/public/downloads/.gitkeep
