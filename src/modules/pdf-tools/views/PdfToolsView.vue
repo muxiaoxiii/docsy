@@ -184,14 +184,28 @@
                     <el-input v-model="row.name" size="small" />
                   </template>
                 </el-table-column>
-                <el-table-column label="起始页" width="112">
+                <el-table-column label="起始页" width="120">
                   <template #default="{ row }">
-                    <el-input-number v-model="row.pageStart" :min="1" :max="splitPreviewMaxPage" size="small" />
+                    <el-input-number
+                      v-model="row.pageStart"
+                      :min="1"
+                      :max="splitPreviewMaxPage"
+                      size="small"
+                      controls-position="right"
+                      style="width: 96px"
+                    />
                   </template>
                 </el-table-column>
-                <el-table-column label="结束页" width="112">
+                <el-table-column label="结束页" width="120">
                   <template #default="{ row }">
-                    <el-input-number v-model="row.pageEnd" :min="1" :max="splitPreviewMaxPage" size="small" />
+                    <el-input-number
+                      v-model="row.pageEnd"
+                      :min="1"
+                      :max="splitPreviewMaxPage"
+                      size="small"
+                      controls-position="right"
+                      style="width: 96px"
+                    />
                   </template>
                 </el-table-column>
                 <el-table-column label="页数" width="64">
@@ -1179,7 +1193,9 @@ h3 {
 
 .split-main {
   display: grid;
-  grid-template-columns: minmax(520px, 0.95fr) minmax(380px, 1.05fr);
+  /* 预览页面比例固定：右列封顶 540px，拉宽窗口时只有左列表区变宽，
+     预览不再随窗口拉伸（避免空边浪费与重排）。 */
+  grid-template-columns: minmax(520px, 1fr) minmax(380px, 540px);
   gap: 16px;
   align-items: start;
 }

@@ -3,7 +3,7 @@
     <div v-if="evidenceDragging" class="evidence-drop-overlay">
       <div class="evidence-drop-message">松开以导入 PDF 文件</div>
     </div>
-    <section class="hf-panel">
+    <section class="hf-panel" ref="hfPanelRef">
       <div class="section-head">
         <div>
           <h3>{{ workflowTitle }}</h3>
@@ -482,47 +482,51 @@
             </template>
           </el-table-column>
           <el-table-column type="index" label="#" width="44" />
-          <el-table-column label="文件名" prop="name" sortable="custom" min-width="160">
-            <template #default="{ row }">
-              <el-input v-model="row.name" size="small" />
+          <el-table-column label="文件名" prop="name" sortable="custom" min-width="150">
+            <template #default="{ row, $index }">
+              <div class="merged-name-cell">
+                <el-input v-model="row.name" size="small" />
+                <span class="merged-output-name">{{ splitOutputNamePreview(row, $index) }}.pdf</span>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="输出文件名" prop="outputName" sortable="custom" min-width="180" show-overflow-tooltip>
-            <template #default="{ row, $index }">{{ splitOutputNamePreview(row, $index) }}.pdf</template>
-          </el-table-column>
-          <el-table-column label="起始页" prop="pageStart" sortable="custom" width="108">
+          <el-table-column label="起始页" prop="pageStart" sortable="custom" width="120">
             <template #default="{ row, $index }">
               <el-input-number
                 v-model="row.pageStart"
                 :min="1"
                 :max="mergedImportPlan.totalPages || 999999"
                 size="small"
+                controls-position="right"
+                style="width: 96px"
                 @change="(value) => onMergedRangeStartChanged($index, value)"
               />
             </template>
           </el-table-column>
-          <el-table-column label="结束页" prop="pageEnd" sortable="custom" width="108">
+          <el-table-column label="结束页" prop="pageEnd" sortable="custom" width="120">
             <template #default="{ row, $index }">
               <el-input-number
                 v-model="row.pageEnd"
                 :min="1"
                 :max="mergedImportPlan.totalPages || 999999"
                 size="small"
+                controls-position="right"
+                style="width: 96px"
                 @change="(value) => onMergedRangeEndChanged($index, value)"
               />
             </template>
           </el-table-column>
-          <el-table-column label="页数" prop="pageCount" sortable="custom" width="64">
+          <el-table-column label="页数" prop="pageCount" sortable="custom" width="60">
             <template #default="{ row }">{{ mergedImportRangePageCount(row) || '-' }}</template>
           </el-table-column>
-          <el-table-column label="识别来源" prop="source" sortable="custom" width="96">
+          <el-table-column label="识别来源" prop="source" sortable="custom" width="88">
             <template #default="{ row }">
               <el-tag :type="mergedImportSourceType(row)" size="small">
                 {{ mergedImportSourceText(row) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="148">
+          <el-table-column label="操作" width="128">
             <template #default="{ row, $index }">
               <el-button link type="primary" size="small" @click.stop="selectMergedImportRange(row)">跳转</el-button>
               <el-button link type="primary" size="small" @click.stop="insertMergedImportRangeAfter($index)"
@@ -3736,9 +3740,36 @@ function handleGlobalKeydown(e) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', handleGlobalKeydown))
+const hfPanelRef = ref(null)
+const overlayTableRef = ref(null)
+let panelResizeObserver = null
+
+// 主列表的「操作」列是 fixed="right" 固定列：面板宽度变化（拉宽窗口）时
+// 行高会因文本换行改变，Element Plus 固定层的绝对定位若不重算就会错位
+// （按钮只出现在部分行）。监听面板尺寸变化并强制表格重算布局。
+function observePanelResize() {
+  const panelEl = hfPanelRef.value
+  if (!panelEl || typeof window.ResizeObserver === 'undefined') return
+  let raf = 0
+  panelResizeObserver = new window.ResizeObserver(() => {
+    window.cancelAnimationFrame(raf)
+    raf = window.requestAnimationFrame(() => {
+      overlayTableRef.value?.doLayout?.()
+    })
+  })
+  panelResizeObserver.observe(panelEl)
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+  observePanelResize()
+})
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  if (panelResizeObserver) {
+    panelResizeObserver.disconnect()
+    panelResizeObserver = null
+  }
   if (unlistenEvidenceProgress) {
     unlistenEvidenceProgress()
     unlistenEvidenceProgress = null
@@ -3825,7 +3856,6 @@ onUnmounted(() => {
 .hf-panel {
   flex: 1 1 0;
   min-width: 400px;
-  max-width: 55%;
   overflow: auto;
   scrollbar-gutter: stable;
   padding: 18px;
@@ -3836,7 +3866,10 @@ onUnmounted(() => {
 }
 
 .preview-panel {
-  flex: 1.3 1 0;
+  /* 预览页面比例固定：面板保持固定宽度，拉宽窗口时不再拉伸预览、
+     不再引发重排错位；列表区（.hf-panel）获得全部剩余宽度。 */
+  flex: 0 0 auto;
+  width: 540px;
   min-width: 320px;
   overflow: auto;
   scrollbar-gutter: stable;
@@ -4294,6 +4327,22 @@ h3 {
 .file-link:hover {
   color: var(--docsy-primary-hover);
   text-decoration: underline;
+}
+
+.merged-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.merged-output-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--docsy-text-muted);
 }
 
 .table-drag-handle {
