@@ -24,6 +24,7 @@ const operationLabels = {
   analyze_image_paddler_folder: 'Doclet 正在分析图片文件夹…',
   render_pdf_preview: 'Doclet 正在生成 PDF 预览…',
   probe_video: 'Doclet 正在读取视频信息…',
+  analyze_frame_selection: 'Doclet 正在智能分析图片…',
   unlock_pdf: 'Doclet 正在解锁 PDF…',
   run_image_paddler: 'Doclet 正在生成文档…',
 }

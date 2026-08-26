@@ -13,13 +13,13 @@
     </div>
 
     <div v-if="items.length" class="reorder-image-scroll">
-      <div class="reorder-image-grid" :style="gridStyle">
+      <div class="reorder-image-grid">
         <article
           v-for="(item, localIndex) in pagedItems"
           :key="itemKey(item, localIndex)"
           class="reorder-image-card"
           :class="reorder.itemClasses(globalIndex(localIndex))"
-          :style="cardStyle"
+          :style="cardStyle(item)"
           :data-reorder-index="globalIndex(localIndex)"
         >
           <button
@@ -35,33 +35,35 @@
             <el-icon><Rank /></el-icon>
           </button>
           <button type="button" class="reorder-image-preview" @click="openPreview(item)">
-            <span class="reorder-image-thumb-wrap" :style="thumbWrapStyle">
-              <img v-if="imageSrc(item)" :src="imageSrc(item)" :alt="itemName(item)" class="reorder-image-thumb" />
-              <span v-else class="reorder-image-placeholder">预览中</span>
+            <span class="reorder-image-thumb-wrap" :style="thumbWrapStyle(item)">
+              <img
+                v-if="imageSrc(item)"
+                :src="imageSrc(item)"
+                :alt="itemName(item)"
+                class="reorder-image-thumb"
+                loading="lazy"
+                decoding="async"
+                @load="recordDimensions(item, $event)"
+              />
+              <span v-else class="reorder-image-placeholder">
+                {{ previewErrors[itemPath(item)] ? '预览失败' : '预览中' }}
+              </span>
             </span>
             <span class="reorder-image-name" :title="itemName(item)">{{ itemName(item) }}</span>
+            <span v-if="itemExcluded(item)" class="reorder-image-status">已排除，不参与排版</span>
             <span v-if="itemMeta(item)" class="reorder-image-meta">{{ itemMeta(item) }}</span>
           </button>
-          <div class="reorder-image-actions" aria-label="顺序调整">
-            <el-button
-              text
-              size="small"
-              :disabled="globalIndex(localIndex) === 0"
-              aria-label="上移"
-              @click="moveBy(globalIndex(localIndex), -1)"
-            >
-              <el-icon><ArrowUp /></el-icon>
-            </el-button>
-            <el-button
-              text
-              size="small"
-              :disabled="globalIndex(localIndex) === items.length - 1"
-              aria-label="下移"
-              @click="moveBy(globalIndex(localIndex), 1)"
-            >
-              <el-icon><ArrowDown /></el-icon>
-            </el-button>
-          </div>
+          <button
+            v-if="excludedResolver"
+            type="button"
+            class="reorder-image-decision"
+            :class="{ excluded: itemExcluded(item) }"
+            :title="itemExcluded(item) ? '恢复到排版结果' : '从排版结果中排除'"
+            @click.stop="toggleExcluded(item, globalIndex(localIndex))"
+          >
+            <el-icon v-if="itemExcluded(item)"><RefreshLeft /></el-icon>
+            <el-icon v-else><Delete /></el-icon>
+          </button>
         </article>
       </div>
     </div>
@@ -74,18 +76,35 @@
       <el-button size="small" :disabled="page >= pageCount" @click="page += 1">下一页</el-button>
     </div>
 
-    <el-dialog v-model="previewVisible" title="图片预览" width="80%" destroy-on-close>
+    <el-dialog
+      v-model="previewVisible"
+      :title="previewItem ? itemName(previewItem) : '图片预览'"
+      width="92%"
+      destroy-on-close
+    >
       <div class="reorder-image-dialog-body">
         <img v-if="previewSrc" :src="previewSrc" class="reorder-image-dialog-img" />
+        <span v-else class="reorder-image-placeholder">正在载入高清图片</span>
       </div>
+      <template v-if="previewItem && excludedResolver" #footer>
+        <div class="reorder-image-dialog-actions">
+          <span>{{ itemExcluded(previewItem) ? '当前不参与排版' : '当前参与排版' }}</span>
+          <el-button
+            :type="itemExcluded(previewItem) ? 'success' : 'danger'"
+            @click="toggleExcluded(previewItem, previewIndex)"
+          >
+            {{ itemExcluded(previewItem) ? '恢复保留' : '排除图片' }}
+          </el-button>
+        </div>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { ArrowDown, ArrowUp, Rank } from '@element-plus/icons-vue'
-import { tauriCallSafe } from '../../core/tauriBridge.js'
+import { Delete, Rank, RefreshLeft } from '@element-plus/icons-vue'
+import { tauriCallQuiet } from '../../core/tauriBridge.js'
 import { fileName } from '../../core/filePath.js'
 import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
 
@@ -99,17 +118,25 @@ const props = defineProps({
   initialPageSize: { type: Number, default: 24 },
   initialZoom: { type: Number, default: 100 },
   minZoom: { type: Number, default: 60 },
-  maxZoom: { type: Number, default: 180 },
+  maxZoom: { type: Number, default: 320 },
+  preserveAspectRatio: { type: Boolean, default: false },
+  excludedResolver: { type: Function, default: null },
 })
 
-const emit = defineEmits(['reorder'])
+const emit = defineEmits(['reorder', 'toggle-excluded'])
 const page = ref(1)
 const pageSize = ref(props.initialPageSize)
 const zoom = ref(props.initialZoom)
 const sources = reactive({})
+const largeSources = reactive({})
+const dimensions = reactive({})
+const previewErrors = reactive({})
 const loadingPaths = new Set()
+const loadingLargePaths = new Set()
 const previewVisible = ref(false)
 const previewSrc = ref('')
+const previewItem = ref(null)
+const previewIndex = ref(-1)
 const reorder = usePointerReorder({
   itemCount: () => props.items.length,
   onReorder: (payload) => emit('reorder', payload),
@@ -122,20 +149,33 @@ const pagedItems = computed(() => props.items.slice(pageStart.value, pageEnd.val
 const rangeLabel = computed(() =>
   props.items.length ? `${pageStart.value + 1}-${pageEnd.value} / ${props.items.length}` : '0 / 0',
 )
-const cardSize = computed(() => Math.round((112 * zoom.value) / 100))
-const thumbSize = computed(() => Math.round((72 * zoom.value) / 100))
-const gridStyle = computed(() => ({ gridTemplateColumns: `repeat(auto-fill, minmax(${cardSize.value}px, 1fr))` }))
-const cardStyle = computed(() => ({ minHeight: `${cardSize.value + 54}px` }))
-const thumbWrapStyle = computed(() => ({ width: `${thumbSize.value}px`, height: `${thumbSize.value}px` }))
+const thumbSize = computed(() => Math.round((112 * zoom.value) / 100))
+
+function itemGeometry(item) {
+  const path = itemPath(item)
+  const measured = dimensions[path]
+  const width = Number(item?.width || measured?.width || 0)
+  const height = Number(item?.height || measured?.height || 0)
+  if (!props.preserveAspectRatio || !width || !height) {
+    return { width: thumbSize.value, height: thumbSize.value }
+  }
+  const ratio = Math.min(12, Math.max(0.08, width / height))
+  if (ratio >= 1) return { width: thumbSize.value, height: Math.max(18, Math.round(thumbSize.value / ratio)) }
+  return { width: Math.max(18, Math.round(thumbSize.value * ratio)), height: thumbSize.value }
+}
+
+function cardStyle(item) {
+  const geometry = itemGeometry(item)
+  return { width: `${Math.max(76, geometry.width) + 18}px` }
+}
+
+function thumbWrapStyle(item) {
+  const geometry = itemGeometry(item)
+  return { width: `${geometry.width}px`, height: `${geometry.height}px` }
+}
 
 function globalIndex(localIndex) {
   return pageStart.value + localIndex
-}
-
-function moveBy(index, delta) {
-  const to = index + delta
-  if (to < 0 || to >= props.items.length) return
-  emit('reorder', { from: index, to })
 }
 
 function itemPath(item) {
@@ -161,6 +201,21 @@ function imageSrc(item) {
   return sources[itemPath(item)] || ''
 }
 
+function itemExcluded(item) {
+  return Boolean(props.excludedResolver?.(item))
+}
+
+function toggleExcluded(item, index) {
+  emit('toggle-excluded', { item, index, excluded: !itemExcluded(item) })
+}
+
+function recordDimensions(item, event) {
+  const path = itemPath(item)
+  const target = event?.target
+  if (!path || !target?.naturalWidth || !target?.naturalHeight) return
+  dimensions[path] = { width: target.naturalWidth, height: target.naturalHeight }
+}
+
 function adjustZoom(delta) {
   zoom.value = Math.min(props.maxZoom, Math.max(props.minZoom, Math.round(zoom.value + delta)))
 }
@@ -177,19 +232,31 @@ async function preloadVisibleImages() {
       const path = queue.shift()
       if (!path) return
       loadingPaths.add(path)
-      const result = await tauriCallSafe('read_image_data_url', { path })
+      delete previewErrors[path]
+      const result = await tauriCallQuiet('read_image_data_url', { path, maxEdge: 640 })
       loadingPaths.delete(path)
       if (result.ok) sources[path] = result.data
+      else previewErrors[path] = true
     }
   })
   await Promise.all(workers)
 }
 
-function openPreview(item) {
-  const src = imageSrc(item)
-  if (!src) return
-  previewSrc.value = src
+async function openPreview(item) {
+  const path = itemPath(item)
+  if (!path) return
+  previewItem.value = item
+  previewIndex.value = props.items.indexOf(item)
   previewVisible.value = true
+  previewSrc.value = largeSources[path] || ''
+  if (previewSrc.value || loadingLargePaths.has(path)) return
+  loadingLargePaths.add(path)
+  const result = await tauriCallQuiet('read_image_data_url', { path, maxEdge: 3840 })
+  loadingLargePaths.delete(path)
+  if (!result.ok || previewItem.value !== item) return
+  for (const cachedPath of Object.keys(largeSources)) delete largeSources[cachedPath]
+  largeSources[path] = result.data
+  previewSrc.value = result.data
 }
 
 watch([pagedItems, pageSize], preloadVisibleImages, { immediate: true })
@@ -233,14 +300,16 @@ watch([pageSize, () => props.items.length], () => {
   background: var(--docsy-surface-muted);
 }
 .reorder-image-grid {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: start;
 }
 .reorder-image-card {
   position: relative;
-  min-width: 0;
+  flex: 0 0 auto;
   padding: 30px 8px 6px;
+  box-sizing: border-box;
   text-align: center;
   background: var(--docsy-surface-elevated);
   border: 1px solid transparent;
@@ -274,9 +343,11 @@ watch([pageSize, () => props.items.length], () => {
   cursor: grabbing;
 }
 .reorder-image-preview {
-  display: block;
+  display: flex;
   width: 100%;
   padding: 0;
+  align-items: center;
+  flex-direction: column;
   color: inherit;
   font: inherit;
   border: 0;
@@ -290,6 +361,9 @@ watch([pageSize, () => props.items.length], () => {
   overflow: hidden;
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
+  transition:
+    width 0.16s ease,
+    height 0.16s ease;
 }
 .reorder-image-thumb {
   display: block;
@@ -303,6 +377,7 @@ watch([pageSize, () => props.items.length], () => {
 }
 .reorder-image-name {
   display: block;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -314,14 +389,39 @@ watch([pageSize, () => props.items.length], () => {
   color: var(--docsy-text-muted);
   font-size: 11px;
 }
-.reorder-image-actions {
+.reorder-image-decision {
   position: absolute;
-  top: 1px;
-  right: 2px;
-  display: flex;
+  top: 3px;
+  right: 6px;
+  display: inline-grid;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--docsy-text-muted);
+  background: transparent;
+  cursor: pointer;
 }
-.reorder-image-actions :deep(.el-button + .el-button) {
-  margin-left: 0;
+.reorder-image-decision:hover,
+.reorder-image-decision.excluded {
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
+}
+.reorder-image-status {
+  display: block;
+  max-width: 100%;
+  margin-top: 3px;
+  padding: 3px 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 5px;
+  color: #fff;
+  background: rgba(126, 70, 61, 0.82);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .reorder-image-pager {
   display: flex;
@@ -340,7 +440,15 @@ watch([pageSize, () => props.items.length], () => {
 }
 .reorder-image-dialog-img {
   max-width: 100%;
-  max-height: 72vh;
+  max-height: 78vh;
   object-fit: contain;
+}
+.reorder-image-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  color: var(--docsy-text-muted);
+  font-size: 12px;
 }
 </style>

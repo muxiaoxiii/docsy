@@ -4,9 +4,13 @@
       <!-- Settings Panel -->
       <div class="settings-panel">
         <el-form label-width="80px" size="small">
-          <el-form-item label="文件夹">
+          <el-form-item :label="isFrameSequence ? '来源' : '文件夹'">
             <el-button @click="selectFolder">选择文件夹</el-button>
-            <span class="folder-path" v-if="folders.length">{{ folders.join('；') }}</span>
+            <span v-if="isFrameSequence" class="folder-path transfer-source">
+              {{ inputContext.sourceLabel || '视频抽帧筛选结果' }}
+              <template v-if="analysis"> · {{ analysis.images.length }} 张</template>
+            </span>
+            <span v-else-if="folders.length" class="folder-path">{{ folders.join('；') }}</span>
           </el-form-item>
 
           <el-form-item label="输出格式">
@@ -16,14 +20,14 @@
             </el-select>
           </el-form-item>
 
-          <el-form-item v-if="folders.length > 1" label="多文件夹">
+          <el-form-item v-if="!isFrameSequence && folders.length > 1" label="多文件夹">
             <el-select v-model="settings.output_mode">
               <el-option label="合并为一个文档" value="merged" />
               <el-option label="每个文件夹单独生成" value="per_folder" />
             </el-select>
           </el-form-item>
 
-          <el-form-item label="每页张数">
+          <el-form-item label="每页最多">
             <el-select v-model="settings.layout">
               <el-option label="1 张" value="1" />
               <el-option label="2 张（左右）" value="1x2" />
@@ -74,6 +78,27 @@
                   active-text="隐藏扩展名"
                   inactive-text="保留扩展名"
                 />
+                <label class="filename-font-control">
+                  <span>字体</span>
+                  <el-select v-model="settings.filename_font_family" :disabled="!settings.show_filename">
+                    <el-option label="无衬线" value="sans" />
+                    <el-option label="宋体" value="serif" />
+                    <el-option label="楷体" value="kaiti" />
+                    <el-option label="仿宋" value="fangsong" />
+                  </el-select>
+                </label>
+                <label class="filename-size-control">
+                  <span>字号</span>
+                  <el-input-number
+                    v-model="settings.filename_font_size_pt"
+                    :min="6"
+                    :max="24"
+                    :step="1"
+                    :disabled="!settings.show_filename"
+                    controls-position="right"
+                  />
+                  <span>pt</span>
+                </label>
               </div>
               <div class="filename-rules">
                 <div
@@ -144,7 +169,7 @@
               type="success"
               @click="run"
               :loading="generating"
-              :disabled="!analysis"
+              :disabled="!analysis || !includedImages.length"
             >
               生成文档
             </el-button>
@@ -164,10 +189,23 @@
             <el-button size="small" type="primary" @click="openGeneratedOutput">打开文件</el-button>
           </div>
 
+          <div v-if="isFrameSequence" class="sequence-mode-note">
+            <strong>抽帧序列模式</strong>
+            <span>保持原顺序和原图比例；当前排版 {{ includedImages.length }} 张，排除 {{ excludedCount }} 张。</span>
+            <el-switch
+              v-model="settings.use_source_exclusions"
+              inline-prompt
+              active-text="沿用抽帧排除"
+              inactive-text="全部载入"
+            />
+          </div>
+
           <div class="analysis-summary">
             <el-descriptions :column="2" border size="small">
-              <el-descriptions-item label="图片数量">{{ analysis.images.length }}</el-descriptions-item>
-              <el-descriptions-item label="分组数">{{ analysis.groups.length }}</el-descriptions-item>
+              <el-descriptions-item label="图片数量">
+                {{ includedImages.length }} 张参与排版
+                <template v-if="excludedCount">，{{ excludedCount }} 张排除</template>
+              </el-descriptions-item>
               <el-descriptions-item label="推荐方向">{{
                 orientationLabel(analysis.recommended.orientation)
               }}</el-descriptions-item>
@@ -193,7 +231,7 @@
             <div class="section-head">
               <h4>第一页预览</h4>
               <div class="preview-toolbar">
-                <span>{{ previewImages.length }} / {{ layoutGrid.rows * layoutGrid.cols }} 张</span>
+                <span>当前页 {{ previewImages.length }} 张</span>
                 <el-button size="small" text @click="adjustPageZoom(-10)">-</el-button>
                 <el-slider v-model="pageZoom" :min="50" :max="180" :step="5" class="zoom-slider" />
                 <el-button size="small" text @click="adjustPageZoom(10)">+</el-button>
@@ -230,15 +268,6 @@
             </div>
           </div>
 
-          <!-- Groups -->
-          <div v-if="analysis.groups.length > 1" class="groups-section">
-            <h4>文件分组</h4>
-            <div v-for="group in analysis.groups" :key="group.prefix" class="group-item">
-              <span>{{ group.prefix }}</span>
-              <el-tag size="small">{{ group.count }} 张</el-tag>
-            </div>
-          </div>
-
           <!-- Image List -->
           <div class="image-list">
             <div class="section-head">
@@ -248,8 +277,12 @@
               :items="orderedImages"
               :name-resolver="imageItemName"
               :meta-resolver="imageItemMeta"
+              :excluded-resolver="isImageExcluded"
+              preserve-aspect-ratio
+              :initial-zoom="130"
               empty-description="暂无图片"
               @reorder="reorderLayoutImages"
+              @toggle-excluded="toggleImageExclusion"
             />
           </div>
         </template>
@@ -258,9 +291,7 @@
           class="result-empty-state"
           :icon-url="imageLayoutIconUrl"
           :title="analyzing ? '正在分析图片' : '等待选择图片文件夹'"
-          :description="
-            analyzing ? '正在读取图片尺寸与分组信息。' : '选择文件夹后，Docsy 会自动分析并生成第一页排版预览。'
-          "
+          :description="analyzing ? '正在读取图片尺寸。' : '选择文件夹后，Docsy 会自动分析并生成第一页排版预览。'"
         />
       </div>
     </div>
@@ -273,6 +304,9 @@ import ReorderableImageGrid from '../../../shared/components/ReorderableImageGri
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import imageLayoutIconUrl from '../../../assets/icons/image-layout.svg?url'
 import { useImagePaddlerState } from '../composables/useImagePaddlerState.js'
+import { useWorkspaceStore } from '../../../stores/workspace.js'
+
+const workspaceStore = useWorkspaceStore()
 
 const {
   folders,
@@ -280,12 +314,16 @@ const {
   generating,
   analysis,
   generatedResult,
+  inputContext,
+  isFrameSequence,
   pageZoom,
   settings,
   layoutGrid,
   resolvedOrientation,
   resolvedOrientationLabel,
   orderedImages,
+  includedImages,
+  excludedCount,
   previewImages,
   previewSlots,
   generatedOutputPaths,
@@ -304,6 +342,8 @@ const {
   previewImageStyle,
   imageItemName,
   imageItemMeta,
+  isImageExcluded,
+  toggleImageExclusion,
   addFilenameRule,
   removeFilenameRule,
   rulePlaceholder,
@@ -312,7 +352,10 @@ const {
   orientationLabel,
   layoutLabel,
   scaleModeLabel,
-} = useImagePaddlerState()
+} = useImagePaddlerState({
+  initialTransfer: () => workspaceStore.mediaTransfer,
+  onInitialPathsLoaded: () => workspaceStore.clearMediaTransfer(),
+})
 </script>
 
 <style scoped>
@@ -372,6 +415,23 @@ const {
   align-items: center;
 }
 
+.filename-font-control,
+.filename-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+}
+
+.filename-font-control :deep(.el-select) {
+  width: 104px;
+}
+
+.filename-size-control :deep(.el-input-number) {
+  width: 82px;
+}
+
 .filename-rules {
   display: flex;
   flex-direction: column;
@@ -423,6 +483,30 @@ const {
 
 .analysis-summary {
   margin-bottom: 16px;
+}
+
+.sequence-mode-note {
+  display: flex;
+  margin-bottom: 14px;
+  padding: 11px 13px;
+  align-items: baseline;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--docsy-primary) 28%, var(--docsy-border-subtle));
+  border-radius: var(--docsy-radius);
+  color: var(--docsy-text-muted);
+  background: var(--docsy-primary-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sequence-mode-note :deep(.el-switch) {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.sequence-mode-note strong {
+  flex: 0 0 auto;
+  color: var(--docsy-text-strong);
 }
 
 .recommendation-bar {
@@ -490,6 +574,7 @@ const {
 }
 
 .page-preview {
+  box-sizing: border-box;
   background: #fff;
   border: 1px solid var(--docsy-border-strong);
   box-shadow: 0 16px 38px rgba(42, 39, 34, 0.14);
@@ -504,6 +589,7 @@ const {
 }
 
 .preview-cell {
+  box-sizing: border-box;
   min-width: 0;
   min-height: 0;
   border: 1px solid transparent;
@@ -525,8 +611,10 @@ const {
 }
 
 .preview-image-area {
+  box-sizing: border-box;
   width: 100%;
   min-height: 0;
+  flex-shrink: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -543,12 +631,17 @@ const {
 }
 
 .preview-name {
+  box-sizing: border-box;
   width: 100%;
+  flex-shrink: 0;
   line-height: 14px;
-  padding: 2px 4px;
+  padding: 0 4px;
   color: var(--docsy-text);
   font-size: 11px;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   overflow: hidden;
   overflow-wrap: anywhere;
 }
@@ -576,23 +669,6 @@ const {
   color: var(--docsy-text);
   word-break: break-all;
   font-size: 12px;
-}
-
-.groups-section {
-  margin-bottom: 16px;
-}
-
-.groups-section h4 {
-  margin: 0 0 8px;
-  font-size: 13px;
-}
-
-.group-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 13px;
 }
 
 .image-list h4 {

@@ -55,7 +55,12 @@
         <span class="app-version">v{{ version }}</span>
       </el-header>
       <el-main class="app-main">
-        <router-view />
+        <router-view v-slot="{ Component, route: currentRoute }">
+          <keep-alive :max="2">
+            <component :is="Component" v-if="currentRoute.meta.keepAlive" :key="currentRoute.name" />
+          </keep-alive>
+          <component :is="Component" v-if="!currentRoute.meta.keepAlive" :key="currentRoute.name" />
+        </router-view>
       </el-main>
       <Transition name="doclet-operation">
         <div v-if="operationVisible" class="doclet-operation-panel">

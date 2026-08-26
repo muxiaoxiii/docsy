@@ -1041,12 +1041,13 @@ dependencies = [
 
 [[package]]
 name = "docsy"
-version = "0.9.7-beta27"
+version = "0.9.7-beta28"
 dependencies = [
  "allsorts",
  "anyhow",
  "base64 0.22.1",
  "calamine 0.26.1",
+ "cc",
  "chrono",
  "dirs 5.0.1",
  "docsy-anydoc",

@@ -4,9 +4,14 @@ use crate::error::DocsyError;
 pub async fn analyze_image_paddler_folder(
     folder: String,
     folders: Option<Vec<String>>,
+    image_paths: Option<Vec<String>>,
 ) -> Result<crate::image_paddler::AnalyzeResult, DocsyError> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::image_paddler::analyze(&crate::image_paddler::AnalyzeArgs { folder, folders })
+        crate::image_paddler::analyze(&crate::image_paddler::AnalyzeArgs {
+            folder,
+            folders,
+            image_paths,
+        })
     })
     .await
     .map_err(|e| DocsyError::Unknown {

@@ -157,7 +157,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
@@ -165,6 +165,7 @@ import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { fileName, parentDir } from '../../../core/filePath.js'
 import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 
 const files = ref([])
 const converting = ref(false)
@@ -179,6 +180,11 @@ const fileOfficeFormat = ref('docx')
 const docxStyle = ref('professional')
 const pdfStartPage = ref(null)
 const pdfEndPage = ref(null)
+const preference = useWorkspacePreferences('markdown-convert.workspace', {
+  fileOfficeFormat,
+  docxStyle,
+  pasteFormat,
+})
 
 const hasPdfInQueue = computed(() => files.value.some((item) => extensionOf(item.path) === 'pdf'))
 const hasPendingFiles = computed(() => files.value.some((item) => item.status === 'pending'))
@@ -442,6 +448,9 @@ useWindowFileDrop({
   },
   onDrop: handleDroppedPaths,
 })
+
+onMounted(() => void preference.start())
+onBeforeUnmount(() => void preference.stop())
 </script>
 
 <style scoped>

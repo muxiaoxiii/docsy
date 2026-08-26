@@ -273,15 +273,15 @@ fn collect_recent_logs(max_lines: usize) -> Vec<String> {
 }
 
 #[tauri::command]
-pub async fn read_image_data_url(path: String) -> Result<String, String> {
-    crate::commands::run_blocking(move || preview_image_data_url(&path)).await
+pub async fn read_image_data_url(path: String, max_edge: Option<u32>) -> Result<String, String> {
+    crate::commands::run_blocking(move || preview_image_data_url(&path, max_edge)).await
 }
 
-fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
+fn preview_image_data_url(path: &str, max_edge: Option<u32>) -> anyhow::Result<String> {
     use base64::Engine;
     use std::io::Cursor;
 
-    const MAX_PREVIEW_EDGE: u32 = 1600;
+    const DEFAULT_PREVIEW_EDGE: u32 = 1600;
     const MAX_SOURCE_PIXELS: u64 = 64_000_000;
     // 源文件大小上限，防止前端传任意大文件读爆内存
     const MAX_SOURCE_BYTES: u64 = 50 * 1024 * 1024;
@@ -309,7 +309,10 @@ fn preview_image_data_url(path: &str) -> anyhow::Result<String> {
         anyhow::bail!("图片像素过大，无法安全生成预览缩略图");
     }
     let image = image::open(&path).map_err(|error| anyhow::anyhow!("读取图片失败: {error}"))?;
-    let preview = image.thumbnail(MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE);
+    let preview_edge = max_edge
+        .unwrap_or(DEFAULT_PREVIEW_EDGE)
+        .clamp(160, DEFAULT_PREVIEW_EDGE);
+    let preview = image.thumbnail(preview_edge, preview_edge);
     let mut bytes = Vec::new();
     preview
         .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Jpeg)

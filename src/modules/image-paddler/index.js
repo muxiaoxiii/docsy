@@ -12,7 +12,7 @@ export default {
       path: '/image-paddler',
       name: 'image-paddler',
       component: () => import('./views/ImagePaddlerView.vue'),
-      meta: { title: '图片排版', moduleId: 'image-paddler' },
+      meta: { title: '图片排版', moduleId: 'image-paddler', keepAlive: true },
     },
   ],
 

@@ -216,8 +216,18 @@
         <div class="hf-control-bar">
           <div class="hf-control-left">
             <span class="hf-control-label">证据编号起始</span>
-            <el-input-number v-model="numberingDefaults.evidenceStart" :min="0" :max="9999" size="small" controls-position="right" style="width: 120px" />
-            <el-tooltip content="各条页眉规则默认跟随；也可在规则内单独覆盖。页码起始在各页码规则内设置" placement="top">
+            <el-input-number
+              v-model="numberingDefaults.evidenceStart"
+              :min="0"
+              :max="9999"
+              size="small"
+              controls-position="right"
+              style="width: 120px"
+            />
+            <el-tooltip
+              content="各条页眉规则默认跟随；也可在规则内单独覆盖。页码起始在各页码规则内设置"
+              placement="top"
+            >
               <el-icon class="hf-control-info"><InfoFilled /></el-icon>
             </el-tooltip>
           </div>
@@ -327,7 +337,7 @@
 
       <div v-if="showProcessingControls && outputMode !== 'files_only'" class="rule-block">
         <div class="block-title">PDF 书签</div>
-          <div class="rule-grid bookmark-rule-grid">
+        <div class="rule-grid bookmark-rule-grid">
           <div class="rule-item rule-item--control-only">
             <el-checkbox v-model="bookmarkEnabled">添加书签</el-checkbox>
           </div>
@@ -352,10 +362,20 @@
           </div>
           <el-select v-model="selectedProcessingPresetId" placeholder="选择预设" class="preset-select">
             <el-option-group label="内置预设">
-              <el-option v-for="preset in builtInProcessingPresets" :key="preset.id" :label="preset.name" :value="preset.id" />
+              <el-option
+                v-for="preset in builtInProcessingPresets"
+                :key="preset.id"
+                :label="preset.name"
+                :value="preset.id"
+              />
             </el-option-group>
             <el-option-group v-if="userProcessingPresets.length" label="我的预设">
-              <el-option v-for="preset in userProcessingPresets" :key="preset.id" :label="preset.name" :value="preset.id" />
+              <el-option
+                v-for="preset in userProcessingPresets"
+                :key="preset.id"
+                :label="preset.name"
+                :value="preset.id"
+              />
             </el-option-group>
           </el-select>
           <el-button :disabled="!selectedProcessingPresetId" @click="applySelectedProcessingPreset">应用</el-button>
@@ -363,7 +383,10 @@
           <el-dropdown v-if="selectedUserPreset" trigger="click" @command="handlePresetCommand">
             <el-button>管理</el-button>
             <template #dropdown>
-              <el-dropdown-menu><el-dropdown-item command="rename">重命名</el-dropdown-item><el-dropdown-item command="delete" divided>删除</el-dropdown-item></el-dropdown-menu>
+              <el-dropdown-menu
+                ><el-dropdown-item command="rename">重命名</el-dropdown-item
+                ><el-dropdown-item command="delete" divided>删除</el-dropdown-item></el-dropdown-menu
+              >
             </template>
           </el-dropdown>
         </div>
@@ -445,7 +468,9 @@
         <div class="split-options-row">
           <div class="block-title">拆分选项</div>
           <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
-          <span class="split-option-note">拆分时自动移除无可视内容的空白页（分隔页、扫描背面等），输出页数可能少于页段页数。</span>
+          <span class="split-option-note"
+            >拆分时自动移除无可视内容的空白页（分隔页、扫描背面等），输出页数可能少于页段页数。</span
+          >
         </div>
         <el-alert
           v-if="mergedImportWarnings.length"
@@ -945,6 +970,7 @@ import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import HeaderFooterRuleFields from '../../../shared/pdf-tools/components/HeaderFooterRuleFields.vue'
 import PageNumberRuleDialog from '../../../shared/pdf-tools/components/PageNumberRuleDialog.vue'
 import ExistingPdfElementsDialog from '../../../shared/pdf-tools/components/ExistingPdfElementsDialog.vue'
+import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   buildEvidencePdfRulePayload,
   buildFileContentRows,
@@ -1089,9 +1115,6 @@ const evidenceDragging = ref(false)
 const listReordering = ref(false)
 const OPTIMIZE_SIZE_KEY = 'docsy.evidencePdf.optimizeSize'
 const optimizeSizeEnabled = ref(window.localStorage.getItem(OPTIMIZE_SIZE_KEY) !== '0')
-watch(optimizeSizeEnabled, (value) => {
-  window.localStorage.setItem(OPTIMIZE_SIZE_KEY, value ? '1' : '0')
-})
 let quickCleanupPipeline = false
 const importingMergedPdf = ref(false)
 const splittingMergedImport = ref(false)
@@ -1166,23 +1189,28 @@ const pageNumberTemplate = computed({
 })
 const selectedHeaderGroup = computed(() =>
   globalApplyEnabled.value
-    ? globalHeaderGroups.value.find((group) => group.id === globalSelectedHeaderGroupId.value) || globalHeaderGroups.value[0]
+    ? globalHeaderGroups.value.find((group) => group.id === globalSelectedHeaderGroupId.value) ||
+      globalHeaderGroups.value[0]
     : selectedGroupFor(selectedOverlayFile.value, 'header') || createDefaultHeaderGroup(),
 )
 const selectedFooterTextGroup = computed(() =>
   globalApplyEnabled.value
-    ? globalFooterTextGroups.value.find((group) => group.id === globalSelectedFooterTextGroupId.value) || globalFooterTextGroups.value[0]
+    ? globalFooterTextGroups.value.find((group) => group.id === globalSelectedFooterTextGroupId.value) ||
+      globalFooterTextGroups.value[0]
     : selectedGroupFor(selectedOverlayFile.value, 'footerText') || createDefaultFooterTextGroup(),
 )
 const selectedPageNumberGroup = computed(() =>
   globalApplyEnabled.value
-    ? globalPageNumberGroups.value.find((group) => group.id === globalSelectedPageNumberGroupId.value) || globalPageNumberGroups.value[0]
+    ? globalPageNumberGroups.value.find((group) => group.id === globalSelectedPageNumberGroupId.value) ||
+      globalPageNumberGroups.value[0]
     : selectedGroupFor(selectedOverlayFile.value, 'pageNumber') || createDefaultPageNumberGroup(),
 )
 // Per-file selected group ids (bind to HeaderFooterRuleFields v-model)
 const selectedHeaderGroupId = computed({
   get: () =>
-    globalApplyEnabled.value ? globalSelectedHeaderGroupId.value : selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
+    globalApplyEnabled.value
+      ? globalSelectedHeaderGroupId.value
+      : selectedOverlayFile.value?.selectedHeaderGroupId || 'h1',
   set: (v) => {
     if (globalApplyEnabled.value) globalSelectedHeaderGroupId.value = v
     else setSelectedGroup(selectedOverlayFile.value, 'header', v)
@@ -1460,6 +1488,28 @@ const fileSuffixText = ref('processed')
 const PROCESSING_PRESET_STORAGE_KEY = 'docsy.evidencePdf.processingPresets.v1'
 const selectedProcessingPresetId = ref('builtin-new-evidence')
 const userProcessingPresets = ref(loadProcessingPresets())
+const commonPreference = useWorkspacePreferences('evidence-pdf.common', { userProcessingPresets })
+const workbenchPreference = useWorkspacePreferences(`evidence-pdf.workbench.${workflowMode.value}`, {
+  optimizeSizeEnabled,
+  removeBlankPages,
+  splitNamePrefix,
+  splitNameSuffix,
+  splitNameSeparator,
+  splitNameCustomSeparator,
+  normalizeA4,
+  a4Orientation,
+  a4ContentRotation,
+  a4ContentMarginMm,
+  rasterDpi,
+  removeAnnotations,
+  annotationKinds,
+  bookmarkEnabled,
+  bookmarkRemoveExisting,
+  outputMode,
+  mergeFileName,
+  fileSuffixEnabled,
+  fileSuffixText,
+})
 const builtInProcessingPresets = [
   {
     id: 'builtin-new-evidence',
@@ -1539,7 +1589,7 @@ function loadProcessingPresets() {
 }
 
 function persistProcessingPresets() {
-  window.localStorage.setItem(PROCESSING_PRESET_STORAGE_KEY, JSON.stringify(userProcessingPresets.value))
+  void commonPreference.save()
 }
 
 function processingPresetSnapshot() {
@@ -1659,7 +1709,9 @@ function applySelectedProcessingPreset() {
 async function saveCurrentProcessingPreset() {
   try {
     const { value } = await ElMessageBox.prompt('输入预设名称', '保存处理预设', {
-      inputValue: selectedUserPreset.value?.name || '', inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
+      inputValue: selectedUserPreset.value?.name || '',
+      inputPattern: /\S+/,
+      inputErrorMessage: '名称不能为空',
     })
     const name = String(value || '').trim()
     const existing = userProcessingPresets.value.find((preset) => preset.name === name)
@@ -1669,7 +1721,12 @@ async function saveCurrentProcessingPreset() {
       existing.updatedAt = new Date().toISOString()
       selectedProcessingPresetId.value = existing.id
     } else {
-      const preset = { id: `preset-${Date.now()}`, name, settings: processingPresetSnapshot(), updatedAt: new Date().toISOString() }
+      const preset = {
+        id: `preset-${Date.now()}`,
+        name,
+        settings: processingPresetSnapshot(),
+        updatedAt: new Date().toISOString(),
+      }
       userProcessingPresets.value.push(preset)
       selectedProcessingPresetId.value = preset.id
     }
@@ -1685,7 +1742,11 @@ async function handlePresetCommand(command) {
   if (!preset) return
   try {
     if (command === 'rename') {
-      const { value } = await ElMessageBox.prompt('输入新名称', '重命名预设', { inputValue: preset.name, inputPattern: /\S+/, inputErrorMessage: '名称不能为空' })
+      const { value } = await ElMessageBox.prompt('输入新名称', '重命名预设', {
+        inputValue: preset.name,
+        inputPattern: /\S+/,
+        inputErrorMessage: '名称不能为空',
+      })
       preset.name = String(value || '').trim()
     } else if (command === 'delete') {
       await ElMessageBox.confirm(`确认删除“${preset.name}”？`, '删除预设', { type: 'warning' })
@@ -1865,16 +1926,16 @@ const previewHint = computed(() => (mergedImportPlan.value ? '合并 PDF 原文�
 const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
 const previewSamplePage = computed(() => {
   const numbering = effectivePageNumbering(selectedPageNumberGroup.value, numberingDefaults.value)
-  const preceding = numbering.sequence === 'continuous'
-    ? Number(selectedOverlayFile.value?.pageStart || 1) + Number(previewPage.value || 1) - 2
-    : Number(previewPage.value || 1) - 1
+  const preceding =
+    numbering.sequence === 'continuous'
+      ? Number(selectedOverlayFile.value?.pageStart || 1) + Number(previewPage.value || 1) - 2
+      : Number(previewPage.value || 1) - 1
   return numbering.pageStart + Math.max(0, preceding)
 })
 const previewSampleTotal = computed(() => {
   const numbering = effectivePageNumbering(selectedPageNumberGroup.value, numberingDefaults.value)
-  const pages = numbering.totalMode === 'combined'
-    ? totalOverlayPages.value
-    : Number(selectedOverlayFile.value?.pages || 1)
+  const pages =
+    numbering.totalMode === 'combined' ? totalOverlayPages.value : Number(selectedOverlayFile.value?.pages || 1)
   return numbering.pageStart + Math.max(0, pages - 1)
 })
 const plannedOutputDir = computed(() => buildOutputDir(overlayRows.value, overlayOutputDir.value))
@@ -1893,7 +1954,12 @@ const firstHeaderPreview = computed(() => {
   const mode = headerMode.value ?? group.mode
   if (mode === 'none') return ''
   const effective = effectiveHeaderNumbering(group, numberingDefaults.value)
-  return buildHeaderTextForGroup(first, 0, { ...group, mode, perFileSeqStart: effective.evidenceStart }, currentRules.value)
+  return buildHeaderTextForGroup(
+    first,
+    0,
+    { ...group, mode, perFileSeqStart: effective.evidenceStart },
+    currentRules.value,
+  )
 })
 const firstFooterPreview = computed(() => {
   if (!insertHeaderFooterEnabled.value) return ''
@@ -3763,6 +3829,8 @@ function observePanelResize() {
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
   observePanelResize()
+  void commonPreference.start()
+  void workbenchPreference.start()
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
@@ -3778,6 +3846,8 @@ onUnmounted(() => {
     window.clearInterval(overlayProgressTimer)
     overlayProgressTimer = null
   }
+  void commonPreference.stop()
+  void workbenchPreference.stop()
 })
 </script>
 

@@ -466,20 +466,19 @@ fn sanitize_name(name: &str) -> String {
     let sanitized: String = name
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric()
-                || matches!(ch, '-' | '_')
-                || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+            if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
             {
-                ch
-            } else {
                 '_'
+            } else {
+                ch
             }
         })
         .collect();
+    let sanitized = sanitized.trim().trim_end_matches(['.', ' ']);
     if sanitized.is_empty() {
         "video".into()
     } else {
-        sanitized
+        sanitized.to_string()
     }
 }
 
@@ -491,7 +490,13 @@ mod tests {
     fn default_output_prefix_uses_video_name_without_run_timestamp() {
         let args = serde_json::json!({});
         let prefix = output_prefix_for(Path::new("/tmp/证据 视频.mp4"), &args);
-        assert_eq!(prefix, "证据_视频");
+        assert_eq!(prefix, "证据 视频");
+    }
+
+    #[test]
+    fn output_prefix_only_replaces_cross_platform_invalid_characters() {
+        assert_eq!(sanitize_name("证据（微信） 01"), "证据（微信） 01");
+        assert_eq!(sanitize_name("证据:微信?.mp4 "), "证据_微信_.mp4");
     }
 
     #[test]

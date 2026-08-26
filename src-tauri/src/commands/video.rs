@@ -61,3 +61,34 @@ pub async fn extract_frames(
 pub async fn list_output_frames(dir: String) -> Result<Vec<String>, String> {
     super::run_blocking(move || crate::ffmpeg::extract::list_output_frames(&dir)).await
 }
+
+#[tauri::command]
+pub async fn analyze_frame_selection(
+    args: crate::ffmpeg::selection::FrameSelectionArgs,
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+) -> Result<crate::ffmpeg::selection::FrameSelectionResult, String> {
+    let operation_id = "analyze_frame_selection:auto".to_string();
+    let progress_operation_id = operation_id.clone();
+    let progress_manager = std::sync::Arc::clone(manager.inner());
+    super::run_managed(
+        &manager,
+        "analyze_frame_selection",
+        Some(operation_id),
+        move |token| {
+            let cancel_token = token.clone();
+            crate::ffmpeg::selection::analyze_with_progress(
+                args,
+                move || cancel_token.is_cancelled(),
+                move |phase, current, total| {
+                    let label = match phase {
+                        "features" => format!("正在读取图片特征… {current}/{total}"),
+                        "compare" => format!("正在判断重复与前后连续性… {current}/{total}"),
+                        _ => "正在整理智能筛选结果…".to_string(),
+                    };
+                    progress_manager.update(&progress_operation_id, label);
+                },
+            )
+        },
+    )
+    .await
+}

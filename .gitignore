@@ -26,8 +26,31 @@ docs/*
 !docs/office-markdown-converter-design.md
 !docs/pdf-markdown-converter-design.md
 !docs/PDF页眉页脚编号规则与预设方案.md
+!docs/VIDEO_FRAME_SELECTION_REFACTOR.md
 Archived/
 
 # 下载站安装包（由同步脚本从 GitHub Releases 拉取，不纳入仓库）
 site/public/downloads/*
 !site/public/downloads/.gitkeep
+
+# 暂停的 NAS 自建官网/自定义端口部署草稿
+site/ANSWER-SUMMARY.md
+site/CONFIG-SUMMARY.md
+site/COPY-PASTE-DEPLOY.md
+site/CURRENT-SETUP-SOLUTION.md
+site/DEPLOY-CHECKLIST.md
+site/FINAL-SOLUTION.md
+site/LUCKY-CONFIG-SPECIFIC.md
+site/LUCKY-WEB-SERVICE-CONFIG.md
+site/OPTIMIZATION-SUMMARY.md
+site/PORT-CONFIG-ANSWER.md
+site/PORT-FORWARD-SOLUTIONS.md
+site/PORT-IPV4-IPV6-ANALYSIS.md
+site/QUICK-DEPLOY.md
+site/READY-TO-USE-CONFIG.md
+site/Caddyfile-custom-port
+site/docker-compose-custom-port.yml
+site/scripts/check-lucky-config.sh
+site/scripts/test-deployment.sh
+site/scripts/validate-config.sh
+site/scripts/verify-structure.sh

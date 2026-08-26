@@ -1,9 +1,10 @@
 /**
  * Composable for template settings: separator, trash, clear history, template database.
  */
-import { ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 
 export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns) {
   const itemSeparatorSetting = ref(window.localStorage.getItem('docsy.template.itemSeparator') || '、')
@@ -12,11 +13,17 @@ export function useTemplateSettings(loadHistoryContext, loadTemplateHistoryRuns)
   const clearingHistory = ref(false)
   const templateDatabase = ref([])
   const templateDatabaseLoading = ref(false)
+  const preference = useWorkspacePreferences('template.workspace', { itemSeparatorSetting })
 
-  function saveItemSeparatorSetting() {
-    window.localStorage.setItem('docsy.template.itemSeparator', itemSeparatorSetting.value || '、')
-    ElMessage.success('已保存多项字段连接符设置')
+  async function saveItemSeparatorSetting() {
+    itemSeparatorSetting.value ||= '、'
+    const saved = await preference.save()
+    if (saved) ElMessage.success('已保存多项字段连接符设置')
+    else ElMessage.error('设置保存失败，请稍后重试')
   }
+
+  onMounted(() => void preference.start())
+  onBeforeUnmount(() => void preference.stop())
 
   async function loadTemplateTrash() {
     templateTrashLoading.value = true

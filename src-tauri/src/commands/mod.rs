@@ -5,6 +5,7 @@ pub mod settings;
 pub mod system;
 pub mod template;
 pub mod video;
+pub mod workspace;
 
 fn anyhow_to_json_string(err: anyhow::Error) -> String {
     let docsy_err: crate::error::DocsyError = err.into();
@@ -102,6 +103,12 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         video::probe_video,
         video::extract_frames,
         video::list_output_frames,
+        video::analyze_frame_selection,
+        // unified workspace persistence
+        workspace::get_workspace_preference,
+        workspace::set_workspace_preference,
+        workspace::save_media_workspace_session,
+        workspace::find_media_workspace_session,
         // markdown
         markdown::convert_markdown,
         markdown::convert_markdown_text,

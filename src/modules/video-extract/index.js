@@ -12,7 +12,7 @@ export default {
       path: '/video-extract',
       name: 'video-extract',
       component: () => import('./views/VideoExtractView.vue'),
-      meta: { title: '视频抽帧', moduleId: 'video-extract' },
+      meta: { title: '视频抽帧', moduleId: 'video-extract', keepAlive: true },
     },
   ],
 

@@ -1,6 +1,6 @@
 [package]
 name = "docsy"
-version = "0.9.7-beta27"
+version = "0.9.7-beta28"
 description = "Docsy - 轻量文档处理工具箱"
 authors = ["木小樨 <muxiaoxi>"]
 edition = "2021"
@@ -11,6 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -52,3 +53,12 @@ rust_xlsxwriter = "0.80"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Image decoding and resizing dominate video-frame analysis and preview time.
+# Keep application code debuggable while running these mature codecs at the
+# same optimization level users receive in packaged builds.
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3

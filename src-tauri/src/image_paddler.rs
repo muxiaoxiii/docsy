@@ -1,7 +1,6 @@
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -11,30 +10,35 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tif", 
 
 const A4_WIDTH_MM: f64 = 210.0;
 const A4_HEIGHT_MM: f64 = 297.0;
-const FILENAME_FONT_PT: f64 = 8.0;
-const FILENAME_MAX_LINES: usize = 2;
-const FILENAME_LINE_HEIGHT_MM: f64 = 4.2;
+const DEFAULT_FILENAME_FONT_PT: f64 = 8.0;
+const FILENAME_MAX_LINES: usize = 3;
 const DOCX_TRAILING_GAP_MM: f64 = 2.0;
+const DOCX_FILENAME_SAFETY_MM: f64 = 2.0;
+const PDF_FILENAME_SAFETY_MM: f64 = 0.6;
 
-static TRAILING_NUMBER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[-_]\d+$").unwrap());
 static TIME_PART_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s").unwrap()
 });
 static NUMBER_PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+").unwrap());
-static OUTPUT_STEM_SUFFIX_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(?:[_-]?(?:frame|img|image)?[_-]?\d+)$").unwrap());
+static OUTPUT_STEM_SUFFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+            r"(?i)(?:[_-]\d{2}[_-]\d{2}[_-]\d{2}[_-]\d{3})?[_-](?:frame|img|image)[_-]?\d+(?:[_-]\d+)?$",
+        )
+        .unwrap()
+});
 
 #[derive(Debug, Deserialize)]
 pub struct AnalyzeArgs {
     pub folder: String,
     #[serde(default)]
     pub folders: Option<Vec<String>>,
+    #[serde(default)]
+    pub image_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct AnalyzeResult {
     pub images: Vec<ImageInfo>,
-    pub groups: Vec<ImageGroup>,
     pub recommended: RecommendedSettings,
 }
 
@@ -44,12 +48,6 @@ pub struct ImageInfo {
     pub width: u32,
     pub height: u32,
     pub file_size: u64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ImageGroup {
-    pub prefix: String,
-    pub count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +84,10 @@ pub struct RunArgs {
     #[serde(default)]
     pub filename_without_ext: Option<bool>,
     #[serde(default)]
+    pub filename_font_family: Option<String>,
+    #[serde(default)]
+    pub filename_font_size_pt: Option<f64>,
+    #[serde(default)]
     pub filename_remove_text: Option<String>,
     #[serde(default)]
     pub filename_rules: Option<Vec<FilenameRule>>,
@@ -100,6 +102,8 @@ pub struct RunArgs {
     /// silently end up in the same filing.
     #[serde(default)]
     pub output_mode: Option<String>,
+    #[serde(default)]
+    pub output_stem: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -131,12 +135,14 @@ pub struct RunResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Clone)]
 struct LayoutGrid {
     rows: usize,
     cols: usize,
 }
 
 /// 布局配置，聚合 generate_pdf / generate_docx 的所有排版参数。
+#[derive(Clone)]
 struct LayoutConfig {
     page_w_mm: f64,
     page_h_mm: f64,
@@ -147,12 +153,72 @@ struct LayoutConfig {
     filename_reserve_mm: f64,
     show_filename: bool,
     filename_without_ext: bool,
+    filename_font_family: String,
+    filename_font_size_pt: f64,
+    filename_max_lines: usize,
+    filename_safety_mm: f64,
     filename_remove_text: String,
     filename_rules: Vec<FilenameRule>,
     border_enabled: bool,
     border_color: String,
     scale_mode: String,
     dpi: u32,
+}
+
+fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig {
+    let image_count = images.len();
+    let capacity = config.grid.rows * config.grid.cols;
+    let mut page = config.clone();
+    let compact_grid = if image_count == 0 || image_count >= capacity {
+        page.grid.clone()
+    } else {
+        compact_grid_for_count(&page.grid, image_count)
+    };
+    let usable_width = page.cell_w_mm * page.grid.cols as f64;
+    let usable_height = (page.image_cell_h_mm + page.filename_reserve_mm) * page.grid.rows as f64;
+    page.cell_w_mm = usable_width / compact_grid.cols as f64;
+    page.filename_max_lines = filename_lines_for_images(
+        images,
+        page.filename_without_ext,
+        &page.filename_remove_text,
+        &page.filename_rules,
+        page.cell_w_mm,
+        page.filename_font_size_pt,
+    );
+    page.filename_reserve_mm = if page.show_filename {
+        filename_line_height_mm(page.filename_font_size_pt) * page.filename_max_lines as f64
+            + page.filename_safety_mm
+    } else {
+        0.0
+    };
+    page.image_cell_h_mm =
+        (usable_height / compact_grid.rows as f64 - page.filename_reserve_mm).max(1.0);
+    page.grid = compact_grid;
+    page
+}
+
+fn compact_grid_for_count(base: &LayoutGrid, count: usize) -> LayoutGrid {
+    if count <= 1 {
+        return LayoutGrid { rows: 1, cols: 1 };
+    }
+    let target_ratio = base.cols as f64 / base.rows as f64;
+    let mut best = LayoutGrid {
+        rows: 1,
+        cols: count,
+    };
+    let mut best_score = ((best.cols as f64 / best.rows as f64).ln() - target_ratio.ln()).abs();
+    for rows in 1..=count {
+        if !count.is_multiple_of(rows) {
+            continue;
+        }
+        let cols = count / rows;
+        let score = ((cols as f64 / rows as f64).ln() - target_ratio.ln()).abs();
+        if score < best_score {
+            best = LayoutGrid { rows, cols };
+            best_score = score;
+        }
+    }
+    best
 }
 
 fn parse_layout(
@@ -186,14 +252,6 @@ fn parse_layout(
             LayoutGrid { rows, cols }
         }
     }
-}
-
-fn extract_prefix(filename: &str) -> String {
-    let stem = Path::new(filename)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(filename);
-    TRAILING_NUMBER_RE.replace(stem, "").to_string()
 }
 
 fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
@@ -282,24 +340,6 @@ fn image_info_from_path(path: &Path) -> Result<Option<ImageInfo>> {
         height,
         file_size: metadata.len(),
     }))
-}
-
-fn build_groups(images: &[ImageInfo]) -> Vec<ImageGroup> {
-    let mut map: HashMap<String, usize> = HashMap::new();
-    for img in images {
-        let name = Path::new(&img.path)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        let prefix = extract_prefix(name);
-        *map.entry(prefix).or_insert(0) += 1;
-    }
-    let mut groups: Vec<ImageGroup> = map
-        .into_iter()
-        .map(|(prefix, count)| ImageGroup { prefix, count })
-        .collect();
-    groups.sort_by(|a, b| natural_cmp(&a.prefix, &b.prefix));
-    groups
 }
 
 fn recommend_settings(images: &[ImageInfo]) -> RecommendedSettings {
@@ -397,13 +437,18 @@ fn recommend_settings(images: &[ImageInfo]) -> RecommendedSettings {
 }
 
 pub fn analyze(args: &AnalyzeArgs) -> Result<AnalyzeResult> {
-    let images = scan_image_folders(&args.folder, &args.folders)?;
-    let groups = build_groups(&images);
+    let images = if let Some(paths) = args.image_paths.as_ref().filter(|paths| !paths.is_empty()) {
+        paths
+            .iter()
+            .filter_map(|path| image_info_from_path(Path::new(path)).ok().flatten())
+            .collect()
+    } else {
+        scan_image_folders(&args.folder, &args.folders)?
+    };
     let recommended = recommend_settings(&images);
 
     Ok(AnalyzeResult {
         images,
-        groups,
         recommended,
     })
 }
@@ -541,7 +586,12 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
     let per_page = grid.rows * grid.cols;
     let margin_mm = args.margin_mm.unwrap_or(12.0);
     let show_filename = args.show_filename.unwrap_or(true);
-    let filename_without_ext = args.filename_without_ext.unwrap_or(true);
+    let filename_without_ext = args.filename_without_ext.unwrap_or(false);
+    let filename_font_family = normalize_filename_font_family(args.filename_font_family.as_deref());
+    let filename_font_size_pt = args
+        .filename_font_size_pt
+        .unwrap_or(DEFAULT_FILENAME_FONT_PT)
+        .clamp(6.0, 24.0);
     let filename_remove_text = args.filename_remove_text.clone().unwrap_or_default();
     let filename_rules = args.filename_rules.clone().unwrap_or_default();
     let order_mode = args.order_mode.as_deref().unwrap_or("z");
@@ -568,8 +618,22 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
     };
     let cell_w = usable_w / grid.cols as f64;
     let cell_h = layout_usable_h / grid.rows as f64;
+    let filename_safety_mm = if args.output_format == "docx" {
+        DOCX_FILENAME_SAFETY_MM
+    } else {
+        PDF_FILENAME_SAFETY_MM
+    };
+    let filename_max_lines = filename_lines_for_images(
+        &images,
+        filename_without_ext,
+        &filename_remove_text,
+        &filename_rules,
+        cell_w,
+        filename_font_size_pt,
+    );
     let filename_reserve = if show_filename {
-        FILENAME_LINE_HEIGHT_MM * FILENAME_MAX_LINES as f64
+        filename_line_height_mm(filename_font_size_pt) * filename_max_lines as f64
+            + filename_safety_mm
     } else {
         0.0
     };
@@ -588,6 +652,10 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
         filename_reserve_mm: filename_reserve,
         show_filename,
         filename_without_ext,
+        filename_font_family,
+        filename_font_size_pt,
+        filename_max_lines,
+        filename_safety_mm,
         filename_remove_text,
         filename_rules,
         border_enabled,
@@ -602,7 +670,13 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
     } else {
         "docx"
     };
-    let output_stem = output_file_stem(&images);
+    let output_stem = args
+        .output_stem
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(sanitize_output_name)
+        .unwrap_or_else(|| output_file_stem(&images));
     let output_path = unique_output_path(output_dir, &format!("{output_stem}_docsy_paddler"), ext);
 
     let warnings = match args.output_format.as_str() {
@@ -784,18 +858,55 @@ fn display_filename_lines(
     remove_text: &str,
     rules: &[FilenameRule],
     cell_w_mm: f64,
+    font_size_pt: f64,
+    max_lines: usize,
 ) -> Vec<String> {
     wrap_filename_lines(
         &display_filename(path, without_ext, remove_text, rules),
         cell_w_mm,
-        FILENAME_MAX_LINES,
+        max_lines,
+        font_size_pt,
     )
 }
 
-fn wrap_filename_lines(name: &str, cell_w_mm: f64, max_lines: usize) -> Vec<String> {
-    let max_units = ((cell_w_mm * 72.0 / 25.4) / (FILENAME_FONT_PT * 0.56))
+fn filename_lines_for_images(
+    images: &[ImageInfo],
+    without_ext: bool,
+    remove_text: &str,
+    rules: &[FilenameRule],
+    cell_w_mm: f64,
+    font_size_pt: f64,
+) -> usize {
+    images
+        .iter()
+        .map(|image| {
+            let name = display_filename(&image.path, without_ext, remove_text, rules);
+            required_filename_lines(&name, cell_w_mm, font_size_pt)
+        })
+        .max()
+        .unwrap_or(1)
+}
+
+fn required_filename_lines(name: &str, cell_w_mm: f64, font_size_pt: f64) -> usize {
+    let max_units = filename_max_units(cell_w_mm, font_size_pt);
+    name_units(name)
+        .div_ceil(max_units)
+        .clamp(1, FILENAME_MAX_LINES)
+}
+
+fn filename_max_units(cell_w_mm: f64, font_size_pt: f64) -> usize {
+    ((cell_w_mm * 72.0 / 25.4) / (font_size_pt.clamp(6.0, 24.0) * 0.56))
         .floor()
-        .max(6.0) as usize;
+        .max(6.0) as usize
+}
+
+fn wrap_filename_lines(
+    name: &str,
+    cell_w_mm: f64,
+    max_lines: usize,
+    font_size_pt: f64,
+) -> Vec<String> {
+    let max_units = filename_max_units(cell_w_mm, font_size_pt);
     let mut lines = Vec::new();
     let mut current = String::new();
     let mut current_units = 0usize;
@@ -830,6 +941,17 @@ fn wrap_filename_lines(name: &str, cell_w_mm: f64, max_lines: usize) -> Vec<Stri
     lines
 }
 
+fn filename_line_height_mm(font_size_pt: f64) -> f64 {
+    font_size_pt.clamp(6.0, 24.0) * 25.4 / 72.0 * 1.32 + 0.45
+}
+
+fn normalize_filename_font_family(value: Option<&str>) -> String {
+    match value {
+        Some(value @ ("serif" | "kaiti" | "fangsong")) => value.to_string(),
+        _ => "sans".to_string(),
+    }
+}
+
 fn name_units(value: &str) -> usize {
     value
         .chars()
@@ -853,20 +975,19 @@ fn sanitize_output_name(name: &str) -> String {
     let value: String = name
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric()
-                || matches!(ch, '-' | '_')
-                || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+            if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
             {
-                ch
-            } else {
                 '_'
+            } else {
+                ch
             }
         })
         .collect();
+    let value = value.trim().trim_end_matches(['.', ' ']);
     if value.is_empty() {
         "images".into()
     } else {
-        value
+        value.to_string()
     }
 }
 
@@ -924,7 +1045,7 @@ fn generate_pdf(
     let mut doc = PdfDocument::new("image_paddler");
     let mut result_warnings = Vec::new();
     let per_page = config.grid.rows * config.grid.cols;
-    let needs_external_filename_font = config.show_filename
+    let has_non_ascii_filename = config.show_filename
         && images.iter().any(|image| {
             !display_filename(
                 &image.path,
@@ -934,8 +1055,14 @@ fn generate_pdf(
             )
             .is_ascii()
         });
-    let filename_font = if needs_external_filename_font {
-        load_pdf_filename_font(&mut doc).map(PdfFontHandle::External)
+    let prefers_external_font = has_non_ascii_filename || config.filename_font_family != "sans";
+    let filename_font = if prefers_external_font {
+        load_pdf_filename_font(&mut doc, &config.filename_font_family)
+            .map(PdfFontHandle::External)
+            .or_else(|| {
+                (!has_non_ascii_filename)
+                    .then(|| PdfFontHandle::Builtin(pdf_builtin_font(&config.filename_font_family)))
+            })
     } else {
         Some(PdfFontHandle::Builtin(BuiltinFont::Helvetica))
     };
@@ -948,6 +1075,8 @@ fn generate_pdf(
     }
 
     for (page_idx, chunk) in images.chunks(per_page).enumerate() {
+        let page_config = layout_for_page(config, chunk);
+        let config = &page_config;
         let mut ops: Vec<Op> = Vec::new();
 
         for (i, img_info) in chunk.iter().enumerate() {
@@ -978,11 +1107,6 @@ fn generate_pdf(
                 });
             }
 
-            let img = ::image::open(&img_info.path).map_err(|e| anyhow::anyhow!("{}", e))?;
-            let raw_image =
-                RawImage::from_dynamic_image(img).map_err(|e| anyhow::anyhow!("{}", e))?;
-            let xobj_id = doc.add_image(&raw_image);
-
             let cell_w_pt = config.cell_w_mm * 72.0 / 25.4;
             let cell_h_pt = config.image_cell_h_mm * 72.0 / 25.4;
 
@@ -994,6 +1118,13 @@ fn generate_pdf(
                 &config.scale_mode,
                 config.dpi,
             );
+            let (target_width_px, target_height_px) =
+                target_pixel_size(draw_w_pt, draw_h_pt, config.dpi);
+            let img = image_for_output(&img_info.path, target_width_px, target_height_px)?;
+            let encoded_width = img.width();
+            let raw_image =
+                RawImage::from_dynamic_image(img).map_err(|e| anyhow::anyhow!("{}", e))?;
+            let xobj_id = doc.add_image(&raw_image);
 
             let offset_x_pt = (cell_w_pt - draw_w_pt) / 2.0;
             let offset_y_pt = (cell_h_pt - draw_h_pt) / 2.0;
@@ -1001,7 +1132,7 @@ fn generate_pdf(
             let base_x_pt = cell_x_mm * 72.0 / 25.4 + offset_x_pt;
             let base_y_pt = image_area_y_mm * 72.0 / 25.4 + offset_y_pt;
 
-            let scale_factor = draw_w_pt / (img_info.width as f64 * 72.0 / config.dpi as f64);
+            let scale_factor = draw_w_pt / (encoded_width as f64 * 72.0 / config.dpi as f64);
 
             ops.push(Op::SaveGraphicsState);
             ops.push(Op::UseXobject {
@@ -1024,6 +1155,8 @@ fn generate_pdf(
                     &config.filename_remove_text,
                     &config.filename_rules,
                     config.cell_w_mm,
+                    config.filename_font_size_pt,
+                    config.filename_max_lines,
                 );
                 ops.push(Op::StartTextSection);
                 ops.push(Op::SetFont {
@@ -1031,17 +1164,21 @@ fn generate_pdf(
                         .as_ref()
                         .expect("未省略文件名时必须存在 PDF 字体")
                         .clone(),
-                    size: Pt(FILENAME_FONT_PT as f32),
+                    size: Pt(config.filename_font_size_pt as f32),
                 });
                 ops.push(Op::SetFillColor {
                     col: Color::Rgb(Rgb::new(0.2, 0.2, 0.2, None)),
                 });
                 for (line_idx, line) in lines.iter().enumerate() {
-                    let line_w_pt = name_units(line) as f64 * FILENAME_FONT_PT * 0.56;
+                    let line_w_pt = name_units(line) as f64 * config.filename_font_size_pt * 0.56;
                     let text_x_pt =
                         cell_x_mm * 72.0 / 25.4 + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
-                    let text_y_pt =
-                        (cell_y_mm + 1.4 + (lines.len() - line_idx - 1) as f64 * 3.6) * 72.0 / 25.4;
+                    let text_y_pt = (cell_y_mm
+                        + 0.8
+                        + (lines.len() - line_idx - 1) as f64
+                            * filename_line_height_mm(config.filename_font_size_pt))
+                        * 72.0
+                        / 25.4;
                     ops.push(Op::SetTextCursor {
                         pos: Point {
                             x: Pt(text_x_pt as f32),
@@ -1074,8 +1211,11 @@ fn generate_pdf(
     Ok(result_warnings)
 }
 
-fn load_pdf_filename_font(doc: &mut printpdf::PdfDocument) -> Option<printpdf::FontId> {
-    for path in cjk_font_candidates() {
+fn load_pdf_filename_font(
+    doc: &mut printpdf::PdfDocument,
+    family: &str,
+) -> Option<printpdf::FontId> {
+    for path in cjk_font_candidates(family) {
         let Ok(bytes) = std::fs::read(&path) else {
             continue;
         };
@@ -1087,28 +1227,85 @@ fn load_pdf_filename_font(doc: &mut printpdf::PdfDocument) -> Option<printpdf::F
     None
 }
 
-fn cjk_font_candidates() -> Vec<std::path::PathBuf> {
+fn cjk_font_candidates(family: &str) -> Vec<std::path::PathBuf> {
     let mut paths = Vec::new();
     if cfg!(target_os = "macos") {
-        paths.extend([
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/STHeiti Light.ttc",
-            "/Library/Fonts/Arial Unicode.ttf",
-        ]);
+        match family {
+            "serif" | "kaiti" | "fangsong" => paths.extend([
+                "/System/Library/Fonts/Supplemental/Songti.ttc",
+                "/System/Library/Fonts/STHeiti Light.ttc",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            ]),
+            _ => paths.extend([
+                "/System/Library/Fonts/PingFang.ttc",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                "/System/Library/Fonts/STHeiti Light.ttc",
+            ]),
+        }
+        paths.push("/Library/Fonts/Arial Unicode.ttf");
     } else if cfg!(windows) {
-        paths.extend([
-            "C:\\Windows\\Fonts\\msyh.ttc",
-            "C:\\Windows\\Fonts\\simsun.ttc",
-            "C:\\Windows\\Fonts\\simhei.ttf",
-        ]);
+        match family {
+            "serif" => paths.extend([
+                "C:\\Windows\\Fonts\\simsun.ttc",
+                "C:\\Windows\\Fonts\\simfang.ttf",
+            ]),
+            "kaiti" => paths.extend([
+                "C:\\Windows\\Fonts\\simkai.ttf",
+                "C:\\Windows\\Fonts\\simsun.ttc",
+            ]),
+            "fangsong" => paths.extend([
+                "C:\\Windows\\Fonts\\simfang.ttf",
+                "C:\\Windows\\Fonts\\simsun.ttc",
+            ]),
+            _ => paths.extend([
+                "C:\\Windows\\Fonts\\msyh.ttc",
+                "C:\\Windows\\Fonts\\simhei.ttf",
+            ]),
+        }
+        paths.push("C:\\Windows\\Fonts\\simsun.ttc");
     } else {
+        if family == "sans" {
+            paths.extend([
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            ]);
+        }
         paths.extend([
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         ]);
     }
     paths.into_iter().map(std::path::PathBuf::from).collect()
+}
+
+fn pdf_builtin_font(family: &str) -> printpdf::BuiltinFont {
+    if family == "sans" {
+        printpdf::BuiltinFont::Helvetica
+    } else {
+        printpdf::BuiltinFont::TimesRoman
+    }
+}
+
+fn docx_font_name(family: &str) -> &'static str {
+    if cfg!(windows) {
+        match family {
+            "serif" => "SimSun",
+            "kaiti" => "KaiTi",
+            "fangsong" => "FangSong",
+            _ => "Microsoft YaHei",
+        }
+    } else if cfg!(target_os = "macos") {
+        match family {
+            "serif" => "Songti SC",
+            "kaiti" => "Kaiti SC",
+            "fangsong" => "STFangsong",
+            _ => "PingFang SC",
+        }
+    } else if family == "serif" || family == "kaiti" || family == "fangsong" {
+        "Noto Serif CJK SC"
+    } else {
+        "Noto Sans CJK SC"
+    }
 }
 
 fn pdf_border_color(color: &str) -> printpdf::Color {
@@ -1118,8 +1315,9 @@ fn pdf_border_color(color: &str) -> printpdf::Color {
 
 fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig) -> Result<()> {
     use docx_rs::{
-        AlignmentType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph, Pic, Run,
-        Table, TableAlignmentType, TableCell, TableCellBorder, TableCellBorderPosition,
+        AlignmentType, BreakType, Docx, HeightRule, LineSpacing, LineSpacingType, PageMargin,
+        PageOrientationType, Paragraph, Pic, Run, RunFonts, Table, TableAlignmentType, TableBorder,
+        TableBorderPosition, TableBorders, TableCell, TableCellBorder, TableCellBorderPosition,
         TableCellBorders, TableCellMargins, TableLayoutType, TableRow, VAlignType, WidthType,
     };
 
@@ -1136,8 +1334,6 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
         (page_h_twips as i32).saturating_sub(margin_t_twips + margin_b_twips) as usize;
     let docx_usable_h_twips =
         usable_h_twips.saturating_sub(mm_to_twips(DOCX_TRAILING_GAP_MM).max(0) as usize);
-    let cell_w_twips = (usable_w_twips / config.grid.cols).max(1);
-    let cell_h_twips = (docx_usable_h_twips / config.grid.rows).max(1);
     let page_orientation = if config.page_w_mm > config.page_h_mm {
         PageOrientationType::Landscape
     } else {
@@ -1177,15 +1373,52 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                     .color(border_hex),
             )
     };
+    let table_borders = || {
+        TableBorders::with_empty()
+            .set(
+                TableBorder::new(TableBorderPosition::Top)
+                    .size(8)
+                    .color(border_hex),
+            )
+            .set(
+                TableBorder::new(TableBorderPosition::Left)
+                    .size(8)
+                    .color(border_hex),
+            )
+            .set(
+                TableBorder::new(TableBorderPosition::Bottom)
+                    .size(8)
+                    .color(border_hex),
+            )
+            .set(
+                TableBorder::new(TableBorderPosition::Right)
+                    .size(8)
+                    .color(border_hex),
+            )
+            .set(
+                TableBorder::new(TableBorderPosition::InsideH)
+                    .size(8)
+                    .color(border_hex),
+            )
+            .set(
+                TableBorder::new(TableBorderPosition::InsideV)
+                    .size(8)
+                    .color(border_hex),
+            )
+    };
 
     let mut doc = Docx::new()
         .page_size(page_w_twips, page_h_twips)
         .page_orient(page_orientation)
         .page_margin(page_margin);
 
-    let cell_w_pt = config.cell_w_mm * 72.0 / 25.4;
-    let cell_h_pt = config.image_cell_h_mm * 72.0 / 25.4;
     for chunk in images.chunks(per_page) {
+        let page_config = layout_for_page(config, chunk);
+        let config = &page_config;
+        let cell_w_twips = (usable_w_twips / config.grid.cols).max(1);
+        let cell_h_twips = (docx_usable_h_twips / config.grid.rows).max(1);
+        let cell_w_pt = config.cell_w_mm * 72.0 / 25.4;
+        let cell_h_pt = config.image_cell_h_mm * 72.0 / 25.4;
         let mut rows = Vec::with_capacity(config.grid.rows);
         for row_idx in 0..config.grid.rows {
             let mut cells = Vec::with_capacity(config.grid.cols);
@@ -1209,12 +1442,16 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         &config.scale_mode,
                         config.dpi,
                     );
-                    let (png_data, width_px, height_px) = image_as_png(&img_info.path)?;
+                    let (target_width_px, target_height_px) =
+                        target_pixel_size(draw_w_pt, draw_h_pt, config.dpi);
+                    let (png_data, width_px, height_px) =
+                        image_as_png(&img_info.path, target_width_px, target_height_px)?;
                     let pic = Pic::new_with_dimensions(png_data, width_px, height_px)
                         .size(pt_to_emu(draw_w_pt), pt_to_emu(draw_h_pt));
                     cell = cell.add_paragraph(
                         Paragraph::new()
                             .align(AlignmentType::Center)
+                            .line_spacing(LineSpacing::new().before(0).after(0))
                             .add_run(Run::new().add_image(pic)),
                     );
                     let filename_lines = display_filename_lines(
@@ -1223,15 +1460,40 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         &config.filename_remove_text,
                         &config.filename_rules,
                         config.cell_w_mm,
+                        config.filename_font_size_pt,
+                        config.filename_max_lines,
                     );
                     if config.show_filename {
-                        for line in filename_lines {
-                            cell = cell.add_paragraph(
-                                Paragraph::new()
-                                    .align(AlignmentType::Center)
-                                    .add_run(Run::new().size(16).add_text(line)),
-                            );
+                        let font_name = docx_font_name(&config.filename_font_family);
+                        let mut filename_run = Run::new()
+                            .fonts(
+                                RunFonts::new()
+                                    .ascii(font_name)
+                                    .hi_ansi(font_name)
+                                    .east_asia(font_name)
+                                    .cs(font_name),
+                            )
+                            .size((config.filename_font_size_pt * 2.0).round() as usize);
+                        for (line_idx, line) in filename_lines.into_iter().enumerate() {
+                            if line_idx > 0 {
+                                filename_run = filename_run.add_break(BreakType::TextWrapping);
+                            }
+                            filename_run = filename_run.add_text(line);
                         }
+                        let filename_line_twips =
+                            mm_to_twips(filename_line_height_mm(config.filename_font_size_pt));
+                        cell = cell.add_paragraph(
+                            Paragraph::new()
+                                .align(AlignmentType::Center)
+                                .line_spacing(
+                                    LineSpacing::new()
+                                        .before(0)
+                                        .after(0)
+                                        .line_rule(LineSpacingType::Exact)
+                                        .line(filename_line_twips),
+                                )
+                                .add_run(filename_run),
+                        );
                     }
                 } else {
                     cell = cell.add_paragraph(Paragraph::new());
@@ -1246,12 +1508,18 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
             );
         }
 
-        let table = Table::without_borders(rows)
-            .set_grid(vec![cell_w_twips; config.grid.cols])
-            .width(usable_w_twips, WidthType::Dxa)
-            .layout(TableLayoutType::Fixed)
-            .align(TableAlignmentType::Center)
-            .margins(table_margins.clone());
+        // 同时写入表格级和单元格级边框。部分 Word/WPS 版本不会稳定显示
+        // 只有 tcBorders 的固定布局表格，tblBorders 作为兼容性兜底。
+        let table = if config.border_enabled {
+            Table::new(rows).set_borders(table_borders())
+        } else {
+            Table::without_borders(rows)
+        }
+        .set_grid(vec![cell_w_twips; config.grid.cols])
+        .width(usable_w_twips, WidthType::Dxa)
+        .layout(TableLayoutType::Fixed)
+        .align(TableAlignmentType::Center)
+        .margins(table_margins.clone());
         doc = doc.add_table(table);
     }
 
@@ -1292,8 +1560,45 @@ fn pt_to_emu(pt: f64) -> u32 {
     (pt * 914400.0 / 72.0).round().max(1.0) as u32
 }
 
-fn image_as_png(path: &str) -> Result<(Vec<u8>, u32, u32)> {
+fn target_pixel_size(draw_w_pt: f64, draw_h_pt: f64, dpi: u32) -> (u32, u32) {
+    let dpi = dpi.clamp(72, 600) as f64;
+    (
+        (draw_w_pt / 72.0 * dpi).ceil().max(1.0) as u32,
+        (draw_h_pt / 72.0 * dpi).ceil().max(1.0) as u32,
+    )
+}
+
+fn image_for_output(
+    path: &str,
+    target_width: u32,
+    target_height: u32,
+) -> Result<::image::DynamicImage> {
     let img = ::image::open(path).map_err(|e| anyhow::anyhow!("{}", e))?;
+    if img.width() <= target_width && img.height() <= target_height {
+        return Ok(img);
+    }
+    Ok(img.resize(
+        target_width.max(1),
+        target_height.max(1),
+        ::image::imageops::FilterType::Lanczos3,
+    ))
+}
+
+fn image_as_png(path: &str, target_width: u32, target_height: u32) -> Result<(Vec<u8>, u32, u32)> {
+    let source_dimensions =
+        ::image::image_dimensions(path).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let is_png = Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
+    if is_png && source_dimensions.0 <= target_width && source_dimensions.1 <= target_height {
+        return Ok((
+            std::fs::read(path)?,
+            source_dimensions.0,
+            source_dimensions.1,
+        ));
+    }
+    let img = image_for_output(path, target_width, target_height)?;
     let width = img.width();
     let height = img.height();
     let mut cursor = std::io::Cursor::new(Vec::new());
@@ -1391,13 +1696,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_prefix() {
-        assert_eq!(extract_prefix("IMG_001.jpg"), "IMG");
-        assert_eq!(extract_prefix("photo-001.jpg"), "photo");
-        assert_eq!(extract_prefix("test123.jpg"), "test123");
-    }
-
-    #[test]
     fn test_natural_sort() {
         let mut v = vec!["img_10.jpg", "img_2.jpg", "img_1.jpg"];
         v.sort_by(|a, b| natural_cmp(a, b));
@@ -1433,12 +1731,15 @@ mod tests {
             margin_mm: None,
             show_filename: None,
             filename_without_ext: None,
+            filename_font_family: None,
+            filename_font_size_pt: None,
             filename_remove_text: None,
             filename_rules: None,
             order_mode: None,
             border_enabled: None,
             border_color: None,
             output_mode: None,
+            output_stem: None,
         };
         assert_eq!(
             explicit_image_paths(&args).unwrap(),
@@ -1460,13 +1761,17 @@ mod tests {
         let img: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
             image::ImageBuffer::from_pixel(240, 120, image::Rgba([240, 240, 240, 255]));
         img.save(&img_path).unwrap();
+        let long_name_path = root.join(
+            "evidence_frame_0002_with_a_filename_long_enough_to_wrap_onto_two_full_lines.png",
+        );
+        img.save(&long_name_path).unwrap();
 
         let args = RunArgs {
             folder: root.display().to_string(),
             folders: None,
             image_paths: None,
             output_format: "docx".into(),
-            layout: "1".into(),
+            layout: "1x2".into(),
             orientation: "portrait".into(),
             dpi: 300,
             scale_mode: "fit".into(),
@@ -1475,12 +1780,15 @@ mod tests {
             margin_mm: Some(6.0),
             show_filename: Some(true),
             filename_without_ext: Some(true),
+            filename_font_family: Some("serif".into()),
+            filename_font_size_pt: Some(11.0),
             filename_remove_text: Some("_clip".into()),
             filename_rules: None,
             order_mode: Some("z".into()),
             border_enabled: Some(true),
             border_color: Some("dark_gray".into()),
             output_mode: None,
+            output_stem: None,
         };
 
         let first = run(&args).unwrap();
@@ -1516,8 +1824,14 @@ mod tests {
             .read_to_string(&mut document_xml)
             .unwrap();
         assert!(document_xml.contains("<wp:docPr"));
+        assert!(document_xml.contains("<w:tblBorders>"));
+        assert!(document_xml.contains("<w:insideH"));
+        assert!(document_xml.contains("<w:insideV"));
         assert!(document_xml.contains("<w:tcBorders>"));
         assert!(document_xml.contains("4B5563"));
+        assert!(document_xml.contains(docx_font_name("serif")));
+        assert!(document_xml.contains("w:lineRule=\"exact\""));
+        assert!(document_xml.contains("<w:br"));
         assert!(!document_xml.contains("w:type=\"page\""));
         assert!(document_xml.contains(">evidence_frame_0001<"));
         assert!(document_xml.contains("<w:pgSz"));
@@ -1558,8 +1872,120 @@ mod tests {
             "这是一个非常非常长的证据截图文件名_00_01_23_frame_0042",
             35.0,
             2,
+            8.0,
         );
         assert_eq!(lines.len(), 2);
         assert!(lines[1].ends_with('…'));
+    }
+
+    #[test]
+    fn frame_document_name_removes_timeline_and_keeps_video_stem() {
+        let images = vec![ImageInfo {
+            path: "/tmp/当事人 微信记录_00_00_03_500_frame_0004.jpg".into(),
+            width: 1200,
+            height: 800,
+            file_size: 1,
+        }];
+
+        assert_eq!(output_file_stem(&images), "当事人 微信记录");
+        assert_eq!(
+            sanitize_output_name("当事人 微信（原始）"),
+            "当事人 微信（原始）"
+        );
+    }
+
+    #[test]
+    fn six_point_long_name_can_expand_to_three_lines() {
+        let name = "中华人民共和国人民法院当事人微信聊天记录视频文件名较长补充说明材料_00_00_03_500_frame_0004.jpg";
+        let lines = wrap_filename_lines(name, 52.0, FILENAME_MAX_LINES, 6.0);
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.concat(), name);
+    }
+
+    #[test]
+    fn docx_reuses_png_bytes_when_layout_does_not_need_downsampling() {
+        let root = std::env::temp_dir().join(format!(
+            "docsy_image_passthrough_test_{}_{}",
+            std::process::id(),
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("evidence.png");
+        let image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+            image::ImageBuffer::from_pixel(160, 90, image::Rgba([28, 76, 57, 255]));
+        image.save(&path).unwrap();
+        let original = std::fs::read(&path).unwrap();
+
+        let (embedded, width, height) = image_as_png(path.to_str().unwrap(), 320, 180).unwrap();
+
+        assert_eq!((width, height), (160, 90));
+        assert_eq!(embedded, original);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn output_image_is_downsampled_to_the_selected_print_dpi_bounds() {
+        let root = std::env::temp_dir().join(format!(
+            "docsy_image_downsample_test_{}_{}",
+            std::process::id(),
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("evidence.png");
+        let image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+            image::ImageBuffer::from_pixel(1200, 800, image::Rgba([240, 240, 236, 255]));
+        image.save(&path).unwrap();
+
+        let resized = image_for_output(path.to_str().unwrap(), 600, 400).unwrap();
+
+        assert_eq!((resized.width(), resized.height()), (600, 400));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn final_single_image_uses_the_full_page_cell() {
+        let config = LayoutConfig {
+            page_w_mm: 210.0,
+            page_h_mm: 297.0,
+            margin_mm: 12.0,
+            grid: LayoutGrid { rows: 2, cols: 1 },
+            cell_w_mm: 186.0,
+            image_cell_h_mm: 128.1,
+            filename_reserve_mm: 8.4,
+            show_filename: true,
+            filename_without_ext: false,
+            filename_font_family: "sans".into(),
+            filename_font_size_pt: 8.0,
+            filename_max_lines: 2,
+            filename_safety_mm: DOCX_FILENAME_SAFETY_MM,
+            filename_remove_text: String::new(),
+            filename_rules: Vec::new(),
+            border_enabled: false,
+            border_color: "black".into(),
+            scale_mode: "fit".into(),
+            dpi: 300,
+        };
+
+        let images = vec![ImageInfo {
+            path: "evidence_frame_0001.png".into(),
+            width: 1200,
+            height: 800,
+            file_size: 1,
+        }];
+        let page = layout_for_page(&config, &images);
+
+        assert_eq!(page.grid.rows, 1);
+        assert_eq!(page.grid.cols, 1);
+        assert!(page.image_cell_h_mm > config.image_cell_h_mm * 1.9);
+    }
+
+    #[test]
+    fn incomplete_final_page_uses_a_compact_grid_without_empty_cells() {
+        let base = LayoutGrid { rows: 2, cols: 2 };
+
+        let compact = compact_grid_for_count(&base, 3);
+
+        assert_eq!(compact.rows * compact.cols, 3);
     }
 }

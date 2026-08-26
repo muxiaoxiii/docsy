@@ -1,12 +1,16 @@
-import { computed, ref, reactive, watch, onBeforeUnmount } from 'vue'
-import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { computed, ref, reactive, watch, onActivated, onBeforeUnmount, onMounted } from 'vue'
+import { openPath, tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage } from 'element-plus'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
-import { fileName as baseFileName } from '../../../core/filePath.js'
+import { fileName as baseFileName, parentDir } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
+import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
+const FILENAME_MAX_LINES = 3
+const DOCX_FILENAME_SAFETY_MM = 2
+const PDF_FILENAME_SAFETY_MM = 0.6
 const KNOWN_NON_IMAGE_EXTENSIONS = new Set([
   'pdf',
   'doc',
@@ -27,7 +31,7 @@ const KNOWN_NON_IMAGE_EXTENSIONS = new Set([
   '7z',
 ])
 
-export function useImagePaddlerState() {
+export function useImagePaddlerState(options = {}) {
   const folder = ref('')
   const folders = ref([])
   const analyzing = ref(false)
@@ -36,8 +40,14 @@ export function useImagePaddlerState() {
   const generatedResult = ref(null)
   const previewSources = reactive({})
   const pageZoom = ref(100)
+  const explicitPaths = ref([])
+  const inputContext = ref({ sourceKind: 'folder', sourceLabel: '', sourceStem: '' })
+  const sourceDecisions = ref({})
+  const exclusionByPath = ref({})
+  const preferenceRevision = ref(0)
   let analyzeTimer = null
   let analysisRequestId = 0
+  let preferencesReady = false
 
   const settings = reactive({
     output_format: 'pdf',
@@ -50,15 +60,25 @@ export function useImagePaddlerState() {
     dpi: 300,
     margin_mm: 12,
     show_filename: true,
-    filename_without_ext: true,
+    filename_font_family: 'sans',
+    filename_font_size_pt: 8,
+    filename_without_ext: false,
     filename_remove_text: '',
-    filename_rules: [createFilenameRule('remove')],
+    filename_rules: [],
+    use_source_exclusions: true,
     order_mode: 'z',
     border_enabled: false,
     border_color: 'black',
   })
+  const preference = useWorkspacePreferences('image-paddler.workspace', {
+    settings,
+    pageZoom,
+    exclusionByPath,
+    preferenceRevision,
+  })
 
   const layoutGrid = computed(() => parseLayout(settings.layout, settings.custom_rows, settings.custom_cols))
+  const isFrameSequence = computed(() => inputContext.value.sourceKind === 'video-frames')
   const resolvedOrientation = computed(() => {
     if (settings.orientation !== 'auto') return settings.orientation
     return analysis.value?.recommended?.orientation || 'portrait'
@@ -67,12 +87,11 @@ export function useImagePaddlerState() {
   const orderedImages = computed(() =>
     reorderImages(analysis.value?.images || [], layoutGrid.value, settings.order_mode),
   )
-  const previewImages = computed(() => orderedImages.value.slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
-  const previewSlots = computed(() => {
-    const slots = [...previewImages.value]
-    while (slots.length < layoutGrid.value.rows * layoutGrid.value.cols) slots.push(null)
-    return slots
-  })
+  const includedImages = computed(() => orderedImages.value.filter((image) => !isImageExcluded(image)))
+  const excludedCount = computed(() => orderedImages.value.length - includedImages.value.length)
+  const previewImages = computed(() => includedImages.value.slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
+  const previewSlots = computed(() => [...previewImages.value])
+  const previewLayoutGrid = computed(() => compactGridForCount(layoutGrid.value, previewImages.value.length))
   const generatedOutputPaths = computed(() => {
     const paths = generatedResult.value?.output_paths || []
     return paths.length ? paths : generatedResult.value?.output_path ? [generatedResult.value.output_path] : []
@@ -82,10 +101,11 @@ export function useImagePaddlerState() {
     padding: `${(Math.max(0, settings.margin_mm) / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}%`,
     width: `${pageZoom.value}%`,
     minWidth: '220px',
+    boxSizing: 'border-box',
   }))
   const previewGridStyle = computed(() => ({
-    gridTemplateColumns: `repeat(${layoutGrid.value.cols}, minmax(0, 1fr))`,
-    gridTemplateRows: `repeat(${layoutGrid.value.rows}, minmax(0, 1fr))`,
+    gridTemplateColumns: `repeat(${previewLayoutGrid.value.cols}, minmax(0, 1fr))`,
+    gridTemplateRows: `repeat(${previewLayoutGrid.value.rows}, minmax(0, 1fr))`,
   }))
   const previewCellStyle = computed(() => {
     if (!settings.border_enabled) return { borderColor: 'transparent' }
@@ -99,46 +119,110 @@ export function useImagePaddlerState() {
     const usableWidth = Math.max(1, page.width - margin * 2)
     const docxTrailingGap = settings.output_format === 'docx' ? 2 : 0
     const usableHeight = Math.max(1, page.height - margin * 2 - docxTrailingGap)
-    const cellWidth = usableWidth / layoutGrid.value.cols
-    const cellHeight = usableHeight / layoutGrid.value.rows
-    const filenameReserve = settings.show_filename ? 8.4 : 0
+    const cellWidth = usableWidth / previewLayoutGrid.value.cols
+    const cellHeight = usableHeight / previewLayoutGrid.value.rows
+    const filenameFontSizePt = clampNumber(settings.filename_font_size_pt, 6, 24, 8)
+    const filenameLineHeightMm = ((filenameFontSizePt * 25.4) / 72) * 1.32 + 0.45
+    const filenameMaxLines = settings.show_filename
+      ? Math.max(
+          1,
+          ...previewImages.value.map((image) =>
+            requiredFilenameLines(fileName(image.path), cellWidth, filenameFontSizePt, FILENAME_MAX_LINES),
+          ),
+        )
+      : 0
+    const filenameSafetyMm = settings.output_format === 'docx' ? DOCX_FILENAME_SAFETY_MM : PDF_FILENAME_SAFETY_MM
+    const filenameReserve = settings.show_filename ? filenameLineHeightMm * filenameMaxLines + filenameSafetyMm : 0
     return {
       cellWidth,
       cellHeight,
       filenameReserve,
+      filenameFontSizePt,
+      filenameLineHeightMm,
+      filenameMaxLines,
       imageCellHeight: Math.max(1, cellHeight - filenameReserve),
     }
   })
   const previewImageAreaStyle = computed(() => {
     const metrics = layoutMetrics.value
+    const height = `${Math.min(100, (metrics.imageCellHeight / metrics.cellHeight) * 100)}%`
     return {
-      height: `${Math.min(100, (metrics.imageCellHeight / metrics.cellHeight) * 100)}%`,
+      height,
+      flexBasis: height,
     }
   })
   const previewNameStyle = computed(() => {
     const metrics = layoutMetrics.value
+    const height = `${Math.min(100, (metrics.filenameReserve / metrics.cellHeight) * 100)}%`
     return {
-      height: `${Math.min(100, (metrics.filenameReserve / metrics.cellHeight) * 100)}%`,
+      height,
+      minHeight: height,
+      flexBasis: height,
+      fontSize: `${(metrics.filenameFontSizePt * 96) / 72}px`,
+      fontFamily: filenameFontFamilyCss(settings.filename_font_family),
+      lineHeight: `${metrics.filenameLineHeightMm}mm`,
     }
   })
+
+  function filenameFontFamilyCss(value) {
+    return (
+      {
+        serif: '"Songti SC", "STSong", SimSun, serif',
+        kaiti: '"Kaiti SC", "STKaiti", KaiTi, serif',
+        fangsong: '"STFangsong", FangSong, serif',
+        sans: '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif',
+      }[value] || '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif'
+    )
+  }
 
   async function selectFolder() {
     const selected = await open({ directory: true, multiple: true })
     if (selected) {
       folders.value = Array.isArray(selected) ? selected : [selected]
       folder.value = folders.value[0] || ''
+      explicitPaths.value = []
+      inputContext.value = { sourceKind: 'folder', sourceLabel: '', sourceStem: '' }
+      sourceDecisions.value = {}
       scheduleAnalyze()
     }
+  }
+
+  function loadImagePaths(paths, context = {}) {
+    const normalized = [...new Set((paths || []).filter((path) => isExplicitImagePath(path)))]
+    if (!normalized.length) return false
+    explicitPaths.value = normalized
+    const sourceKind = context.sourceKind || (normalized.every(isVideoFramePath) ? 'video-frames' : 'images')
+    inputContext.value = {
+      sourceKind,
+      sourceLabel: context.sourceLabel || '',
+      sourceStem: context.sourceStem || '',
+    }
+    sourceDecisions.value = Object.fromEntries(
+      (context.selection || [])
+        .filter((item) => item?.path)
+        .map((item) => [item.path, { decision: item.decision || 'review', reason: item.reason || '' }]),
+    )
+    folders.value = [...new Set(normalized.map((path) => parentDir(path)))]
+    folder.value = folders.value[0] || parentDir(normalized[0])
+    settings.order_mode = 'custom'
+    if (inputContext.value.sourceKind === 'video-frames') settings.output_mode = 'merged'
+    scheduleAnalyze()
+    return true
   }
 
   async function analyze() {
     if (!folders.value.length) return
     const requestId = ++analysisRequestId
     analyzing.value = true
-    const result = await tauriCallSafe('analyze_image_paddler_folder', { folder: folder.value, folders: folders.value })
+    const result = await tauriCallSafe('analyze_image_paddler_folder', {
+      folder: folder.value,
+      folders: folders.value,
+      imagePaths: explicitPaths.value.length ? explicitPaths.value : undefined,
+    })
     if (requestId !== analysisRequestId) return
     if (result.ok) {
       analysis.value = result.data
+      if (isFrameSequence.value) applyRecommendedSettings(false)
       await preloadVisibleImages()
     } else {
       ElMessage.error(userFacingError(result.error, '图片文件夹分析失败，请确认文件夹路径正确'))
@@ -148,12 +232,17 @@ export function useImagePaddlerState() {
 
   async function run() {
     if (!folders.value.length) return
+    if (!includedImages.value.length) {
+      ElMessage.warning('当前没有参与排版的图片，请先恢复至少一张图片')
+      return
+    }
     generating.value = true
     const result = await tauriCallSafe('run_image_paddler', {
       args: {
         folder: folder.value,
         folders: folders.value,
-        image_paths: settings.order_mode === 'custom' ? orderedImages.value.map((image) => image.path) : undefined,
+        image_paths: includedImages.value.map((image) => image.path),
+        output_stem: inputContext.value.sourceStem || undefined,
         ...settings,
         orientation: resolvedOrientation.value,
       },
@@ -214,6 +303,24 @@ export function useImagePaddlerState() {
     return { rows: Math.ceil(count / cols), cols }
   }
 
+  function compactGridForCount(baseGrid, count) {
+    const capacity = baseGrid.rows * baseGrid.cols
+    if (!count || count >= capacity) return baseGrid
+    const targetRatio = baseGrid.cols / baseGrid.rows
+    let best = { rows: 1, cols: count }
+    let bestScore = Math.abs(Math.log(best.cols / best.rows) - Math.log(targetRatio))
+    for (let rows = 1; rows <= count; rows += 1) {
+      if (count % rows !== 0) continue
+      const cols = count / rows
+      const score = Math.abs(Math.log(cols / rows) - Math.log(targetRatio))
+      if (score < bestScore) {
+        best = { rows, cols }
+        bestScore = score
+      }
+    }
+    return best
+  }
+
   function clampNumber(value, min, max, fallback) {
     const number = Number(value)
     if (!Number.isFinite(number)) return fallback
@@ -237,7 +344,25 @@ export function useImagePaddlerState() {
   }
 
   function imageItemMeta(img) {
-    return img?.width && img?.height ? `${img.width}×${img.height}` : ''
+    const dimensions = img?.width && img?.height ? `${img.width}×${img.height}` : ''
+    const sourceReason = sourceDecisions.value[img?.path]?.reason
+    if (isImageExcluded(img)) return sourceReason ? `来源判断：${sourceReason}` : dimensions
+    return dimensions
+  }
+
+  function isImageExcluded(img) {
+    const path = img?.path || ''
+    if (!path) return false
+    if (Object.prototype.hasOwnProperty.call(exclusionByPath.value, path)) {
+      return Boolean(exclusionByPath.value[path])
+    }
+    return settings.use_source_exclusions && sourceDecisions.value[path]?.decision === 'exclude'
+  }
+
+  function toggleImageExclusion({ item, excluded }) {
+    if (!item?.path) return
+    exclusionByPath.value = { ...exclusionByPath.value, [item.path]: Boolean(excluded) }
+    generatedResult.value = null
   }
 
   function applyFilenameRules(name) {
@@ -291,11 +416,17 @@ export function useImagePaddlerState() {
   }
 
   function fileNameLines(path) {
-    return wrapFilenameLines(fileName(path), layoutMetrics.value.cellWidth, 2)
+    return wrapFilenameLines(fileName(path), layoutMetrics.value.cellWidth, layoutMetrics.value.filenameMaxLines)
+  }
+
+  function requiredFilenameLines(name, cellWidthMm, fontSizePt, maxLines) {
+    const maxUnits = Math.max(6, Math.floor((cellWidthMm * 72) / 25.4 / (fontSizePt * 0.56)))
+    return Math.min(maxLines, Math.max(1, Math.ceil(nameUnits(name) / maxUnits)))
   }
 
   function wrapFilenameLines(name, cellWidthMm, maxLines) {
-    const maxUnits = Math.max(6, Math.floor((cellWidthMm * 72) / 25.4 / (8 * 0.56)))
+    const fontSize = clampNumber(settings.filename_font_size_pt, 6, 24, 8)
+    const maxUnits = Math.max(6, Math.floor((cellWidthMm * 72) / 25.4 / (fontSize * 0.56)))
     const lines = []
     let current = ''
     let units = 0
@@ -395,7 +526,7 @@ export function useImagePaddlerState() {
     await Promise.all(
       paths.map(async (path) => {
         if (previewSources[path]) return
-        const result = await tauriCallSafe('read_image_data_url', { path })
+        const result = await tauriCallQuiet('read_image_data_url', { path, maxEdge: 900 })
         if (result.ok) {
           previewSources[path] = result.data
         }
@@ -433,7 +564,7 @@ export function useImagePaddlerState() {
     return order
   }
 
-  function applyRecommendedSettings() {
+  function applyRecommendedSettings(showMessage = true) {
     const recommended = analysis.value?.recommended
     if (!recommended) return
     settings.orientation = recommended.orientation || 'auto'
@@ -441,7 +572,7 @@ export function useImagePaddlerState() {
     settings.scale_mode = recommended.scale_mode || 'fit'
     settings.margin_mm = Number(recommended.margin_mm || 12)
     settings.show_filename = recommended.show_filename !== false
-    ElMessage.success('已应用推荐参数')
+    if (showMessage) ElMessage.success('已应用推荐参数')
   }
 
   function adjustPageZoom(delta) {
@@ -470,12 +601,49 @@ export function useImagePaddlerState() {
       }
       folders.value = accepted
       folder.value = accepted[0]
+      explicitPaths.value = accepted.every(isExplicitImagePath) ? accepted : []
+      inputContext.value = { sourceKind: 'drop', sourceLabel: '', sourceStem: '' }
+      sourceDecisions.value = {}
       scheduleAnalyze()
     },
   })
 
   onBeforeUnmount(() => {
     if (analyzeTimer) clearTimeout(analyzeTimer)
+    void preference.stop()
+  })
+
+  function consumeIncomingTransfer() {
+    const transfer = typeof options.initialTransfer === 'function' ? options.initialTransfer() : null
+    const initialPaths =
+      transfer?.paths || (typeof options.initialImagePaths === 'function' ? options.initialImagePaths() : [])
+    if (loadImagePaths(initialPaths, transfer || {}) && typeof options.onInitialPathsLoaded === 'function') {
+      options.onInitialPathsLoaded()
+    }
+  }
+
+  onMounted(async () => {
+    await preference.start()
+    if (preferenceRevision.value < 2) {
+      const legacyBlankRules =
+        Array.isArray(settings.filename_rules) &&
+        settings.filename_rules.every((rule) => !rule?.value && !rule?.replacement)
+      if (legacyBlankRules && !settings.filename_remove_text) {
+        settings.filename_without_ext = false
+        settings.filename_rules = []
+      }
+      settings.filename_font_size_pt = clampNumber(settings.filename_font_size_pt, 6, 24, 8)
+      if (!['sans', 'serif', 'kaiti', 'fangsong'].includes(settings.filename_font_family)) {
+        settings.filename_font_family = 'sans'
+      }
+      preferenceRevision.value = 2
+    }
+    preferencesReady = true
+    consumeIncomingTransfer()
+  })
+
+  onActivated(() => {
+    if (preferencesReady) consumeIncomingTransfer()
   })
 
   function orientationLabel(value) {
@@ -491,6 +659,16 @@ export function useImagePaddlerState() {
     const ext = name.slice(dot + 1).toLowerCase()
     if (IMAGE_EXTENSIONS.has(ext)) return true
     return !KNOWN_NON_IMAGE_EXTENSIONS.has(ext)
+  }
+
+  function isExplicitImagePath(path) {
+    const name = baseFileName(path)
+    const dot = name.lastIndexOf('.')
+    return dot > 0 && IMAGE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())
+  }
+
+  function isVideoFramePath(path) {
+    return /(?:^|[/\\])_docsy_video_frames(?:[/\\])|(?:^|[_-])frame[_-]?\d+/i.test(path)
   }
 
   function layoutLabel(value) {
@@ -514,12 +692,16 @@ export function useImagePaddlerState() {
     analysis,
     generatedResult,
     previewSources,
+    inputContext,
+    isFrameSequence,
     pageZoom,
     settings,
     layoutGrid,
     resolvedOrientation,
     resolvedOrientationLabel,
     orderedImages,
+    includedImages,
+    excludedCount,
     previewImages,
     previewSlots,
     generatedOutputPaths,
@@ -530,6 +712,7 @@ export function useImagePaddlerState() {
     previewImageAreaStyle,
     previewNameStyle,
     selectFolder,
+    loadImagePaths,
     analyze,
     run,
     reorderLayoutImages,
@@ -540,6 +723,8 @@ export function useImagePaddlerState() {
     previewImageStyle,
     imageItemName,
     imageItemMeta,
+    isImageExcluded,
+    toggleImageExclusion,
     addFilenameRule,
     removeFilenameRule,
     rulePlaceholder,

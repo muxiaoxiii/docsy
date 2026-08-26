@@ -74,7 +74,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { open } from '@tauri-apps/plugin-dialog'
 import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
@@ -84,6 +84,7 @@ import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.
 import evidenceIconUrl from '../../../assets/icons/evidence.svg?url'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 
 const activeTab = ref('merge')
 const evidenceFolder = ref('')
@@ -91,6 +92,7 @@ const evidenceGroups = ref([])
 const scanning = ref(false)
 const building = ref(false)
 const conversionFailures = ref([])
+const preference = useWorkspacePreferences('evidence-pdf.workspace', { activeTab })
 
 function reorderGroupFiles(group, { from, to }) {
   group.files = moveItem(group.files, from, to)
@@ -134,6 +136,9 @@ async function buildEvidence() {
   }
   building.value = false
 }
+
+onMounted(() => void preference.start())
+onBeforeUnmount(() => void preference.stop())
 </script>
 
 <style scoped>

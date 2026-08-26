@@ -51,7 +51,9 @@
           <template #actions>
             <div class="merge-options">
               <el-checkbox v-model="duplexSeparate">双面打印分隔模式</el-checkbox>
-              <span class="merge-option-hint">文件页数为奇数时在末尾补一页空白，让每份文件独立占满双面打印的整张纸</span>
+              <span class="merge-option-hint"
+                >文件页数为奇数时在末尾补一页空白，让每份文件独立占满双面打印的整张纸</span
+              >
             </div>
             <el-button type="success" @click="doMerge" :loading="merging" :disabled="mergeFiles.length < 2">
               合并为一个 PDF
@@ -330,7 +332,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -344,6 +346,7 @@ import { getPdfPageCount, tauriCallSafe, userFacingError } from '../../../core/t
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
+import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   buildRangeAfter,
   insertRangeAfter,
@@ -515,6 +518,14 @@ const selectedSplitRange = computed(() => splitRanges.value[selectedSplitRangeIn
 const antiOcrFiles = ref([])
 const antiOcrProcessing = ref(false)
 const antiCopyMethod = ref('cmap_scramble')
+const preference = useWorkspacePreferences('pdf-tools.workspace', {
+  activeTab,
+  duplexSeparate,
+  compressImageReencode,
+  compressLevel,
+  removeBlankPages,
+  antiCopyMethod,
+})
 const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => !f.hasAntiOcr).length)
 const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr).length)
 
@@ -1023,6 +1034,9 @@ function splitRangeStatus(row) {
   }
   return { type: 'success', text: '正常' }
 }
+
+onMounted(() => void preference.start())
+onBeforeUnmount(() => void preference.stop())
 </script>
 
 <style scoped>
