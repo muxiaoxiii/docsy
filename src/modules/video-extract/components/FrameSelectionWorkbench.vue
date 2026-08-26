@@ -44,10 +44,13 @@
       <span class="toolbar-label">预览大小</span>
       <el-slider v-model="thumbWidth" :min="160" :max="600" :step="20" class="thumb-slider" />
       <span class="toolbar-zoom-value">{{ thumbWidth }} px</span>
-      <el-select v-model="pageSize" size="small" class="page-size-select">
-        <el-option :value="24" label="每页 24 张" />
-        <el-option :value="48" label="每页 48 张" />
-        <el-option :value="96" label="每页 96 张" />
+      <el-select v-model="pageFraction" size="small" class="page-size-select" aria-label="每页图片数量">
+        <el-option
+          v-for="option in pageSizeOptions"
+          :key="option.fraction"
+          :value="option.fraction"
+          :label="option.label"
+        />
       </el-select>
     </div>
 
@@ -106,7 +109,7 @@
           </article>
         </div>
         <WorkspaceEmptyState v-else title="当前筛选条件下没有图片" description="切换筛选条件，或恢复已排除的图片。" />
-        <div v-if="filteredEntries.length > pageSize" class="frame-pager">
+        <div v-if="pageCount > 1" class="frame-pager">
           <el-button size="small" :disabled="page <= 1" @click="page -= 1">上一页</el-button>
           <span>第 {{ page }} / {{ pageCount }} 页</span>
           <el-button size="small" :disabled="page >= pageCount" @click="page += 1">下一页</el-button>
@@ -240,6 +243,11 @@ import { fileName } from '../../../core/filePath.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
+import {
+  pageRangeForSize,
+  pageSizeForFraction,
+  percentagePageSizeOptions,
+} from '../../../shared/components/imageGridPagination.js'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -252,7 +260,7 @@ const props = defineProps({
 const emit = defineEmits(['update-decision', 'reorder', 'undo', 'run-analysis', 'accept-suggestions', 'send-to-layout'])
 const filter = ref('all')
 const thumbWidth = ref(240)
-const pageSize = ref(24)
+const pageFraction = ref(0.25)
 const page = ref(1)
 const selectedIndex = ref(0)
 const compareMode = ref('single')
@@ -267,7 +275,7 @@ const largePreviewIndex = ref(0)
 const preference = useWorkspacePreferences('video-extract.workbench', {
   filter,
   thumbWidth,
-  pageSize,
+  pageFraction,
   compareMode,
 })
 const filterOptions = [
@@ -307,10 +315,11 @@ const filteredEntries = computed(() =>
       return effectiveDecision(item) === filter.value
     }),
 )
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredEntries.value.length / pageSize.value)))
-const pagedItems = computed(() =>
-  filteredEntries.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value),
-)
+const pageSizeOptions = computed(() => percentagePageSizeOptions(props.items.length))
+const pageSize = computed(() => pageSizeForFraction(props.items.length, pageFraction.value))
+const pageRange = computed(() => pageRangeForSize(filteredEntries.value.length, pageSize.value, page.value))
+const pageCount = computed(() => pageRange.value.pageCount)
+const pagedItems = computed(() => filteredEntries.value.slice(pageRange.value.start, pageRange.value.end))
 const selectedItem = computed(() => props.items[selectedIndex.value] || null)
 const comparisonIndex = computed(() => {
   if (!selectedItem.value) return -1
@@ -515,7 +524,7 @@ function handleKeydown(event) {
 }
 
 watch([pagedItems, selectedIndex, comparisonIndex], () => void loadSources(pagedItems.value), { immediate: true })
-watch([filter, pageSize], () => {
+watch([filter, pageFraction], () => {
   page.value = 1
 })
 watch(pageCount, (value) => {
@@ -650,7 +659,7 @@ onBeforeUnmount(() => {
 }
 
 .page-size-select {
-  width: 122px;
+  width: 88px;
 }
 
 .frame-review-layout {

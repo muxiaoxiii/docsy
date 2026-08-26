@@ -3,8 +3,13 @@
     <div class="reorder-image-toolbar">
       <span>{{ rangeLabel }}</span>
       <span class="reorder-image-hint">拖动手柄调整顺序</span>
-      <el-select v-model="pageSize" size="small" class="reorder-image-page-size">
-        <el-option v-for="size in pageSizeOptions" :key="size" :label="`${size} 张`" :value="size" />
+      <el-select v-model="selectedFraction" size="small" class="reorder-image-page-size" aria-label="每页图片数量">
+        <el-option
+          v-for="option in pageSizeOptions"
+          :key="option.fraction"
+          :label="option.label"
+          :value="option.fraction"
+        />
       </el-select>
       <el-button size="small" text @click="adjustZoom(-10)">-</el-button>
       <el-slider v-model="zoom" :min="minZoom" :max="maxZoom" :step="5" class="reorder-image-zoom" />
@@ -12,7 +17,7 @@
       <span class="reorder-image-zoom-value">{{ zoom }}%</span>
     </div>
 
-    <div v-if="items.length" class="reorder-image-scroll">
+    <div v-if="items.length" ref="scrollContainer" class="reorder-image-scroll">
       <div class="reorder-image-grid">
         <article
           v-for="(item, localIndex) in pagedItems"
@@ -102,11 +107,12 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { Delete, Rank, RefreshLeft } from '@element-plus/icons-vue'
 import { tauriCallQuiet } from '../../core/tauriBridge.js'
 import { fileName } from '../../core/filePath.js'
 import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
+import { pageRangeForSize, pageSizeForFraction, percentagePageSizeOptions } from './imageGridPagination.js'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -114,8 +120,7 @@ const props = defineProps({
   metaResolver: { type: Function, default: null },
   pathResolver: { type: Function, default: null },
   emptyDescription: { type: String, default: '暂无图片' },
-  pageSizeOptions: { type: Array, default: () => [24, 48, 96] },
-  initialPageSize: { type: Number, default: 24 },
+  pageFraction: { type: Number, default: 0.25 },
   initialZoom: { type: Number, default: 100 },
   minZoom: { type: Number, default: 60 },
   maxZoom: { type: Number, default: 320 },
@@ -123,10 +128,10 @@ const props = defineProps({
   excludedResolver: { type: Function, default: null },
 })
 
-const emit = defineEmits(['reorder', 'toggle-excluded'])
+const emit = defineEmits(['reorder', 'toggle-excluded', 'update:page-fraction'])
 const page = ref(1)
-const pageSize = ref(props.initialPageSize)
 const zoom = ref(props.initialZoom)
+const scrollContainer = ref(null)
 const sources = reactive({})
 const largeSources = reactive({})
 const dimensions = reactive({})
@@ -142,14 +147,19 @@ const reorder = usePointerReorder({
   onReorder: (payload) => emit('reorder', payload),
 })
 
-const pageCount = computed(() => Math.max(1, Math.ceil(props.items.length / pageSize.value)))
-const pageStart = computed(() => Math.min((page.value - 1) * pageSize.value, props.items.length))
-const pageEnd = computed(() => Math.min(pageStart.value + pageSize.value, props.items.length))
-const pagedItems = computed(() => props.items.slice(pageStart.value, pageEnd.value))
-const rangeLabel = computed(() =>
-  props.items.length ? `${pageStart.value + 1}-${pageEnd.value} / ${props.items.length}` : '0 / 0',
-)
 const thumbSize = computed(() => Math.round((112 * zoom.value) / 100))
+const pageSizeOptions = computed(() => percentagePageSizeOptions(props.items.length))
+const selectedFraction = computed({
+  get: () => props.pageFraction,
+  set: (value) => emit('update:page-fraction', value),
+})
+const pageSize = computed(() => pageSizeForFraction(props.items.length, selectedFraction.value))
+const pageRange = computed(() => pageRangeForSize(props.items.length, pageSize.value, page.value))
+const pageCount = computed(() => pageRange.value.pageCount)
+const pagedItems = computed(() => props.items.slice(pageRange.value.start, pageRange.value.end))
+const rangeLabel = computed(() =>
+  props.items.length ? `${pageRange.value.start + 1}-${pageRange.value.end} / ${props.items.length}` : '0 / 0',
+)
 
 function itemGeometry(item) {
   const path = itemPath(item)
@@ -175,7 +185,7 @@ function thumbWrapStyle(item) {
 }
 
 function globalIndex(localIndex) {
-  return pageStart.value + localIndex
+  return pageRange.value.start + localIndex
 }
 
 function itemPath(item) {
@@ -259,9 +269,16 @@ async function openPreview(item) {
   previewSrc.value = result.data
 }
 
-watch([pagedItems, pageSize], preloadVisibleImages, { immediate: true })
+watch(pagedItems, preloadVisibleImages, { immediate: true })
 watch([pageSize, () => props.items.length], () => {
   page.value = Math.min(pageCount.value, Math.max(1, page.value))
+})
+watch(selectedFraction, () => {
+  page.value = 1
+})
+watch(page, async () => {
+  await nextTick()
+  if (scrollContainer.value) scrollContainer.value.scrollTop = 0
 })
 </script>
 

@@ -280,6 +280,7 @@
               :excluded-resolver="isImageExcluded"
               preserve-aspect-ratio
               :initial-zoom="130"
+              v-model:page-fraction="previewPageFraction"
               empty-description="暂无图片"
               @reorder="reorderLayoutImages"
               @toggle-excluded="toggleImageExclusion"
@@ -317,6 +318,7 @@ const {
   inputContext,
   isFrameSequence,
   pageZoom,
+  previewPageFraction,
   settings,
   layoutGrid,
   resolvedOrientation,

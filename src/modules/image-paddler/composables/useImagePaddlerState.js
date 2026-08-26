@@ -40,6 +40,7 @@ export function useImagePaddlerState(options = {}) {
   const generatedResult = ref(null)
   const previewSources = reactive({})
   const pageZoom = ref(100)
+  const previewPageFraction = ref(0.25)
   const explicitPaths = ref([])
   const inputContext = ref({ sourceKind: 'folder', sourceLabel: '', sourceStem: '' })
   const sourceDecisions = ref({})
@@ -73,6 +74,7 @@ export function useImagePaddlerState(options = {}) {
   const preference = useWorkspacePreferences('image-paddler.workspace', {
     settings,
     pageZoom,
+    previewPageFraction,
     exclusionByPath,
     preferenceRevision,
   })
@@ -695,6 +697,7 @@ export function useImagePaddlerState(options = {}) {
     inputContext,
     isFrameSequence,
     pageZoom,
+    previewPageFraction,
     settings,
     layoutGrid,
     resolvedOrientation,
