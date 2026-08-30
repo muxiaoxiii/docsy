@@ -371,7 +371,7 @@ pub fn respond_conversion_timeout(
 /// OperationManager: CancellationToken-based 异步任务取消（run_managed 注册的任务）
 /// SubprocessRegistry: PID-based 外部子进程 kill（qpdf 等外部命令）
 #[tauri::command]
-pub fn cancel_operation(
+pub async fn cancel_operation(
     manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     registry: tauri::State<'_, std::sync::Arc<crate::SubprocessRegistry>>,
     operation_id: String,
@@ -381,7 +381,12 @@ pub fn cancel_operation(
         return Ok(true);
     }
     // 回退到 SubprocessRegistry（外部子进程 kill）
-    Ok(registry.cancel(&operation_id))
+    let registry = std::sync::Arc::clone(registry.inner());
+    tauri::async_runtime::spawn_blocking(move || registry.cancel(&operation_id))
+        .await
+        .map_err(|err| DocsyError::Unknown {
+            message: format!("取消子进程失败：{err}"),
+        })
 }
 
 /// List all currently active operations with metadata (for debugging and UI).
@@ -397,15 +402,23 @@ pub fn list_active_operations(
 /// `lib.rs`; this command marks the retry as approved and performs coordinated
 /// cancellation before asking the window to close again.
 #[tauri::command]
-pub fn confirm_app_close(
+pub async fn confirm_app_close(
     window: tauri::Window,
     close_state: tauri::State<'_, std::sync::Arc<crate::CloseRequestState>>,
     manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     registry: tauri::State<'_, std::sync::Arc<crate::SubprocessRegistry>>,
     conversion_state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
 ) -> Result<(), DocsyError> {
+    let close_state = std::sync::Arc::clone(close_state.inner());
+    let manager = std::sync::Arc::clone(manager.inner());
+    let registry = std::sync::Arc::clone(registry.inner());
+    let conversion_state = std::sync::Arc::clone(conversion_state.inner());
     manager.cancel_all();
-    registry.cancel_all();
+    tauri::async_runtime::spawn_blocking(move || registry.cancel_all())
+        .await
+        .map_err(|err| DocsyError::Unknown {
+            message: format!("关闭前终止子进程失败：{err}"),
+        })?;
     if conversion_state
         .timed_out
         .load(std::sync::atomic::Ordering::SeqCst)

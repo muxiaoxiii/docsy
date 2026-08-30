@@ -70,6 +70,7 @@ export function useWorkspacePreferences(scope, bindings, options = {}) {
   async function start() {
     if (loaded) return
     stopped = false
+    if (stopWatch) stopWatch()
     const result = await tauriCallSafe('get_workspace_preference', { scope })
     if (stopped) return
     if (result.ok && result.data) applyBindings(bindings, result.data)

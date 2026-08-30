@@ -35,7 +35,7 @@ pub enum DocsyError {
 impl From<anyhow::Error> for DocsyError {
     fn from(err: anyhow::Error) -> Self {
         // 沿错误链查找已知错误类型
-        let msg = err.to_string();
+        let msg = format!("{:#}", err);
 
         if msg.contains("不存在") || msg.contains("not found") || msg.contains("No such file") {
             // 尝试提取路径

@@ -69,7 +69,7 @@ pub(crate) fn build_overlay_pdf(
         let local_page = index as u32 + 1;
         let page_h_mm = size.height_pt * 25.4 / 72.0;
         let mut operations = Vec::new();
-        let mut placed: Vec<(OverlayRegion, f32, f32)> = Vec::new();
+        let mut placed: Vec<(OverlayRegion, f32, f32, f32, f32)> = Vec::new();
         let mut page_warnings: Vec<String> = Vec::new();
 
         // Draw order: main header, main footer, then extra overlays. Overlapping
@@ -89,16 +89,30 @@ pub(crate) fn build_overlay_pdf(
 
         for (region, config) in candidates {
             let (y0, y1) = overlay_y_range_mm(config, region, page_h_mm);
-            let overlaps = placed
-                .iter()
-                .any(|(pr, py0, py1)| *pr == region && y0 < *py1 - 0.5 && *py0 < y1 - 0.5);
+            let text =
+                super::overlay_font::expand_config_placeholders(config, current_page, total_pages);
+            let use_embedded = super::overlay_font::requires_embedded_font(&text);
+            let width_pt =
+                super::overlay_font::estimate_text_width(&text, use_embedded, config.font_size);
+            let x0_pt = super::overlay_font::compute_x(config, &text, use_embedded, size.width_pt);
+            let x0_mm = x0_pt * 25.4 / 72.0;
+            let width_mm = width_pt * 25.4 / 72.0;
+            let x1_mm = x0_mm + width_mm;
+
+            let overlaps = placed.iter().any(|(pr, py0, py1, px0, px1)| {
+                *pr == region
+                    && y0 < *py1 - 0.5
+                    && *py0 < y1 - 0.5
+                    && x0_mm < *px1 - 0.5
+                    && *px0 < x1_mm - 0.5
+            });
             if overlaps {
                 page_warnings.push(format!(
                     "第 {local_page} 页的\u{201c}{}\u{201d}与其他页眉页脚位置重叠，将按实际位置叠加渲染",
                     config.text.trim()
                 ));
             }
-            placed.push((region, y0, y1));
+            placed.push((region, y0, y1, x0_mm, x1_mm));
             if append_overlay_text_ops(
                 &mut operations,
                 config,

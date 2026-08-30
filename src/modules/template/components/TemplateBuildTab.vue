@@ -532,7 +532,7 @@
                               size="small"
                               text
                               type="danger"
-                              @click="(row.selectOptions || []).splice(optIdx, 1)"
+                              @click="row.selectOptions?.splice(optIdx, 1)"
                             >
                               删除
                             </el-button>

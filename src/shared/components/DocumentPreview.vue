@@ -46,7 +46,7 @@ function segmentClasses(segment) {
 
 function onMouseUp() {
   const sel = window.getSelection()
-  if (!sel || sel.isCollapsed) return
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return
   emit('select', {
     text: sel.toString(),
     range: sel.getRangeAt(0),
@@ -54,7 +54,12 @@ function onMouseUp() {
 }
 
 function onKeyUp() {
-  // Keyboard selection support
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return
+  emit('select', {
+    text: sel.toString(),
+    range: sel.getRangeAt(0),
+  })
 }
 
 function onOverlayClick(overlay) {

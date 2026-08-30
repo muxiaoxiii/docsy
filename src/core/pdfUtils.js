@@ -94,9 +94,7 @@ export function insertRangeAtPage(items, page, totalPages, options = {}) {
     return 0
   }
 
-  const index = items.findIndex(
-    (item) => target >= Number(item.pageStart || 0) && target <= Number(item.pageEnd || 0),
-  )
+  const index = items.findIndex((item) => target >= Number(item.pageStart || 0) && target <= Number(item.pageEnd || 0))
   if (index < 0) {
     // 防御：page 不在任何页段内，插到第一个起始页大于它的页段之前
     const insertAt = items.findIndex((item) => Number(item.pageStart || 0) > target)
@@ -115,6 +113,9 @@ export function insertRangeAtPage(items, page, totalPages, options = {}) {
   const start = Number(segment.pageStart || 0)
   const end = Number(segment.pageEnd || 0)
   if (target === start) {
+    // 快速拆分命令需要幂等：目标页已经是一个页段的起点时，直接
+    // 复用该页段并聚焦它，不再把边界页额外提出成单页段。
+    if (options.reuseBoundary) return index
     if (end === start) {
       // 单页段：新段插在其后，接续下一页（或到最后一页）
       const newStart = start + 1

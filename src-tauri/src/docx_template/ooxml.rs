@@ -45,10 +45,11 @@ impl XmlTree {
     }
 
     fn parse_utf8(xml_bytes: &[u8]) -> Result<Self> {
-        let xml_str = std::str::from_utf8(xml_bytes).context("XML is not valid UTF-8 encoding")?;
+        let preview_len = std::cmp::min(xml_bytes.len(), 256);
+        let preview = String::from_utf8_lossy(&xml_bytes[..preview_len]);
 
         // Quick check for non-UTF-8 encoding declaration in XML prolog
-        if let Some(decl) = xml_str.strip_prefix("<?xml ") {
+        if let Some(decl) = preview.strip_prefix("<?xml ") {
             let lower = decl.to_lowercase();
             if let Some(enc_start) = lower.find("encoding=") {
                 let rest = &decl[enc_start + 9..];
@@ -69,7 +70,7 @@ impl XmlTree {
             }
         }
 
-        let mut reader = Reader::from_str(xml_str);
+        let mut reader = Reader::from_reader(Cursor::new(xml_bytes));
         // Word uses xml:space="preserve" for meaningful leading and trailing
         // whitespace. Trimming here would silently change the document before
         // any template operation has a chance to preserve it.

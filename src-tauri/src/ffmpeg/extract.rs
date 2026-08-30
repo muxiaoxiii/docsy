@@ -56,7 +56,7 @@ pub fn extract(
 
     let mut cmd = crate::external::hidden_command(&bin);
     cmd.arg("-hide_banner").arg("-y");
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdout(Stdio::null()).stderr(Stdio::piped());
     if let Some(start) = time_range.start {
         cmd.arg("-ss").arg(format_seconds_arg(start));
     }
@@ -120,7 +120,11 @@ pub fn extract(
         match rx.try_recv() {
             Ok(line) => {
                 last_activity = Instant::now();
-                stderr_lines.push(line);
+                if stderr_lines.len() < 1000 {
+                    stderr_lines.push(line);
+                } else if stderr_lines.len() == 1000 {
+                    stderr_lines.push("... (stderr truncated)".to_string());
+                }
             }
             Err(mpsc::TryRecvError::Empty) => {
                 // 检查空闲超时

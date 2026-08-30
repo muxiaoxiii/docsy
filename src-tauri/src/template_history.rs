@@ -317,12 +317,31 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
     let all_runs: Vec<TemplateHistoryRun> = collect_rows(rows)?;
 
     // 自动清理：模板文件已不存在于磁盘的记录标记为已删除
-    let mut orphaned_ids = Vec::new();
+    let mut orphaned_ids = std::collections::HashSet::new();
+    let mut active_templates = std::collections::HashSet::new();
     let mut valid_runs = Vec::new();
+
     for run in all_runs {
-        if !run.template_path.is_empty() && !std::path::Path::new(&run.template_path).exists() {
-            orphaned_ids.push(run.template_id.clone());
+        if run.template_path.is_empty() {
+            valid_runs.push(run);
+            continue;
+        }
+
+        if orphaned_ids.contains(&run.template_id) {
+            continue;
+        }
+
+        let exists = if active_templates.contains(&run.template_id) {
+            true
+        } else if std::path::Path::new(&run.template_path).exists() {
+            active_templates.insert(run.template_id.clone());
+            true
         } else {
+            orphaned_ids.insert(run.template_id.clone());
+            false
+        };
+
+        if exists {
             valid_runs.push(run);
         }
     }

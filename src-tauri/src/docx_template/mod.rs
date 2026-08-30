@@ -718,7 +718,8 @@ pub(super) fn read_vec_with_limit<R: Read>(
     if declared_size > limit {
         anyhow::bail!("{}解压后超过安全限制", label);
     }
-    let mut bytes = Vec::with_capacity(declared_size.min(limit) as usize);
+    let initial_capacity = declared_size.min(1024 * 1024).min(limit) as usize;
+    let mut bytes = Vec::with_capacity(initial_capacity);
     reader
         .by_ref()
         .take(limit + 1)

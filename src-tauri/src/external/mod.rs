@@ -13,6 +13,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+const MAX_CAPTURED_OUTPUT_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolStatus {
     pub available: bool,
@@ -127,18 +129,29 @@ pub fn command_output_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+
+    let (tx, rx) = mpsc::channel();
+    let stdout_reader = child
+        .stdout
+        .take()
+        .map(|pipe| spawn_stream_reader(pipe, OutputStream::Stdout, tx.clone()));
+    let stderr_reader = child
+        .stderr
+        .take()
+        .map(|pipe| spawn_stream_reader(pipe, OutputStream::Stderr, tx));
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut dummy_activity = Instant::now();
     let start = Instant::now();
+
     loop {
+        drain_output_chunks(&rx, &mut stdout, &mut stderr, &mut dummy_activity);
         if child.try_wait()?.is_some() {
-            let mut stdout = Vec::new();
-            let mut stderr = Vec::new();
-            if let Some(mut pipe) = child.stdout.take() {
-                pipe.read_to_end(&mut stdout).ok();
-            }
-            if let Some(mut pipe) = child.stderr.take() {
-                pipe.read_to_end(&mut stderr).ok();
-            }
             let status = child.wait()?;
+            join_reader(stdout_reader);
+            join_reader(stderr_reader);
+            drain_output_chunks(&rx, &mut stdout, &mut stderr, &mut dummy_activity);
             return Ok(Output {
                 status,
                 stdout,
@@ -148,6 +161,8 @@ pub fn command_output_with_timeout(
         if start.elapsed() >= timeout {
             child.kill().ok();
             child.wait().ok();
+            join_reader(stdout_reader);
+            join_reader(stderr_reader);
             anyhow::bail!("命令执行超时");
         }
         std::thread::sleep(Duration::from_millis(30));
@@ -254,6 +269,32 @@ fn join_reader(handle: Option<thread::JoinHandle<()>>) {
     }
 }
 
+/// Drain a subprocess pipe without allowing diagnostic output to grow without
+/// bound. The reader always consumes the complete stream, but retains at most
+/// the first MiB for error reporting.
+pub(crate) fn spawn_bounded_output_reader<R: Read + Send + 'static>(
+    mut reader: R,
+) -> thread::JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut captured = Vec::new();
+        let mut buffer = [0_u8; 8192];
+        while let Ok(read) = reader.read(&mut buffer) {
+            if read == 0 {
+                break;
+            }
+            let remaining = MAX_CAPTURED_OUTPUT_BYTES.saturating_sub(captured.len());
+            captured.extend_from_slice(&buffer[..read.min(remaining)]);
+        }
+        captured
+    })
+}
+
+pub(crate) fn finish_bounded_output_reader(handle: Option<thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    handle
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,5 +332,12 @@ mod tests {
             stderr: b"stderr detail\nmore".to_vec(),
         };
         assert_eq!(command_failure_detail(&output), "退出码 2：stderr detail");
+    }
+
+    #[test]
+    fn bounded_output_reader_drains_but_caps_diagnostics() {
+        let input = std::io::Cursor::new(vec![b'x'; MAX_CAPTURED_OUTPUT_BYTES + 4096]);
+        let output = finish_bounded_output_reader(Some(spawn_bounded_output_reader(input)));
+        assert_eq!(output.len(), MAX_CAPTURED_OUTPUT_BYTES);
     }
 }

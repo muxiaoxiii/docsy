@@ -1,5 +1,5 @@
 <template>
-  <div class="pdfjs-preview">
+  <div class="pdfjs-preview" :class="{ 'is-compact': compact }">
     <div v-if="errorText" class="preview-error">{{ errorText }}</div>
     <div v-else-if="!filePath" class="preview-empty">请选择 PDF 文件后生成预览</div>
     <div v-else class="preview-stage">
@@ -26,6 +26,7 @@ const props = defineProps({
   scale: { type: Number, default: 1.6 },
   reloadKey: { type: Number, default: 0 },
   engine: { type: String, default: 'auto' },
+  compact: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['loaded', 'error'])
@@ -237,10 +238,16 @@ function cancelRender() {
 .page-preview {
   position: relative;
   flex: 0 0 auto;
-  width: min(100%, 620px);
+  width: 100%;
+  max-width: 100%;
   background: #fff;
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.16);
   overflow: hidden;
+}
+
+.pdfjs-preview.is-compact .preview-stage {
+  min-height: 0;
+  padding: 3px;
 }
 
 .pdf-canvas,

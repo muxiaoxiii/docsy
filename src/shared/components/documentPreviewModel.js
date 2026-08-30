@@ -28,17 +28,21 @@ export function buildPreviewParagraphs(runs, overlays = [], mode = 'fields') {
 
     const source = chars(run.text)
     const runOverlays = [...(overlaysByRun.get(run.id) || [])].sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
+
     let cursor = 0
     for (const [overlayOrder, overlay] of runOverlays.entries()) {
-      const start = clamp(overlay.start ?? 0, cursor, source.length)
-      const end = clamp(overlay.end ?? source.length, start, source.length)
+      const overlayStart = clamp(overlay.start ?? 0, 0, source.length)
+      const overlayEnd = clamp(overlay.end ?? source.length, overlayStart, source.length)
+      const start = Math.max(cursor, overlayStart)
+      const end = Math.max(start, overlayEnd)
+      if (end <= cursor) continue
       if (start > cursor) {
         current.segments.push(makeSegment(run, source.slice(cursor, start).join(''), cursor, start, null, runOrder))
       }
       current.segments.push(
         makeSegment(
           run,
-          String(overlay.label ?? source.slice(start, end).join('')),
+          visibleOverlayLabel(overlay, source, overlayStart, overlayEnd, start, end),
           start,
           end,
           overlay,
@@ -52,6 +56,24 @@ export function buildPreviewParagraphs(runs, overlays = [], mode = 'fields') {
     }
   }
   return paragraphs
+}
+
+function visibleOverlayLabel(overlay, source, overlayStart, overlayEnd, visibleStart, visibleEnd) {
+  const fallback = source.slice(overlayStart, overlayEnd).join('')
+  const label = chars(overlay.label ?? fallback)
+  const sourceLength = overlayEnd - overlayStart
+  if (visibleStart === overlayStart || sourceLength <= 0) return label.join('')
+
+  // Overlapping ranges share a linear preview. Clip the already-covered part
+  // from the later label instead of rendering the full replacement again.
+  const visibleOffset = visibleStart - overlayStart
+  const labelStart = Math.min(label.length, Math.floor((visibleOffset / sourceLength) * label.length))
+  const visibleLength = visibleEnd - visibleStart
+  const labelEnd = Math.min(
+    label.length,
+    Math.max(labelStart, Math.ceil(((visibleOffset + visibleLength) / sourceLength) * label.length)),
+  )
+  return label.slice(labelStart, labelEnd).join('')
 }
 
 function makeSegment(run, text, start, end, overlay, order) {

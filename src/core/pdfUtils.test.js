@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  insertRangeAtPage,
-  parsePageSelection,
-  smartSetRangeEnd,
-  smartSetRangeStart,
-} from './pdfUtils.js'
+import { insertRangeAtPage, parsePageSelection, smartSetRangeEnd, smartSetRangeStart } from './pdfUtils.js'
 
 function segment(start, end, name = '') {
   return { name, pageStart: start, pageEnd: end }
@@ -131,6 +126,13 @@ describe('insertRangeAtPage', () => {
       [6, 10],
     ])
     expect(items[0].name).toBe('目录')
+  })
+
+  it('reuses an existing boundary for quick split commands', () => {
+    const items = [segment(1, 5, 'A'), segment(6, 10, 'B')]
+    const index = insertRangeAtPage(items, 6, 10, { name: '新段', reuseBoundary: true })
+    expect(index).toBe(1)
+    expect(items).toEqual([segment(1, 5, 'A'), segment(6, 10, 'B')])
   })
 
   it('splits inside a segment: new segment takes the tail', () => {

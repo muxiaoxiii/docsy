@@ -1,5 +1,9 @@
 <template>
-  <div class="hf-workbench" :class="{ 'is-evidence-dragging': evidenceDragging, 'is-list-reordering': listReordering }">
+  <div
+    ref="workbenchRef"
+    class="hf-workbench"
+    :class="{ 'is-evidence-dragging': evidenceDragging, 'is-list-reordering': listReordering }"
+  >
     <div v-if="evidenceDragging" class="evidence-drop-overlay">
       <div class="evidence-drop-message">松开以导入 PDF 文件</div>
     </div>
@@ -864,13 +868,26 @@
       @jump-to-settings="handleJumpToSettings"
     />
 
-    <section class="preview-panel">
+    <div
+      class="workbench-resizer"
+      role="separator"
+      aria-label="调整证据列表与预览宽度"
+      aria-orientation="vertical"
+      @pointerdown="startWorkbenchResize"
+    />
+
+    <section class="preview-panel" :style="previewPanelStyle">
       <div class="preview-head">
         <div>
           <h3>位置预览</h3>
           <p class="hint">{{ listReordering ? '正在调整顺序，松手后更新预览' : previewHint }}</p>
         </div>
         <div class="preview-controls">
+          <el-button-group>
+            <el-button size="small" @click="setPreviewPanelRatio(0.5)">标准 50%</el-button>
+            <el-button size="small" @click="setPreviewPanelRatio(0.7)">大图 70%</el-button>
+            <el-button size="small" @click="setPreviewPanelRatio(0.78)">全屏对比</el-button>
+          </el-button-group>
           <template v-if="mergedImportPlan">
             <el-button size="small" :disabled="previewPage <= 1" @click="movePreviewPage(-1)">上一页</el-button>
             <el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)"
@@ -881,6 +898,15 @@
             >
             <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd"
               >设为结束页</el-button
+            >
+            <el-button size="small" type="primary" plain @click="splitMergedImportFromCurrentPage">从本页拆</el-button>
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :disabled="previewPage <= 1"
+              @click="splitMergedImportFromPreviousPage"
+              >从上一页拆</el-button
             >
             <el-button size="small" type="primary" plain @click="addMergedImportRangeFromPage">添加新页段</el-button>
           </template>
@@ -904,56 +930,68 @@
         </div>
       </div>
 
-      <div v-if="truePreview" class="true-preview-stage">
-        <div class="true-preview-page" :style="truePreviewFrameStyle">
-          <img :src="truePreview.imageDataUrl" alt="PDF 真实预览" />
-        </div>
-      </div>
-      <PdfJsPreview
-        v-else
-        :file-path="activePreviewFilePath"
-        :page="previewPage"
-        :reload-key="previewReloadKey"
-        @loaded="handlePreviewLoaded"
-        @error="handlePreviewError"
-      >
-        <template #default>
-          <div
-            v-for="marker in deletionPreviewMarkers"
-            :key="marker.key"
-            class="delete-preview-marker"
-            :style="marker.style"
-          >
-            <span>{{ marker.label }}</span>
+      <div class="preview-pages">
+        <div class="primary-preview-page">
+          <div v-if="truePreview" class="true-preview-stage">
+            <div class="true-preview-page" :style="truePreviewFrameStyle">
+              <img :src="truePreview.imageDataUrl" alt="PDF 真实预览" />
+            </div>
           </div>
+          <PdfJsPreview
+            v-else
+            :file-path="activePreviewFilePath"
+            :page="previewPage"
+            :reload-key="previewReloadKey"
+            @loaded="handlePreviewLoaded"
+            @error="handlePreviewError"
+          >
+            <template #default>
+              <div
+                v-for="marker in deletionPreviewMarkers"
+                :key="marker.key"
+                class="delete-preview-marker"
+                :style="marker.style"
+              >
+                <span>{{ marker.label }}</span>
+              </div>
 
-          <div
-            v-for="overlay in convertedExistingPreviewOverlays"
-            :key="overlay.key"
-            class="preview-text"
-            :class="overlay.region === 'header' ? 'preview-header-text' : 'preview-footer-text'"
-            :style="overlay.style"
-          >
-            {{ overlay.text }}
-          </div>
-          <div
-            v-if="showRulePreviewOverlays && previewHeaderText"
-            class="preview-text preview-header-text"
-            :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
-            :style="previewHeaderStyle"
-          >
-            {{ previewHeaderText }}
-          </div>
-          <div
-            v-if="showRulePreviewOverlays && previewFooterText"
-            class="preview-text preview-footer-text"
-            :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
-            :style="previewFooterStyle"
-          >
-            {{ previewFooterText }}
-          </div>
-        </template>
-      </PdfJsPreview>
+              <div
+                v-for="overlay in convertedExistingPreviewOverlays"
+                :key="overlay.key"
+                class="preview-text"
+                :class="overlay.region === 'header' ? 'preview-header-text' : 'preview-footer-text'"
+                :style="overlay.style"
+              >
+                {{ overlay.text }}
+              </div>
+              <div
+                v-if="showRulePreviewOverlays && previewHeaderText"
+                class="preview-text preview-header-text"
+                :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
+                :style="previewHeaderStyle"
+              >
+                {{ previewHeaderText }}
+              </div>
+              <div
+                v-if="showRulePreviewOverlays && previewFooterText"
+                class="preview-text preview-footer-text"
+                :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
+                :style="previewFooterStyle"
+              >
+                {{ previewFooterText }}
+              </div>
+            </template>
+          </PdfJsPreview>
+        </div>
+        <NextPageThumbnail
+          v-if="activePreviewFilePath"
+          :file-path="activePreviewFilePath"
+          :page="previewPage"
+          :max-page="previewMaxPage"
+          @select="(page) => (previewPage = page)"
+          @error="handlePreviewError"
+        />
+      </div>
     </section>
   </div>
 </template>
@@ -967,6 +1005,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
 import { log as diagLog } from '../../../shared/diagnostics.js'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
+import NextPageThumbnail from '../../../shared/pdf-tools/components/NextPageThumbnail.vue'
 import HeaderFooterRuleFields from '../../../shared/pdf-tools/components/HeaderFooterRuleFields.vue'
 import PageNumberRuleDialog from '../../../shared/pdf-tools/components/PageNumberRuleDialog.vue'
 import ExistingPdfElementsDialog from '../../../shared/pdf-tools/components/ExistingPdfElementsDialog.vue'
@@ -1048,6 +1087,14 @@ function parsePageNumberValue(text) {
     }
     if (result > 0) return result
   }
+  // 匹配 "- 1 -" 格式
+  const dashMatch = trimmed.match(/^-\s*(\d{1,4})\s*-$/)
+  if (dashMatch) return parseInt(dashMatch[1], 10)
+
+  // 宽容匹配 "第 x/y 页" 等变体
+  const cnSlashMatch = trimmed.match(/第\s*(\d+)\s*[/／∕]\s*\d+\s*页/)
+  if (cnSlashMatch) return parseInt(cnSlashMatch[1], 10)
+
   return null
 }
 
@@ -1129,6 +1176,9 @@ const splitNameCustomSeparator = ref('')
 const headerFooterSettingsVisible = ref(false)
 const splitReplacementOutputDir = ref('')
 const removeBlankPages = ref(false)
+const previewPanelRatio = ref(0.5)
+const workbenchRef = ref(null)
+let stopWorkbenchResize = null
 
 const existingBookmarkCount = ref(0)
 const existingBookmarkAlertVisible = ref(true)
@@ -1496,6 +1546,7 @@ const workbenchPreference = useWorkspacePreferences(`evidence-pdf.workbench.${wo
   splitNameSuffix,
   splitNameSeparator,
   splitNameCustomSeparator,
+  previewPanelRatio,
   normalizeA4,
   a4Orientation,
   a4ContentRotation,
@@ -1922,6 +1973,9 @@ const previewMaxPage = computed(() => {
   if (mergedImportPlan.value) return Math.max(1, Number(mergedImportPlan.value.totalPages || 1))
   return selectedOverlayFile.value?.pages || 1
 })
+const previewPanelStyle = computed(() => ({
+  flexBasis: `${Math.round(clampPreviewPanelRatio(previewPanelRatio.value) * 100)}%`,
+}))
 const previewHint = computed(() => (mergedImportPlan.value ? '合并 PDF 原文预览' : '实时位置；真实预览需手动生成'))
 const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
 const previewSamplePage = computed(() => {
@@ -2305,6 +2359,8 @@ const {
   setSelectedMergedRangeStart,
   setSelectedMergedRangeEnd,
   addMergedImportRangeFromPage,
+  splitMergedImportFromCurrentPage,
+  splitMergedImportFromPreviousPage,
   onMergedRangeStartChanged,
   onMergedRangeEndChanged,
   addMergedImportRange,
@@ -3793,17 +3849,56 @@ function clearContentRowEdit() {
   editingContentRowValue.value = ''
 }
 
-// --- Global keyboard shortcut: Ctrl+Z / Ctrl+Shift+Z ---
-function handleGlobalKeydown(e) {
-  if (!(e.ctrlKey || e.metaKey) || e.key !== 'z') return
-  const tag = (e.target?.tagName || '').toLowerCase()
-  if (tag === 'input' || tag === 'textarea') return
-  e.preventDefault()
-  if (e.shiftKey) {
-    if (!redoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.redo()
-  } else {
-    if (!undoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.undo()
+function clampPreviewPanelRatio(value) {
+  return Math.min(0.78, Math.max(0.3, Number(value) || 0.5))
+}
+
+function setPreviewPanelRatio(value) {
+  previewPanelRatio.value = clampPreviewPanelRatio(value)
+}
+
+function startWorkbenchResize(event) {
+  if (event.button !== 0 || !workbenchRef.value) return
+  event.preventDefault()
+  const rect = workbenchRef.value.getBoundingClientRect()
+  const update = (pointerEvent) => {
+    setPreviewPanelRatio((rect.right - pointerEvent.clientX) / Math.max(1, rect.width))
   }
+  const finish = () => {
+    window.removeEventListener('pointermove', update)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    stopWorkbenchResize = null
+  }
+  stopWorkbenchResize?.()
+  stopWorkbenchResize = finish
+  window.addEventListener('pointermove', update)
+  window.addEventListener('pointerup', finish, { once: true })
+  window.addEventListener('pointercancel', finish, { once: true })
+  update(event)
+}
+
+// --- Global keyboard shortcuts: undo/redo and merged-PDF review ---
+function handleGlobalKeydown(e) {
+  const tag = (e.target?.tagName || '').toLowerCase()
+  const editing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    if (editing) return
+    e.preventDefault()
+    if (e.shiftKey) {
+      if (!redoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.redo()
+    } else {
+      if (!undoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.undo()
+    }
+    return
+  }
+  if (!mergedImportPlan.value || editing || e.ctrlKey || e.metaKey || e.altKey) return
+  if (e.key === 'ArrowLeft') movePreviewPage(-1)
+  else if (e.key === 'ArrowRight') movePreviewPage(1)
+  else if (e.key === '[') splitMergedImportFromPreviousPage()
+  else if (e.key === ']') splitMergedImportFromCurrentPage()
+  else return
+  e.preventDefault()
 }
 
 const hfPanelRef = ref(null)
@@ -3834,6 +3929,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  stopWorkbenchResize?.()
   if (panelResizeObserver) {
     panelResizeObserver.disconnect()
     panelResizeObserver = null
@@ -3855,7 +3951,7 @@ onUnmounted(() => {
 .hf-workbench {
   display: flex;
   flex-direction: row;
-  gap: 16px;
+  gap: 0;
   height: 100%;
   min-height: 0;
   padding: 20px;
@@ -3926,6 +4022,7 @@ onUnmounted(() => {
 .hf-panel {
   flex: 1 1 0;
   min-width: 400px;
+  margin-right: 8px;
   overflow: auto;
   scrollbar-gutter: stable;
   padding: 18px;
@@ -3936,11 +4033,10 @@ onUnmounted(() => {
 }
 
 .preview-panel {
-  /* 预览页面比例固定：面板保持固定宽度，拉宽窗口时不再拉伸预览、
-     不再引发重排错位；列表区（.hf-panel）获得全部剩余宽度。 */
-  flex: 0 0 auto;
-  width: 540px;
+  flex: 0 1 auto;
+  width: auto;
   min-width: 320px;
+  margin-left: 8px;
   overflow: auto;
   scrollbar-gutter: stable;
   padding: 18px;
@@ -3948,7 +4044,43 @@ onUnmounted(() => {
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface);
   box-shadow: var(--docsy-shadow-panel);
-  resize: horizontal;
+}
+
+.workbench-resizer {
+  flex: 0 0 10px;
+  align-self: stretch;
+  min-height: 420px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent 3px,
+    var(--docsy-border-subtle) 3px,
+    var(--docsy-border-subtle) 7px,
+    transparent 7px
+  );
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.workbench-resizer:hover {
+  background: linear-gradient(
+    90deg,
+    transparent 3px,
+    var(--docsy-primary) 3px,
+    var(--docsy-primary) 7px,
+    transparent 7px
+  );
+}
+
+.preview-pages {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.primary-preview-page {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .section-head,
@@ -4789,6 +4921,7 @@ h3 {
 
   .hf-panel,
   .preview-panel {
+    flex-basis: auto !important;
     width: 100%;
     max-width: none;
     min-width: 0;
@@ -4798,6 +4931,15 @@ h3 {
 
   .preview-panel {
     margin-top: 16px;
+    margin-left: 0;
+  }
+
+  .hf-panel {
+    margin-right: 0;
+  }
+
+  .workbench-resizer {
+    display: none;
   }
 }
 </style>

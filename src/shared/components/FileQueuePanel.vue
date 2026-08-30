@@ -92,11 +92,11 @@ const { start, move, finish, reset, itemClasses } = usePointerReorder({
 })
 
 function itemLabel(item) {
-  return String(item?.name || item?.path || item || '')
+  return String(item?.name || item?.path || '未知文件')
 }
 
 function itemKey(item, index) {
-  return String(item?.id || item?.path || item || index)
+  return String(item?.id || item?.path || index)
 }
 </script>
 

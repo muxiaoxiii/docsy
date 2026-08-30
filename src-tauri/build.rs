@@ -38,7 +38,10 @@ fn configure_embedded_opencv() {
     }
     if target_os == "windows" {
         if target_arch != "x86_64" {
-            panic!("Docsy embedded OpenCV currently supports the Windows x64 release target");
+            println!(
+                "cargo:warning=embedded OpenCV is disabled for Windows {target_arch}; using the Rust frame-selection engine"
+            );
+            return;
         }
         let library_dir = root.join("windows-x64/lib");
         if !library_dir.join("opencv_imgproc4130.lib").is_file() {

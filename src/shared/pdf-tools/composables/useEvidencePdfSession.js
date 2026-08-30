@@ -148,16 +148,16 @@ export function pageNumberTemplateWithShowTotal(template, showTotal) {
       String(template || '{page}')
         .replaceAll('{range}', '{page}')
         // Strip Chinese total pattern: 共{total}页
-        .replace(/共\s*\{total\}\s*页/g, '')
+        .replace(/\s*共\s*\{total\}\s*页/g, '')
         // Strip English 'of {total}' pattern
-        .replace(/\bof\s*\{total\}/gi, '')
+        .replace(/\s*\bof\s*\{total\}/gi, '')
         // Strip remaining {total}
-        .replaceAll('{total}', '')
+        .replace(/\s*\{total\}/g, '')
         // Clean up trailing punctuation/spaces
-        .replace(/[，,]\s*$/, '')
-        .replace(/\s+$/, '')
+        .replace(/[，,\s]+$/, '')
         .replaceAll('//', '/')
-        .replace(/\/+$/, '')
+        .replace(/\s*\/+\s*$/, '')
+        .trim()
     )
   }
   return template
@@ -307,7 +307,7 @@ export function buildFileContentRows(file, index = 0, rules = {}) {
     const selectedId = selectedGroup?.id
 
     // 1. New selected group (only when insert toggle is on)
-    if (newEnabled && enabled && selectedGroup) {
+    if (newEnabled && enabled && selectedGroup && selectedGroup.enabled !== false) {
       let effectiveGroup = selectedGroup
       if (kind === 'header' && rules.headerMode !== undefined) {
         effectiveGroup = { ...selectedGroup, mode: rules.headerMode }

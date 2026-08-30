@@ -751,8 +751,14 @@ fn export_images(bytes: &[u8], docx: &Docx, output: &Path) -> Result<ExportedIma
             continue;
         };
         let mut data = Vec::new();
-        std::io::Read::read_to_end(&mut entry, &mut data)
+        let max_limit = 50 * 1024 * 1024; // 50MB
+        let mut handle = (&mut entry).take(max_limit);
+        std::io::Read::read_to_end(&mut handle, &mut data)
             .with_context(|| format!("读取图片失败: {zip_path}"))?;
+        if data.len() >= max_limit as usize {
+            log::warn!("图片 {} 超过 50MB 大小限制，已跳过", zip_path);
+            continue;
+        }
         // 扩展名取包内条目的原始格式
         let ext = Path::new(target)
             .extension()

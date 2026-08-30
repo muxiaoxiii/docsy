@@ -90,8 +90,12 @@ fn run_pdftotext_cancellable(
     operation_id: Option<&str>,
     token: Option<&CancellationToken>,
 ) -> Result<Output> {
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = cmd.spawn().context("执行 pdftotext 失败")?;
+    let mut stderr_reader = child
+        .stderr
+        .take()
+        .map(crate::external::spawn_bounded_output_reader);
     let registry = crate::get_subprocess_registry();
     if let (Some(registry), Some(operation_id)) = (registry, operation_id) {
         registry.register(operation_id, child.id());
@@ -104,17 +108,32 @@ fn run_pdftotext_cancellable(
             } else {
                 let _ = child.kill();
             }
-            let _ = child.wait_with_output();
+            let _ = child.wait();
+            crate::external::finish_bounded_output_reader(stderr_reader.take());
             anyhow::bail!("操作已取消");
         }
-        if child.try_wait()?.is_some() {
-            let output = child
-                .wait_with_output()
-                .context("读取 pdftotext 输出失败")?;
-            if let (Some(registry), Some(operation_id)) = (registry, operation_id) {
-                registry.unregister(operation_id);
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stderr = crate::external::finish_bounded_output_reader(stderr_reader.take());
+                if let (Some(registry), Some(operation_id)) = (registry, operation_id) {
+                    registry.unregister(operation_id);
+                }
+                return Ok(Output {
+                    status,
+                    stdout: Vec::new(),
+                    stderr,
+                });
             }
-            return Ok(output);
+            Ok(None) => {}
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                crate::external::finish_bounded_output_reader(stderr_reader.take());
+                if let (Some(registry), Some(operation_id)) = (registry, operation_id) {
+                    registry.unregister(operation_id);
+                }
+                return Err(err).context("检查 pdftotext 进程状态失败");
+            }
         }
         std::thread::sleep(Duration::from_millis(50));
     }

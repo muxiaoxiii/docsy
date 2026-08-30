@@ -61,15 +61,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function setFrameSelectionDraft(draft) {
     frameSelectionDraft.value = Array.isArray(draft?.items) && draft.items.length ? draft : null
     if (typeof window === 'undefined') return
-    try {
+
+    const trySave = () => {
       const serialized = frameSelectionDraft.value ? JSON.stringify(frameSelectionDraft.value) : ''
       if (serialized && serialized.length <= 3_000_000) {
         window.sessionStorage.setItem(FRAME_DRAFT_KEY, serialized)
       } else {
         window.sessionStorage.removeItem(FRAME_DRAFT_KEY)
       }
-    } catch {
+    }
+
+    try {
+      trySave()
+    } catch (e) {
+      console.warn('存储草稿失败，清理旧草稿后重试', e)
       window.sessionStorage.removeItem(FRAME_DRAFT_KEY)
+      try {
+        trySave()
+      } catch (e2) {
+        console.warn('清理后存储仍失败', e2)
+        window.sessionStorage.removeItem(FRAME_DRAFT_KEY)
+      }
     }
   }
 

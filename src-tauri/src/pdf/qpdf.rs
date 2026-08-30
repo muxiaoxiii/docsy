@@ -255,10 +255,31 @@ pub fn extract_pages(
     let output_path = unique_output_path_in_dir(input_path, output_dir, "_pages");
     let mut command = crate::external::hidden_command(&bin);
     command.arg("--empty").arg("--pages");
-    // qpdf --pages 里每个文件名后只认一个页段，多页需重复文件名
-    for page in pages {
-        command.arg(input_path).arg(page.to_string());
+
+    let mut ranges = Vec::new();
+    let mut start = pages[0];
+    let mut end = pages[0];
+
+    for &page in &pages[1..] {
+        if page == end + 1 {
+            end = page;
+        } else {
+            if start == end {
+                ranges.push(start.to_string());
+            } else {
+                ranges.push(format!("{}-{}", start, end));
+            }
+            start = page;
+            end = page;
+        }
     }
+    if start == end {
+        ranges.push(start.to_string());
+    } else {
+        ranges.push(format!("{}-{}", start, end));
+    }
+
+    command.arg(input_path).arg(ranges.join(","));
     command.arg("--").arg(&output_path);
 
     let command_output = run_cancellable("页面提取", command)?;
@@ -550,7 +571,7 @@ mod tests {
         let two = dir.join("two.pdf");
         let three = dir.join("three.pdf");
         for (pages, path) in [(1, &one), (2, &two), (3, &three)] {
-            let mut cmd = crate::external::hidden_command(&qpdf.binary_path().unwrap());
+            let mut cmd = crate::external::hidden_command(qpdf.binary_path().unwrap());
             cmd.arg("--empty").arg("--pages");
             for _ in 0..pages {
                 cmd.arg(&blank).arg("1");

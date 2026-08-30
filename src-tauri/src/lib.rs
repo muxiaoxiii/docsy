@@ -111,8 +111,23 @@ fn kill_pid(pid: u32) {
         let _ = std::process::Command::new("kill")
             .args(["-TERM", &pid.to_string()])
             .output();
-        // Give the process 2 seconds to exit gracefully, then SIGKILL
-        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(2);
+        while start.elapsed() < timeout {
+            if let Ok(status) = std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .status()
+            {
+                if !status.success() {
+                    return; // Process has exited
+                }
+            } else {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
         let _ = std::process::Command::new("kill")
             .args(["-KILL", &pid.to_string()])
             .output();
@@ -206,7 +221,8 @@ impl ConversionState {
         // Emit event to frontend
         let _ = app.emit("docsy-conversion-timeout", ());
 
-        // 阻塞等待用户响应（不再 500ms 轮询）
+        // 此方法只从 spawn_blocking 工作线程调用；等待用户明确选择，避免
+        // 用户暂时离开时被静默当作“取消转换”。
         let mut state = self.response.lock().unwrap_or_else(|e| e.into_inner());
         while *state == 0 {
             state = self

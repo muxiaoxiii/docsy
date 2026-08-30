@@ -140,6 +140,7 @@ fn remove_outlines(doc: &mut Document) -> Result<()> {
 }
 
 fn save_replacing(mut doc: Document, output: &Path, temp: &Path, context: &str) -> Result<()> {
+    doc.prune_objects();
     doc.save(temp).with_context(|| context.to_string())?;
     replace_file(temp, output).context("替换 PDF 文件失败")
 }

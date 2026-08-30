@@ -139,7 +139,9 @@ export function usePreviewSelection(documentRuns, documentText, fieldRows, _prev
 
   function collectSourcePreviewSelection() {
     const selection = window.getSelection?.()
-    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    if (!selection || selection.rangeCount === 0) return
+
+    if (!selection.isCollapsed) {
       const liveRange = selection.getRangeAt(0)
       const resolved = resolvePreviewSelection(liveRange)
       if (resolved.refs.length) {

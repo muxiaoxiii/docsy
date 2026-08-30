@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::Read;
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::Emitter;
@@ -588,22 +588,60 @@ fn extract_7z_file(
     max_total_uncompressed: u64,
 ) -> Result<()> {
     let file = fs::File::open(archive_path).context("读取工具 7z 失败")?;
-    sevenz_rust::decompress(file, output_dir).context("解压 7z 文件失败")?;
-
-    // Verify uncompressed size
-    let mut total: u64 = 0;
-    if let Ok(entries) = fs::read_dir(output_dir) {
-        for entry in entries.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                total = total.saturating_add(meta.len());
-            }
+    let mut total_uncompressed = 0_u64;
+    sevenz_rust::decompress_with_extract_fn(file, output_dir, |entry, reader, destination| {
+        if !(is_safe_archive_entry_name(entry.name())
+            || entry.is_directory() && entry.name().is_empty())
+        {
+            return Err(sevenz_rust::Error::other(format!(
+                "工具包包含不安全路径: {}",
+                entry.name()
+            )));
         }
+        if entry.is_directory() {
+            fs::create_dir_all(destination).map_err(sevenz_rust::Error::io)?;
+            return Ok(true);
+        }
+
+        let remaining = max_total_uncompressed.saturating_sub(total_uncompressed);
+        if entry.size() > remaining {
+            return Err(sevenz_rust::Error::other(
+                "工具包解压后体积过大，已拒绝解压",
+            ));
+        }
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(sevenz_rust::Error::io)?;
+        }
+        let output = fs::File::create(destination).map_err(sevenz_rust::Error::io)?;
+        let mut writer = BufWriter::new(output);
+        let written = std::io::copy(&mut reader.take(remaining.saturating_add(1)), &mut writer)
+            .map_err(sevenz_rust::Error::io)?;
+        if written > remaining {
+            return Err(sevenz_rust::Error::other(
+                "工具包解压后体积过大，已拒绝解压",
+            ));
+        }
+        writer.flush().map_err(sevenz_rust::Error::io)?;
+        total_uncompressed = total_uncompressed.saturating_add(written);
+        Ok(true)
+    })
+    .context("解压 7z 文件失败")
+}
+
+fn is_safe_archive_entry_name(name: &str) -> bool {
+    if name.trim().is_empty() || name.starts_with(['/', '\\']) {
+        return false;
     }
-    if total > max_total_uncompressed {
-        fs::remove_dir_all(output_dir).ok();
-        anyhow::bail!("工具包解压后体积过大，已拒绝解压");
+    let normalized = name.replace('\\', "/");
+    if normalized.as_bytes().get(1) == Some(&b':') {
+        return false;
     }
-    Ok(())
+    Path::new(&normalized).components().all(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    })
 }
 
 fn find_binary_in_dir(dir: &Path, binary: &str) -> Option<PathBuf> {
@@ -642,6 +680,7 @@ fn platform_key() -> Result<String> {
     };
     let arch = match std::env::consts::ARCH {
         "aarch64" => "aarch64",
+        "x86" => "x86",
         "x86_64" => "x86_64",
         other => anyhow::bail!("暂不支持当前 CPU 架构 {other}"),
     };
@@ -771,5 +810,44 @@ mod tests {
             );
             assert!(package.url.starts_with("https://"));
         }
+    }
+
+    #[test]
+    fn archive_entry_names_cannot_escape_staging_directory() {
+        for safe in ["bin/qpdf", "./bin/qpdf.exe", "nested\\bin\\tool.exe"] {
+            assert!(
+                is_safe_archive_entry_name(safe),
+                "expected safe path: {safe}"
+            );
+        }
+        for unsafe_name in [
+            "../outside",
+            "bin/../../outside",
+            "/absolute/path",
+            "\\absolute\\path",
+            "C:\\Windows\\tool.exe",
+        ] {
+            assert!(
+                !is_safe_archive_entry_name(unsafe_name),
+                "expected unsafe path: {unsafe_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn seven_zip_limit_is_enforced_before_large_entry_is_written() {
+        let root = std::env::temp_dir().join(format!("docsy-7z-limit-test-{}", unique_suffix()));
+        let source_dir = root.join("source");
+        let archive = root.join("sample.7z");
+        let output = root.join("output");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(source_dir.join("large.bin"), vec![0_u8; 4096]).unwrap();
+        sevenz_rust::compress_to_path(&source_dir, &archive).unwrap();
+
+        let result = extract_7z_file(&archive, &output, 1024);
+
+        assert!(result.is_err());
+        assert!(!output.join("large.bin").exists());
+        fs::remove_dir_all(&root).ok();
     }
 }

@@ -17,7 +17,7 @@ const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm"];
 /// Run a child process with interactive timeout.
 /// When the initial timeout expires, calls `on_timeout` to ask the user whether to continue.
 /// If the user chooses to continue, waits another `timeout` period.
-/// Returns Ok(output) on success, Err on cancel or max rounds exceeded.
+/// Returns Ok(output) on success and Err when the user cancels.
 fn run_process_with_interactive_timeout(
     cmd: &mut std::process::Command,
     initial_timeout: std::time::Duration,
@@ -28,6 +28,14 @@ fn run_process_with_interactive_timeout(
         .stderr(std::process::Stdio::piped())
         .spawn()
         .context("启动转换进程失败")?;
+    let mut stdout_reader = child
+        .stdout
+        .take()
+        .map(crate::external::spawn_bounded_output_reader);
+    let mut stderr_reader = child
+        .stderr
+        .take()
+        .map(crate::external::spawn_bounded_output_reader);
 
     let timeout = initial_timeout;
     let mut wait_started = std::time::Instant::now();
@@ -37,20 +45,12 @@ fn run_process_with_interactive_timeout(
         // Check if process finished
         match child.try_wait() {
             Ok(Some(status)) => {
-                let stdout = child.stdout.take().map(|mut s| {
-                    let mut buf = Vec::new();
-                    let _ = std::io::Read::read_to_end(&mut s, &mut buf);
-                    buf
-                });
-                let stderr = child.stderr.take().map(|mut s| {
-                    let mut buf = Vec::new();
-                    let _ = std::io::Read::read_to_end(&mut s, &mut buf);
-                    buf
-                });
+                let stdout = crate::external::finish_bounded_output_reader(stdout_reader.take());
+                let stderr = crate::external::finish_bounded_output_reader(stderr_reader.take());
                 return Ok(std::process::Output {
                     status,
-                    stdout: stdout.unwrap_or_default(),
-                    stderr: stderr.unwrap_or_default(),
+                    stdout,
+                    stderr,
                 });
             }
             Ok(None) => {
@@ -58,6 +58,9 @@ fn run_process_with_interactive_timeout(
             }
             Err(e) => {
                 let _ = child.kill();
+                let _ = child.wait();
+                crate::external::finish_bounded_output_reader(stdout_reader.take());
+                crate::external::finish_bounded_output_reader(stderr_reader.take());
                 anyhow::bail!("检查转换进程状态失败: {e}");
             }
         }
@@ -67,6 +70,9 @@ fn run_process_with_interactive_timeout(
             let should_continue = on_timeout();
             if !should_continue {
                 let _ = child.kill();
+                let _ = child.wait();
+                crate::external::finish_bounded_output_reader(stdout_reader.take());
+                crate::external::finish_bounded_output_reader(stderr_reader.take());
                 anyhow::bail!("用户取消了转换");
             }
             wait_started = std::time::Instant::now();

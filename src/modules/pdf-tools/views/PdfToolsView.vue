@@ -143,7 +143,7 @@
           <div v-if="splitFile" class="path-line">{{ splitFile }}</div>
           <div v-if="splitOutputDir" class="path-line">{{ splitOutputDir }}</div>
 
-          <div v-if="splitFile" class="split-main">
+          <div v-if="splitFile" ref="splitMainRef" class="split-main" :style="splitGridStyle">
             <section class="split-list-panel">
               <div class="split-options-row">
                 <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
@@ -239,6 +239,14 @@
               </el-button>
             </section>
 
+            <div
+              class="split-resizer"
+              role="separator"
+              aria-label="调整页段列表与预览宽度"
+              aria-orientation="vertical"
+              @pointerdown="startSplitResize"
+            />
+
             <section class="split-preview">
               <div class="split-preview-head">
                 <div>
@@ -253,6 +261,11 @@
                   </div>
                 </div>
                 <div class="split-preview-actions">
+                  <el-button-group>
+                    <el-button size="small" @click="setSplitPreviewRatio(0.5)">标准 50%</el-button>
+                    <el-button size="small" @click="setSplitPreviewRatio(0.7)">大图 70%</el-button>
+                    <el-button size="small" @click="setSplitPreviewRatio(0.78)">全屏对比</el-button>
+                  </el-button-group>
                   <el-button size="small" :disabled="splitPreviewPage <= 1" @click="moveSplitPreviewPage(-1)"
                     >上一页</el-button
                   >
@@ -263,6 +276,15 @@
                     @click="moveSplitPreviewPage(1)"
                     >下一页</el-button
                   >
+                  <el-button size="small" type="primary" plain @click="splitFromCurrentPage">从本页拆</el-button>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    plain
+                    :disabled="splitPreviewPage <= 1"
+                    @click="splitFromPreviousPage"
+                    >从上一页拆</el-button
+                  >
                   <el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitStart"
                     >设为起始页</el-button
                   >
@@ -271,13 +293,24 @@
                   >
                 </div>
               </div>
-              <PdfJsPreview
-                v-if="activeTab === 'split' && splitFile"
-                :file-path="splitFile"
-                :page="splitPreviewPage"
-                :scale="0.9"
-                @error="(message) => ElMessage.error(message)"
-              />
+              <div class="split-preview-pages">
+                <PdfJsPreview
+                  v-if="activeTab === 'split' && splitFile"
+                  class="split-primary-preview"
+                  :file-path="splitFile"
+                  :page="splitPreviewPage"
+                  :scale="0.9"
+                  @error="(message) => ElMessage.error(message)"
+                />
+                <NextPageThumbnail
+                  v-if="activeTab === 'split' && splitFile"
+                  :file-path="splitFile"
+                  :page="splitPreviewPage"
+                  :max-page="splitPreviewMaxPage"
+                  @select="(page) => (splitPreviewPage = page)"
+                  @error="(message) => ElMessage.error(message)"
+                />
+              </div>
             </section>
           </div>
           <WorkspaceEmptyState
@@ -337,6 +370,7 @@ import { ElMessage, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
+import NextPageThumbnail from '../../../shared/pdf-tools/components/NextPageThumbnail.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
@@ -349,6 +383,7 @@ import { usePointerReorder } from '../../../core/composables/usePointerReorder.j
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   buildRangeAfter,
+  insertRangeAtPage,
   insertRangeAfter,
   navigatePage,
   parsePageSelection,
@@ -409,10 +444,13 @@ async function inspectUnlockFiles(paths) {
       const path = paths[nextIndex]
       nextIndex += 1
       try {
+        let timer
         const result = await Promise.race([
           tauriCallSafe('inspect_pdf', { input: path }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
-        ])
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)
+          }),
+        ]).finally(() => clearTimeout(timer))
         const item = reactive.find((f) => f.path === path)
         if (!item) continue
         item.inspecting = false
@@ -507,12 +545,19 @@ const splitPreviewPage = ref(1)
 const splitTotalPages = ref(1)
 const splitRunWarnings = ref([])
 const removeBlankPages = ref(false)
+const splitPreviewRatio = ref(0.5)
+const splitMainRef = ref(null)
+let stopSplitResize = null
 const splitWarnings = computed(() => [
   ...splitRangeWarnings(splitRanges.value, splitTotalPages.value),
   ...splitRunWarnings.value,
 ])
 const splitPreviewMaxPage = computed(() => Math.max(1, splitTotalPages.value || 1))
 const selectedSplitRange = computed(() => splitRanges.value[selectedSplitRangeIndex.value] || null)
+const splitGridStyle = computed(() => {
+  const preview = Math.round(clampSplitPreviewRatio(splitPreviewRatio.value) * 100)
+  return { gridTemplateColumns: `minmax(360px, ${100 - preview}fr) 10px minmax(320px, ${preview}fr)` }
+})
 
 // Anti-OCR
 const antiOcrFiles = ref([])
@@ -525,6 +570,7 @@ const preference = useWorkspacePreferences('pdf-tools.workspace', {
   compressLevel,
   removeBlankPages,
   antiCopyMethod,
+  splitPreviewRatio,
 })
 const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => !f.hasAntiOcr).length)
 const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr).length)
@@ -554,10 +600,13 @@ async function inspectAntiOcrFiles(paths) {
       const path = paths[nextIndex]
       nextIndex += 1
       try {
+        let timer
         const result = await Promise.race([
           tauriCallSafe('detect_anti_copy', { input: path }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)),
-        ])
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('检测超时（10秒）')), 10000)
+          }),
+        ]).finally(() => clearTimeout(timer))
         const item = reactive.find((f) => f.path === path)
         if (!item) continue
         if (!result.ok) {
@@ -609,10 +658,15 @@ async function batchAntiOcrApply() {
     const dir = parentDir(file.path)
     const stem = stripPdf(file.name)
     const output = `${dir}/${stem}_anti_copy.pdf`
+    let timer
     const result = await Promise.race([
       tauriCallSafe('apply_anti_copy', { input: file.path, output, method: antiCopyMethod.value }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)),
-    ]).catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)
+      }),
+    ])
+      .finally(() => clearTimeout(timer))
+      .catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
     if (!result.ok) {
       file.statusText = userFacingError(result.error, '处理失败')
       file.statusType = 'danger'
@@ -634,10 +688,15 @@ async function batchAntiOcrRemove() {
     const dir = parentDir(file.path)
     const stem = stripPdf(file.name)
     const output = `${dir}/${stem}_restored.pdf`
+    let timer
     const result = await Promise.race([
       tauriCallSafe('remove_anti_copy', { input: file.path, output }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)),
-    ]).catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)
+      }),
+    ])
+      .finally(() => clearTimeout(timer))
+      .catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
     if (!result.ok) {
       file.statusText = userFacingError(result.error, '处理失败')
       file.statusType = 'danger'
@@ -949,6 +1008,67 @@ function moveSplitPreviewPage(delta) {
   splitPreviewPage.value = navigatePage(splitPreviewPage.value, delta, splitPreviewMaxPage.value)
 }
 
+function clampSplitPreviewRatio(value) {
+  return Math.min(0.78, Math.max(0.3, Number(value) || 0.5))
+}
+
+function setSplitPreviewRatio(value) {
+  splitPreviewRatio.value = clampSplitPreviewRatio(value)
+}
+
+function startSplitResize(event) {
+  if (event.button !== 0 || !splitMainRef.value) return
+  event.preventDefault()
+  const rect = splitMainRef.value.getBoundingClientRect()
+  const update = (pointerEvent) => {
+    setSplitPreviewRatio((rect.right - pointerEvent.clientX) / Math.max(1, rect.width))
+  }
+  const finish = () => {
+    window.removeEventListener('pointermove', update)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    stopSplitResize = null
+  }
+  stopSplitResize?.()
+  stopSplitResize = finish
+  window.addEventListener('pointermove', update)
+  window.addEventListener('pointerup', finish, { once: true })
+  window.addEventListener('pointercancel', finish, { once: true })
+  update(event)
+}
+
+function splitAtPreviewPage(page) {
+  const target = Math.min(splitPreviewMaxPage.value, Math.max(1, Number(page || 1)))
+  const index = insertRangeAtPage(splitRanges.value, target, splitPreviewMaxPage.value, {
+    name: `文件${splitRanges.value.length + 1}`,
+    reuseBoundary: true,
+  })
+  if (index < 0) return
+  selectedSplitRangeIndex.value = index
+  splitPreviewPage.value = target
+}
+
+function splitFromCurrentPage() {
+  splitAtPreviewPage(splitPreviewPage.value)
+}
+
+function splitFromPreviousPage() {
+  if (splitPreviewPage.value <= 1) return
+  splitAtPreviewPage(splitPreviewPage.value - 1)
+}
+
+function handleSplitShortcut(event) {
+  if (activeTab.value !== 'split' || !splitFile.value || event.ctrlKey || event.metaKey || event.altKey) return
+  const tag = String(event.target?.tagName || '').toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || event.target?.isContentEditable) return
+  if (event.key === 'ArrowLeft') moveSplitPreviewPage(-1)
+  else if (event.key === 'ArrowRight') moveSplitPreviewPage(1)
+  else if (event.key === '[') splitFromPreviousPage()
+  else if (event.key === ']') splitFromCurrentPage()
+  else return
+  event.preventDefault()
+}
+
 function setSelectedSplitStart() {
   setRangeStart(selectedSplitRange.value, splitPreviewPage.value)
 }
@@ -1035,8 +1155,15 @@ function splitRangeStatus(row) {
   return { type: 'success', text: '正常' }
 }
 
-onMounted(() => void preference.start())
-onBeforeUnmount(() => void preference.stop())
+onMounted(() => {
+  window.addEventListener('keydown', handleSplitShortcut)
+  void preference.start()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleSplitShortcut)
+  stopSplitResize?.()
+  void preference.stop()
+})
 </script>
 
 <style scoped>
@@ -1207,16 +1334,46 @@ h3 {
 
 .split-main {
   display: grid;
-  /* 预览页面比例固定：右列封顶 540px，拉宽窗口时只有左列表区变宽，
-     预览不再随窗口拉伸（避免空边浪费与重排）。 */
-  grid-template-columns: minmax(520px, 1fr) minmax(380px, 540px);
-  gap: 16px;
+  gap: 0;
   align-items: start;
 }
 
 .split-list-panel,
 .split-preview {
   min-width: 0;
+}
+
+.split-list-panel {
+  margin-right: 8px;
+}
+
+.split-preview {
+  margin-left: 8px;
+}
+
+.split-resizer {
+  align-self: stretch;
+  min-height: 360px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent 3px,
+    var(--docsy-border-subtle) 3px,
+    var(--docsy-border-subtle) 7px,
+    transparent 7px
+  );
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.split-resizer:hover {
+  background: linear-gradient(
+    90deg,
+    transparent 3px,
+    var(--docsy-primary) 3px,
+    var(--docsy-primary) 7px,
+    transparent 7px
+  );
 }
 
 .split-warning {
@@ -1270,6 +1427,17 @@ h3 {
   justify-content: flex-end;
 }
 
+.split-preview-pages {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.split-primary-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .split-empty {
   min-height: 100%;
 }
@@ -1292,7 +1460,20 @@ h3 {
 
 @media (max-width: 1180px) {
   .split-main {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
+  }
+
+  .split-resizer {
+    display: none;
+  }
+
+  .split-list-panel,
+  .split-preview {
+    margin: 0;
+  }
+
+  .split-preview {
+    margin-top: 16px;
   }
 
   .split-options {

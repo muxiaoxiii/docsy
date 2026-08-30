@@ -164,7 +164,7 @@ import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vu
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { fileName, parentDir } from '../../../core/filePath.js'
-import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 
 const files = ref([])
@@ -180,6 +180,8 @@ const fileOfficeFormat = ref('docx')
 const docxStyle = ref('professional')
 const pdfStartPage = ref(null)
 const pdfEndPage = ref(null)
+const activeBackendOperationId = ref('')
+const PDF_CONVERT_OPERATION_ID = 'convert_pdf_text_layer:auto'
 const preference = useWorkspacePreferences('markdown-convert.workspace', {
   fileOfficeFormat,
   docxStyle,
@@ -331,8 +333,9 @@ function removeFile(index) {
 
 async function runQueue() {
   if (converting.value) return
-  const startPage = Number(pdfStartPage.value || 0)
-  const endPage = Number(pdfEndPage.value || 0)
+  let startPage = Number(pdfStartPage.value || 0)
+  let endPage = Number(pdfEndPage.value || 0)
+  if (startPage <= 0) startPage = 1
   if (hasPdfInQueue.value && startPage && endPage && endPage < startPage) {
     ElMessage.error('PDF 结束页不能早于起始页')
     return
@@ -347,20 +350,26 @@ async function runQueue() {
       item.statusText = '转换中'
       item.statusType = 'warning'
       const isPdf = extensionOf(item.path) === 'pdf'
-      const result = isPdf
-        ? await tauriCallSafe('convert_pdf_text_layer', {
-            input: item.path,
-            outputDir: null,
-            startPage: pdfStartPage.value || null,
-            endPage: pdfEndPage.value || null,
-          })
-        : await tauriCallSafe('convert_markdown', {
-            input: item.path,
-            outputDir: null,
-            docEngine: item.docEngine || null,
-            outputFormat: item.outputFormat,
-            docxStyle: item.docxStyle,
-          })
+      activeBackendOperationId.value = isPdf ? PDF_CONVERT_OPERATION_ID : ''
+      let result
+      try {
+        result = isPdf
+          ? await tauriCallSafe('convert_pdf_text_layer', {
+              input: item.path,
+              outputDir: null,
+              startPage: startPage || null,
+              endPage: endPage || null,
+            })
+          : await tauriCallSafe('convert_markdown', {
+              input: item.path,
+              outputDir: null,
+              docEngine: item.docEngine || null,
+              outputFormat: item.outputFormat,
+              docxStyle: item.docxStyle,
+            })
+      } finally {
+        activeBackendOperationId.value = ''
+      }
       if (result.ok) {
         item.status = 'done'
         item.outputPath = String(result.data?.output_path || '')
@@ -450,7 +459,12 @@ useWindowFileDrop({
 })
 
 onMounted(() => void preference.start())
-onBeforeUnmount(() => void preference.stop())
+onBeforeUnmount(() => {
+  if (activeBackendOperationId.value) {
+    void tauriCallQuiet('cancel_operation', { operationId: activeBackendOperationId.value })
+  }
+  void preference.stop()
+})
 </script>
 
 <style scoped>

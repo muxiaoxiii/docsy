@@ -447,7 +447,7 @@ export function useImagePaddlerState(options = {}) {
     const used = lines.join('').length
     if (used < name.length && lines.length) {
       let last = lines[lines.length - 1]
-      while (nameUnits(last) + 1 > maxUnits && last.length) last = last.slice(0, -1)
+      while (nameUnits(last) + 1 > maxUnits && last.length) last = Array.from(last).slice(0, -1).join('')
       lines[lines.length - 1] = `${last}…`
     }
     return lines.length ? lines : ['']

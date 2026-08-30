@@ -73,59 +73,59 @@ export function useBatchFill(
     const xlsxPath = selected
 
     batchProcessing.value = true
-    const validation = await tauriCallSafe('validate_batch_import', {
-      templatePath: templatePath.value,
-      xlsxPath,
-    })
+    try {
+      const validation = await tauriCallSafe('validate_batch_import', {
+        templatePath: templatePath.value,
+        xlsxPath,
+      })
 
-    if (!validation.ok) {
+      if (!validation.ok) {
+        ElMessage.error(userFacingError(validation.error, '校验失败'))
+        return
+      }
+
+      const v = validation.data
+      const { proceed, skipRows } = await showValidationDialog(v)
+      if (!proceed) {
+        return
+      }
+
+      const outputDir = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: parentDir(templatePath.value),
+      })
+      if (!outputDir) {
+        return
+      }
+
+      const result = await tauriCallSafe('batch_render_from_xlsx', {
+        templatePath: templatePath.value,
+        xlsxPath,
+        outputDir,
+        namePattern: '',
+        skipRows,
+        structureOverrides: normalizeStructureOverrides(),
+        itemSeparator: itemSeparatorSetting.value || '、',
+      })
+
+      if (!result.ok) {
+        ElMessage.error(userFacingError(result.error, '批量生成失败'))
+        return
+      }
+
+      const r = result.data
+      batchCompleteResult.value = {
+        success: r.success || 0,
+        failed: r.failed || 0,
+        outputDir: typeof outputDir === 'string' ? outputDir : '',
+        rows: r.rows || [],
+      }
+      batchCompleteDataSaved.value = false
+      batchCompleteVisible.value = true
+    } finally {
       batchProcessing.value = false
-      ElMessage.error(userFacingError(validation.error, '校验失败'))
-      return
     }
-
-    const v = validation.data
-    const { proceed, skipRows } = await showValidationDialog(v)
-    if (!proceed) {
-      batchProcessing.value = false
-      return
-    }
-
-    const outputDir = await open({
-      directory: true,
-      multiple: false,
-      defaultPath: parentDir(templatePath.value),
-    })
-    if (!outputDir) {
-      batchProcessing.value = false
-      return
-    }
-
-    const result = await tauriCallSafe('batch_render_from_xlsx', {
-      templatePath: templatePath.value,
-      xlsxPath,
-      outputDir,
-      namePattern: '',
-      skipRows,
-      structureOverrides: normalizeStructureOverrides(),
-      itemSeparator: itemSeparatorSetting.value || '、',
-    })
-    batchProcessing.value = false
-
-    if (!result.ok) {
-      ElMessage.error(userFacingError(result.error, '批量生成失败'))
-      return
-    }
-
-    const r = result.data
-    batchCompleteResult.value = {
-      success: r.success || 0,
-      failed: r.failed || 0,
-      outputDir: typeof outputDir === 'string' ? outputDir : '',
-      rows: r.rows || [],
-    }
-    batchCompleteDataSaved.value = false
-    batchCompleteVisible.value = true
   }
 
   async function openBatchOutputDir() {

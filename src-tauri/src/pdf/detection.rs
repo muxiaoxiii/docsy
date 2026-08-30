@@ -1024,6 +1024,8 @@ static RE_CN_NUMERIC_PAGE: LazyLock<Regex> =
 static RE_PAGE_WORD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)page\s+\d+\s+of\s+\d+").unwrap());
 static RE_STANDALONE_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}$").unwrap());
+static RE_DASH_PAGE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^-\s*(\d{1,6})\s*-$").unwrap());
 
 /// Map circled/dingbat digits to their arabic text. Returns None for non-digit chars.
 fn circled_digit_text(ch: char) -> Option<&'static str> {
@@ -1227,10 +1229,10 @@ fn build_candidates(
                 (first.text.clone(), first.normalized_text.clone())
             };
             let mut labels = labels_for(&effective_normalized);
-            // First-page evidence labels such as "证据1" / "对比文件3" appear
-            // only once per document, so they can never prove themselves by
-            // repetition; tag them so they survive the repetition gate below.
-            if page_start == 1 && is_evidence_label_text(&effective_normalized) {
+            // Evidence labels such as "证据1" / "对比文件3" appear only once
+            // per item. In a merged PDF their first occurrence can be on any
+            // page, so let the strong label survive the repetition gate.
+            if is_evidence_label_text(&effective_normalized) {
                 labels.push("evidence-label".to_string());
             }
             let is_page_number = labels.iter().any(|label| label == "page-number");
@@ -1321,7 +1323,7 @@ fn build_candidates(
     // Page content is only promoted to an existing header/footer/page-number
     // candidate when repetition or a stable sequence proves that it is not an
     // incidental body line. Structural Artifact candidates are merged later
-    // and are not subject to this heuristic gate. First-page evidence labels
+    // and are not subject to this heuristic gate. Strong evidence labels
     // ("证据1", "对比文件3") are exempt: they legitimately occur only once.
     candidates.retain(|candidate| {
         candidate.repeating
@@ -1416,7 +1418,7 @@ fn parsed_page_number_value(text: &str) -> Option<u32> {
         LazyLock::new(|| Regex::new(r"第\s*(\d{1,6})\s*页").expect("valid page number regex"));
     static RE_TRAILING: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(\d{1,6})\s*页?$").expect("valid page number regex"));
-    for re in [&RE_SLASH, &RE_PAGE, &RE_CN, &RE_TRAILING] {
+    for re in [&RE_SLASH, &RE_PAGE, &RE_CN, &RE_DASH_PAGE, &RE_TRAILING] {
         if let Some(caps) = re.captures(trimmed) {
             if let Some(value) = caps.get(1) {
                 if let Ok(number) = value.as_str().parse() {
@@ -1625,7 +1627,7 @@ fn normalize_header_footer_text(text: &str) -> String {
     value = RE_CN_NUMERIC_PAGE
         .replace_all(&value, "第{page}页")
         .to_string();
-    if RE_STANDALONE_NUMBER.is_match(&value) {
+    if RE_STANDALONE_NUMBER.is_match(&value) || RE_DASH_PAGE.is_match(&value) {
         value = "{page}".to_string();
     } else if is_roman_page_marker(value.trim()) {
         value = "{roman-page}".to_string();
@@ -1648,6 +1650,7 @@ fn labels_for(normalized_text: &str) -> Vec<String> {
             \d+\s*/\s*\d+\s*页?$
             | 第\s*\d+\s*页\s*/\s*共\s*\d+\s*页
             | page\s*\d+\s*(?:of|/)\s*\d+
+            | ^-\s*\d+\s*-$
         ",
         )
         .unwrap()
@@ -1674,15 +1677,18 @@ fn is_noise(text: &str, normalized_text: &str) -> bool {
 }
 
 /// Match first-page evidence label text such as "证据1"、"对比文件3"、"证据一".
-/// Digits may be Arabic or Chinese numerals; anything may follow the number
+/// Identifiers may be Arabic digits, Chinese numerals, or Latin letters;
+/// anything may follow the identifier
 /// (e.g. "证据1（合同）").
 fn is_evidence_label_text(normalized_text: &str) -> bool {
-    static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^(证据|对比文件)\s*[0-9一二三四五六七八九十百千]+").unwrap());
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(证据|对比文件)\s*[0-9A-Za-z一二三四五六七八九十百千]+").unwrap()
+    });
     RE.is_match(normalized_text.trim())
 }
 
 fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSuggestionItem> {
+    let header_stats = split_header_stats(pages);
     let mut items = Vec::new();
     let mut current_name: Option<String> = None;
     let mut current_source = "fallback".to_string();
@@ -1690,7 +1696,7 @@ fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSugge
     let mut previous_page = 0_u32;
 
     for page in pages {
-        let header = best_split_header(page);
+        let header = eligible_split_header(page, &header_stats);
         if previous_page == 0 {
             current_start = page.page;
             if let Some(header) = header {
@@ -1744,11 +1750,72 @@ fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSugge
     items
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct SplitHeaderStats {
+    page_count: usize,
+    position_stable: bool,
+}
+
+/// Count each normalized header at most once per page and require its position
+/// to stay stable before ordinary repeated text can become a split signal.
+fn split_header_stats(pages: &[PageDetection]) -> BTreeMap<String, SplitHeaderStats> {
+    let mut grouped: BTreeMap<String, Vec<&TextLineDetection>> = BTreeMap::new();
+    let mut page_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for page in pages {
+        let mut seen = BTreeSet::new();
+        for line in &page.headers {
+            if is_noise(&line.text, &line.normalized_text)
+                || labels_for(&line.normalized_text).contains(&"page-number".to_string())
+            {
+                continue;
+            }
+            let normalized = normalize_header_footer_text(&line.text);
+            grouped.entry(normalized.clone()).or_default().push(line);
+            if seen.insert(normalized.clone()) {
+                *page_counts.entry(normalized).or_insert(0) += 1;
+            }
+        }
+    }
+
+    grouped
+        .into_iter()
+        .map(|(normalized, lines)| {
+            let page_count = page_counts.get(&normalized).copied().unwrap_or(0);
+            let position_stable = normalized_position_spread(&lines) <= 0.025;
+            (
+                normalized,
+                SplitHeaderStats {
+                    page_count,
+                    position_stable,
+                },
+            )
+        })
+        .collect()
+}
+
+fn eligible_split_header(
+    page: &PageDetection,
+    header_stats: &BTreeMap<String, SplitHeaderStats>,
+) -> Option<String> {
+    page.headers.iter().find_map(|line| {
+        if is_noise(&line.text, &line.normalized_text)
+            || labels_for(&line.normalized_text).contains(&"page-number".to_string())
+        {
+            return None;
+        }
+        let normalized = normalize_header_footer_text(&line.text);
+        let strong_label = is_evidence_label_text(&normalized);
+        let stats = header_stats.get(&normalized).copied().unwrap_or_default();
+        (strong_label || (stats.page_count >= 2 && stats.position_stable))
+            .then(|| line.text.trim().to_string())
+    })
+}
+
 /// 基于三层检测结果生成拆分建议（与分项证据处理共用同一套候选）。
 ///
 /// 优先级：每页先找覆盖它的页眉候选（artifact 优先，其次重复内容候选），
 /// 候选的 page_range 直接来自检测结果，天然携带稳定边界；没有任何页眉
-/// 候选时（例如第三方合并的 PDF），回退到逐页第一条页眉文本对比。
+/// 候选时，只接受强证据标签或跨页重复且位置稳定的页眉文本。
 fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionItem> {
     let header_candidates: Vec<&HeaderFooterCandidate> = detection
         .header_candidates
@@ -1761,17 +1828,7 @@ fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionIt
         return build_split_suggestions_from_pages(&detection.pages);
     }
 
-    // 预计算规范化页眉文本的出现页数，避免逐页重复做正则规范化。
-    let mut header_text_counts: BTreeMap<String, usize> = BTreeMap::new();
-    for page in &detection.pages {
-        let mut seen = BTreeSet::new();
-        for line in &page.headers {
-            let normalized = normalize_header_footer_text(&line.text);
-            if seen.insert(normalized.clone()) {
-                *header_text_counts.entry(normalized).or_insert(0) += 1;
-            }
-        }
-    }
+    let header_stats = split_header_stats(&detection.pages);
 
     let mut items = Vec::new();
     let mut current_name: Option<String> = None;
@@ -1780,7 +1837,7 @@ fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionIt
     let mut previous_page = 0_u32;
 
     for page in &detection.pages {
-        let header = split_header_identity(&header_candidates, page, &header_text_counts);
+        let header = split_header_identity(&header_candidates, page, &header_stats);
         if previous_page == 0 {
             current_start = page.page;
             if let Some((name, source)) = header {
@@ -1842,7 +1899,7 @@ fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionIt
 fn split_header_identity(
     candidates: &[&HeaderFooterCandidate],
     page: &PageDetection,
-    header_text_counts: &BTreeMap<String, usize>,
+    header_stats: &BTreeMap<String, SplitHeaderStats>,
 ) -> Option<(String, String)> {
     let covering = candidates
         .iter()
@@ -1859,14 +1916,7 @@ fn split_header_identity(
         return Some((candidate.text.clone(), candidate.source.clone()));
     }
 
-    let text = best_split_header(page)?;
-    let normalized = normalize_header_footer_text(&text);
-    if is_evidence_label_text(&normalized)
-        || header_text_counts.get(&normalized).copied().unwrap_or(0) >= 2
-    {
-        return Some((text, "header".to_string()));
-    }
-    None
+    eligible_split_header(page, header_stats).map(|text| (text, "header".to_string()))
 }
 
 /// 候选身份优先级：数值越小越优先。
@@ -2129,11 +2179,13 @@ mod tests {
             "Page {page} of {total}"
         );
         assert_eq!(normalize_header_footer_text("15"), "{page}");
+        assert_eq!(normalize_header_footer_text("- 15 -"), "{page}");
         assert_eq!(normalize_header_footer_text("III"), "{roman-page}");
         assert_eq!(normalize_header_footer_text("mid"), "mid");
         assert_eq!(normalize_header_footer_text("IC"), "IC");
         assert_eq!(parsed_page_number_value("第四页"), Some(4));
         assert_eq!(parsed_page_number_value("第二十三页"), Some(23));
+        assert_eq!(parsed_page_number_value("- 23 -"), Some(23));
     }
 
     #[test]
@@ -2552,6 +2604,74 @@ mod tests {
     }
 
     #[test]
+    fn fallback_keeps_unique_body_like_headers_in_one_range() {
+        let page = |page: u32, text: &str| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![TextLineDetection {
+                text: text.to_string(),
+                normalized_text: text.to_string(),
+                bbox: BBox {
+                    x0: 40.0,
+                    y0: 24.0,
+                    x1: 300.0,
+                    y1: 40.0,
+                    page,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+            }],
+            footers: vec![],
+        };
+        let items = build_split_suggestions_from_pages(&[
+            page(1, "第一条 双方权利"),
+            page(2, "第二条 履行方式"),
+            page(3, "第三条 违约责任"),
+        ]);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].page_start, 1);
+        assert_eq!(items[0].page_end, 3);
+        assert_eq!(items[0].source, "fallback");
+    }
+
+    #[test]
+    fn fallback_accepts_repeated_headers_only_when_position_is_stable() {
+        let page = |page: u32, text: &str, y: f32| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![TextLineDetection {
+                text: text.to_string(),
+                normalized_text: text.to_string(),
+                bbox: BBox {
+                    x0: 40.0,
+                    y0: y,
+                    x1: 220.0,
+                    y1: y + 16.0,
+                    page,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+            }],
+            footers: vec![],
+        };
+        let items = build_split_suggestions_from_pages(&[
+            page(1, "目录正文", 24.0),
+            page(2, "合同附件", 24.0),
+            page(3, "合同附件", 24.0),
+        ]);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!((items[0].page_start, items[0].page_end), (1, 1));
+        assert_eq!((items[1].page_start, items[1].page_end), (2, 3));
+        assert_eq!(items[1].name, "合同附件");
+    }
+
+    #[test]
     fn names_first_headerless_split_range_as_catalog() {
         let page = |page: u32, header: Option<&str>| PageDetection {
             page,
@@ -2892,6 +3012,8 @@ mod tests {
         assert!(labels_for("第2页/共19页").contains(&"page-number".to_string()));
         // English
         assert!(labels_for("Page 5 of 20").contains(&"page-number".to_string()));
+        // Decorative dash form
+        assert!(labels_for("- 5 -").contains(&"page-number".to_string()));
         // Pure number - should NOT be page-number (ambiguous)
         assert!(!labels_for("2").contains(&"page-number".to_string()));
         // Regular header text
@@ -3075,7 +3197,7 @@ mod tests {
             .all(|c| !(c.page_range.start <= 3 && c.page_range.end >= 5)));
     }
     #[test]
-    fn first_page_evidence_label_survives_repetition_gate() {
+    fn evidence_label_survives_repetition_gate_on_any_page() {
         let line = |page: u32, text: &str, normalized: &str| TextLineDetection {
             text: text.to_string(),
             normalized_text: normalized.to_string(),
@@ -3097,20 +3219,20 @@ mod tests {
             headers,
             footers: vec![],
         };
-        // "证据１" (fullwidth digit) appears only on page 1, like the stamped
-        // evidence labels in real merged-evidence PDFs.
+        // "证据１" (fullwidth digit) appears only on page 4, like a stamped
+        // label at the start of a later item in a merged-evidence PDF.
         let pages = vec![
-            mk(1, vec![line(1, "证据１", "证据1")]),
+            mk(1, vec![]),
             mk(2, vec![]),
             mk(3, vec![]),
-            mk(4, vec![]),
+            mk(4, vec![line(4, "证据１", "证据1")]),
             mk(5, vec![]),
         ];
         let candidates = build_candidates(&pages, "header", 5);
         let evidence = candidates
             .iter()
             .find(|candidate| candidate.normalized_text == "证据1")
-            .expect("first-page evidence label must remain a candidate");
+            .expect("evidence label on a later page must remain a candidate");
         assert!(evidence
             .labels
             .iter()
@@ -3120,7 +3242,7 @@ mod tests {
     }
 
     #[test]
-    fn evidence_label_not_on_first_page_is_not_promoted() {
+    fn later_evidence_label_is_promoted() {
         let line = |page: u32| TextLineDetection {
             text: "证据3".to_string(),
             normalized_text: "证据3".to_string(),
@@ -3142,11 +3264,13 @@ mod tests {
             headers,
             footers: vec![],
         };
-        // A single "证据3" first appearing on page 2 is more likely body text
-        // than a stamped label; without repetition it is not a candidate.
         let pages = vec![mk(1, vec![]), mk(2, vec![line(2)]), mk(3, vec![])];
         let candidates = build_candidates(&pages, "header", 3);
-        assert!(candidates.is_empty());
+        assert_eq!(candidates.len(), 1);
+        assert!(candidates[0]
+            .labels
+            .iter()
+            .any(|label| label == "evidence-label"));
     }
 
     #[test]
@@ -3154,6 +3278,7 @@ mod tests {
         assert!(is_evidence_label_text("证据1"));
         assert!(is_evidence_label_text("证据 12"));
         assert!(is_evidence_label_text("对比文件3"));
+        assert!(is_evidence_label_text("对比文件A"));
         assert!(is_evidence_label_text("证据一"));
         assert!(is_evidence_label_text("证据1（合同）"));
         assert!(!is_evidence_label_text("证据"));
@@ -3289,7 +3414,7 @@ mod tests {
                 .chain(result.footer_candidates.iter())
                 .filter(|candidate| candidate.source == "content-text")
             {
-                // First-page evidence labels legitimately occur only once.
+                // Evidence labels in merged items legitimately occur only once.
                 if candidate
                     .labels
                     .iter()

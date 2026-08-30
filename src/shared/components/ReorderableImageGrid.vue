@@ -245,6 +245,10 @@ async function preloadVisibleImages() {
       delete previewErrors[path]
       const result = await tauriCallQuiet('read_image_data_url', { path, maxEdge: 640 })
       loadingPaths.delete(path)
+
+      const currentPaths = pagedItems.value.map(itemPath).filter(Boolean)
+      if (!currentPaths.includes(path)) continue
+
       if (result.ok) sources[path] = result.data
       else previewErrors[path] = true
     }

@@ -269,10 +269,7 @@ export function useEvidencePdfMergedImport({
 
       const failed = split.data.failed?.length || 0
       const warnings = split.data.warnings || []
-      const removedBlanks = (outputs || []).reduce(
-        (sum, output) => sum + Number(output.removedBlankPages || 0),
-        0,
-      )
+      const removedBlanks = (outputs || []).reduce((sum, output) => sum + Number(output.removedBlankPages || 0), 0)
       const blankSuffix = removedBlanks > 0 ? `（已删除 ${removedBlanks} 个空白页）` : ''
       if (failed) {
         ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个${blankSuffix}`)
@@ -415,6 +412,32 @@ export function useEvidencePdfMergedImport({
     refreshPreview()
   }
 
+  function splitMergedImportAtPage(page) {
+    const plan = mergedImportPlan.value
+    if (!plan) return
+    const target = Math.min(Number(plan.totalPages || 1), Math.max(1, Number(page || 1)))
+    const items = plan.items
+    const newIndex = insertRangeAtPage(items, target, plan.totalPages, {
+      name: `文件${items.length + 1}`,
+      extra: { source: 'manual' },
+      reuseBoundary: true,
+    })
+    if (newIndex < 0) return
+    selectedMergedImportIndex.value = newIndex
+    previewPage.value = target
+    truePreview.value = null
+    refreshPreview()
+  }
+
+  function splitMergedImportFromCurrentPage() {
+    splitMergedImportAtPage(previewPage.value)
+  }
+
+  function splitMergedImportFromPreviousPage() {
+    if (previewPage.value <= 1) return
+    splitMergedImportAtPage(previewPage.value - 1)
+  }
+
   // 计划表格内直接修改起始页/结束页后，同样走智能无缝调整
   function onMergedRangeStartChanged(index, value) {
     const items = mergedImportPlan.value?.items
@@ -454,10 +477,7 @@ export function useEvidencePdfMergedImport({
       if (index === 0) {
         items[0].pageStart = Math.min(Number(items[0].pageStart || 1), Number(removed.pageStart || 1))
       } else {
-        items[index - 1].pageEnd = Math.max(
-          Number(items[index - 1].pageEnd || 0),
-          Number(removed.pageEnd || 0),
-        )
+        items[index - 1].pageEnd = Math.max(Number(items[index - 1].pageEnd || 0), Number(removed.pageEnd || 0))
       }
     }
     selectedMergedImportIndex.value = Math.min(selectedMergedImportIndex.value, Math.max(0, items.length - 1))
@@ -525,6 +545,9 @@ export function useEvidencePdfMergedImport({
     setSelectedMergedRangeStart,
     setSelectedMergedRangeEnd,
     addMergedImportRangeFromPage,
+    splitMergedImportAtPage,
+    splitMergedImportFromCurrentPage,
+    splitMergedImportFromPreviousPage,
     onMergedRangeStartChanged,
     onMergedRangeEndChanged,
     addMergedImportRange,

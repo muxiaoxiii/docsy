@@ -202,11 +202,19 @@ fn store_backup_meta(doc: &mut Document, backup: &BackupData) {
 
     // Try to use existing Info dictionary
     let info_ref = doc.trailer.get(b"Info").ok().cloned();
-    if let Some(Object::Reference(info_id)) = info_ref {
-        if let Ok(Object::Dictionary(dict)) = doc.get_object_mut(info_id) {
+    match info_ref {
+        Some(Object::Reference(info_id)) => {
+            if let Ok(Object::Dictionary(dict)) = doc.get_object_mut(info_id) {
+                dict.set(BACKUP_KEY.to_vec(), Object::string_literal(json_bytes));
+                return;
+            }
+        }
+        Some(Object::Dictionary(mut dict)) => {
             dict.set(BACKUP_KEY.to_vec(), Object::string_literal(json_bytes));
+            doc.trailer.set(b"Info", Object::Dictionary(dict));
             return;
         }
+        _ => {}
     }
 
     // No Info dict - create one and add to trailer via indirect reference
@@ -219,11 +227,11 @@ fn store_backup_meta(doc: &mut Document, backup: &BackupData) {
 
 fn get_backup_meta(doc: &Document) -> Option<BackupData> {
     let info_ref = doc.trailer.get(b"Info").ok()?;
-    let info_id = match info_ref {
-        Object::Reference(id) => *id,
+    let info_dict = match info_ref {
+        Object::Reference(id) => doc.get_dictionary(*id).ok()?,
+        Object::Dictionary(d) => d,
         _ => return None,
     };
-    let info_dict = doc.get_dictionary(info_id).ok()?;
     let backup_obj = info_dict.get(BACKUP_KEY).ok()?;
     let json_bytes = match backup_obj {
         Object::String(bytes, _) => bytes.clone(),
@@ -235,10 +243,17 @@ fn get_backup_meta(doc: &Document) -> Option<BackupData> {
 
 fn remove_backup_meta(doc: &mut Document) {
     let info_ref = doc.trailer.get(b"Info").ok().cloned();
-    if let Some(Object::Reference(info_id)) = info_ref {
-        if let Ok(Object::Dictionary(dict)) = doc.get_object_mut(info_id) {
-            dict.remove(BACKUP_KEY);
+    match info_ref {
+        Some(Object::Reference(info_id)) => {
+            if let Ok(Object::Dictionary(dict)) = doc.get_object_mut(info_id) {
+                dict.remove(BACKUP_KEY);
+            }
         }
+        Some(Object::Dictionary(mut dict)) => {
+            dict.remove(BACKUP_KEY);
+            doc.trailer.set(b"Info", Object::Dictionary(dict));
+        }
+        _ => {}
     }
 }
 

@@ -8,8 +8,20 @@ on:
 
 jobs:
   build-windows:
-    name: Build Windows x64
+    name: Build Windows ${{ matrix.arch }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            command: npm run tauri:build:windows
+            rust-target: x86_64-pc-windows-msvc
+            artifact-path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis
+          - arch: x86
+            command: npm run tauri:build:windows:x86
+            rust-target: i686-pc-windows-msvc
+            artifact-path: src-tauri/target/i686-pc-windows-msvc/release/bundle/nsis
 
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +31,8 @@ jobs:
           node-version: 24
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
 
       - name: Install dependencies
         shell: bash
@@ -33,6 +47,7 @@ jobs:
           npm ci
 
       - name: Install external tools
+        if: matrix.arch == 'x64'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -99,13 +114,13 @@ jobs:
         run: npm run test -- --run
 
       - name: Build Windows package
-        run: npm run tauri:build:windows
+        run: ${{ matrix.command }}
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: docsy-windows-x64
+          name: docsy-windows-${{ matrix.arch }}
           path: |
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
+            ${{ matrix.artifact-path }}/*.exe
+            ${{ matrix.artifact-path }}/*.exe.sig
           if-no-files-found: error

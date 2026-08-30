@@ -84,6 +84,8 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { toChineseNumber } from '../../core/numberFormat.js'
+
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
@@ -231,7 +233,7 @@ function previewToken(token) {
     if (token.value === '序号') return String((props.index || 0) + 1)
     if (token.value === '序号01') return String((props.index || 0) + 1).padStart(2, '0')
     if (token.value === '序号001') return String((props.index || 0) + 1).padStart(3, '0')
-    if (token.value === '中文序号') return toChinese((props.index || 0) + 1)
+    if (token.value === '中文序号') return toChineseNumber((props.index || 0) + 1)
     return token.value
   }
   return token.value
@@ -248,13 +250,6 @@ function todayDash() {
 function todayShort() {
   const d = new Date()
   return `${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
-}
-function toChinese(n) {
-  const c = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-  if (n <= 10) return c[n]
-  if (n < 20) return '十' + c[n - 10]
-  if (n < 100) return c[Math.floor(n / 10)] + '十' + (n % 10 ? c[n % 10] : '')
-  return String(n)
 }
 </script>
 

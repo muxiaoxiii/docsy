@@ -5,6 +5,7 @@ Docsy 的软件主页与下载镜像站，部署在 **https://docsy.muxiaoxi.top
 
 - 页面：
   - `index.html` 软件主页（介绍 + 下载 + 软件截图 + 更新日志）
+  - `features.html` 功能详情页（六大核心功能模块详细介绍）
   - `tools.html` 外部工具下载页（qpdf / Poppler / FFmpeg 的系统-版本对照 + 官方地址 + 风险提示）
 - 部署：极空间（或任意支持 Docker Compose 的 NAS）上跑一个 Caddy 容器
 - 同步：GitHub Actions 发布时推送（主通道）+ NAS 定时任务拉取（兜底）

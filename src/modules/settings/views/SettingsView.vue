@@ -314,8 +314,8 @@ async function saveSettings() {
     return
   }
   const loPath = (settings.value.libreoffice_path || '').trim()
-  if (loPath && !loPath.startsWith('/') && !/^[A-Za-z]:\\/.test(loPath)) {
-    ElMessage.warning('LibreOffice 路径格式不正确，应以 / 或盘符（如 C:\\）开头')
+  if (loPath && !loPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(loPath)) {
+    ElMessage.warning('LibreOffice 路径格式不正确，应以 / 或盘符（如 C:\\ 或 C:/）开头')
     return
   }
 

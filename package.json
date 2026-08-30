@@ -1,6 +1,6 @@
 {
   "name": "docsy",
-  "version": "0.9.7-beta29",
+  "version": "0.9.7-beta30",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "tauri:build:mac": "tauri build",
     "tauri:build:windows": "tauri build --target x86_64-pc-windows-msvc --bundles nsis",
+    "tauri:build:windows:x86": "tauri build --target i686-pc-windows-msvc --bundles nsis",
     "lint": "eslint src vite.config.js",
     "format:check": "prettier \"src/**/*.{js,vue,css}\" \"*.js\" \"*.json\" --check",
     "test": "vitest run",

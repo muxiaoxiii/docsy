@@ -276,7 +276,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, reactive, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { openExternalUrl, tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -295,6 +295,8 @@ import { useWorkspaceStore } from '../../../stores/workspace.js'
 
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
+const EXTRACT_OPERATION_ID = 'extract_frames:video-view'
+const ANALYZE_OPERATION_ID = 'analyze_frame_selection:auto'
 
 const ffmpegLoading = ref(true)
 const ffmpegStatus = reactive({ available: false, path: null, version: null, has_drawtext: false })
@@ -468,6 +470,7 @@ async function extractFrames() {
   mediaReadyToSave = false
 
   const args = {
+    operation_id: EXTRACT_OPERATION_ID,
     input: videoPath.value,
     output_dir: settings.outputDir,
     filename_prefix: settings.filenamePrefix,
@@ -922,6 +925,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  cancelViewOperations()
   if (mediaSaveTimer) window.clearTimeout(mediaSaveTimer)
   if (dynamicAnalysisTimer) window.clearTimeout(dynamicAnalysisTimer)
   unlistenAnalysisProgress?.()
@@ -929,6 +933,17 @@ onBeforeUnmount(() => {
   void saveMediaSession()
   void preference.stop()
 })
+
+onDeactivated(cancelViewOperations)
+
+function cancelViewOperations() {
+  if (extracting.value) {
+    void tauriCallQuiet('cancel_operation', { operationId: EXTRACT_OPERATION_ID })
+  }
+  if (analyzingSelection.value) {
+    void tauriCallQuiet('cancel_operation', { operationId: ANALYZE_OPERATION_ID })
+  }
+}
 
 useWindowFileDrop({
   onEnter: () => {
