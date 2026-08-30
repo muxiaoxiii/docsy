@@ -1,6 +1,10 @@
 <template>
   <el-container class="app-container">
-    <el-aside width="var(--docsy-sidebar-width)" class="app-aside">
+    <el-aside
+      :width="sidebarCollapsed ? '78px' : 'var(--docsy-sidebar-width)'"
+      class="app-aside"
+      :class="{ 'is-collapsed': sidebarCollapsed }"
+    >
       <button type="button" class="brand" aria-label="返回首页" @click="router.push('/')">
         <img src="./assets/docsy-logo.png" alt="Docsy" class="brand-logo" />
         <span class="brand-copy">
@@ -48,9 +52,20 @@
     </el-aside>
     <el-container>
       <el-header class="app-header">
-        <div class="page-heading">
-          <span class="page-title">{{ currentPageTitle }}</span>
-          <span class="page-context">本地文档处理工作台</span>
+        <div class="header-leading">
+          <button
+            type="button"
+            class="sidebar-toggle"
+            :aria-label="sidebarCollapsed ? '展开工作空间导航' : '收起工作空间导航'"
+            :title="sidebarCollapsed ? '展开工作空间' : '收起工作空间'"
+            @click="toggleSidebar"
+          >
+            {{ sidebarCollapsed ? '›' : '‹' }}
+          </button>
+          <div class="page-heading">
+            <span class="page-title">{{ currentPageTitle }}</span>
+            <span class="page-context">本地文档处理工作台</span>
+          </div>
         </div>
         <span class="app-version">v{{ version }}</span>
       </el-header>
@@ -106,6 +121,7 @@ const menuIconByRoute = {
 }
 
 const activeMenu = computed(() => route.name || 'home')
+const sidebarCollapsed = ref(window.localStorage.getItem('docsy.sidebar.collapsed') === '1')
 const operationVisible = ref(false)
 const version = import.meta.env.PACKAGE_VERSION || ''
 const operationMessage = ref('Doclet 正在处理…')
@@ -123,6 +139,11 @@ const currentPageTitle = computed(() => {
 
 function onMenuSelect(index) {
   router.push({ name: index })
+}
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  window.localStorage.setItem('docsy.sidebar.collapsed', sidebarCollapsed.value ? '1' : '0')
 }
 
 function applySettingsEvent(event) {
@@ -355,6 +376,42 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.app-aside.is-collapsed .brand {
+  justify-content: center;
+  padding-inline: 10px;
+}
+
+.app-aside.is-collapsed .brand-copy,
+.app-aside.is-collapsed .sidebar-section-label,
+.app-aside.is-collapsed .menu-label,
+.app-aside.is-collapsed .menu-arrow,
+.app-aside.is-collapsed .sidebar-footer .footer-btn span {
+  display: none;
+}
+
+.app-aside.is-collapsed .sidebar-menu {
+  padding-block: clamp(10px, 1.8dvh, 14px);
+  padding-inline: 10px;
+}
+
+.app-aside.is-collapsed .sidebar-menu :deep(.el-menu-item) {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 0 !important;
+}
+
+.app-aside.is-collapsed .menu-index {
+  display: none;
+}
+
+.app-aside.is-collapsed .menu-icon {
+  display: block;
+}
+
+.app-aside.is-collapsed .sidebar-footer .footer-btn {
+  gap: 0;
+}
+
 .app-aside::after {
   position: absolute;
   inset: 0;
@@ -569,6 +626,34 @@ onBeforeUnmount(() => {
   padding: 0 30px;
   border-bottom: 1px solid var(--docsy-border-subtle);
   background: rgba(251, 247, 239, 0.94);
+}
+
+.header-leading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-toggle {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 8px;
+  color: var(--docsy-text-muted);
+  background: var(--docsy-surface-elevated);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  place-items: center;
+}
+
+.sidebar-toggle:hover {
+  color: var(--docsy-primary);
+  border-color: color-mix(in srgb, var(--docsy-primary) 42%, var(--docsy-border-subtle));
 }
 
 .page-heading {

@@ -23,8 +23,11 @@
         </div>
       </div>
 
-      <div v-if="importingMergedPdf" v-loading="true" element-loading-text="正在分析合并 PDF" class="local-processing">
-        <p>大文件可能需要一段时间，当前只占用这个任务区域；其他标签和窗口仍可继续操作。</p>
+      <div v-if="importingMergedPdf" v-loading="true" element-loading-text="正在导入合并 PDF" class="local-processing">
+        <p>正在读取文件页数并建立一个覆盖全文的手动页段。</p>
+      </div>
+      <div v-if="detectingMergedImport" v-loading="true" element-loading-text="正在检测页段" class="local-processing">
+        <p>检测会完整分析标准页眉页脚、重复文本和页码；大文件等待时间较长，完成后请逐项核对候选页段。</p>
       </div>
       <div v-if="splittingMergedImport" v-loading="true" element-loading-text="正在拆分 PDF" class="local-processing">
         <p>大文件会按页段逐个输出，当前只占用合并证据处理区域；请先不要重复点击确认拆分。</p>
@@ -423,6 +426,14 @@
             <p class="hint">核对页段后拆成证据列表</p>
           </div>
           <div class="plan-actions">
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :loading="detectingMergedImport"
+              @click="detectMergedImportPlan"
+              >检测页段</el-button
+            >
             <el-button size="small" @click="addMergedImportRange">添加页段</el-button>
             <el-button size="small" @click="selectMergedImportOutputDir">输出目录</el-button>
             <el-button size="small" @click="cancelMergedImportPlan">取消</el-button>
@@ -883,54 +894,85 @@
           <p class="hint">{{ listReordering ? '正在调整顺序，松手后更新预览' : previewHint }}</p>
         </div>
         <div class="preview-controls">
-          <el-button-group>
-            <el-button size="small" @click="setPreviewPanelRatio(0.5)">标准 50%</el-button>
-            <el-button size="small" @click="setPreviewPanelRatio(0.7)">大图 70%</el-button>
-            <el-button size="small" @click="setPreviewPanelRatio(0.78)">全屏对比</el-button>
-          </el-button-group>
-          <template v-if="mergedImportPlan">
-            <el-button size="small" :disabled="previewPage <= 1" @click="movePreviewPage(-1)">上一页</el-button>
-            <el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)"
-              >下一页</el-button
+          <div v-if="mergedImportPlan" class="merged-preview-toolbar">
+            <div class="merged-preview-primary-row">
+              <el-button size="small" :disabled="!canUndoMergedImport" @click="undoMergedImportEdit">撤销</el-button>
+              <el-button size="small" :disabled="!canRedoMergedImport" @click="redoMergedImportEdit">重做</el-button>
+              <el-button size="small" :disabled="previewPage <= 1" @click="movePreviewPage(-1)">上一页</el-button>
+              <el-input-number v-model="previewPage" :min="1" :max="previewMaxPage" size="small" />
+              <el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)"
+                >下一页</el-button
+              >
+              <el-button size="small" :disabled="!activePreviewFilePath" @click="refreshPreview">重新渲染</el-button>
+              <el-button
+                size="small"
+                :disabled="!activePreviewFilePath || (!showNextPagePreview && previewPage >= previewMaxPage)"
+                :aria-pressed="showNextPagePreview"
+                @click="showNextPagePreview = !showNextPagePreview"
+              >
+                {{ showNextPagePreview ? '隐藏下一页预览' : '显示下一页预览' }}
+              </el-button>
+            </div>
+            <div class="merged-preview-secondary-row">
+              <el-button
+                size="small"
+                :disabled="!canMergeCurrentMergedImportRange"
+                @click="mergeCurrentMergedImportRangeIntoPrevious"
+                >合并到上段</el-button
+              >
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                :disabled="previewPage <= 1"
+                @click="splitMergedImportFromPreviousPage"
+                >从上一页拆</el-button
+              >
+              <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeStart"
+                >设为起始页</el-button
+              >
+              <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd"
+                >设为结束页</el-button
+              >
+              <el-button size="small" type="primary" plain @click="addMergedImportRangeFromPage">添加新页段</el-button>
+              <el-button size="small" type="primary" plain @click="splitMergedImportFromCurrentPage"
+                >从本页拆</el-button
+              >
+            </div>
+          </div>
+          <div v-else class="preview-utility-actions">
+            <el-input-number
+              v-model="previewPage"
+              :min="1"
+              :max="previewMaxPage"
+              :disabled="!activePreviewFilePath"
+              size="small"
+            />
+            <el-button size="small" :disabled="!activePreviewFilePath" @click="refreshPreview"
+              >重新渲染当前页</el-button
             >
-            <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeStart"
-              >设为起始页</el-button
+            <el-button
+              size="small"
+              :disabled="!activePreviewFilePath || (!showNextPagePreview && previewPage >= previewMaxPage)"
+              :aria-pressed="showNextPagePreview"
+              @click="showNextPagePreview = !showNextPagePreview"
             >
-            <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd"
-              >设为结束页</el-button
-            >
-            <el-button size="small" type="primary" plain @click="splitMergedImportFromCurrentPage">从本页拆</el-button>
+              {{ showNextPagePreview ? '隐藏下一页预览' : '显示下一页预览' }}
+            </el-button>
             <el-button
               size="small"
               type="primary"
-              plain
-              :disabled="previewPage <= 1"
-              @click="splitMergedImportFromPreviousPage"
-              >从上一页拆</el-button
+              :loading="truePreviewLoading"
+              :disabled="!selectedOverlayFile"
+              @click="renderTruePreview"
             >
-            <el-button size="small" type="primary" plain @click="addMergedImportRangeFromPage">添加新页段</el-button>
-          </template>
-          <el-input-number
-            v-model="previewPage"
-            :min="1"
-            :max="previewMaxPage"
-            :disabled="!activePreviewFilePath"
-            size="small"
-          />
-          <el-button size="small" :disabled="!activePreviewFilePath" @click="refreshPreview">重新渲染当前页</el-button>
-          <el-button
-            size="small"
-            type="primary"
-            :loading="truePreviewLoading"
-            :disabled="!selectedOverlayFile || Boolean(mergedImportPlan)"
-            @click="renderTruePreview"
-          >
-            生成真实预览
-          </el-button>
+              生成真实预览
+            </el-button>
+          </div>
         </div>
       </div>
 
-      <div class="preview-pages">
+      <div class="preview-pages" :class="{ 'has-next-preview': showNextPagePreview }">
         <div class="primary-preview-page">
           <div v-if="truePreview" class="true-preview-stage">
             <div class="true-preview-page" :style="truePreviewFrameStyle">
@@ -984,7 +1026,7 @@
           </PdfJsPreview>
         </div>
         <NextPageThumbnail
-          v-if="activePreviewFilePath"
+          v-if="showNextPagePreview && activePreviewFilePath"
           :file-path="activePreviewFilePath"
           :page="previewPage"
           :max-page="previewMaxPage"
@@ -1164,6 +1206,7 @@ const OPTIMIZE_SIZE_KEY = 'docsy.evidencePdf.optimizeSize'
 const optimizeSizeEnabled = ref(window.localStorage.getItem(OPTIMIZE_SIZE_KEY) !== '0')
 let quickCleanupPipeline = false
 const importingMergedPdf = ref(false)
+const detectingMergedImport = ref(false)
 const splittingMergedImport = ref(false)
 const selectedOverlayIndex = ref(0)
 const selectedMergedImportIndex = ref(0)
@@ -1176,7 +1219,8 @@ const splitNameCustomSeparator = ref('')
 const headerFooterSettingsVisible = ref(false)
 const splitReplacementOutputDir = ref('')
 const removeBlankPages = ref(false)
-const previewPanelRatio = ref(0.5)
+const previewPanelRatio = ref(0.42)
+const showNextPagePreview = ref(false)
 const workbenchRef = ref(null)
 let stopWorkbenchResize = null
 
@@ -1547,6 +1591,7 @@ const workbenchPreference = useWorkspacePreferences(`evidence-pdf.workbench.${wo
   splitNameSeparator,
   splitNameCustomSeparator,
   previewPanelRatio,
+  showNextPagePreview,
   normalizeA4,
   a4Orientation,
   a4ContentRotation,
@@ -2350,7 +2395,11 @@ const {
 const {
   mergedImportWarnings,
   selectedMergedImportRange,
+  canUndoMergedImport,
+  canRedoMergedImport,
+  canMergeCurrentMergedImportRange,
   importMergedPdfAsEvidence,
+  detectMergedImportPlan,
   executeMergedImportPlan,
   selectMergedImportOutputDir,
   cancelMergedImportPlan,
@@ -2361,6 +2410,9 @@ const {
   addMergedImportRangeFromPage,
   splitMergedImportFromCurrentPage,
   splitMergedImportFromPreviousPage,
+  mergeCurrentMergedImportRangeIntoPrevious,
+  undoMergedImportEdit,
+  redoMergedImportEdit,
   onMergedRangeStartChanged,
   onMergedRangeEndChanged,
   addMergedImportRange,
@@ -2374,6 +2426,7 @@ const {
   overlayFiles,
   overlayOutputDir,
   importingMergedPdf,
+  detectingMergedImport,
   splittingMergedImport,
   mergedImportPlan,
   selectedMergedImportIndex,
@@ -3850,7 +3903,7 @@ function clearContentRowEdit() {
 }
 
 function clampPreviewPanelRatio(value) {
-  return Math.min(0.78, Math.max(0.3, Number(value) || 0.5))
+  return Math.min(0.65, Math.max(0.3, Number(value) || 0.42))
 }
 
 function setPreviewPanelRatio(value) {
@@ -3882,13 +3935,15 @@ function startWorkbenchResize(event) {
 function handleGlobalKeydown(e) {
   const tag = (e.target?.tagName || '').toLowerCase()
   const editing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable
-  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     if (editing) return
     e.preventDefault()
     if (e.shiftKey) {
-      if (!redoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.redo()
+      if (mergedImportPlan.value) redoMergedImportEdit()
+      else if (!redoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.redo()
     } else {
-      if (!undoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.undo()
+      if (mergedImportPlan.value) undoMergedImportEdit()
+      else if (!undoEdit() && inlineHfFieldsRef.value) inlineHfFieldsRef.value.undo()
     }
     return
   }
@@ -4697,8 +4752,42 @@ h3 {
 
 .preview-controls {
   display: flex;
+  width: 100%;
+  flex-direction: column;
+  flex-wrap: wrap;
   gap: 8px;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.merged-preview-toolbar {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+}
+
+.merged-preview-primary-row,
+.merged-preview-secondary-row,
+.preview-utility-actions {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 8px;
+}
+
+.merged-preview-primary-row,
+.merged-preview-secondary-row {
+  width: 100%;
+  align-content: flex-start;
+}
+
+.merged-preview-primary-row :deep(.el-button + .el-button),
+.merged-preview-secondary-row :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.preview-utility-actions {
+  width: 100%;
 }
 
 .footer-candidate-panel {

@@ -450,6 +450,11 @@ fn build_artifact_candidates(
                 });
 
             let mut labels = labels_for(&normalized_text);
+            if is_evidence_label_text(&normalized_text)
+                && !labels.iter().any(|label| label == "evidence-label")
+            {
+                labels.push("evidence-label".to_string());
+            }
             if first.docsy_kind.as_deref() == Some("PageNumber")
                 && !labels.iter().any(|label| label == "page-number")
             {
@@ -1812,11 +1817,20 @@ fn eligible_split_header(
 }
 
 /// 基于三层检测结果生成拆分建议（与分项证据处理共用同一套候选）。
+fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionItem> {
+    let base_items = build_split_suggestions_from_candidates(detection);
+    organize_splits_around_evidence_labels(detection, base_items)
+}
+
+/// 先按普通 artifact / 重复页眉生成基础页段；若存在强证据标签，后续会
+/// 以标签为主边界重新组织，避免标签首页被跨页重复页眉覆盖后只剩一页。
 ///
 /// 优先级：每页先找覆盖它的页眉候选（artifact 优先，其次重复内容候选），
 /// 候选的 page_range 直接来自检测结果，天然携带稳定边界；没有任何页眉
 /// 候选时，只接受强证据标签或跨页重复且位置稳定的页眉文本。
-fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionItem> {
+fn build_split_suggestions_from_candidates(
+    detection: &DetectionResult,
+) -> Vec<SplitSuggestionItem> {
     let header_candidates: Vec<&HeaderFooterCandidate> = detection
         .header_candidates
         .iter()
@@ -1891,6 +1905,100 @@ fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionIt
     items
 }
 
+/// “证据X / 对比文件X”是分项首页的强边界。基础页眉建议只负责组织第一个
+/// 强边界之前的前置材料；强边界之后按下一个标签闭合页段，页码总数变化仍会
+/// 在后续 augment 阶段提供辅助断点。这样重复页眉用于识别和校验，但不会在
+/// 标签后的下一页立即把证据页段切碎。
+fn organize_splits_around_evidence_labels(
+    detection: &DetectionResult,
+    base_items: Vec<SplitSuggestionItem>,
+) -> Vec<SplitSuggestionItem> {
+    let mut labels_by_page: BTreeMap<u32, &HeaderFooterCandidate> = BTreeMap::new();
+    for candidate in detection.header_candidates.iter().filter(|candidate| {
+        candidate.region == "header"
+            && candidate
+                .labels
+                .iter()
+                .any(|label| label == "evidence-label")
+            && is_strong_evidence_boundary(candidate)
+    }) {
+        labels_by_page
+            .entry(candidate.page_range.start)
+            .and_modify(|current| {
+                if evidence_boundary_preference(candidate) < evidence_boundary_preference(current) {
+                    *current = candidate;
+                }
+            })
+            .or_insert(candidate);
+    }
+    if labels_by_page.is_empty() {
+        return base_items;
+    }
+
+    let analyzed_end = detection.pages.last().map(|page| page.page).unwrap_or(0);
+    let first_label_page = *labels_by_page.keys().next().unwrap_or(&1);
+    let mut organized = Vec::new();
+    for item in base_items
+        .iter()
+        .filter(|item| item.page_start < first_label_page)
+    {
+        let page_end = item.page_end.min(first_label_page.saturating_sub(1));
+        if page_end < item.page_start {
+            continue;
+        }
+        let (has_total, sequence_form) =
+            page_number_meta_for_range(&detection.pages, item.page_start, page_end);
+        organized.push(SplitSuggestionItem {
+            name: item.name.clone(),
+            page_start: item.page_start,
+            page_end,
+            source: item.source.clone(),
+            has_total,
+            sequence_form,
+        });
+    }
+
+    let boundaries = labels_by_page.into_iter().collect::<Vec<_>>();
+    for (index, (page_start, candidate)) in boundaries.iter().enumerate() {
+        let page_end = boundaries
+            .get(index + 1)
+            .map(|(next_start, _)| next_start.saturating_sub(1))
+            .unwrap_or(analyzed_end);
+        if page_end < *page_start {
+            continue;
+        }
+        let (has_total, sequence_form) =
+            page_number_meta_for_range(&detection.pages, *page_start, page_end);
+        organized.push(SplitSuggestionItem {
+            name: candidate.text.clone(),
+            page_start: *page_start,
+            page_end,
+            source: candidate.source.clone(),
+            has_total,
+            sequence_form,
+        });
+    }
+    organized
+}
+
+fn evidence_boundary_preference(candidate: &HeaderFooterCandidate) -> u8 {
+    if candidate.source == "artifact" {
+        0
+    } else {
+        1
+    }
+}
+
+/// 自动分组只把简短的“证据X / 对比文件X”标签当作强边界。正文中也可能有
+/// “证据 2.3：……”之类的句子，虽然检测层仍保留它供用户查看，但不能据此切段。
+fn is_strong_evidence_boundary(candidate: &HeaderFooterCandidate) -> bool {
+    let text = candidate.normalized_text.trim();
+    text.chars().count() <= 24
+        && !text
+            .chars()
+            .any(|ch| matches!(ch, '：' | ':' | '，' | ',' | '；' | ';' | '。'))
+}
+
 /// 返回某页的页眉身份 (文本, source)。
 ///
 /// 候选覆盖优先：同一页被多个候选覆盖时，取 artifact > 重复内容 > 普通候选，
@@ -1921,12 +2029,18 @@ fn split_header_identity(
 
 /// 候选身份优先级：数值越小越优先。
 fn split_candidate_rank(candidate: &HeaderFooterCandidate) -> u8 {
-    if candidate.source == "artifact" {
+    if candidate
+        .labels
+        .iter()
+        .any(|label| label == "evidence-label")
+    {
         0
-    } else if candidate.repeating {
+    } else if candidate.source == "artifact" {
         1
-    } else {
+    } else if candidate.repeating {
         2
+    } else {
+        3
     }
 }
 
@@ -2065,7 +2179,10 @@ fn split_suggestion_warnings(
     if items.last().map(|item| item.page_end).unwrap_or(0) < total_pages {
         warnings.push("末尾存在未覆盖页段，请检查扫描页或空白页".to_string());
     }
-    if items.iter().all(|item| item.source != "header") {
+    if items
+        .iter()
+        .all(|item| item.source == "fallback" || item.source == "manual")
+    {
         warnings.push("未识别到稳定页眉，当前仅生成一个默认页段".to_string());
     }
     warnings
@@ -2786,6 +2903,92 @@ mod tests {
         assert_eq!(items[1].name, "证据二");
         assert_eq!((items[1].page_start, items[1].page_end), (3, 4));
         assert_eq!(items[2].name, "证据三");
+        assert_eq!((items[2].page_start, items[2].page_end), (5, 6));
+    }
+
+    #[test]
+    fn evidence_labels_keep_repeating_headers_inside_the_evidence_range() {
+        let page = |page: u32, header: &str| PageDetection {
+            page,
+            width: 595.0,
+            height: 842.0,
+            headers: vec![TextLineDetection {
+                text: header.to_string(),
+                normalized_text: normalize_header_footer_text(header),
+                bbox: BBox {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 220.0,
+                    y1: 20.0,
+                    page,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+            }],
+            footers: vec![],
+        };
+        let candidate =
+            |text: &str, start: u32, end: u32, evidence_label: bool| HeaderFooterCandidate {
+                text: text.to_string(),
+                normalized_text: normalize_header_footer_text(text),
+                region: "header".to_string(),
+                page_range: PageRange { start, end },
+                count: (end - start + 1) as usize,
+                repeating: end > start,
+                position_stable: true,
+                position_spread: 0.0,
+                sequence_stable: true,
+                labels: if evidence_label {
+                    vec!["evidence-label".to_string()]
+                } else {
+                    vec![]
+                },
+                confidence: 1.0,
+                bbox: BBox {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 220.0,
+                    y1: 20.0,
+                    page: start,
+                    width: 595.0,
+                    height: 842.0,
+                },
+                font_size: None,
+                source: "header".to_string(),
+                artifact_id: None,
+                docsy_kind: None,
+                sequence_form: None,
+                has_total: None,
+            };
+        let detection = DetectionResult {
+            input_path: "/tmp/merged.pdf".to_string(),
+            pages_analyzed: 6,
+            artifact: ArtifactSummary::default(),
+            pages: vec![
+                page(1, "目录"),
+                page(2, "证据6"),
+                page(3, "国家知识产权局"),
+                page(4, "国家知识产权局"),
+                page(5, "对比文件10"),
+                page(6, "国家知识产权局"),
+            ],
+            header_candidates: vec![
+                candidate("国家知识产权局", 1, 6, false),
+                candidate("证据6", 2, 2, true),
+                candidate("证据 2.3：正文引用", 3, 3, true),
+                candidate("对比文件10", 5, 5, true),
+            ],
+            footer_candidates: vec![],
+        };
+
+        let items = build_split_suggestions(&detection);
+
+        assert_eq!(items.len(), 3);
+        assert_eq!((items[0].page_start, items[0].page_end), (1, 1));
+        assert_eq!(items[1].name, "证据6");
+        assert_eq!((items[1].page_start, items[1].page_end), (2, 4));
+        assert_eq!(items[2].name, "对比文件10");
         assert_eq!((items[2].page_start, items[2].page_end), (5, 6));
     }
 

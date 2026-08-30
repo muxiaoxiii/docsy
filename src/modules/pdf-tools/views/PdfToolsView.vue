@@ -261,11 +261,6 @@
                   </div>
                 </div>
                 <div class="split-preview-actions">
-                  <el-button-group>
-                    <el-button size="small" @click="setSplitPreviewRatio(0.5)">标准 50%</el-button>
-                    <el-button size="small" @click="setSplitPreviewRatio(0.7)">大图 70%</el-button>
-                    <el-button size="small" @click="setSplitPreviewRatio(0.78)">全屏对比</el-button>
-                  </el-button-group>
                   <el-button size="small" :disabled="splitPreviewPage <= 1" @click="moveSplitPreviewPage(-1)"
                     >上一页</el-button
                   >
@@ -291,9 +286,17 @@
                   <el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitEnd"
                     >设为结束页</el-button
                   >
+                  <el-button
+                    size="small"
+                    :disabled="!showSplitNextPreview && splitPreviewPage >= splitPreviewMaxPage"
+                    :aria-pressed="showSplitNextPreview"
+                    @click="showSplitNextPreview = !showSplitNextPreview"
+                  >
+                    {{ showSplitNextPreview ? '隐藏下一页预览' : '显示下一页预览' }}
+                  </el-button>
                 </div>
               </div>
-              <div class="split-preview-pages">
+              <div class="split-preview-pages" :class="{ 'has-next-preview': showSplitNextPreview }">
                 <PdfJsPreview
                   v-if="activeTab === 'split' && splitFile"
                   class="split-primary-preview"
@@ -303,7 +306,7 @@
                   @error="(message) => ElMessage.error(message)"
                 />
                 <NextPageThumbnail
-                  v-if="activeTab === 'split' && splitFile"
+                  v-if="showSplitNextPreview && activeTab === 'split' && splitFile"
                   :file-path="splitFile"
                   :page="splitPreviewPage"
                   :max-page="splitPreviewMaxPage"
@@ -545,7 +548,8 @@ const splitPreviewPage = ref(1)
 const splitTotalPages = ref(1)
 const splitRunWarnings = ref([])
 const removeBlankPages = ref(false)
-const splitPreviewRatio = ref(0.5)
+const splitPreviewRatio = ref(0.42)
+const showSplitNextPreview = ref(false)
 const splitMainRef = ref(null)
 let stopSplitResize = null
 const splitWarnings = computed(() => [
@@ -571,6 +575,7 @@ const preference = useWorkspacePreferences('pdf-tools.workspace', {
   removeBlankPages,
   antiCopyMethod,
   splitPreviewRatio,
+  showSplitNextPreview,
 })
 const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => !f.hasAntiOcr).length)
 const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr).length)
@@ -1009,7 +1014,7 @@ function moveSplitPreviewPage(delta) {
 }
 
 function clampSplitPreviewRatio(value) {
-  return Math.min(0.78, Math.max(0.3, Number(value) || 0.5))
+  return Math.min(0.65, Math.max(0.3, Number(value) || 0.42))
 }
 
 function setSplitPreviewRatio(value) {
@@ -1405,8 +1410,8 @@ h3 {
 
 .split-preview-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
   margin-bottom: 8px;
   color: var(--docsy-text);
@@ -1422,9 +1427,10 @@ h3 {
 
 .split-preview-actions {
   display: flex;
+  width: 100%;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .split-preview-pages {

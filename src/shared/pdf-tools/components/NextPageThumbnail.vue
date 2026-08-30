@@ -1,5 +1,5 @@
 <template>
-  <aside class="next-page-thumbnail" aria-label="下一页预览">
+  <aside ref="thumbnailRef" class="next-page-thumbnail" :style="thumbnailStyle" aria-label="下一页预览">
     <button
       v-if="hasNextPage"
       type="button"
@@ -12,12 +12,19 @@
         v-if="renderedPage"
         :file-path="filePath"
         :page="renderedPage"
-        :scale="0.35"
+        :scale="0.55"
         compact
         @error="(message) => emit('error', message)"
       />
     </button>
     <div v-else class="thumbnail-end">已是最后一页</div>
+    <div
+      class="thumbnail-resize-handle"
+      role="separator"
+      aria-label="调整下一页预览大小；向左拖动放大，向右拖动缩小"
+      aria-orientation="vertical"
+      @pointerdown="startResize"
+    />
   </aside>
 </template>
 
@@ -34,10 +41,48 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'error'])
 const renderedPage = ref(0)
+const thumbnailRef = ref(null)
+const widthRatio = ref(loadWidthRatio())
 let timer = null
+let stopResize = null
 
 const nextPage = computed(() => Math.max(1, Number(props.page || 1)) + 1)
 const hasNextPage = computed(() => Boolean(props.filePath) && nextPage.value <= Math.max(1, Number(props.maxPage || 1)))
+const thumbnailStyle = computed(() => ({
+  flexBasis: widthRatio.value >= 0.5 ? 'calc(50% - 6px)' : `${Math.round(widthRatio.value * 1000) / 10}%`,
+}))
+
+function loadWidthRatio() {
+  const stored = window.localStorage.getItem('docsy.nextPagePreview.widthRatio')
+  if (stored === null) return 0.3
+  const value = Number(stored)
+  return Number.isFinite(value) ? Math.min(0.5, Math.max(0.2, value)) : 0.3
+}
+
+function startResize(event) {
+  if (event.button !== 0 || !thumbnailRef.value?.parentElement) return
+  event.preventDefault()
+  event.stopPropagation()
+  const parentWidth = Math.max(1, thumbnailRef.value.parentElement.getBoundingClientRect().width)
+  const startWidth = thumbnailRef.value.getBoundingClientRect().width
+  const startX = event.clientX
+  const update = (pointerEvent) => {
+    const nextWidth = startWidth - (pointerEvent.clientX - startX)
+    widthRatio.value = Math.min(0.5, Math.max(0.2, nextWidth / parentWidth))
+  }
+  const finish = () => {
+    window.removeEventListener('pointermove', update)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    window.localStorage.setItem('docsy.nextPagePreview.widthRatio', String(widthRatio.value))
+    stopResize = null
+  }
+  stopResize?.()
+  stopResize = finish
+  window.addEventListener('pointermove', update)
+  window.addEventListener('pointerup', finish, { once: true })
+  window.addEventListener('pointercancel', finish, { once: true })
+}
 
 watch(
   () => [props.filePath, props.page, props.maxPage],
@@ -61,13 +106,16 @@ watch(
 
 onBeforeUnmount(() => {
   if (timer) window.clearTimeout(timer)
+  stopResize?.()
 })
 </script>
 
 <style scoped>
 .next-page-thumbnail {
-  flex: 0 0 clamp(120px, 12vw, 150px);
+  position: relative;
+  flex: 0 0 clamp(190px, 24vw, 260px);
   min-width: 120px;
+  max-width: calc(50% - 6px);
 }
 
 .thumbnail-button {
@@ -101,7 +149,7 @@ onBeforeUnmount(() => {
 
 .thumbnail-end {
   display: grid;
-  min-height: 120px;
+  min-height: 220px;
   padding: 12px;
   border: 1px dashed var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
@@ -109,5 +157,33 @@ onBeforeUnmount(() => {
   font-size: 12px;
   place-items: center;
   text-align: center;
+}
+
+.thumbnail-resize-handle {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  opacity: 0.72;
+  touch-action: none;
+}
+
+.thumbnail-resize-handle::before {
+  position: absolute;
+  right: 0;
+  bottom: 5px;
+  width: 16px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--docsy-primary) 72%, transparent);
+  content: '';
+  transform: rotate(45deg);
+  transform-origin: right center;
+}
+
+.thumbnail-resize-handle:hover {
+  opacity: 1;
 }
 </style>
