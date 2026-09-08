@@ -10,27 +10,25 @@
       {
         version: '1.0.0',
         tag: 'v1.0.0',
-        published_at: '2026-08-24T08:36:57Z',
+        published_at: '2026-09-08T08:30:00Z',
         assets: [
           {
             platform: 'macos',
-            name: 'Docsy_0.9.7-beta26_aarch64.dmg',
+            name: 'Docsy_1.0.0_aarch64.dmg',
             size: 18389199,
-            sha256:
-              '059dce476491ce3a6ed10c66ca25ec44e1795ad853a9a340a9feff2ea5eef43c',
-            url: '/downloads/Docsy_0.9.7-beta26_aarch64.dmg',
+            sha256: '',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.0/Docsy_1.0.0_aarch64.dmg',
             github_url:
-              'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta26/Docsy_0.9.7-beta26_aarch64.dmg',
+              'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.0/Docsy_1.0.0_aarch64.dmg',
           },
           {
             platform: 'windows',
-            name: 'Docsy_0.9.7-beta26_x64-setup.exe',
+            name: 'Docsy_1.0.0_x64-setup.exe',
             size: 12735467,
-            sha256:
-              '0e4a9b86f7ebde298d27496d86ec39706b565669aadcc99120439ad7a23bcdfb',
-            url: '/downloads/Docsy_0.9.7-beta26_x64-setup.exe',
+            sha256: '',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.0/Docsy_1.0.0_x64-setup.exe',
             github_url:
-              'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta26/Docsy_0.9.7-beta26_x64-setup.exe',
+              'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.0/Docsy_1.0.0_x64-setup.exe',
           },
         ],
       },
@@ -128,11 +126,8 @@
     var versionEl = document.getElementById('dl-version-static');
     if (versionEl) versionEl.textContent = 'v' + latest.version;
 
-    var isGitHubPages =
-      location.hostname.endsWith('github.io') ||
-      location.hostname === 'docsy.muxiaoxi.top';
-    var macDownload = (isGitHubPages ? mac?.github_url : mac?.url) || mac?.github_url;
-    var winDownload = (isGitHubPages ? win?.github_url : win?.url) || win?.github_url;
+    var macDownload = (mac && mac.github_url) || (mac && mac.url) || FALLBACK.githubUrl;
+    var winDownload = (win && win.github_url) || (win && win.url) || FALLBACK.githubUrl;
 
     if (mac) {
       setText('dl-mac-name', mac.name);

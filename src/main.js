@@ -14,4 +14,9 @@ app.use(createPinia())
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
 
+// 禁用默认右键上下文菜单（避免唤起 webview 默认的浏览器右键行为）
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault()
+})
+
 app.mount('#app')

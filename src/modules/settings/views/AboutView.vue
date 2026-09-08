@@ -56,17 +56,17 @@
 </template>
 
 <script setup>
-import { open } from '@tauri-apps/plugin-shell'
+import { openExternalUrl } from '../../../core/tauriBridge.js'
 import { DOCSY_SITE_URL } from '../../../core/siteConfig.js'
 
 const version = import.meta.env.PACKAGE_VERSION || '开发版'
 
 function openGitHub() {
-  open('https://github.com/muxiaoxiii/docsy')
+  openExternalUrl('https://github.com/muxiaoxiii/docsy')
 }
 
 function openSite() {
-  open(DOCSY_SITE_URL)
+  openExternalUrl(DOCSY_SITE_URL)
 }
 </script>
 
