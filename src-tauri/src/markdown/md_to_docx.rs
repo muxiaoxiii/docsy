@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use docx_rs::{
     AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
     Level, LevelJc, LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, PageMargin,
-    Paragraph, ParagraphBorder, ParagraphBorderPosition, ParagraphChild, Pic, Run, RunFonts,
+    Paragraph, ParagraphChild, Pic, Run, RunFonts,
     Shading, SpecialIndentType, Start, Style, StyleType, Table, TableCell, TableCellBorder,
     TableCellBorderPosition, TableCellBorders, TableCellMargins, TableLayoutType, TableRow,
     WidthType,
@@ -230,18 +230,9 @@ impl<'a> Builder<'a> {
                 self.children.push(ParagraphChild::Run(Box::new(run)));
             }
             Event::Rule => {
-                // 水平线：仅带下边框的段落（必须用 with_empty()，否则 docx-rs 默认会带上上下左右四边框变成方框/空白表格）
+                // 分割线转换为一个空白段落（回车空行），自然分隔段落，避免 Word 中多出无用的实线或边框
                 self.flush_paragraph(None);
-                let mut para = Paragraph::new();
-                let border = ParagraphBorder::new(ParagraphBorderPosition::Bottom)
-                    .size(6)
-                    .space(1)
-                    .color("B0B0B0");
-                let borders = docx_rs::ParagraphBorders::with_empty().set(border);
-                para.property = para
-                    .property
-                    .set_borders(borders)
-                    .line_spacing(LineSpacing::new().line(120).before(120).after(120));
+                let para = Paragraph::new();
                 self.docx = std::mem::take(&mut self.docx).add_paragraph(para);
             }
             Event::TaskListMarker(checked) => {
@@ -777,8 +768,6 @@ let x = 1;
         // 代码块
         assert!(md.contains("```"), "md:\n{md}");
         assert!(md.contains("fn main() {}"), "md:\n{md}");
-        // 水平线
-        assert!(md.contains("---"), "md:\n{md}");
         // 链接
         assert!(md.contains("[链接](https://example.com)"), "md:\n{md}");
         // 任务列表
@@ -865,8 +854,10 @@ let x = 1;
     }
 
     #[test]
-    fn horizontal_rule_emits_bottom_border_only() {
+    fn horizontal_rule_emits_blank_paragraph() {
         let bytes = build_docx_bytes("hello\n\n---\n\nworld", Path::new(".")).unwrap();
+        let docx = docx_rs::read_docx(&bytes).unwrap();
+        assert_eq!(docx.document.children.len(), 3);
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         let mut document_xml = String::new();
         archive
@@ -874,10 +865,7 @@ let x = 1;
             .unwrap()
             .read_to_string(&mut document_xml)
             .unwrap();
-        // 水平线必须仅带 bottom 边框，不能带有 top/left/right，避免 Word 渲染为方框或空白表格行
-        assert!(document_xml.contains("<w:bottom"), "w:bottom border missing");
-        assert!(!document_xml.contains("<w:left"), "w:left border must not exist for rule");
-        assert!(!document_xml.contains("<w:top"), "w:top border must not exist for rule");
-        assert!(!document_xml.contains("<w:right"), "w:right border must not exist for rule");
+        // 分割线转为纯空段落（回车空行），不带有任何边框或方框
+        assert!(!document_xml.contains("<w:pBdr"));
     }
 }

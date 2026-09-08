@@ -28,6 +28,11 @@
   "bundle": {
     "active": true,
     "targets": ["dmg", "nsis"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    },
     "macOS": {
       "signingIdentity": "-",
       "hardenedRuntime": false
