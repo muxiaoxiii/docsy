@@ -128,7 +128,9 @@
     var versionEl = document.getElementById('dl-version-static');
     if (versionEl) versionEl.textContent = 'v' + latest.version;
 
-    var isGitHubPages = location.hostname.endsWith('github.io');
+    var isGitHubPages =
+      location.hostname.endsWith('github.io') ||
+      location.hostname === 'docsy.muxiaoxi.top';
     var macDownload = (isGitHubPages ? mac?.github_url : mac?.url) || mac?.github_url;
     var winDownload = (isGitHubPages ? win?.github_url : win?.url) || win?.github_url;
 
