@@ -47,6 +47,9 @@
               <el-option label="法律文书版式" value="legal" />
               <el-option label="紧凑工作版式" value="compact" />
             </el-select>
+            <span v-if="fileOfficeFormat === 'docx'" class="docx-style-hint">
+              {{ docxStyleHint }}
+            </span>
           </div>
           <div class="pdf-convert-note">
             <span>PDF 当前使用文本层提取，不会改写原件。</span>
@@ -131,6 +134,9 @@
               <el-option label="法律文书版式" value="legal" />
               <el-option label="紧凑工作版式" value="compact" />
             </el-select>
+            <span v-if="pasteFormat === 'docx'" class="docx-style-hint">
+              {{ docxStyleHint }}
+            </span>
             <el-input
               v-model="pasteFileName"
               placeholder="文件名（可选）"
@@ -178,6 +184,12 @@ const pasteConverting = ref(false)
 const pasteOutputPath = ref('')
 const fileOfficeFormat = ref('docx')
 const docxStyle = ref('professional')
+const docxStyleHints = {
+  professional: '宋体正文 + Times New Roman + 商务深蓝标题',
+  legal: '仿宋正文 + Times New Roman + 首行缩进两字符',
+  compact: '宋体正文 + Times New Roman + 紧凑字号行距',
+}
+const docxStyleHint = computed(() => docxStyleHints[docxStyle.value] || '')
 const pdfStartPage = ref(null)
 const pdfEndPage = ref(null)
 const activeBackendOperationId = ref('')
@@ -571,6 +583,13 @@ onBeforeUnmount(() => {
 
 .style-select {
   width: 150px;
+}
+
+.docx-style-hint {
+  color: var(--docsy-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.85;
 }
 
 .queue-warning {

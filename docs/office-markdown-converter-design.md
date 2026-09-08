@@ -35,9 +35,9 @@ Markdown → Excel / PowerPoint 仅创建结构化可编辑内容，不等同于
 
 | 预设 | 用途 | 关键规则 |
 | --- | --- | --- |
-| `professional` | 默认通用文档 | Word 使用 A4、清晰标题层级与规范段落；表格保留可读边框和表头层次。 |
-| `legal` | 法律文书、证据说明 | Word 使用宋体正文、黑色标题、较宽版心和正式行距。 |
-| `compact` | 工作笔记、交付草稿 | Word 使用紧凑字号和间距，适合信息密集内容。 |
+| `professional` | 默认通用文档 | Word 使用宋体正文、黑体标题、Times New Roman 西文、A4版心与规范1.5倍行距；表格保留可读边框和表头层次。 |
+| `legal` | 法律文书、证据说明 | Word 使用仿宋正文、黑体标题、Times New Roman 西文、首行缩进两字符与装订线加宽。 |
+| `compact` | 工作笔记、交付草稿 | Word 使用宋体正文、黑体标题、Times New Roman 西文、紧凑字号和间距，适合信息密集内容。 |
 
 预设只影响 Markdown 新生成的 DOCX；Excel 和 PowerPoint 会使用统一的清晰结构模板，不会改写导入的 Office 文件。
 
