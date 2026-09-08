@@ -32,6 +32,14 @@
     'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.23, 1, 0.32, 1);
+
+  /* 变量别名，兼容子页面命名规范 */
+  --bg-primary: var(--canvas);
+  --bg-secondary: var(--surface);
+  --border-color: var(--border);
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-soft);
+  --accent-primary: var(--primary);
 }
 
 * {
@@ -53,8 +61,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.container {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
 img {
   max-width: 100%;
+  height: auto;
   display: block;
 }
 
@@ -316,28 +331,40 @@ a:hover {
 .hero-visual {
   display: flex;
   justify-content: center;
+  align-items: center;
 }
 
 .hero-card {
   position: relative;
-  width: min(340px, 100%);
-  padding: 26px 26px 22px;
+  width: min(310px, 100%);
+  padding: 22px 20px 18px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 24px;
+  border-radius: 22px;
   box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
   align-items: center;
-  transform: rotate(1.5deg);
+  transform: rotate(1.2deg);
 }
 
-.hero-card img[alt='Docsy 的吉祥物 Doclet'] {
+.hero-mascot,
+.hero-card img[alt*='Doclet'] {
+  width: 100%;
+  max-width: 250px;
+  height: auto;
+  aspect-ratio: 339 / 520;
+  object-fit: contain;
   border-radius: 14px;
+  display: block;
 }
 
 .hero-card-logo {
-  margin-top: 18px;
+  width: 108px;
+  height: auto;
+  aspect-ratio: 420 / 337;
+  object-fit: contain;
+  margin-top: 14px;
   border-radius: 8px;
 }
 
@@ -1375,46 +1402,93 @@ a:hover {
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-card);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+  display: flex;
+  flex-direction: column;
 }
 
 .shot-item:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 24px rgba(48, 41, 32, 0.12);
+  box-shadow: 0 14px 30px rgba(48, 41, 32, 0.12);
+  border-color: var(--border-strong);
+}
+
+/* 主页大图放大展示：横跨两列，后面 6 个模块两两并排 */
+.shot-item.shot-featured,
+.shot-item:first-child {
+  grid-column: span 2;
+  background: var(--surface);
+  border-color: var(--border-strong);
 }
 
 .shot-img {
   position: relative;
   overflow: hidden;
+  background: var(--canvas);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .shot-img img {
   width: 100%;
   height: auto;
   display: block;
-  transition: transform 0.3s ease;
+  transition: transform 0.35s ease;
 }
 
 .shot-item:hover .shot-img img {
-  transform: scale(1.05);
+  transform: scale(1.025);
+}
+
+.shot-item.shot-featured .shot-img,
+.shot-item:first-child .shot-img {
+  padding: 14px 14px 0;
+  background: color-mix(in srgb, var(--canvas) 85%, var(--surface));
+  border-bottom: 1px solid var(--border);
+}
+
+.shot-item.shot-featured .shot-img img,
+.shot-item:first-child .shot-img img {
+  border-radius: 10px 10px 0 0;
+  box-shadow: 0 -2px 16px rgba(48, 41, 32, 0.08);
 }
 
 .shot-caption {
-  padding: 1.25rem;
+  padding: 1.25rem 1.4rem;
+  background: var(--surface);
+  margin-top: auto;
+}
+
+.shot-item.shot-featured .shot-caption,
+.shot-item:first-child .shot-caption {
+  padding: 1.5rem 1.8rem;
 }
 
 .shot-caption h4 {
-  font-size: 1.1rem;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
   color: var(--ink);
-  margin-bottom: 0.5rem;
-  font-weight: 600;
+  margin-bottom: 0.45rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.shot-item.shot-featured .shot-caption h4,
+.shot-item:first-child .shot-caption h4 {
+  font-size: 1.35rem;
 }
 
 .shot-caption p {
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   color: var(--ink-soft);
-  line-height: 1.5;
+  line-height: 1.6;
   margin: 0;
+}
+
+.shot-item.shot-featured .shot-caption p,
+.shot-item:first-child .shot-caption p {
+  font-size: 1rem;
 }
 
 .shot-more {
@@ -1427,19 +1501,12 @@ a:hover {
     grid-template-columns: 1fr;
     gap: 20px;
   }
-  
-  .tools-entry {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      'os'
-      'ver'
-      'act'
-      'note';
-  }
-  
-  .tool-card-head {
 
-@media (max-width: 760px) {
+  .shot-item.shot-featured,
+  .shot-item:first-child {
+    grid-column: span 1;
+  }
+
   .tools-entry {
     grid-template-columns: 1fr;
     grid-template-areas:
@@ -1451,9 +1518,5 @@ a:hover {
 
   .tool-card-head {
     flex-direction: column;
-  }
-
-  .shot-grid {
-    grid-template-columns: 1fr;
   }
 }

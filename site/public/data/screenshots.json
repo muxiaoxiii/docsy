@@ -2,9 +2,9 @@
   "items": [
     {
       "src": "assets/screenshots/home.png",
-      "alt": "Docsy 主页界面",
-      "title": "主页界面",
-      "description": "简洁直观的卡片式首页，功能模块一目了然，还有可爱的 Doclet 小宠物陪伴"
+      "alt": "Docsy 主页工作台",
+      "title": "主页工作台",
+      "description": "简洁直观的卡片式首页，六大功能模块一目了然，搭载可爱的 Doclet 操作助手陪伴与状态感知"
     },
     {
       "src": "assets/screenshots/shot-template.png",

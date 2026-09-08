@@ -27,6 +27,121 @@
       ]
     },
     {
+      "version": "0.9.7-beta31",
+      "tag": "v0.9.7-beta31",
+      "published_at": "2026-08-30T10:00:00Z",
+      "assets": [
+        {
+          "platform": "macos",
+          "name": "Docsy_0.9.7-beta31_aarch64.dmg",
+          "size": 18389199,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta31/Docsy_0.9.7-beta31_aarch64.dmg",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta31/Docsy_0.9.7-beta31_aarch64.dmg"
+        },
+        {
+          "platform": "windows",
+          "name": "Docsy_0.9.7-beta31_x64-setup.exe",
+          "size": 12735467,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta31/Docsy_0.9.7-beta31_x64-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta31/Docsy_0.9.7-beta31_x64-setup.exe"
+        }
+      ]
+    },
+    {
+      "version": "0.9.7-beta30",
+      "tag": "v0.9.7-beta30",
+      "published_at": "2026-08-30T06:00:00Z",
+      "assets": [
+        {
+          "platform": "macos",
+          "name": "Docsy_0.9.7-beta30_aarch64.dmg",
+          "size": 18389199,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta30/Docsy_0.9.7-beta30_aarch64.dmg",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta30/Docsy_0.9.7-beta30_aarch64.dmg"
+        },
+        {
+          "platform": "windows",
+          "name": "Docsy_0.9.7-beta30_x64-setup.exe",
+          "size": 12735467,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta30/Docsy_0.9.7-beta30_x64-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta30/Docsy_0.9.7-beta30_x64-setup.exe"
+        }
+      ]
+    },
+    {
+      "version": "0.9.7-beta29",
+      "tag": "v0.9.7-beta29",
+      "published_at": "2026-08-26T12:00:00Z",
+      "assets": [
+        {
+          "platform": "macos",
+          "name": "Docsy_0.9.7-beta29_aarch64.dmg",
+          "size": 18389199,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta29/Docsy_0.9.7-beta29_aarch64.dmg",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta29/Docsy_0.9.7-beta29_aarch64.dmg"
+        },
+        {
+          "platform": "windows",
+          "name": "Docsy_0.9.7-beta29_x64-setup.exe",
+          "size": 12735467,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta29/Docsy_0.9.7-beta29_x64-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta29/Docsy_0.9.7-beta29_x64-setup.exe"
+        }
+      ]
+    },
+    {
+      "version": "0.9.7-beta28",
+      "tag": "v0.9.7-beta28",
+      "published_at": "2026-08-26T08:00:00Z",
+      "assets": [
+        {
+          "platform": "macos",
+          "name": "Docsy_0.9.7-beta28_aarch64.dmg",
+          "size": 18389199,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta28/Docsy_0.9.7-beta28_aarch64.dmg",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta28/Docsy_0.9.7-beta28_aarch64.dmg"
+        },
+        {
+          "platform": "windows",
+          "name": "Docsy_0.9.7-beta28_x64-setup.exe",
+          "size": 12735467,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta28/Docsy_0.9.7-beta28_x64-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta28/Docsy_0.9.7-beta28_x64-setup.exe"
+        }
+      ]
+    },
+    {
+      "version": "0.9.7-beta27",
+      "tag": "v0.9.7-beta27",
+      "published_at": "2026-08-24T14:00:00Z",
+      "assets": [
+        {
+          "platform": "macos",
+          "name": "Docsy_0.9.7-beta27_aarch64.dmg",
+          "size": 18389199,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta27/Docsy_0.9.7-beta27_aarch64.dmg",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta27/Docsy_0.9.7-beta27_aarch64.dmg"
+        },
+        {
+          "platform": "windows",
+          "name": "Docsy_0.9.7-beta27_x64-setup.exe",
+          "size": 12735467,
+          "sha256": "",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta27/Docsy_0.9.7-beta27_x64-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta27/Docsy_0.9.7-beta27_x64-setup.exe"
+        }
+      ]
+    },
+    {
       "version": "0.9.7-beta26",
       "tag": "v0.9.7-beta26",
       "published_at": "2026-08-24T08:36:57Z",

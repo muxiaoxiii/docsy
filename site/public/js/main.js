@@ -32,31 +32,98 @@
           },
         ],
       },
+      {
+        version: '0.9.7-beta31',
+        tag: 'v0.9.7-beta31',
+        published_at: '2026-08-30T10:00:00Z',
+        assets: [
+          {
+            platform: 'macos',
+            name: 'Docsy_0.9.7-beta31_aarch64.dmg',
+            size: 18389199,
+            sha256: '',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta31/Docsy_0.9.7-beta31_aarch64.dmg',
+            github_url:
+              'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta31/Docsy_0.9.7-beta31_aarch64.dmg',
+          },
+          {
+            platform: 'windows',
+            name: 'Docsy_0.9.7-beta31_x64-setup.exe',
+            size: 12735467,
+            sha256: '',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta31/Docsy_0.9.7-beta31_x64-setup.exe',
+            github_url:
+              'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta31/Docsy_0.9.7-beta31_x64-setup.exe',
+          },
+        ],
+      },
+      {
+        version: '0.9.7-beta30',
+        tag: 'v0.9.7-beta30',
+        published_at: '2026-08-30T06:00:00Z',
+        assets: [
+          {
+            platform: 'macos',
+            name: 'Docsy_0.9.7-beta30_aarch64.dmg',
+            size: 18389199,
+            sha256: '',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta30/Docsy_0.9.7-beta30_aarch64.dmg',
+            github_url:
+              'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta30/Docsy_0.9.7-beta30_aarch64.dmg',
+          },
+          {
+            platform: 'windows',
+            name: 'Docsy_0.9.7-beta30_x64-setup.exe',
+            size: 12735467,
+            sha256: '',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta30/Docsy_0.9.7-beta30_x64-setup.exe',
+            github_url:
+              'https://github.com/muxiaoxiii/docsy/releases/download/v0.9.7-beta30/Docsy_0.9.7-beta30_x64-setup.exe',
+          },
+        ],
+      },
     ],
   };
 
   var FALLBACK_CHANGELOG = [
     {
-      version: '0.9.7-beta26',
-      date: '2026-08-24',
+      version: '1.0.0',
+      date: '2026-09-08',
       sections: [
         {
-          title: '新增',
+          title: '里程碑',
           items: [
-            '**PDF 合并双面打印分隔模式**：开启后，合并时若某份文件页数为奇数，自动在其末尾补一页与最后页同尺寸的空白页，让每份文件都占满双面打印的整张纸，避免两份文件拼在同一张纸的正反面。',
+            '**Docsy 1.0.0 正式定版**：首个正式稳定版，提供纯本地、零网络上传的安全文档生产力体验。',
+            '**文书模板工程**：基于 quick-xml 精确解析，支持 Word 标黄自动建模、8 种字段类型、智能上下文回填与 Excel 批量渲染。',
+            '**证据处理工作台**：三层页眉页脚智能检测、证据编号与页码规则编排、页段边界智能衔接与合并拆分、空白页自动移除。',
+            '**媒体与排版工具箱**：智能抽帧选图工作流、OpenCV 画面分析、自适应 A4 图片排版、PDF 基础工具与 Markdown/Office 互转。',
           ],
         },
       ],
     },
     {
-      version: '0.9.7-beta25',
-      date: '2026-08-18',
+      version: '0.9.7-beta31',
+      date: '2026-08-30',
       sections: [
         {
-          title: '变更',
+          title: '新增',
           items: [
-            '**证据处理选项网格对齐统一**：选项网格 min-height 与 justify-content 对齐统一。',
-            '**控制栏整合为一行三区**：证据编号、分段与例外、全局应用+开关集中到同一操作栏。',
+            '**合并证据拆分优化**：完善证据标签全局识别与按证据边界自动分组，合并导入支持快速重新检测、撤销/重做与“合并到上一段”。',
+            '**PDF 拆分与证据工作台预览交互**：支持自由拖拽分割条调整预览宽度、“从本页拆”与“从上一页拆”快捷操作、以及带防抖的下一页缩略图实时预览。',
+            '**全局导航收缩**：支持左侧主导航栏展开/收缩切换，收缩后仅显示图标，为工作区与预览区提供更大展示空间。',
+          ],
+        },
+      ],
+    },
+    {
+      version: '0.9.7-beta30',
+      date: '2026-08-30',
+      sections: [
+        {
+          title: '修复',
+          items: [
+            '**全项目可靠性修复**：集中修复外部命令管道阻塞、任务取消、解压边界、PDF 与 DOCX 处理、前端状态恢复等代码审查发现的问题。',
+            '**合并证据自动拆分**：支持识别合并文件任意页的证据标签，并限制普通页眉必须跨页重复且位置稳定，避免正文被误判为拆分点。',
           ],
         },
       ],
@@ -132,14 +199,14 @@
     if (mac) {
       setText('dl-mac-name', mac.name);
       setText('dl-mac-size', formatSize(mac.size));
-      setText('dl-mac-sha', mac.sha256 || '');
+      setText('dl-mac-sha', mac.sha256 || '见 GitHub Releases 发布页');
       setAttr('dl-mac-link', 'href', macDownload || '#');
       setAttr('dl-mac-github', 'href', mac.github_url);
     }
     if (win) {
       setText('dl-win-name', win.name);
       setText('dl-win-size', formatSize(win.size));
-      setText('dl-win-sha', win.sha256 || '');
+      setText('dl-win-sha', win.sha256 || '见 GitHub Releases 发布页');
       setAttr('dl-win-link', 'href', winDownload || '#');
       setAttr('dl-win-github', 'href', win.github_url);
     }
@@ -319,23 +386,35 @@
     var grid = document.getElementById('shot-grid');
     if (!section || !grid || !items || !items.length) return;
     var html = '';
-    items.forEach(function (item) {
+    items.forEach(function (item, index) {
       var src = typeof item === 'string' ? item : item.src;
-      var alt = typeof item === 'string' ? '' : item.alt || '';
+      var alt = typeof item === 'string' ? '' : item.alt || item.title || '';
+      var title = typeof item === 'string' ? '' : item.title || item.alt || '';
+      var desc = typeof item === 'string' ? '' : item.description || '';
       if (!src) return;
+      var isFeatured = index === 0;
       html +=
-        '<figure class="shot-cell">' +
-        '<img src="' + escapeHtml(src) + '" alt="' + escapeHtml(alt) + '" loading="lazy" />' +
-        (alt ? '<figcaption>' + escapeHtml(alt) + '</figcaption>' : '') +
-        '</figure>';
+        '<div class="shot-item' +
+        (isFeatured ? ' shot-featured' : '') +
+        ' reveal is-visible">' +
+        '<div class="shot-img">' +
+        '<img src="' +
+        escapeHtml(src) +
+        '" alt="' +
+        escapeHtml(alt) +
+        '" loading="lazy" />' +
+        '</div>' +
+        '<div class="shot-caption">' +
+        '<h4>' +
+        escapeHtml(title) +
+        '</h4>' +
+        (desc ? '<p>' + escapeHtml(desc) + '</p>' : '') +
+        '</div>' +
+        '</div>';
     });
     if (!html) return;
     grid.innerHTML = html;
     section.hidden = false;
-    /* 截图区从隐藏变为显示，直接标记内部元素可见 */
-    section.querySelectorAll('.reveal').forEach(function (el) {
-      el.classList.add('is-visible');
-    });
   }
 
   /* ---------- 数据加载 ---------- */
