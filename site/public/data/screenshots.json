@@ -10,7 +10,7 @@
       "src": "assets/screenshots/shot-template.png",
       "alt": "文书模板功能",
       "title": "文书模板",
-      "description": "Word 标黄即生成模板，8 种字段类型，批量填写导出几十份文书"
+      "description": "Word 标黄即建模板，支持交互填报与 Excel 批量合并导出，空项自动清理标点语病"
     },
     {
       "src": "assets/screenshots/shot-evidence.png",
