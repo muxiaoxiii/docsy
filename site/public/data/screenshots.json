@@ -35,6 +35,12 @@
       "alt": "视频抽帧功能",
       "title": "视频抽帧",
       "description": "按时间范围或固定帧率截取画面，时间戳水印叠加，取证必备"
+    },
+    {
+      "src": "assets/screenshots/shot-convert.png",
+      "alt": "文档转换功能",
+      "title": "文档转换",
+      "description": "Markdown、Office 与 PDF 互转，保留标题、表格与结构语义"
     }
   ]
 }

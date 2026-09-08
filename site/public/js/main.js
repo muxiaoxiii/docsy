@@ -4,12 +4,12 @@
 
   /* 无 JS 或数据加载失败时的回退数据（与发布产物保持一致） */
   var FALLBACK = {
-    latest: '0.9.7-beta26',
+    latest: '1.0.0',
     githubUrl: 'https://github.com/muxiaoxiii/docsy/releases',
     releases: [
       {
-        version: '0.9.7-beta26',
-        tag: 'v0.9.7-beta26',
+        version: '1.0.0',
+        tag: 'v1.0.0',
         published_at: '2026-08-24T08:36:57Z',
         assets: [
           {
@@ -128,24 +128,28 @@
     var versionEl = document.getElementById('dl-version-static');
     if (versionEl) versionEl.textContent = 'v' + latest.version;
 
+    var isGitHubPages = location.hostname.endsWith('github.io');
+    var macDownload = (isGitHubPages ? mac?.github_url : mac?.url) || mac?.github_url;
+    var winDownload = (isGitHubPages ? win?.github_url : win?.url) || win?.github_url;
+
     if (mac) {
       setText('dl-mac-name', mac.name);
       setText('dl-mac-size', formatSize(mac.size));
       setText('dl-mac-sha', mac.sha256 || '');
-      setAttr('dl-mac-link', 'href', mac.url || mac.github_url);
+      setAttr('dl-mac-link', 'href', macDownload || '#');
       setAttr('dl-mac-github', 'href', mac.github_url);
     }
     if (win) {
       setText('dl-win-name', win.name);
       setText('dl-win-size', formatSize(win.size));
       setText('dl-win-sha', win.sha256 || '');
-      setAttr('dl-win-link', 'href', win.url || win.github_url);
+      setAttr('dl-win-link', 'href', winDownload || '#');
       setAttr('dl-win-github', 'href', win.github_url);
     }
 
     /* Hero CTA 也指向最新版 */
-    if (mac) setAttr('cta-macos', 'href', mac.url || mac.github_url);
-    if (win) setAttr('cta-windows', 'href', win.url || win.github_url);
+    if (mac) setAttr('cta-macos', 'href', macDownload || '#');
+    if (win) setAttr('cta-windows', 'href', winDownload || '#');
 
     /* 标记当前系统 */
     if (current) {
