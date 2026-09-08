@@ -1,4 +1,4 @@
-// Extracted from /Users/only/Downloads/民事案件案由规定（2025）.docx.
+// Extracted from 民事案件案由规定（2025）.docx.
 // Keep this as data only; matching and inference rules live in publicRules.js.
 export const PUBLIC_CAUSE_ACTIONS_2025 = [
   '生命权、身体权、健康权纠纷',

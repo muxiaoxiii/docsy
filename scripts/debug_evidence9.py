@@ -5,7 +5,11 @@ import re
 import sys
 from collections import defaultdict
 
-PDF = "/Users/only/Documents/Workspace/浦项项目/【无效阶段文件】/444 【6号专利新无效】/4W122724 I D1-D14/09 证据 9. 国家知识产权局第 587099 号无效宣告请求审查决定书.pdf"
+def get_pdf_path():
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    print(f"Usage: {sys.argv[0]} <path_to_pdf>")
+    sys.exit(1)
 
 HEADER_ZONE_MM = 25
 FOOTER_ZONE_MM = 25
@@ -47,8 +51,9 @@ def parse_bbox_xml(xml_text):
     return pages
 
 def main():
+    pdf_path = get_pdf_path()
     # Run pdftotext -bbox
-    result = subprocess.run(['pdftotext', '-bbox', PDF, '-'], capture_output=True, text=True)
+    result = subprocess.run(['pdftotext', '-bbox', pdf_path, '-'], capture_output=True, text=True)
     pages = parse_bbox_xml(result.stdout)
     
     header_zone_pt = HEADER_ZONE_MM * MM_TO_PT

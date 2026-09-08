@@ -86,7 +86,6 @@
 import { computed, ref, watch } from 'vue'
 import { toChineseNumber } from '../../core/numberFormat.js'
 
-
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   availableFields: { type: Array, default: () => [] },

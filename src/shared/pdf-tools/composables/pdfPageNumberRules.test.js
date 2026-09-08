@@ -46,9 +46,7 @@ describe('PDF page number rules', () => {
         sequence: 'continuous',
         template: '-{page}-',
         style: 'arabic',
-        exceptions: [
-          { scope: { type: 'global', start: 8, end: 8 }, overrides: { enabled: false, count: true } },
-        ],
+        exceptions: [{ scope: { type: 'global', start: 8, end: 8 }, overrides: { enabled: false, count: true } }],
       },
     )
     expect(overlays).toHaveLength(2)
@@ -84,9 +82,7 @@ describe('PDF page number rules', () => {
         totalMode: 'combined',
         template: '{page}',
         style: 'arabic',
-        exceptions: [
-          { scope: { type: 'global', start: 2, end: 2 }, overrides: { enabled: false, count: false } },
-        ],
+        exceptions: [{ scope: { type: 'global', start: 2, end: 2 }, overrides: { enabled: false, count: false } }],
       },
     )
     // file2 第 1 页物理页码 3，前面计数页只有 file1 第 1 页 → 显示编号 2
@@ -108,9 +104,7 @@ describe('PDF page number rules', () => {
         totalMode: 'combined',
         template: '{page}',
         style: 'arabic',
-        exceptions: [
-          { scope: { type: 'global', start: 2, end: 2 }, overrides: { enabled: false } },
-        ],
+        exceptions: [{ scope: { type: 'global', start: 2, end: 2 }, overrides: { enabled: false } }],
       },
     )
     // file1 第 2 页被排除但未关闭计数 → 仍占用编号，file2 第 1 页显示编号 3
@@ -164,9 +158,7 @@ describe('PDF page number rules', () => {
         sequence: 'continuous',
         template: '{page}',
         style: 'arabic',
-        exceptions: [
-          { scope: { type: 'global', start: 2, end: 2 }, overrides: { style: 'roman-upper' } },
-        ],
+        exceptions: [{ scope: { type: 'global', start: 2, end: 2 }, overrides: { style: 'roman-upper' } }],
       },
     )
     expect(overlays).toHaveLength(3)
@@ -176,7 +168,10 @@ describe('PDF page number rules', () => {
   })
 
   it('normalizeInsertException defaults legacy entries to pageNumber kind', () => {
-    const legacy = normalizeInsertException({ scope: { type: 'global', start: 2, end: 4 }, overrides: { enabled: false } })
+    const legacy = normalizeInsertException({
+      scope: { type: 'global', start: 2, end: 4 },
+      overrides: { enabled: false },
+    })
     expect(legacy.kinds).toEqual(['pageNumber'])
     expect(legacy.scope).toMatchObject({ type: 'global', start: 2, end: 4, fileIds: [] })
 

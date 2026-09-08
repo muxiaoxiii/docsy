@@ -46,7 +46,19 @@ export function normalizePageNumberException(rule, index = 0) {
   }
   const overrides = {}
   if (rule?.action === 'exclude') overrides.enabled = false
-  for (const key of ['style', 'template', 'align', 'region', 'marginMm', 'offsetXMm', 'fontSize', 'fontFamily', 'color', 'startOffset', 'count']) {
+  for (const key of [
+    'style',
+    'template',
+    'align',
+    'region',
+    'marginMm',
+    'offsetXMm',
+    'fontSize',
+    'fontFamily',
+    'color',
+    'startOffset',
+    'count',
+  ]) {
     if (rule?.[key] !== undefined && rule?.[key] !== null && rule?.[key] !== '') overrides[key] = rule[key]
   }
   return {
@@ -89,7 +101,9 @@ export function normalizeInsertException(entry, index = 0) {
 }
 
 export function exceptionsForKind(exceptions, kind) {
-  return (exceptions || []).map((entry, index) => normalizeInsertException(entry, index)).filter((entry) => entry.kinds.includes(kind))
+  return (exceptions || [])
+    .map((entry, index) => normalizeInsertException(entry, index))
+    .filter((entry) => entry.kinds.includes(kind))
 }
 
 export function effectivePageNumberRule(baseRule, globalPage, localPage, file = null) {
@@ -103,16 +117,18 @@ function documentPages(baseRule, currentFile) {
   const files = Array.isArray(baseRule.allFiles) && baseRule.allFiles.length ? baseRule.allFiles : [currentFile]
   return files.flatMap((file) => {
     const start = Number(file.pageStart || 1)
-    return Array.from({ length: Number(file.pages || 0) }, (_, index) => ({ file, localPage: index + 1, globalPage: start + index }))
+    return Array.from({ length: Number(file.pages || 0) }, (_, index) => ({
+      file,
+      localPage: index + 1,
+      globalPage: start + index,
+    }))
   })
 }
 
 function pageCountsForNumbering(baseRule, currentFile) {
   const allPages = documentPages(baseRule, currentFile)
   const localPages = allPages.filter((entry) => fileStableId(entry.file) === fileStableId(currentFile))
-  const totalPages = baseRule.totalMode === 'combined'
-    ? allPages
-    : localPages
+  const totalPages = baseRule.totalMode === 'combined' ? allPages : localPages
   const counted = totalPages.filter((entry) => pageCounts(entry, baseRule))
   return { allPages, counted }
 }
@@ -141,11 +157,21 @@ export function pageNumberOverlaysForFile(file, baseRule) {
     const excluded = rule.enabled === false || rule.action === 'exclude'
     const countsCurrent = !excluded || rule.count !== false
     const number = pageNumberStart + countedBefore + Number(rule.startOffset || 0)
-    const signature = excluded ? 'exclude' : JSON.stringify({
-      template: rule.template, style: rule.style, align: rule.align, region: rule.region,
-      marginMm: rule.marginMm, offsetXMm: rule.offsetXMm, fontSize: rule.fontSize,
-      fontFamily: rule.fontFamily, color: rule.color, startOffset: rule.startOffset || 0, total,
-    })
+    const signature = excluded
+      ? 'exclude'
+      : JSON.stringify({
+          template: rule.template,
+          style: rule.style,
+          align: rule.align,
+          region: rule.region,
+          marginMm: rule.marginMm,
+          offsetXMm: rule.offsetXMm,
+          fontSize: rule.fontSize,
+          fontFamily: rule.fontFamily,
+          color: rule.color,
+          startOffset: rule.startOffset || 0,
+          total,
+        })
     if (active && active.signature === signature && active.numberEnd + 1 === number) {
       active.pageEnd = localPage
       active.numberEnd = number
@@ -153,7 +179,16 @@ export function pageNumberOverlaysForFile(file, baseRule) {
       continue
     }
     if (active && !active.excluded) overlays.push(toOverlay(active, total, continuous))
-    active = { signature, excluded, rule, pageStart: localPage, pageEnd: localPage, globalStart: globalPage, numberStart: number, numberEnd: number }
+    active = {
+      signature,
+      excluded,
+      rule,
+      pageStart: localPage,
+      pageEnd: localPage,
+      globalStart: globalPage,
+      numberStart: number,
+      numberEnd: number,
+    }
     if (countsCurrent) countedBefore += 1
   }
   if (active && !active.excluded) overlays.push(toOverlay(active, total, continuous))
@@ -163,21 +198,47 @@ export function pageNumberOverlaysForFile(file, baseRule) {
 function toOverlay(group, total, continuous) {
   const offset = group.numberStart - group.globalStart
   return {
-    text: group.rule.template || '{page}/{total}', region: group.rule.region || 'footer', artifactKind: 'PageNumber',
-    sequence: continuous ? 'continuous' : 'per-file', numberStyle: group.rule.style || 'arabic',
-    numberOffset: offset, numberTotal: total, pageStart: group.pageStart, pageEnd: group.pageEnd,
-    align: group.rule.align || 'center', fontSize: Number(group.rule.fontSize || 9),
-    fontFamily: group.rule.fontFamily || 'auto', marginMm: Number(group.rule.marginMm || 10),
-    offsetXMm: Number(group.rule.offsetXMm || 0), color: group.rule.color || '#000000',
+    text: group.rule.template || '{page}/{total}',
+    region: group.rule.region || 'footer',
+    artifactKind: 'PageNumber',
+    sequence: continuous ? 'continuous' : 'per-file',
+    numberStyle: group.rule.style || 'arabic',
+    numberOffset: offset,
+    numberTotal: total,
+    pageStart: group.pageStart,
+    pageEnd: group.pageEnd,
+    align: group.rule.align || 'center',
+    fontSize: Number(group.rule.fontSize || 9),
+    fontFamily: group.rule.fontFamily || 'auto',
+    marginMm: Number(group.rule.marginMm || 10),
+    offsetXMm: Number(group.rule.offsetXMm || 0),
+    color: group.rule.color || '#000000',
   }
 }
 
 function toRoman(value) {
-  const pairs = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]
+  const pairs = [
+    [1000, 'M'],
+    [900, 'CM'],
+    [500, 'D'],
+    [400, 'CD'],
+    [100, 'C'],
+    [90, 'XC'],
+    [50, 'L'],
+    [40, 'XL'],
+    [10, 'X'],
+    [9, 'IX'],
+    [5, 'V'],
+    [4, 'IV'],
+    [1, 'I'],
+  ]
   let remaining = value
   let result = ''
   for (const [amount, token] of pairs) {
-    while (remaining >= amount) { result += token; remaining -= amount }
+    while (remaining >= amount) {
+      result += token
+      remaining -= amount
+    }
   }
   return result
 }

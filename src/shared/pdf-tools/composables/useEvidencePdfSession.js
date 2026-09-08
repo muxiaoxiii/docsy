@@ -2,7 +2,12 @@ import { expandSplitNameTokens } from './splitFileName.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { toChineseNumber } from '../../../core/numberFormat.js'
 import { ptToMm } from '../../../core/unitConversion.js'
-import { pageNumberOverlaysForFile, exceptionMatches, exceptionsForKind, normalizeInsertException } from './pdfPageNumberRules.js'
+import {
+  pageNumberOverlaysForFile,
+  exceptionMatches,
+  exceptionsForKind,
+  normalizeInsertException,
+} from './pdfPageNumberRules.js'
 
 export { fileName, parentDir, stripPdf, toChineseNumber }
 
@@ -707,14 +712,18 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             marginMm: pageNumberGroup.marginMm ?? rules.footerMarginMm ?? 10,
             offsetXMm: pageNumberGroup.offsetXMm ?? rules.footerOffsetXMm ?? 0,
             color: pageNumberGroup.color || rules.footerColor || '#000000',
-            exceptions: [...(pageNumberGroup.exceptions || pageNumberGroup.overrides || []), ...pageNumberSharedExceptions],
+            exceptions: [
+              ...(pageNumberGroup.exceptions || pageNumberGroup.overrides || []),
+              ...pageNumberSharedExceptions,
+            ],
           })
         : []
     const extraOverlays = [...convertedExistingOverlays(file, rules), ...mainPageNumberOverlays]
     // Header groups: every enabled group except the main (selected) one
     if (headerInsertEnabled) {
       for (const g of availableHeaderGroups) {
-        if (g.id === headerGroup?.id || g.enabled === false || g.mode === 'none' || !groupAppliesToFile(g, file)) continue
+        if (g.id === headerGroup?.id || g.enabled === false || g.mode === 'none' || !groupAppliesToFile(g, file))
+          continue
         const groupText = buildHeaderTextForGroup(
           file,
           index,

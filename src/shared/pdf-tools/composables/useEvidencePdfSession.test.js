@@ -905,7 +905,11 @@ describe('Evidence PDF session helpers', () => {
         ...baseRules,
         footerEnabled: false,
         insertExceptions: [
-          { kinds: ['header'], scope: { type: 'global', start: 2, end: 3, fileIds: [] }, overrides: { enabled: false } },
+          {
+            kinds: ['header'],
+            scope: { type: 'global', start: 2, end: 3, fileIds: [] },
+            overrides: { enabled: false },
+          },
         ],
       },
       '/out',
@@ -1004,7 +1008,9 @@ describe('Evidence PDF session helpers', () => {
     file.pageNumberGroups = [
       {
         ...createDefaultPageNumberGroup(),
-        exceptions: [{ scope: { type: 'global', start: 1, end: 1, fileIds: [] }, overrides: { enabled: false, count: true } }],
+        exceptions: [
+          { scope: { type: 'global', start: 1, end: 1, fileIds: [] }, overrides: { enabled: false, count: true } },
+        ],
       },
     ]
     const items = buildHeaderFooterItems(
@@ -1039,7 +1045,11 @@ describe('Evidence PDF session helpers', () => {
         ...baseRules,
         footerEnabled: false,
         insertExceptions: [
-          { kinds: ['header'], scope: { type: 'global', start: 1, end: 5, fileIds: [] }, overrides: { enabled: false } },
+          {
+            kinds: ['header'],
+            scope: { type: 'global', start: 1, end: 5, fileIds: [] },
+            overrides: { enabled: false },
+          },
         ],
       },
       '/out',

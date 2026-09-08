@@ -528,12 +528,7 @@
                               placeholder="输出值（留空同文本）"
                               class="select-option-input"
                             />
-                            <el-button
-                              size="small"
-                              text
-                              type="danger"
-                              @click="row.selectOptions?.splice(optIdx, 1)"
-                            >
+                            <el-button size="small" text type="danger" @click="row.selectOptions?.splice(optIdx, 1)">
                               删除
                             </el-button>
                           </div>

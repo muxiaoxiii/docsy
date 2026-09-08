@@ -86,7 +86,9 @@
               controls-position="right"
               :disabled="headerNumberingSourceModel === 'default'"
             />
-            <span class="field-hint">{{ headerNumberingSourceModel === 'default' ? '跟随全局，选择单独设置后可修改' : '仅覆盖本规则' }}</span>
+            <span class="field-hint">{{
+              headerNumberingSourceModel === 'default' ? '跟随全局，选择单独设置后可修改' : '仅覆盖本规则'
+            }}</span>
           </div>
           <div v-if="headerMode === 'custom'" class="rule-item">
             <label>页眉文本</label>
@@ -721,11 +723,14 @@ const pageNumberEnabledModel = model('pageNumberEnabled'),
   pageNumberOffsetXMmModel = model('pageNumberOffsetXMm'),
   pageNumberColorModel = model('pageNumberColor')
 const pageNumberShowTotalModel = model('pageNumberShowTotal')
-const selectedHeaderGroup = computed(() =>
-  props.headerGroups.find((group) => group.id === props.selectedHeaderGroupId) || props.headerGroups[0] || null,
+const selectedHeaderGroup = computed(
+  () => props.headerGroups.find((group) => group.id === props.selectedHeaderGroupId) || props.headerGroups[0] || null,
 )
-const selectedPageNumberGroup = computed(() =>
-  props.pageNumberGroups.find((group) => group.id === props.selectedPageNumberGroupId) || props.pageNumberGroups[0] || null,
+const selectedPageNumberGroup = computed(
+  () =>
+    props.pageNumberGroups.find((group) => group.id === props.selectedPageNumberGroupId) ||
+    props.pageNumberGroups[0] ||
+    null,
 )
 function updateSelectedGroup(kind, patch) {
   const groups = kind === 'header' ? props.headerGroups : props.pageNumberGroups
@@ -743,9 +748,10 @@ const headerNumberingSourceModel = computed({
   set: (value) => updateGroupNumbering('header', { source: value }),
 })
 const effectiveHeaderSeqStartModel = computed({
-  get: () => headerNumberingSourceModel.value === 'custom'
-    ? Number(selectedHeaderGroup.value?.numbering?.evidenceStart ?? props.headerPerFileSeqStart ?? 1)
-    : Number(props.numberingDefaults.evidenceStart ?? 1),
+  get: () =>
+    headerNumberingSourceModel.value === 'custom'
+      ? Number(selectedHeaderGroup.value?.numbering?.evidenceStart ?? props.headerPerFileSeqStart ?? 1)
+      : Number(props.numberingDefaults.evidenceStart ?? 1),
   set: (value) => updateGroupNumbering('header', { source: 'custom', evidenceStart: Number(value) }),
 })
 // 页码编号收归规则自含：读取时兼容旧数据（pageStart 为空则回落旧全局值），写入只改规则本身

@@ -61,13 +61,28 @@
             <el-option label="合并后页码" value="global" />
             <el-option label="文件内页码" value="file" />
           </el-select>
-          <el-select v-model="row.scope.fileIds" multiple collapse-tags clearable placeholder="全部文件" class="scope-files">
+          <el-select
+            v-model="row.scope.fileIds"
+            multiple
+            collapse-tags
+            clearable
+            placeholder="全部文件"
+            class="scope-files"
+          >
             <el-option v-for="file in files" :key="fileId(file)" :label="file.name" :value="fileId(file)" />
           </el-select>
-          <span class="num-field"><el-input-number v-model="row.scope.start" :min="1" controls-position="right" /></span>
+          <span class="num-field"
+            ><el-input-number v-model="row.scope.start" :min="1" controls-position="right"
+          /></span>
           <span class="range-sep">–</span>
-          <span class="num-field"><el-input-number v-model="row.scope.end" :min="row.scope.start || 1" controls-position="right" /></span>
-          <el-select :model-value="exceptionAction(row)" class="action-select" @change="setExceptionAction(row, $event)">
+          <span class="num-field"
+            ><el-input-number v-model="row.scope.end" :min="row.scope.start || 1" controls-position="right"
+          /></span>
+          <el-select
+            :model-value="exceptionAction(row)"
+            class="action-select"
+            @change="setExceptionAction(row, $event)"
+          >
             <el-option label="不显示" value="hide" />
             <el-option label="覆盖主规则" value="override" />
           </el-select>
@@ -80,7 +95,8 @@
               v-if="row.kinds.includes('pageNumber')"
               :model-value="row.overrides.count !== false"
               @change="row.overrides.count = $event"
-            >隐藏页仍计数</el-checkbox>
+              >隐藏页仍计数</el-checkbox
+            >
           </template>
           <template v-else>
             <el-input
@@ -99,20 +115,36 @@
             />
             <template v-if="row.kinds.includes('pageNumber')">
               <el-select v-model="row.overrides.style" clearable placeholder="页码样式跟随" class="mini-field">
-                <el-option v-for="style in PAGE_NUMBER_STYLES" :key="style.value" :label="style.label" :value="style.value" />
+                <el-option
+                  v-for="style in PAGE_NUMBER_STYLES"
+                  :key="style.value"
+                  :label="style.label"
+                  :value="style.value"
+                />
               </el-select>
               <el-input v-model="row.overrides.template" clearable placeholder="页码格式跟随" class="text-field" />
-              <span class="num-field slim"><el-input-number v-model="row.overrides.startOffset" placeholder="偏移" controls-position="right" /></span>
+              <span class="num-field slim"
+                ><el-input-number v-model="row.overrides.startOffset" placeholder="偏移" controls-position="right"
+              /></span>
             </template>
             <el-select v-model="row.overrides.align" clearable placeholder="位置跟随" class="mini-field">
               <el-option label="左" value="left" />
               <el-option label="中" value="center" />
               <el-option label="右" value="right" />
             </el-select>
-            <span class="num-field slim"><el-input-number v-model="row.overrides.fontSize" :min="5" :max="72" placeholder="字号跟随" controls-position="right" /></span>
+            <span class="num-field slim"
+              ><el-input-number
+                v-model="row.overrides.fontSize"
+                :min="5"
+                :max="72"
+                placeholder="字号跟随"
+                controls-position="right"
+            /></span>
             <span class="color-field">
               <el-color-picker v-model="row.overrides.color" size="small" />
-              <el-button v-if="row.overrides.color" link size="small" @click="row.overrides.color = ''">颜色跟随</el-button>
+              <el-button v-if="row.overrides.color" link size="small" @click="row.overrides.color = ''"
+                >颜色跟随</el-button
+              >
             </span>
           </template>
         </div>
@@ -169,15 +201,26 @@ const selectedCard = computed(
   () => cards.value.find((card) => card.group.id === selectedCardId.value) || cards.value[0] || null,
 )
 
-function fileId(file) { return String(file?.id || file?.path || '') }
+function fileId(file) {
+  return String(file?.id || file?.path || '')
+}
 function cardKindIndex(card) {
-  const list = card.kind === 'header' ? localHeaderGroups.value : card.kind === 'footerText' ? localFooterGroups.value : localGroups.value
+  const list =
+    card.kind === 'header'
+      ? localHeaderGroups.value
+      : card.kind === 'footerText'
+        ? localFooterGroups.value
+        : localGroups.value
   return list.indexOf(card.group) + 1
 }
 function cardSummary(card) {
   const group = card.group
   if (card.kind === 'pageNumber') return group.template || '{page}/{total}'
-  const scope = group.fileIds?.length ? `${group.fileIds.length} 个文件` : group.pageEnd > 0 ? `第 ${group.pageStart || 1}-${group.pageEnd} 页` : '全部页面'
+  const scope = group.fileIds?.length
+    ? `${group.fileIds.length} 个文件`
+    : group.pageEnd > 0
+      ? `第 ${group.pageStart || 1}-${group.pageEnd} 页`
+      : '全部页面'
   return `${group.text || group.mode || '规则'} · ${scope}`
 }
 function cardOptionLabel(card) {
@@ -189,9 +232,13 @@ function ensureCustomNumbering(group) {
   group.numbering.evidenceStart ??= Number(props.numberingDefaults.evidenceStart || 1)
 }
 
-function clone(value) { return JSON.parse(JSON.stringify(value ?? [])) }
+function clone(value) {
+  return JSON.parse(JSON.stringify(value ?? []))
+}
 function cleanOverrides(value) {
-  return Object.fromEntries(Object.entries(value || {}).filter(([, item]) => item !== '' && item !== null && item !== undefined))
+  return Object.fromEntries(
+    Object.entries(value || {}).filter(([, item]) => item !== '' && item !== null && item !== undefined),
+  )
 }
 function normalizeGroups(groups) {
   return clone(groups).map((group) => ({
@@ -211,12 +258,14 @@ function serializeExceptions() {
 }
 
 function addException() {
-  localExceptions.value.push(normalizeInsertException({
-    id: `exception-${Date.now()}`,
-    kinds: ['pageNumber'],
-    scope: { type: 'global', start: 1, end: 1, fileIds: [] },
-    overrides: { enabled: false, count: true },
-  }))
+  localExceptions.value.push(
+    normalizeInsertException({
+      id: `exception-${Date.now()}`,
+      kinds: ['pageNumber'],
+      scope: { type: 'global', start: 1, end: 1, fileIds: [] },
+      overrides: { enabled: false, count: true },
+    }),
+  )
 }
 function removeException(row) {
   localExceptions.value = localExceptions.value.filter((entry) => entry.id !== row.id)
@@ -225,7 +274,9 @@ function setKinds(row, value) {
   // 至少保留一个类型：取消最后一个勾选时忽略本次操作
   if (value.length) row.kinds = value
 }
-function exceptionAction(row) { return row.overrides.enabled === false ? 'hide' : 'override' }
+function exceptionAction(row) {
+  return row.overrides.enabled === false ? 'hide' : 'override'
+}
 function setExceptionAction(row, value) {
   if (value === 'hide') {
     row.overrides = { enabled: false, count: row.overrides.count !== false }
@@ -234,21 +285,27 @@ function setExceptionAction(row, value) {
   }
 }
 
-watch(() => props.visible, (visible) => {
-  if (!visible) return
-  localGroups.value = normalizeGroups(props.groups)
-  localHeaderGroups.value = normalizeGroups(props.headerGroups)
-  localFooterGroups.value = normalizeGroups(props.footerGroups)
-  // 就地迁移：页码规则上残留的旧 exceptions/overrides 搬进共享例外列表
-  const migrated = clone(props.exceptions)
-  for (const group of props.groups) {
-    const legacy = group.exceptions?.length ? group.exceptions : group.overrides || []
-    migrated.push(...clone(legacy))
-  }
-  localExceptions.value = migrated.map((entry, index) => normalizeInsertException(entry, index))
-  const preferred = props.selectedGroupId || props.selectedHeaderGroupId || props.selectedFooterGroupId
-  selectedCardId.value = cards.value.some((card) => card.group.id === preferred) ? preferred : cards.value[0]?.group.id || ''
-}, { immediate: true })
+watch(
+  () => props.visible,
+  (visible) => {
+    if (!visible) return
+    localGroups.value = normalizeGroups(props.groups)
+    localHeaderGroups.value = normalizeGroups(props.headerGroups)
+    localFooterGroups.value = normalizeGroups(props.footerGroups)
+    // 就地迁移：页码规则上残留的旧 exceptions/overrides 搬进共享例外列表
+    const migrated = clone(props.exceptions)
+    for (const group of props.groups) {
+      const legacy = group.exceptions?.length ? group.exceptions : group.overrides || []
+      migrated.push(...clone(legacy))
+    }
+    localExceptions.value = migrated.map((entry, index) => normalizeInsertException(entry, index))
+    const preferred = props.selectedGroupId || props.selectedHeaderGroupId || props.selectedFooterGroupId
+    selectedCardId.value = cards.value.some((card) => card.group.id === preferred)
+      ? preferred
+      : cards.value[0]?.group.id || ''
+  },
+  { immediate: true },
+)
 
 watch(selectedCardId, (value) => {
   const card = cards.value.find((entry) => entry.group.id === value)
@@ -264,27 +321,106 @@ watch(localFooterGroups, (value) => emit('update:footerGroups', normalizeGroups(
 </script>
 
 <style scoped>
-.dialog-head, .exception-row-main, .exception-row-detail, .color-field { display: flex; align-items: center; gap: 10px; }
-.dialog-head { justify-content: space-between; margin-bottom: 12px; color: var(--docsy-text-muted); font-size: 13px; }
-.section-caption { margin: 4px 0 8px; color: var(--docsy-text-muted); font-size: 12px; font-weight: 600; }
-.inherit-text { color: var(--docsy-text-muted); font-size: 12px; }
-.base-scope { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 12px; border: 1px solid var(--docsy-border-subtle); background: var(--docsy-surface-soft); }
-.base-scope .rule-item { min-width: 160px; }
-.base-scope .rule-item:first-child { min-width: 220px; }
-.rule-item { display: flex; flex-direction: column; gap: 6px; }
-.rule-item label { color: var(--docsy-text-muted); font-size: 12px; }
-.exception-list { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow-y: auto; }
-.exception-row { padding: 8px 10px; border: 1px solid var(--docsy-border-subtle); border-radius: 6px; }
-.exception-row-main { flex-wrap: wrap; }
-.exception-row-detail { flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--docsy-border-subtle); }
-.scope-type { width: 120px; }
-.scope-files { min-width: 160px; flex: 1; }
-.action-select { width: 118px; }
-.num-field { width: 130px; flex: none; }
-.num-field.slim { width: 104px; }
-.num-field .el-input-number { width: 100%; }
-.range-sep { color: var(--docsy-text-muted); }
-.mini-field { width: 110px; }
-.text-field { width: 180px; }
-.color-field { gap: 4px; }
+.dialog-head,
+.exception-row-main,
+.exception-row-detail,
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dialog-head {
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: var(--docsy-text-muted);
+  font-size: 13px;
+}
+.section-caption {
+  margin: 4px 0 8px;
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.inherit-text {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+}
+.base-scope {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface-soft);
+}
+.base-scope .rule-item {
+  min-width: 160px;
+}
+.base-scope .rule-item:first-child {
+  min-width: 220px;
+}
+.rule-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rule-item label {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+}
+.exception-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.exception-row {
+  padding: 8px 10px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 6px;
+}
+.exception-row-main {
+  flex-wrap: wrap;
+}
+.exception-row-detail {
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--docsy-border-subtle);
+}
+.scope-type {
+  width: 120px;
+}
+.scope-files {
+  min-width: 160px;
+  flex: 1;
+}
+.action-select {
+  width: 118px;
+}
+.num-field {
+  width: 130px;
+  flex: none;
+}
+.num-field.slim {
+  width: 104px;
+}
+.num-field .el-input-number {
+  width: 100%;
+}
+.range-sep {
+  color: var(--docsy-text-muted);
+}
+.mini-field {
+  width: 110px;
+}
+.text-field {
+  width: 180px;
+}
+.color-field {
+  gap: 4px;
+}
 </style>
