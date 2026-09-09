@@ -369,13 +369,88 @@ fi
     )
 }
 
+fn homebrew_tsinghua_install_script() -> String {
+    r#"clear
+echo "============================================================"
+echo "  Docsy: 正在通过 清华大学开源软件镜像站 安装 Homebrew"
+echo "  （教育骨干网高速节点，无 Gitee 限流排队与第三方风险）"
+echo "============================================================"
+echo ""
+
+# 1. 导出清华大学镜像源环境变量
+export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
+export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"
+export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
+export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
+export HOMEBREW_PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+export NONINTERACTIVE=1
+export CI=1
+
+# 2. 从清华大学镜像站快速拉取官方安装程序
+TMP_DIR=$(mktemp -d /tmp/docsy-brew-XXXXXX)
+cd "$TMP_DIR"
+echo "--> 1/3: 正在从清华镜像拉取官方安装脚本..."
+git clone --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install.git brew-install
+
+echo ""
+echo "--> 2/3: 开始执行 Homebrew 安装..."
+echo "⚠️  若系统弹出开机密码提示，请直接盲敲键盘输入密码并按回车（无星号显示属于正常安全机制）"
+echo ""
+
+/bin/bash brew-install/install.sh
+INSTALL_STATUS=$?
+
+# 清理临时下载目录
+cd /
+rm -rf "$TMP_DIR"
+
+if [ $INSTALL_STATUS -eq 0 ]; then
+    echo ""
+    echo "--> 3/3: 正在配置永久清华大学镜像与终端环境变量..."
+    
+    BREW_BIN="/opt/homebrew/bin/brew"
+    [ ! -f "$BREW_BIN" ] && BREW_BIN="/usr/local/bin/brew"
+    
+    if [ -f "$BREW_BIN" ]; then
+        eval "$($BREW_BIN shellenv)"
+        
+        ZPROFILE="$HOME/.zprofile"
+        touch "$ZPROFILE"
+        
+        if ! grep -q 'brew shellenv' "$ZPROFILE" 2>/dev/null; then
+            echo "eval \"\$($BREW_BIN shellenv)\"" >> "$ZPROFILE"
+        fi
+        if ! grep -q 'HOMEBREW_BREW_GIT_REMOTE' "$ZPROFILE" 2>/dev/null; then
+            echo 'export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"' >> "$ZPROFILE"
+            echo 'export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"' >> "$ZPROFILE"
+            echo 'export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"' >> "$ZPROFILE"
+            echo 'export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"' >> "$ZPROFILE"
+        fi
+    fi
+
+    echo ""
+    echo "============================================================"
+    echo "  🎉 Homebrew 安装并配置清华镜像成功！"
+    echo "  请返回 Docsy 继续完成外部工具组件配置。"
+    echo "  终端窗口将在 3 秒后自动关闭..."
+    echo "============================================================"
+    sleep 3
+    osascript -e 'tell application "Terminal" to close front window' & exit
+else
+    echo ""
+    echo "============================================================"
+    echo "  ❌ 安装未完成或遇到错误（退出码: $INSTALL_STATUS）。"
+    echo "  请查看上方日志。按任意键关闭此窗口..."
+    echo "============================================================"
+    read -n 1
+    osascript -e 'tell application "Terminal" to close front window' & exit
+fi
+"#.to_string()
+}
+
 pub fn install_via_terminal(tool_name: &str) -> anyhow::Result<()> {
     let script = match tool_name {
-        "homebrew" => wrap_terminal_script(
-            "安装 Homebrew (国内极速镜像源)",
-            r#"/bin/zsh -c "$(curl -fsSL https://gitee.com/cunkai/HomebrewCN/raw/master/Homebrew.sh)""#,
-            "Homebrew",
-        ),
+        "homebrew" => homebrew_tsinghua_install_script(),
         "ffmpeg" => wrap_terminal_script(
             "正在通过 Homebrew 安装 FFmpeg (Full 完整版，含 drawtext 水印)",
             r#"echo "1/2: 添加 ffmpeg tap 仓库..."
