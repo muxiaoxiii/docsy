@@ -78,7 +78,55 @@ pub fn check_by_name(name: &str) -> ToolStatus {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn install_via_homebrew_background(name: &str) -> anyhow::Result<String> {
+    let brew_bin = if std::path::Path::new("/opt/homebrew/bin/brew").exists() {
+        "/opt/homebrew/bin/brew"
+    } else if std::path::Path::new("/usr/local/bin/brew").exists() {
+        "/usr/local/bin/brew"
+    } else {
+        "brew"
+    };
+
+    let packages: Vec<&str> = match name {
+        "ffmpeg" => vec!["homebrew-ffmpeg/ffmpeg/ffmpeg-full"],
+        "poppler" => vec!["poppler"],
+        "qpdf" => vec!["qpdf"],
+        _ => anyhow::bail!("未知工具: {}", name),
+    };
+
+    if name == "ffmpeg" {
+        let mut tap_cmd = hidden_command(brew_bin);
+        tap_cmd.args(["tap", "homebrew-ffmpeg/ffmpeg"]);
+        tap_cmd.env("HOMEBREW_API_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles/api");
+        tap_cmd.env("HOMEBREW_BOTTLE_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles");
+        tap_cmd.env("HOMEBREW_NO_AUTO_UPDATE", "1");
+        tap_cmd.env("NONINTERACTIVE", "1");
+        let _ = tap_cmd.output();
+    }
+
+    let mut cmd = hidden_command(brew_bin);
+    cmd.arg("install");
+    cmd.args(&packages);
+    cmd.env("HOMEBREW_API_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles/api");
+    cmd.env("HOMEBREW_BOTTLE_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles");
+    cmd.env("HOMEBREW_NO_AUTO_UPDATE", "1");
+    cmd.env("NONINTERACTIVE", "1");
+
+    let output = cmd.output()?;
+    if !output.status.success() {
+        anyhow::bail!(command_failure_detail(&output));
+    }
+    validate_tool(name)?;
+    Ok(format!("{} 安装成功", name))
+}
+
 pub fn install_by_name(name: &str) -> anyhow::Result<String> {
+    #[cfg(target_os = "macos")]
+    if has_homebrew() {
+        return install_via_homebrew_background(name);
+    }
+
     let installed = match name {
         "qpdf" => QpdfTool.try_install(),
         "ffmpeg" => FfmpegTool.try_install(),
@@ -352,16 +400,19 @@ echo ""
 if [ $STATUS -eq 0 ]; then
     echo "========================================="
     echo "  🎉 {tool_name} 安装成功！"
-    echo "  Docsy 正在实时检测并同步状态，您可以直接返回 Docsy 继续使用。"
+    echo "  Docsy 正在实时检测并同步状态，窗口即将自动关闭..."
     echo "========================================="
-    exit 0
+    sleep 1
+    MY_TTY=$(tty)
+    osascript -e "tell application \"Terminal\" to close (every window whose tty of selected tab is \"$MY_TTY\")"
 else
     echo "========================================="
     echo "  ❌ 安装未完成或遇到错误（退出码: $STATUS）。"
     echo "  请查看上方日志排查原因。按回车键退出..."
     echo "========================================="
     read -r
-    exit $STATUS
+    MY_TTY=$(tty)
+    osascript -e "tell application \"Terminal\" to close (every window whose tty of selected tab is \"$MY_TTY\")"
 fi
 "#
     )
@@ -417,9 +468,11 @@ if [ $INSTALL_STATUS -eq 0 ]; then
     echo ""
     echo "============================================================"
     echo "  🎉 Homebrew 安装并配置中科大镜像成功！"
-    echo "  Docsy 正在实时检测状态，您可以直接返回 Docsy 继续配置外部工具。"
+    echo "  Docsy 正在实时检测状态，窗口即将自动关闭..."
     echo "============================================================"
-    exit 0
+    sleep 1
+    MY_TTY=$(tty)
+    osascript -e "tell application \"Terminal\" to close (every window whose tty of selected tab is \"$MY_TTY\")"
 else
     echo ""
     echo "============================================================"
@@ -427,7 +480,8 @@ else
     echo "  请查看上方日志。按回车键退出..."
     echo "============================================================"
     read -r
-    exit $INSTALL_STATUS
+    MY_TTY=$(tty)
+    osascript -e "tell application \"Terminal\" to close (every window whose tty of selected tab is \"$MY_TTY\")"
 fi
 "#.to_string()
 }

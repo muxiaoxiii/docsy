@@ -106,6 +106,20 @@ export async function openToolDownloadWithGuide(toolName, fallbackUrl, fallbackL
  */
 export async function installToolViaTerminal(toolName, toolLabel, onFinished) {
   const targetName = toolLabel || toolName
+
+  // 若本机已具备 Homebrew，优先走后台静默安装，完全无需弹出终端黑框！
+  const brewRes = await tauriCallSafe('check_homebrew_installed')
+  if (brewRes.ok && brewRes.data) {
+    ElMessage.info(`Docsy 正在后台静默安装 ${targetName}，请稍候…`)
+    const res = await tauriCallSafe('install_external_tool', { toolName })
+    if (res.ok) {
+      ElMessage.success(`${targetName} 已在后台安装完成！`)
+      if (typeof onFinished === 'function') onFinished()
+      return true
+    }
+  }
+
+  // 兜底唤起终端（如需首次安装 Homebrew），安装完将自动关闭终端窗口
   const res = await tauriCallSafe('open_terminal_to_install', { toolName })
   if (res.ok) {
     ElMessage.success(`已为您打开终端开始安装 ${targetName}。`)
