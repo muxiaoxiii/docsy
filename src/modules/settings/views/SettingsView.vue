@@ -20,9 +20,7 @@
         自动安装时会强制校验）。第三方工具的使用风险由您自行承担。
       </el-alert>
       <p class="section-desc">
-        qpdf、poppler、ffmpeg 可在 macOS 和 Windows 下载到 Docsy 自己的工具目录；Word 文件转 PDF 会优先使用 Microsoft
-        Word，失败后使用 LibreOffice。如果某个工具出现问题（如 qpdf
-        处理失败），可以清除托管版本后重新下载安装，或手动下载新版本放到 Docsy 工具目录。
+        Windows 支持自动下载安装工具包到 Docsy 托管目录；macOS 推荐使用 Homebrew 安装系统工具（支持一键调起终端安装），也可手动下载后通过本地安装导入。如果某个工具出现问题，可以清除托管版本后重新安装。
       </p>
       <div v-if="managedToolsDir" class="managed-dir">{{ managedToolsDir }}</div>
       <div class="tool-list">
@@ -65,7 +63,7 @@
               @click="installTool(tool.name)"
               :loading="tool.installing"
             >
-              下载安装到 Docsy
+              {{ isMac ? '终端安装 (Homebrew)' : '下载安装到 Docsy' }}
             </el-button>
             <el-button
               v-if="tool.autoInstall"
@@ -164,6 +162,7 @@ import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.j
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Message } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
+import { isMac, installToolViaTerminal } from '../../../core/terminalInstall.js'
 
 const settings = ref({
   menu_visibility: {},
@@ -428,6 +427,10 @@ function syncDiagnosticToolStatus() {
 
 async function installTool(name) {
   const tool = tools.find((t) => t.name === name)
+  if (isMac) {
+    await installToolViaTerminal(name, tool?.label || name)
+    return
+  }
   if (tool) tool.installing = true
   const result = await tauriCallSafe('install_external_tool', { toolName: name })
   if (result.ok) {

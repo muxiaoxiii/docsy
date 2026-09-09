@@ -295,6 +295,67 @@ pub(crate) fn finish_bounded_output_reader(handle: Option<thread::JoinHandle<Vec
         .unwrap_or_default()
 }
 
+pub fn has_homebrew() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        for path in ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
+            if std::path::Path::new(path).exists() {
+                return true;
+            }
+        }
+        managed::find_on_path("brew").is_some()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+pub fn run_in_terminal(command: &str) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let escaped = command.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            r#"tell application "Terminal"
+    activate
+    do script "{}"
+end tell"#,
+            escaped
+        );
+        let mut cmd = hidden_command("osascript");
+        cmd.arg("-e").arg(script);
+        let output = cmd.output()?;
+        if !output.status.success() {
+            anyhow::bail!(command_failure_detail(&output));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = command;
+        anyhow::bail!("当前系统不支持通过终端自动安装")
+    }
+}
+
+pub fn install_via_terminal(tool_name: &str) -> anyhow::Result<()> {
+    let script = match tool_name {
+        "homebrew" => {
+            r#"clear; echo "=== Docsy: 安装 Homebrew (国内极速镜像源) ==="; export NONINTERACTIVE=1; echo ""; /bin/zsh -c "$(curl -fsSL https://gitee.com/cunkai/HomebrewCN/raw/master/Homebrew.sh)"; echo ""; echo "=== 安装结束 ==="; echo "如果安装成功，请返回 Docsy 继续安装外部工具。""#.to_string()
+        }
+        "ffmpeg" => {
+            r#"clear; echo "=== Docsy: 正在通过 Homebrew 安装 FFmpeg (Full 完整版，含 drawtext 水印) ==="; export NONINTERACTIVE=1; export HOMEBREW_NO_AUTO_UPDATE=1; echo "1/2: 添加 ffmpeg tap 仓库..."; brew tap homebrew-ffmpeg/ffmpeg; echo "2/2: 安装 ffmpeg-full..."; brew install homebrew-ffmpeg/ffmpeg/ffmpeg-full || brew install ffmpeg-full || brew install ffmpeg; echo ""; echo "=== 执行完毕 ==="; echo "请返回 Docsy，点击「检测此工具」或「重新检测」确认状态。""#.to_string()
+        }
+        "qpdf" => {
+            r#"clear; echo "=== Docsy: 正在通过 Homebrew 安装 Qpdf ==="; export NONINTERACTIVE=1; export HOMEBREW_NO_AUTO_UPDATE=1; echo "执行命令: brew install qpdf"; echo ""; brew install qpdf; echo ""; echo "=== 执行完毕 ==="; echo "请返回 Docsy，点击「检测此工具」或「重新检测」确认状态。""#.to_string()
+        }
+        "poppler" => {
+            r#"clear; echo "=== Docsy: 正在通过 Homebrew 安装 Poppler ==="; export NONINTERACTIVE=1; export HOMEBREW_NO_AUTO_UPDATE=1; echo "执行命令: brew install poppler"; echo ""; brew install poppler; echo ""; echo "=== 执行完毕 ==="; echo "请返回 Docsy，点击「检测此工具」或「重新检测」确认状态。""#.to_string()
+        }
+        other => anyhow::bail!("不支持通过终端安装工具 {other}"),
+    };
+    run_in_terminal(&script)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

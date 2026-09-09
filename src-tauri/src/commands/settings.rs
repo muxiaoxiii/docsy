@@ -84,3 +84,20 @@ pub async fn remove_managed_tool(tool_name: String) -> Result<String, DocsyError
         message: e.to_string(),
     })?
 }
+
+#[tauri::command]
+pub fn check_homebrew_installed() -> bool {
+    crate::external::has_homebrew()
+}
+
+#[tauri::command]
+pub async fn open_terminal_to_install(tool_name: String) -> Result<(), DocsyError> {
+    tauri::async_runtime::spawn_blocking(move || crate::external::install_via_terminal(&tool_name))
+        .await
+        .map_err(|e| DocsyError::Unknown {
+            message: e.to_string(),
+        })?
+        .map_err(|e| DocsyError::Unknown {
+            message: e.to_string(),
+        })
+}

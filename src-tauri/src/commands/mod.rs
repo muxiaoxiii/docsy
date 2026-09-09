@@ -122,6 +122,8 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         settings::get_managed_tools_dir,
         settings::open_managed_tools_dir,
         settings::remove_managed_tool,
+        settings::check_homebrew_installed,
+        settings::open_terminal_to_install,
         // system
         system::open_path,
         system::open_external_url,

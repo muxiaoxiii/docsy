@@ -26,7 +26,7 @@
             <el-icon><WarningFilled /></el-icon>
             <span>未找到 ffmpeg</span>
             <el-button size="small" type="primary" @click="installFfmpeg" :loading="installing">
-              下载安装到 Docsy
+              {{ isMac ? '终端安装 (Homebrew)' : '下载安装到 Docsy' }}
             </el-button>
             <el-button size="small" @click="openFfmpegDownload"> 下载页 </el-button>
           </div>
@@ -292,6 +292,7 @@ import { fileName, parentDir } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import { useWorkspaceStore } from '../../../stores/workspace.js'
+import { isMac, installToolViaTerminal } from '../../../core/terminalInstall.js'
 
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
@@ -369,6 +370,10 @@ async function checkFfmpeg() {
 }
 
 async function installFfmpeg() {
+  if (isMac) {
+    await installToolViaTerminal('ffmpeg', 'FFmpeg')
+    return
+  }
   installing.value = true
   const res = await tauriCallSafe('install_external_tool', { toolName: 'ffmpeg' })
   if (res.ok) {
