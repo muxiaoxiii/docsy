@@ -292,7 +292,7 @@ import { fileName, parentDir } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import { useWorkspaceStore } from '../../../stores/workspace.js'
-import { isMac, installToolViaTerminal } from '../../../core/terminalInstall.js'
+import { isMac, installToolViaTerminal, openToolDownloadWithGuide } from '../../../core/terminalInstall.js'
 
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
@@ -386,10 +386,7 @@ async function installFfmpeg() {
 }
 
 async function openFfmpegDownload() {
-  const res = await openExternalUrl('https://www.gyan.dev/ffmpeg/builds/')
-  if (!res.ok) {
-    ElMessage.error(userFacingError(res.error, '无法打开 FFmpeg 下载页'))
-  }
+  await openToolDownloadWithGuide('ffmpeg')
 }
 
 async function selectFile() {

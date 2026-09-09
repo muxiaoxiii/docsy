@@ -162,7 +162,7 @@ import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.j
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Message } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
-import { isMac, installToolViaTerminal } from '../../../core/terminalInstall.js'
+import { isMac, installToolViaTerminal, openToolDownloadWithGuide } from '../../../core/terminalInstall.js'
 
 const settings = ref({
   menu_visibility: {},
@@ -532,32 +532,7 @@ async function removeManagedTool(tool) {
 }
 
 async function openToolDownload(tool) {
-  try {
-    await ElMessageBox.confirm(
-      `<div style="line-height:1.8">
-        <p><strong>即将打开 ${tool.label} 官方下载页</strong></p>
-        ${tool.downloadGuide ? `<p>📋 <strong>选择指南：</strong>${tool.downloadGuide}</p>` : ''}
-        <p style="color:var(--el-text-color-secondary);font-size:12px;margin-top:8px">
-          ⚠️ 请从官方源下载，不要使用第三方打包版本。<br>
-          下载后放入 Docsy 工具目录（设置页可见路径），或使用「本地安装」按钮。<br>
-          第三方工具的使用风险由您自行承担。
-        </p>
-      </div>`,
-      '外部下载提示',
-      {
-        confirmButtonText: '打开下载页',
-        cancelButtonText: '取消',
-        dangerouslyUseHTMLString: true,
-        type: 'info',
-      },
-    )
-  } catch {
-    return // User cancelled
-  }
-  const result = await openExternalUrl(tool.downloadUrl)
-  if (!result.ok) {
-    ElMessage.error(userFacingError(result.error, '无法打开下载页'))
-  }
+  await openToolDownloadWithGuide(tool.name, tool.downloadUrl, tool.label)
 }
 
 onMounted(() => {
