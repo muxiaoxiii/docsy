@@ -86,6 +86,7 @@
         </div>
       </Transition>
     </el-container>
+    <OnboardingModal ref="onboardingModalRef" />
   </el-container>
 </template>
 
@@ -98,6 +99,7 @@ import { confirmAppClose, listActiveOperations, tauriCallSafe } from './core/tau
 import { listen } from '@tauri-apps/api/event'
 import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
+import OnboardingModal from './shared/components/OnboardingModal.vue'
 import { useAppStore } from './stores/app.js'
 import evidenceIconUrl from './assets/icons/evidence.svg?url'
 import documentsIconUrl from './assets/icons/documents.svg?url'
@@ -123,6 +125,7 @@ const menuIconByRoute = {
 const activeMenu = computed(() => route.name || 'home')
 const sidebarCollapsed = ref(window.localStorage.getItem('docsy.sidebar.collapsed') === '1')
 const operationVisible = ref(false)
+const onboardingModalRef = ref(null)
 const version = import.meta.env.PACKAGE_VERSION || ''
 const operationMessage = ref('Doclet 正在处理…')
 const operationElapsed = ref('')
@@ -286,6 +289,9 @@ onMounted(() => {
   window.addEventListener('docsy-operation-start', startOperation)
   window.addEventListener('docsy-operation-finish', finishOperation)
   window.addEventListener('docsy-operation-update', updateOperation)
+  window.addEventListener('open-onboarding-modal', () => {
+    onboardingModalRef.value?.show()
+  })
 
   // Listen for conversion timeout events from the backend
   listen('docsy-conversion-timeout', async () => {

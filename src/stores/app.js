@@ -9,12 +9,16 @@ export const useAppStore = defineStore('app', () => {
     menu_order: [],
     libreoffice_path: '',
     tool_manifest_url: '',
+    onboarding_completed: false,
   })
 
   async function loadSettings() {
     const result = await tauriCallSafe('get_app_settings')
     if (result.ok) {
-      settings.value = result.data
+      settings.value = {
+        ...settings.value,
+        ...result.data,
+      }
     } else {
       void logError('app.store', 'load settings failed', { error: result.error })
     }
@@ -27,5 +31,10 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  return { settings, loadSettings, saveSettings }
+  async function completeOnboarding() {
+    settings.value.onboarding_completed = true
+    await saveSettings()
+  }
+
+  return { settings, loadSettings, saveSettings, completeOnboarding }
 })

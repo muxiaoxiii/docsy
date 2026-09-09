@@ -8,6 +8,7 @@
         <div class="card-header">
           <span>外部工具状态</span>
           <div class="card-header-actions">
+            <el-button size="small" @click="runOnboardingWizard">首次配置向导</el-button>
             <el-button size="small" @click="openToolsPage">外部工具下载页面</el-button>
             <el-button size="small" :loading="checkingTools" @click="checkTools">重新检测</el-button>
             <el-button size="small" @click="openManagedToolsDir">打开 Docsy 工具目录</el-button>
@@ -505,6 +506,10 @@ async function openManagedToolsDir() {
 
 function openToolsPage() {
   openExternalUrl(DOCSY_TOOLS_URL)
+}
+
+function runOnboardingWizard() {
+  window.dispatchEvent(new CustomEvent('open-onboarding-modal'))
 }
 
 async function removeManagedTool(tool) {

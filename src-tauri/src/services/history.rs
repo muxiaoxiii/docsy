@@ -9,6 +9,7 @@ pub struct AppSettings {
     pub menu_order: Vec<String>,
     pub libreoffice_path: Option<String>,
     pub tool_manifest_url: Option<String>,
+    pub onboarding_completed: bool,
 }
 
 pub fn get_settings() -> Result<AppSettings> {
