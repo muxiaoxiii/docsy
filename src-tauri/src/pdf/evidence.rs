@@ -714,18 +714,17 @@ fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Re
     // the existing appearance first, then apply the lossless structural
     // optimization so its resources are not mistaken for unreachable data.
     super::qpdf::add_merge_args(&mut command);
-    let status = command
+    let output_result = command
         .arg("--empty")
         .arg("--pages")
         .args(inputs)
         .arg("--")
         .arg(output)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
+        .output()?;
 
-    if !super::qpdf::status_is_success(&status) {
-        anyhow::bail!("qpdf 合并失败");
+    if !super::qpdf::status_is_success(&output_result.status) {
+        let detail = crate::external::command_failure_detail(&output_result);
+        anyhow::bail!("qpdf 合并失败: {detail}");
     }
 
     Ok(())

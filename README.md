@@ -3,7 +3,7 @@
 > 一个专为法律人、行政党、文字工作者打造的本地文档处理效率工具 ✨  
 > 所有操作 100% 在本地电脑完成，**断网可用，绝不上传云端** 🔒
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/muxiaoxiii/docsy/releases)
 

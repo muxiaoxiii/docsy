@@ -63,13 +63,45 @@ pub fn open_tools_root() -> Result<()> {
     open::that(&root).map_err(|e| anyhow::anyhow!(e))
 }
 
+pub fn validate_managed_tool_name(tool: &str) -> Result<()> {
+    let name = tool.trim();
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || name.contains('\0')
+    {
+        anyhow::bail!("非法的工具名称: {tool}");
+    }
+    match name {
+        "qpdf" | "ffmpeg" | "poppler" => Ok(()),
+        _ => anyhow::bail!("不支持的托管工具: {tool}"),
+    }
+}
+
 pub fn remove_managed_tool(tool: &str) -> Result<()> {
-    let dir = tools_root().join(tool);
+    validate_managed_tool_name(tool)?;
+    let root = tools_root();
+    if !root.exists() {
+        anyhow::bail!("未找到 {} 的托管安装目录", tool);
+    }
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("解析工具根目录失败: {}", root.display()))?;
+    let dir = canonical_root.join(tool.trim());
     if !dir.exists() {
         anyhow::bail!("未找到 {} 的托管安装目录", tool);
     }
-    fs::remove_dir_all(&dir)
-        .with_context(|| format!("清除 {} 失败，请手动删除目录：{}", tool, dir.display()))?;
+    let canonical_dir = dir
+        .canonicalize()
+        .with_context(|| format!("解析工具目录失败: {}", dir.display()))?;
+
+    if canonical_dir.parent() != Some(&canonical_root) || canonical_dir == canonical_root {
+        anyhow::bail!("拒绝删除非托管工具目录: {}", canonical_dir.display());
+    }
+
+    fs::remove_dir_all(&canonical_dir)
+        .with_context(|| format!("清除 {} 失败，请手动删除目录：{}", tool, canonical_dir.display()))?;
     Ok(())
 }
 
@@ -849,5 +881,27 @@ mod tests {
         assert!(result.is_err());
         assert!(!output.join("large.bin").exists());
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn validate_managed_tool_name_enforces_whitelist_and_blocks_traversal() {
+        assert!(validate_managed_tool_name("qpdf").is_ok());
+        assert!(validate_managed_tool_name("ffmpeg").is_ok());
+        assert!(validate_managed_tool_name("poppler").is_ok());
+
+        assert!(validate_managed_tool_name("").is_err());
+        assert!(validate_managed_tool_name("  ").is_err());
+        assert!(validate_managed_tool_name("unknown").is_err());
+        assert!(validate_managed_tool_name("../qpdf").is_err());
+        assert!(validate_managed_tool_name("qpdf/../../").is_err());
+        assert!(validate_managed_tool_name("..\\qpdf").is_err());
+        assert!(validate_managed_tool_name("/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn remove_managed_tool_rejects_traversal_attempts() {
+        assert!(remove_managed_tool("../../../etc").is_err());
+        assert!(remove_managed_tool("unknown_tool").is_err());
+        assert!(remove_managed_tool("").is_err());
     }
 }

@@ -8,6 +8,8 @@ src-tauri/vendor/*/Cargo.lock
 test-pdf/
 .DS_Store
 *.log
+__pycache__/
+*.py[cod]
 
 # 备份归档（任何位置的 zip，排除 node_modules 等已忽略目录）
 *.zip

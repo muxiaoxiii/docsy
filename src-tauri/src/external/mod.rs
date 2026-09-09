@@ -352,25 +352,34 @@ pub fn has_homebrew() -> bool {
 pub fn run_in_terminal(command: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let script_path = "/tmp/docsy_run.sh";
-        let script_content = format!("#!/bin/bash\n{}\n", command);
-        std::fs::write(script_path, script_content)?;
+        let script_path = crate::util::fs::temp_named_path("docsy_run", "sh");
+        let script_str = script_path.to_string_lossy().to_string();
+        let script_content = format!(
+            "#!/bin/bash\nDOCSY_TEMP_SCRIPT=\"{}\"\ntrap 'rm -f \"$DOCSY_TEMP_SCRIPT\"' EXIT INT TERM\n{}\n",
+            script_str.replace('"', "\\\""),
+            command
+        );
+        std::fs::write(&script_path, script_content)?;
 
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = std::fs::metadata(script_path) {
+        if let Ok(metadata) = std::fs::metadata(&script_path) {
             let mut perms = metadata.permissions();
-            perms.set_mode(0o755);
-            let _ = std::fs::set_permissions(script_path, perms);
+            perms.set_mode(0o700);
+            let _ = std::fs::set_permissions(&script_path, perms);
         }
 
-        let script = r#"tell application "Terminal"
-    activate
-    do script "/bin/bash /tmp/docsy_run.sh"
-end tell"#;
+        let script = r#"on run argv
+    set scriptPath to item 1 of argv
+    tell application "Terminal"
+        activate
+        do script "/bin/bash " & quoted form of scriptPath
+    end tell
+end run"#;
         let mut cmd = hidden_command("osascript");
-        cmd.arg("-e").arg(script);
+        cmd.arg("-e").arg(script).arg(&script_str);
         let output = cmd.output()?;
         if !output.status.success() {
+            let _ = std::fs::remove_file(&script_path);
             anyhow::bail!(command_failure_detail(&output));
         }
         Ok(())
