@@ -6,11 +6,19 @@
     <el-card class="settings-section" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>外部工具状态</span>
+          <div class="card-header-title">
+            <span>外部工具状态（环境检测）</span>
+          </div>
           <div class="card-header-actions">
-            <el-button size="small" @click="runOnboardingWizard">首次配置向导</el-button>
+            <el-button type="primary" size="small" @click="runOnboardingWizard">
+              <el-icon><Compass /></el-icon>
+              启动引导 (一键安装组件)
+            </el-button>
+            <el-button size="small" :loading="checkingTools" @click="checkTools">
+              <el-icon><Refresh /></el-icon>
+              重新检测环境
+            </el-button>
             <el-button size="small" @click="openToolsPage">外部工具下载页面</el-button>
-            <el-button size="small" :loading="checkingTools" @click="checkTools">重新检测</el-button>
             <el-button size="small" @click="openManagedToolsDir">打开 Docsy 工具目录</el-button>
           </div>
         </div>
@@ -24,6 +32,16 @@
         Windows 支持自动下载安装工具包到 Docsy 托管目录；macOS 推荐使用 Homebrew 安装系统工具（支持一键调起终端安装），也可手动下载后通过本地安装导入。如果某个工具出现问题，可以清除托管版本后重新安装。
       </p>
       <div v-if="managedToolsDir" class="managed-dir">{{ managedToolsDir }}</div>
+      <div v-if="hasMissingTools" class="quick-setup-banner">
+        <div class="quick-setup-text">
+          <span class="quick-setup-title">💡 组件一键安装与环境配置引导</span>
+          <span class="quick-setup-desc">检测到部分关键组件尚未就绪。您可以点击启动引导向导，按向导一键自动安装配置所需组件。</span>
+        </div>
+        <el-button type="primary" size="small" @click="runOnboardingWizard">
+          <el-icon><Compass /></el-icon>
+          启动组件安装引导
+        </el-button>
+      </div>
       <div class="tool-list">
         <div v-for="tool in tools" :key="tool.name" class="tool-item">
           <div class="tool-info">
@@ -131,7 +149,13 @@
     <!-- Diagnostics -->
     <el-card class="settings-section" shadow="never">
       <template #header>
-        <span>诊断信息</span>
+        <div class="card-header">
+          <span>系统与环境诊断信息</span>
+          <el-button size="small" type="primary" plain @click="runOnboardingWizard">
+            <el-icon><Compass /></el-icon>
+            启动引导向导 (一键安装组件)
+          </el-button>
+        </div>
       </template>
       <el-descriptions :column="2" border size="small">
         <el-descriptions-item label="版本">{{ diagnostic.version }}</el-descriptions-item>
@@ -147,6 +171,7 @@
         </el-button>
         <el-button size="small" @click="openLogDir">打开日志目录</el-button>
         <el-button size="small" @click="openLogFile">打开当前日志</el-button>
+        <el-button size="small" @click="runOnboardingWizard">启动组件安装引导</el-button>
       </div>
       <p class="diagnostic-hint">
         将创建发往 oonlyxin@outlook.com 的邮件草稿，并仅附加已隐藏本地路径和文件名的脱敏日志。
@@ -161,7 +186,7 @@ import { openExternalUrl, tauriCallSafe, userFacingError } from '../../../core/t
 import { DOCSY_TOOLS_URL } from '../../../core/siteConfig.js'
 import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Message } from '@element-plus/icons-vue'
+import { Message, Compass, Refresh } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { isMac, installToolViaTerminal, openToolDownloadWithGuide } from '../../../core/terminalInstall.js'
 
@@ -175,6 +200,7 @@ const managedToolsDir = ref('')
 const checkingTools = ref(false)
 const composingLogEmail = ref(false)
 const menuModules = getMenuModules()
+const hasMissingTools = computed(() => tools.some((tool) => !tool.status?.available))
 const menuSettingsItems = computed(() =>
   normalizedMenuOrder()
     .map((id) => menuModules.find((item) => item.id === id))
@@ -706,6 +732,35 @@ onMounted(() => {
   margin: 8px 0 0;
   color: var(--docsy-text-muted);
   font-size: 12px;
+}
+
+.quick-setup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: var(--docsy-primary-light, rgba(59, 130, 246, 0.08));
+  border: 1px solid var(--docsy-primary-border, rgba(59, 130, 246, 0.25));
+  border-radius: var(--docsy-radius);
+}
+
+.quick-setup-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quick-setup-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--docsy-text);
+}
+
+.quick-setup-desc {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
 }
 
 .section-desc {

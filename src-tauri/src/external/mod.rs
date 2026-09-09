@@ -387,11 +387,8 @@ end tell"#,
 
 fn wrap_terminal_script(title: &str, body: &str, tool_name: &str) -> String {
     format!(
-        r#"clear
-export NONINTERACTIVE=1
-export HOMEBREW_NO_AUTO_UPDATE=1
-export HOMEBREW_NO_INSTALL_CLEANUP=1
-export CI=1
+        r#"setopt interactivecomments 2>/dev/null || true
+clear
 echo "=== Docsy: {title} ==="
 echo ""
 {body}
@@ -419,23 +416,26 @@ fi
 }
 
 fn homebrew_ustc_install_script() -> String {
-    r#"clear
+    r#"setopt interactivecomments 2>/dev/null || true
+clear
 echo "============================================================"
 echo "  Docsy: 正在通过 中国科学技术大学(USTC) 开源镜像站 安装 Homebrew"
 echo "  （高速专用 CDN 节点，无需排队等待）"
 echo "============================================================"
 echo ""
 
+# 允许终端正常进行交互密码输入（不能开启 NONINTERACTIVE，否则 sudo 权限无法输入密码）
+unset NONINTERACTIVE
+unset CI
+
 # 1. 导出中科大高速镜像环境变量（避免清华/Gitee 排队机制）
 export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"
 export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.ustc.edu.cn/homebrew-core.git"
 export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"
 export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"
-export NONINTERACTIVE=1
-export CI=1
 
 echo "--> 1/2: 正在执行 Homebrew 极速安装..."
-echo "⚠️  若系统弹出开机密码提示，请直接盲敲键盘输入密码并按回车（无星号显示属于正常安全机制）"
+echo "⚠️  若系统弹出开机密码提示 Password:，请直接盲敲键盘输入电脑开机密码并按回车（输密码时不显示字符属于 macOS 正常安全机制）"
 echo ""
 
 /bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
@@ -523,7 +523,7 @@ pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
 
     let pkgs_str = packages.join(" ");
     let names_str = names.join("、");
-    let brew_bootstrap = r#"# 自动检查并确保 Homebrew 运行环境
+    let brew_bootstrap = r#": # 自动检查并确保 Homebrew 运行环境
 if [ -f /opt/homebrew/bin/brew ]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
 elif [ -f /usr/local/bin/brew ]; then
@@ -533,19 +533,24 @@ fi
 if ! command -v brew >/dev/null 2>&1; then
     echo "============================================================"
     echo "  检测到系统尚未安装 Homebrew，正在为您通过中科大(USTC)极速镜像安装..."
+    echo "  ⚠️ 若提示输入 Password:，请直接盲敲键盘输入开机密码并按回车"
     echo "============================================================"
+    unset NONINTERACTIVE
+    unset CI
     export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"
     export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.ustc.edu.cn/homebrew-core.git"
     export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"
     export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"
-    export NONINTERACTIVE=1
-    export CI=1
 
     /bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
 
     [ -f /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
     [ -f /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
 fi
+
+export NONINTERACTIVE=1
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
 "#;
 
     let body = format!(
