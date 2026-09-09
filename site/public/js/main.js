@@ -4,31 +4,31 @@
 
   /* 无 JS 或数据加载失败时的回退数据（与发布产物保持一致） */
   var FALLBACK = {
-    latest: '1.0.0',
+    latest: '1.0.1',
     githubUrl: 'https://github.com/muxiaoxiii/docsy/releases',
     releases: [
       {
-        version: '1.0.0',
-        tag: 'v1.0.0',
-        published_at: '2026-09-08T08:30:00Z',
+        version: '1.0.1',
+        tag: 'v1.0.1',
+        published_at: '2026-09-09T09:45:00Z',
         assets: [
           {
             platform: 'macos',
-            name: 'Docsy_1.0.0_aarch64.dmg',
-            size: 18389199,
-            sha256: '',
-            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.0/Docsy_1.0.0_aarch64.dmg',
+            name: 'Docsy_1.0.1_aarch64.dmg',
+            size: 19205444,
+            sha256: 'd1020790737e56d2642288f973804119f6d418362e21c9ef9c96dccabbee7432',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.1/Docsy_1.0.1_aarch64.dmg',
             github_url:
-              'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.0/Docsy_1.0.0_aarch64.dmg',
+              'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.1/Docsy_1.0.1_aarch64.dmg',
           },
           {
             platform: 'windows',
-            name: 'Docsy_1.0.0_x64-setup.exe',
+            name: 'Docsy_1.0.1_x64-setup.exe',
             size: 12735467,
             sha256: '',
-            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.0/Docsy_1.0.0_x64-setup.exe',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.1/Docsy_1.0.1_x64-setup.exe',
             github_url:
-              'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.0/Docsy_1.0.0_x64-setup.exe',
+              'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.1/Docsy_1.0.1_x64-setup.exe',
           },
         ],
       },
@@ -86,6 +86,21 @@
   };
 
   var FALLBACK_CHANGELOG = [
+    {
+      version: '1.0.1',
+      date: '2026-09-09',
+      sections: [
+        {
+          title: '新增与优化',
+          items: [
+            '**首次运行引导与组件一键配置向导**：新增组件配置向导弹窗，支持用户一键部署外部依赖工具。',
+            '**纯血内置 Homebrew 极速部署**：免交互免确认，基于中科大/清华镜像 CDN 秒级拉取部署，杜绝等待与问卷。',
+            '**设置页环境检测强化**：外部工具状态区加入高亮向导唤起入口与未就绪组件智能横幅。',
+            '**终端与多平台通路自愈**：解决多行终端脚本截断与非空目录拉取报错，安装完毕自动关闭窗口。',
+          ],
+        },
+      ],
+    },
     {
       version: '1.0.0',
       date: '2026-09-08',

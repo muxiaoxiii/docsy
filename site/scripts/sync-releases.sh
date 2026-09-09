@@ -18,7 +18,7 @@
 set -euo pipefail
 
 REPO="muxiaoxiii/docsy"
-BRANCH="v0.9-mdg"
+BRANCH="main"
 SITE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PUBLIC_DIR="$SITE_DIR/public"
 DOWNLOAD_DIR="$PUBLIC_DIR/downloads"
