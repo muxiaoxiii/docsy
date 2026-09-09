@@ -89,21 +89,11 @@ fn install_via_homebrew_background(name: &str) -> anyhow::Result<String> {
     };
 
     let packages: Vec<&str> = match name {
-        "ffmpeg" => vec!["homebrew-ffmpeg/ffmpeg/ffmpeg-full"],
+        "ffmpeg" => vec!["ffmpeg"],
         "poppler" => vec!["poppler"],
         "qpdf" => vec!["qpdf"],
         _ => anyhow::bail!("未知工具: {}", name),
     };
-
-    if name == "ffmpeg" {
-        let mut tap_cmd = hidden_command(brew_bin);
-        tap_cmd.args(["tap", "homebrew-ffmpeg/ffmpeg"]);
-        tap_cmd.env("HOMEBREW_API_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles/api");
-        tap_cmd.env("HOMEBREW_BOTTLE_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles");
-        tap_cmd.env("HOMEBREW_NO_AUTO_UPDATE", "1");
-        tap_cmd.env("NONINTERACTIVE", "1");
-        let _ = tap_cmd.output();
-    }
 
     let mut cmd = hidden_command(brew_bin);
     cmd.arg("install");
@@ -362,14 +352,21 @@ pub fn has_homebrew() -> bool {
 pub fn run_in_terminal(command: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let escaped = command.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!(
-            r#"tell application "Terminal"
+        let script_path = "/tmp/docsy_run.sh";
+        let script_content = format!("#!/bin/bash\n{}\n", command);
+        std::fs::write(script_path, script_content)?;
+
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(script_path) {
+            let mut perms = metadata.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(script_path, perms);
+        }
+
+        let script = r#"tell application "Terminal"
     activate
-    do script "{}"
-end tell"#,
-            escaped
-        );
+    do script "/bin/bash /tmp/docsy_run.sh"
+end tell"#;
         let mut cmd = hidden_command("osascript");
         cmd.arg("-e").arg(script);
         let output = cmd.output()?;
@@ -387,8 +384,7 @@ end tell"#,
 
 fn wrap_terminal_script(title: &str, body: &str, tool_name: &str) -> String {
     format!(
-        r#"setopt interactivecomments 2>/dev/null || true
-clear
+        r#"clear
 echo "=== Docsy: {title} ==="
 echo ""
 {body}
@@ -442,14 +438,17 @@ if ! command -v brew >/dev/null 2>&1 && [ ! -f "$BREW_PREFIX/bin/brew" ]; then
         sudo chown -R "$(whoami):admin" "$BREW_PREFIX"
     fi
 
-    echo "--> 2/3: 正在通过高速 CDN 节点极速部署 Homebrew 核心..."
-    if [ -d "$BREW_PREFIX/.git" ]; then
-        git -C "$BREW_PREFIX" fetch --depth=1 origin main 2>/dev/null || true
-        git -C "$BREW_PREFIX" reset --hard origin/main 2>/dev/null || true
-    else
-        git clone --depth=1 https://mirrors.ustc.edu.cn/brew.git "$BREW_PREFIX" 2>/dev/null || \
-        git clone --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git "$BREW_PREFIX"
-    fi
+    echo "--> 2/3: 正在通过高速 CDN 节点极速拉取部署 Homebrew 核心..."
+    cd "$BREW_PREFIX"
+    git init -q
+    git config remote.origin.url "https://mirrors.ustc.edu.cn/brew.git"
+    git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+    git fetch --depth=1 origin main || {
+        echo "中科大源受阻，自动切换为清华大学镜像重试..."
+        git config remote.origin.url "https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
+        git fetch --depth=1 origin main
+    }
+    git reset --hard FETCH_HEAD
 
     if [ "$(uname -m)" != "arm64" ] && [ ! -f /usr/local/bin/brew ]; then
         sudo mkdir -p /usr/local/bin
@@ -483,8 +482,7 @@ export NONINTERACTIVE=1
 
 fn homebrew_ustc_install_script() -> String {
     format!(
-        r#"setopt interactivecomments 2>/dev/null || true
-clear
+        r#"clear
 {bootstrap}
 BREW_BIN="/opt/homebrew/bin/brew"
 [ ! -f "$BREW_BIN" ] && BREW_BIN="/usr/local/bin/brew"
@@ -521,16 +519,14 @@ pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
         return run_in_terminal(&homebrew_ustc_install_script());
     }
 
-    let mut tap_cmd = String::new();
     let mut packages = Vec::new();
     let mut names = Vec::new();
 
     for t in tools {
         match t.as_str() {
             "ffmpeg" => {
-                tap_cmd = "echo \"--> 正在添加 homebrew-ffmpeg tap 仓库...\"; yes | brew tap homebrew-ffmpeg/ffmpeg\n".to_string();
-                packages.push("homebrew-ffmpeg/ffmpeg/ffmpeg-full");
-                names.push("FFmpeg (完整版)");
+                packages.push("ffmpeg");
+                names.push("FFmpeg");
             }
             "poppler" => {
                 packages.push("poppler");
@@ -553,10 +549,9 @@ pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
 
     let body = format!(
         r#"{bootstrap}
-{tap_cmd}echo "--> 正在通过 Homebrew 安装所选组件: {pkgs_str}..."
+echo "--> 正在通过 Homebrew 安装所选组件: {pkgs_str}..."
 yes | brew install {pkgs_str}"#,
         bootstrap = homebrew_bootstrap_sh(),
-        tap_cmd = tap_cmd,
         pkgs_str = pkgs_str
     );
 
