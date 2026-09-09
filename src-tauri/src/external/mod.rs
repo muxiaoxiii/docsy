@@ -352,18 +352,16 @@ echo ""
 if [ $STATUS -eq 0 ]; then
     echo "========================================="
     echo "  🎉 {tool_name} 安装成功！"
-    echo "  请返回 Docsy 点击「检测此工具」确认状态。"
-    echo "  终端窗口将在 3 秒后自动关闭..."
+    echo "  Docsy 正在实时检测并同步状态，您可以直接返回 Docsy 继续使用。"
     echo "========================================="
-    sleep 3
-    osascript -e 'tell application "Terminal" to close front window' & exit
+    exit 0
 else
     echo "========================================="
     echo "  ❌ 安装未完成或遇到错误（退出码: $STATUS）。"
-    echo "  请查看上方日志排查原因。按任意键关闭此窗口..."
+    echo "  请查看上方日志排查原因。按回车键退出..."
     echo "========================================="
-    read -n 1
-    osascript -e 'tell application "Terminal" to close front window' & exit
+    read -r
+    exit $STATUS
 fi
 "#
     )
@@ -431,47 +429,108 @@ if [ $INSTALL_STATUS -eq 0 ]; then
     echo ""
     echo "============================================================"
     echo "  🎉 Homebrew 安装并配置清华镜像成功！"
-    echo "  请返回 Docsy 继续完成外部工具组件配置。"
-    echo "  终端窗口将在 3 秒后自动关闭..."
+    echo "  Docsy 正在实时检测状态，您可以直接返回 Docsy 继续配置外部工具。"
     echo "============================================================"
-    sleep 3
-    osascript -e 'tell application "Terminal" to close front window' & exit
+    exit 0
 else
     echo ""
     echo "============================================================"
     echo "  ❌ 安装未完成或遇到错误（退出码: $INSTALL_STATUS）。"
-    echo "  请查看上方日志。按任意键关闭此窗口..."
+    echo "  请查看上方日志。按回车键退出..."
     echo "============================================================"
-    read -n 1
-    osascript -e 'tell application "Terminal" to close front window' & exit
+    read -r
+    exit $INSTALL_STATUS
 fi
 "#.to_string()
 }
 
-pub fn install_via_terminal(tool_name: &str) -> anyhow::Result<()> {
-    let script = match tool_name {
-        "homebrew" => homebrew_tsinghua_install_script(),
-        "ffmpeg" => wrap_terminal_script(
-            "正在通过 Homebrew 安装 FFmpeg (Full 完整版，含 drawtext 水印)",
-            r#"echo "1/2: 添加 ffmpeg tap 仓库..."
-yes | brew tap homebrew-ffmpeg/ffmpeg
-echo "2/2: 安装 ffmpeg-full (自动跳过确认)..."
-yes | brew install homebrew-ffmpeg/ffmpeg/ffmpeg-full || yes | brew install ffmpeg-full || yes | brew install ffmpeg"#,
-            "FFmpeg",
-        ),
-        "qpdf" => wrap_terminal_script(
-            "正在通过 Homebrew 安装 Qpdf",
-            r#"yes | brew install qpdf"#,
-            "Qpdf",
-        ),
-        "poppler" => wrap_terminal_script(
-            "正在通过 Homebrew 安装 Poppler",
-            r#"yes | brew install poppler"#,
-            "Poppler",
-        ),
-        other => anyhow::bail!("不支持通过终端安装工具 {other}"),
-    };
+pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
+    if tools.is_empty() {
+        return Ok(());
+    }
+    if tools.len() == 1 && tools[0] == "homebrew" {
+        return run_in_terminal(&homebrew_tsinghua_install_script());
+    }
+
+    let mut tap_cmd = String::new();
+    let mut packages = Vec::new();
+    let mut names = Vec::new();
+
+    for t in tools {
+        match t.as_str() {
+            "ffmpeg" => {
+                tap_cmd = "echo \"--> 正在添加 homebrew-ffmpeg tap 仓库...\"; yes | brew tap homebrew-ffmpeg/ffmpeg\n".to_string();
+                packages.push("homebrew-ffmpeg/ffmpeg/ffmpeg-full");
+                names.push("FFmpeg (完整版)");
+            }
+            "poppler" => {
+                packages.push("poppler");
+                names.push("Poppler");
+            }
+            "qpdf" => {
+                packages.push("qpdf");
+                names.push("Qpdf");
+            }
+            _ => {}
+        }
+    }
+
+    if packages.is_empty() {
+        return Ok(());
+    }
+
+    let pkgs_str = packages.join(" ");
+    let names_str = names.join("、");
+    let brew_bootstrap = r#"# 自动检查并确保 Homebrew 运行环境
+if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -f /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
+if ! command -v brew >/dev/null 2>&1; then
+    echo "============================================================"
+    echo "  检测到系统尚未安装 Homebrew，正在为您通过清华镜像自动安装..."
+    echo "============================================================"
+    export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
+    export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"
+    export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
+    export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
+    export HOMEBREW_PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+    export NONINTERACTIVE=1
+    export CI=1
+
+    TMP_BOOT_DIR=$(mktemp -d /tmp/docsy-brew-boot-XXXXXX)
+    git clone --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install.git "$TMP_BOOT_DIR/brew-install"
+    /bin/bash "$TMP_BOOT_DIR/brew-install/install.sh"
+    rm -rf "$TMP_BOOT_DIR"
+
+    [ -f /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
+    [ -f /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
+fi
+"#;
+
+    let body = format!(
+        r#"{brew_bootstrap}
+{tap_cmd}echo "--> 正在通过 Homebrew 安装所选组件: {pkgs_str}..."
+yes | brew install {pkgs_str}"#
+    );
+
+    let script = wrap_terminal_script(
+        &format!("正在安装 {}", names_str),
+        &body,
+        &names_str,
+    );
     run_in_terminal(&script)
+}
+
+pub fn install_via_terminal(tool_name: &str) -> anyhow::Result<()> {
+    let tools: Vec<String> = tool_name
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    install_tools_via_terminal(&tools)
 }
 
 #[cfg(test)]

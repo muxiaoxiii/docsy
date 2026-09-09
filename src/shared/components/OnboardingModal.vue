@@ -51,7 +51,9 @@
             />
           </div>
           <div class="card-icon" :style="{ backgroundColor: item.color + '15', color: item.color }">
-            <component :is="item.icon" />
+            <el-icon :size="22">
+              <component :is="item.icon" />
+            </el-icon>
           </div>
           <div class="card-content">
             <div class="card-title-row">
@@ -122,6 +124,10 @@
         </div>
       </div>
 
+      <div v-if="!isAllDone && isMac" class="progress-notice">
+        💡 系统终端正在合并安装所选组件。当组件安装完成，上方状态将自动点亮为「✓ 已就绪」。您可以随时点击下方按钮进入 Docsy，后台将持续进行。
+      </div>
+
       <div class="onboarding-footer progress-footer">
         <el-button
           v-if="!isAllDone"
@@ -146,12 +152,12 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { VideoCamera, Document, Files } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '../../stores/app.js'
 import { tauriCallSafe } from '../../core/tauriBridge.js'
-import { isMac, installToolViaTerminal } from '../../core/terminalInstall.js'
+import { isMac, installToolsBatchViaTerminal } from '../../core/terminalInstall.js'
 import spritesheet from '../../assets/doclet-v2-spritesheet.webp'
 
 const appStore = useAppStore()
@@ -160,6 +166,14 @@ const visible = ref(false)
 const step = ref('select') // 'select' | 'progress'
 const isAllDone = ref(false)
 const currentStatusText = ref('Doclet 正在准备…')
+let pollTimer = null
+
+function clearPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
 
 const featureList = reactive([
   {
@@ -260,35 +274,62 @@ async function startSetup() {
 
   for (const item of toInstall) {
     item.status = 'installing'
-    currentStatusText.value = `Doclet 正在为您配置 ${item.title}…`
+  }
 
-    if (isMac) {
-      // macOS 走终端安装流程
-      await installToolViaTerminal(item.tool, item.toolLabel)
-      // 终端已拉起，由于可能耗时较长，标记为就绪/已触发
-      item.status = 'ready'
-    } else {
-      // Windows 走后台自动下载托管包安装
+  if (isMac) {
+    currentStatusText.value = '已打开系统终端合并安装所选组件，Doclet 正在实时检测就绪状态…'
+    await installToolsBatchViaTerminal(toInstall.map((item) => item.tool))
+
+    clearPolling()
+    pollTimer = setInterval(async () => {
+      let pendingCount = 0
+      for (const item of toInstall) {
+        if (item.status === 'ready') continue
+        const res = await tauriCallSafe('check_external_tool', { toolName: item.tool })
+        if (res.ok && res.data?.available) {
+          item.ready = true
+          item.status = 'ready'
+        } else {
+          pendingCount++
+        }
+      }
+      if (pendingCount === 0) {
+        clearPolling()
+        isAllDone.value = true
+        currentStatusText.value = '🎉 所有组件已成功安装并验证就绪！'
+      }
+    }, 2000)
+  } else {
+    // Windows / other: 走托管包下载或后台安装
+    for (const item of toInstall) {
+      currentStatusText.value = `Doclet 正在为您配置 ${item.title}…`
       const res = await tauriCallSafe('install_external_tool', { toolName: item.tool })
       if (res.ok) {
+        item.ready = true
         item.status = 'ready'
       } else {
         item.status = 'error'
       }
     }
+    const allReady = toInstall.every((i) => i.status === 'ready')
+    if (allReady) {
+      isAllDone.value = true
+      currentStatusText.value = '🎉 外部组件配置流程已完成！'
+    } else {
+      currentStatusText.value = '部分组件安装遇到问题，可进入 Docsy 在设置中重试'
+    }
   }
-
-  isAllDone.value = true
-  currentStatusText.value = '🎉 外部组件配置流程已完成！'
 }
 
 async function handleSkip() {
+  clearPolling()
   await appStore.completeOnboarding()
   visible.value = false
   ElMessage.info('已跳过引导，您稍后可随时在「设置」中安装所需组件')
 }
 
 async function finishOnboarding() {
+  clearPolling()
   await appStore.completeOnboarding()
   visible.value = false
   ElMessage.success('欢迎开启 Docsy，尽情探索吧！')
@@ -300,6 +341,10 @@ function showModal() {
   visible.value = true
   probeInitialTools()
 }
+
+onUnmounted(() => {
+  clearPolling()
+})
 
 defineExpose({
   show: showModal,
@@ -409,19 +454,40 @@ onMounted(async () => {
 }
 
 .card-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
   flex-shrink: 0;
+}
+
+.card-icon :deep(.el-icon) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-icon :deep(svg),
+.card-icon svg {
+  width: 22px;
+  height: 22px;
 }
 
 .card-content {
   flex: 1;
   min-width: 0;
+}
+
+.progress-notice {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
 }
 
 .card-title-row {
