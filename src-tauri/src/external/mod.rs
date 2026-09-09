@@ -367,44 +367,32 @@ fi
     )
 }
 
-fn homebrew_tsinghua_install_script() -> String {
+fn homebrew_ustc_install_script() -> String {
     r#"clear
 echo "============================================================"
-echo "  Docsy: 正在通过 清华大学开源软件镜像站 安装 Homebrew"
-echo "  （教育骨干网高速节点，无 Gitee 限流排队与第三方风险）"
+echo "  Docsy: 正在通过 中国科学技术大学(USTC) 开源镜像站 安装 Homebrew"
+echo "  （高速专用 CDN 节点，无需排队等待）"
 echo "============================================================"
 echo ""
 
-# 1. 导出清华大学镜像源环境变量
-export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
-export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"
-export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
-export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
-export HOMEBREW_PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+# 1. 导出中科大高速镜像环境变量（避免清华/Gitee 排队机制）
+export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"
+export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.ustc.edu.cn/homebrew-core.git"
+export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"
+export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"
 export NONINTERACTIVE=1
 export CI=1
 
-# 2. 从清华大学镜像站快速拉取官方安装程序
-TMP_DIR=$(mktemp -d /tmp/docsy-brew-XXXXXX)
-cd "$TMP_DIR"
-echo "--> 1/3: 正在从清华镜像拉取官方安装脚本..."
-git clone --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install.git brew-install
-
-echo ""
-echo "--> 2/3: 开始执行 Homebrew 安装..."
+echo "--> 1/2: 正在执行 Homebrew 极速安装..."
 echo "⚠️  若系统弹出开机密码提示，请直接盲敲键盘输入密码并按回车（无星号显示属于正常安全机制）"
 echo ""
 
-/bin/bash brew-install/install.sh
+/bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
 INSTALL_STATUS=$?
-
-# 清理临时下载目录
-cd /
-rm -rf "$TMP_DIR"
 
 if [ $INSTALL_STATUS -eq 0 ]; then
     echo ""
-    echo "--> 3/3: 正在配置永久清华大学镜像与终端环境变量..."
+    echo "--> 2/2: 正在配置中科大高速镜像与终端环境变量..."
     
     BREW_BIN="/opt/homebrew/bin/brew"
     [ ! -f "$BREW_BIN" ] && BREW_BIN="/usr/local/bin/brew"
@@ -419,16 +407,16 @@ if [ $INSTALL_STATUS -eq 0 ]; then
             echo "eval \"\$($BREW_BIN shellenv)\"" >> "$ZPROFILE"
         fi
         if ! grep -q 'HOMEBREW_BREW_GIT_REMOTE' "$ZPROFILE" 2>/dev/null; then
-            echo 'export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"' >> "$ZPROFILE"
-            echo 'export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"' >> "$ZPROFILE"
-            echo 'export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"' >> "$ZPROFILE"
-            echo 'export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"' >> "$ZPROFILE"
+            echo 'export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"' >> "$ZPROFILE"
+            echo 'export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.ustc.edu.cn/homebrew-core.git"' >> "$ZPROFILE"
+            echo 'export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"' >> "$ZPROFILE"
+            echo 'export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"' >> "$ZPROFILE"
         fi
     fi
 
     echo ""
     echo "============================================================"
-    echo "  🎉 Homebrew 安装并配置清华镜像成功！"
+    echo "  🎉 Homebrew 安装并配置中科大镜像成功！"
     echo "  Docsy 正在实时检测状态，您可以直接返回 Docsy 继续配置外部工具。"
     echo "============================================================"
     exit 0
@@ -449,7 +437,7 @@ pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
     if tools.len() == 1 && tools[0] == "homebrew" {
-        return run_in_terminal(&homebrew_tsinghua_install_script());
+        return run_in_terminal(&homebrew_ustc_install_script());
     }
 
     let mut tap_cmd = String::new();
@@ -490,20 +478,16 @@ fi
 
 if ! command -v brew >/dev/null 2>&1; then
     echo "============================================================"
-    echo "  检测到系统尚未安装 Homebrew，正在为您通过清华镜像自动安装..."
+    echo "  检测到系统尚未安装 Homebrew，正在为您通过中科大(USTC)极速镜像安装..."
     echo "============================================================"
-    export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
-    export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"
-    export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
-    export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
-    export HOMEBREW_PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+    export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"
+    export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.ustc.edu.cn/homebrew-core.git"
+    export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"
+    export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"
     export NONINTERACTIVE=1
     export CI=1
 
-    TMP_BOOT_DIR=$(mktemp -d /tmp/docsy-brew-boot-XXXXXX)
-    git clone --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install.git "$TMP_BOOT_DIR/brew-install"
-    /bin/bash "$TMP_BOOT_DIR/brew-install/install.sh"
-    rm -rf "$TMP_BOOT_DIR"
+    /bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
 
     [ -f /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
     [ -f /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
