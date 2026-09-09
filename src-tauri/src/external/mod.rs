@@ -415,59 +415,84 @@ fi
     )
 }
 
-fn homebrew_ustc_install_script() -> String {
-    r#"setopt interactivecomments 2>/dev/null || true
-clear
-echo "============================================================"
-echo "  Docsy: 正在通过 中国科学技术大学(USTC) 开源镜像站 安装 Homebrew"
-echo "  （高速专用 CDN 节点，无需排队等待）"
-echo "============================================================"
-echo ""
+fn homebrew_bootstrap_sh() -> &'static str {
+    r#": # 自动检查并确保 Homebrew 运行环境与国内极速镜像
+if [ "$(uname -m)" = "arm64" ]; then
+    BREW_PREFIX="/opt/homebrew"
+else
+    BREW_PREFIX="/usr/local/Homebrew"
+fi
 
-# 允许终端正常进行交互密码输入（不能开启 NONINTERACTIVE，否则 sudo 权限无法输入密码）
-unset NONINTERACTIVE
-unset CI
+if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -f /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
 
-# 1. 导出中科大高速镜像环境变量（避免清华/Gitee 排队机制）
-export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"
-export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.ustc.edu.cn/homebrew-core.git"
-export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"
-export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"
-
-echo "--> 1/2: 正在执行 Homebrew 极速安装..."
-echo "⚠️  若系统弹出开机密码提示 Password:，请直接盲敲键盘输入电脑开机密码并按回车（输密码时不显示字符属于 macOS 正常安全机制）"
-echo ""
-
-/bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
-INSTALL_STATUS=$?
-
-if [ $INSTALL_STATUS -eq 0 ]; then
+if ! command -v brew >/dev/null 2>&1 && [ ! -f "$BREW_PREFIX/bin/brew" ]; then
+    echo "============================================================"
+    echo "  Docsy: 正在为您内置部署 Homebrew (中国科大/清华极速镜像免确认版)"
+    echo "============================================================"
     echo ""
-    echo "--> 2/2: 正在配置中科大高速镜像与终端环境变量..."
-    
-    BREW_BIN="/opt/homebrew/bin/brew"
-    [ ! -f "$BREW_BIN" ] && BREW_BIN="/usr/local/bin/brew"
-    
-    if [ -f "$BREW_BIN" ]; then
-        eval "$($BREW_BIN shellenv)"
-        
-        ZPROFILE="$HOME/.zprofile"
-        touch "$ZPROFILE"
-        
-        if ! grep -q 'brew shellenv' "$ZPROFILE" 2>/dev/null; then
-            echo "eval \"\$($BREW_BIN shellenv)\"" >> "$ZPROFILE"
-        fi
-        if ! grep -q 'HOMEBREW_BREW_GIT_REMOTE' "$ZPROFILE" 2>/dev/null; then
-            echo 'export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"' >> "$ZPROFILE"
-            echo 'export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.ustc.edu.cn/homebrew-core.git"' >> "$ZPROFILE"
-            echo 'export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"' >> "$ZPROFILE"
-            echo 'export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"' >> "$ZPROFILE"
-        fi
+
+    if [ ! -d "$BREW_PREFIX" ] || [ ! -w "$BREW_PREFIX" ]; then
+        echo "--> 1/3: 正在初始化 Homebrew 安装目录..."
+        echo "⚠️  若系统提示 Password:，请直接盲敲输入电脑开机密码并按回车（输密码不显字符属于正常机制）："
+        sudo mkdir -p "$BREW_PREFIX"
+        sudo chown -R "$(whoami):admin" "$BREW_PREFIX"
     fi
 
+    echo "--> 2/3: 正在通过高速 CDN 节点极速部署 Homebrew 核心..."
+    if [ -d "$BREW_PREFIX/.git" ]; then
+        git -C "$BREW_PREFIX" fetch --depth=1 origin main 2>/dev/null || true
+        git -C "$BREW_PREFIX" reset --hard origin/main 2>/dev/null || true
+    else
+        git clone --depth=1 https://mirrors.ustc.edu.cn/brew.git "$BREW_PREFIX" 2>/dev/null || \
+        git clone --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git "$BREW_PREFIX"
+    fi
+
+    if [ "$(uname -m)" != "arm64" ] && [ ! -f /usr/local/bin/brew ]; then
+        sudo mkdir -p /usr/local/bin
+        sudo ln -sf "$BREW_PREFIX/bin/brew" /usr/local/bin/brew
+    fi
+
+    echo "--> 3/3: 正在配置终端国内极速镜像源与环境变量..."
+    eval "$("$BREW_PREFIX/bin/brew" shellenv)"
+
+    ZPROFILE="$HOME/.zprofile"
+    touch "$ZPROFILE"
+    if ! grep -q 'brew shellenv' "$ZPROFILE" 2>/dev/null; then
+        echo "eval \"\$($BREW_PREFIX/bin/brew shellenv)\"" >> "$ZPROFILE"
+    fi
+    if ! grep -q 'HOMEBREW_API_DOMAIN' "$ZPROFILE" 2>/dev/null; then
+        echo 'export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"' >> "$ZPROFILE"
+        echo 'export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"' >> "$ZPROFILE"
+        echo 'export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"' >> "$ZPROFILE"
+    fi
+fi
+
+# 全局开启非交互及国内极速镜像通道
+export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"
+export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"
+export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+export NONINTERACTIVE=1
+"#
+}
+
+fn homebrew_ustc_install_script() -> String {
+    format!(
+        r#"setopt interactivecomments 2>/dev/null || true
+clear
+{bootstrap}
+BREW_BIN="/opt/homebrew/bin/brew"
+[ ! -f "$BREW_BIN" ] && BREW_BIN="/usr/local/bin/brew"
+
+if [ -f "$BREW_BIN" ]; then
     echo ""
     echo "============================================================"
-    echo "  🎉 Homebrew 安装并配置中科大镜像成功！"
+    echo "  🎉 Homebrew 已成功内置部署就绪（中科大/清华极速镜像）！"
     echo "  Docsy 正在实时检测状态，窗口即将自动关闭..."
     echo "============================================================"
     sleep 1
@@ -476,14 +501,16 @@ if [ $INSTALL_STATUS -eq 0 ]; then
 else
     echo ""
     echo "============================================================"
-    echo "  ❌ 安装未完成或遇到错误（退出码: $INSTALL_STATUS）。"
-    echo "  请查看上方日志。按回车键退出..."
+    echo "  ❌ Homebrew 部署未完成，请查看上方日志排查。"
+    echo "  按回车键退出..."
     echo "============================================================"
     read -r
     MY_TTY=$(tty)
     osascript -e "tell application \"Terminal\" to close (every window whose tty of selected tab is \"$MY_TTY\")"
 fi
-"#.to_string()
+"#,
+        bootstrap = homebrew_bootstrap_sh()
+    )
 }
 
 pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
@@ -523,40 +550,14 @@ pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
 
     let pkgs_str = packages.join(" ");
     let names_str = names.join("、");
-    let brew_bootstrap = r#": # 自动检查并确保 Homebrew 运行环境
-if [ -f /opt/homebrew/bin/brew ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [ -f /usr/local/bin/brew ]; then
-    eval "$(/usr/local/bin/brew shellenv)"
-fi
-
-if ! command -v brew >/dev/null 2>&1; then
-    echo "============================================================"
-    echo "  检测到系统尚未安装 Homebrew，正在为您通过中科大(USTC)极速镜像安装..."
-    echo "  ⚠️ 若提示输入 Password:，请直接盲敲键盘输入开机密码并按回车"
-    echo "============================================================"
-    unset NONINTERACTIVE
-    unset CI
-    export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.ustc.edu.cn/brew.git"
-    export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.ustc.edu.cn/homebrew-core.git"
-    export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles"
-    export HOMEBREW_API_DOMAIN="https://mirrors.ustc.edu.cn/homebrew-bottles/api"
-
-    /bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
-
-    [ -f /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
-    [ -f /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
-fi
-
-export NONINTERACTIVE=1
-export HOMEBREW_NO_AUTO_UPDATE=1
-export HOMEBREW_NO_INSTALL_CLEANUP=1
-"#;
 
     let body = format!(
-        r#"{brew_bootstrap}
+        r#"{bootstrap}
 {tap_cmd}echo "--> 正在通过 Homebrew 安装所选组件: {pkgs_str}..."
-yes | brew install {pkgs_str}"#
+yes | brew install {pkgs_str}"#,
+        bootstrap = homebrew_bootstrap_sh(),
+        tap_cmd = tap_cmd,
+        pkgs_str = pkgs_str
     );
 
     let script = wrap_terminal_script(
