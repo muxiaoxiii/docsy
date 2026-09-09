@@ -106,20 +106,6 @@ export async function openToolDownloadWithGuide(toolName, fallbackUrl, fallbackL
  */
 export async function installToolViaTerminal(toolName, toolLabel, onFinished) {
   const targetName = toolLabel || toolName
-
-  // 若本机已具备 Homebrew，优先走后台静默安装，完全无需弹出终端黑框！
-  const brewRes = await tauriCallSafe('check_homebrew_installed')
-  if (brewRes.ok && brewRes.data) {
-    ElMessage.info(`Docsy 正在后台静默安装 ${targetName}，请稍候…`)
-    const res = await tauriCallSafe('install_external_tool', { toolName })
-    if (res.ok) {
-      ElMessage.success(`${targetName} 已在后台安装完成！`)
-      if (typeof onFinished === 'function') onFinished()
-      return true
-    }
-  }
-
-  // 兜底唤起终端（如需首次安装 Homebrew），安装完将自动关闭终端窗口
   const res = await tauriCallSafe('open_terminal_to_install', { toolName })
   if (res.ok) {
     ElMessage.success(`已为您打开终端开始安装 ${targetName}。`)
@@ -134,28 +120,12 @@ export async function installToolViaTerminal(toolName, toolLabel, onFinished) {
 }
 
 /**
- * 在 macOS 下合并多个工具一次性安装（若具备 Homebrew 优先走后台静默安装）
+ * 在 macOS 下合并多个工具一次性打开终端进行批量安装
  * @param {string[]} toolNames 工具标识列表（如 ['ffmpeg', 'poppler', 'qpdf']）
  * @param {Function} [onStarted] 成功唤起安装后的回调
  */
 export async function installToolsBatchViaTerminal(toolNames, onStarted) {
   if (!toolNames || toolNames.length === 0) return true
-
-  // 若已具备 Homebrew，全部走后台静默安装，无需开启黑框终端！
-  const brewRes = await tauriCallSafe('check_homebrew_installed')
-  if (brewRes.ok && brewRes.data) {
-    ElMessage.info('Docsy 正在后台静默安装组件，请稍候…')
-    for (const tool of toolNames) {
-      await tauriCallSafe('install_external_tool', { toolName: tool })
-    }
-    ElMessage.success('所有所选组件已在后台安装完成！')
-    if (typeof onStarted === 'function') {
-      onStarted()
-    }
-    return true
-  }
-
-  // 首次未安装 Homebrew 时唤起免交互终端进行极速内置部署
   const res = await tauriCallSafe('open_terminal_to_install', {
     toolName: toolNames.join(','),
   })

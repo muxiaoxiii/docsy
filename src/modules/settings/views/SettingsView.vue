@@ -455,7 +455,22 @@ function syncDiagnosticToolStatus() {
 async function installTool(name) {
   const tool = tools.find((t) => t.name === name)
   if (isMac) {
-    await installToolViaTerminal(name, tool?.label || name)
+    if (tool) tool.installing = true
+    const ok = await installToolViaTerminal(name, tool?.label || name)
+    if (!ok) {
+      if (tool) tool.installing = false
+      return
+    }
+    let checks = 0
+    const timer = setInterval(async () => {
+      checks++
+      if (tool) await checkTool(tool)
+      if (tool?.status?.available || checks > 150) {
+        clearInterval(timer)
+        if (tool) tool.installing = false
+        await loadDiagnostic()
+      }
+    }, 2000)
     return
   }
   if (tool) tool.installing = true

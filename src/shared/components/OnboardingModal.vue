@@ -277,33 +277,7 @@ async function startSetup() {
   }
 
   if (isMac) {
-    const brewRes = await tauriCallSafe('check_homebrew_installed')
-    const hasBrew = brewRes.ok && Boolean(brewRes.data)
-
-    if (hasBrew) {
-      // 本机已有 Homebrew：后台静默安装，完全无需弹出终端黑框！
-      for (const item of toInstall) {
-        currentStatusText.value = `Doclet 正在后台配置 ${item.title}…`
-        const res = await tauriCallSafe('install_external_tool', { toolName: item.tool })
-        if (res.ok) {
-          item.ready = true
-          item.status = 'ready'
-        } else {
-          item.status = 'error'
-        }
-      }
-      const allReady = toInstall.every((i) => i.status === 'ready')
-      if (allReady) {
-        isAllDone.value = true
-        currentStatusText.value = '🎉 所有组件已成功安装并验证就绪！'
-      } else {
-        currentStatusText.value = '部分组件安装遇到问题，可进入 Docsy 设置中重试'
-      }
-      return
-    }
-
-    // 尚未安装 Homebrew：打开系统终端执行安装（完成后 1 秒自动关闭窗口）
-    currentStatusText.value = '已打开系统终端初始化 Homebrew 与所选组件，Doclet 正在实时检测就绪状态…'
+    currentStatusText.value = '已打开系统终端执行安装，Doclet 正在实时检测就绪状态…'
     await installToolsBatchViaTerminal(toInstall.map((item) => item.tool))
 
     clearPolling()
