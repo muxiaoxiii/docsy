@@ -337,20 +337,63 @@ end tell"#,
     }
 }
 
+fn wrap_terminal_script(title: &str, body: &str, tool_name: &str) -> String {
+    format!(
+        r#"clear
+export NONINTERACTIVE=1
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+export CI=1
+echo "=== Docsy: {title} ==="
+echo ""
+{body}
+STATUS=$?
+echo ""
+if [ $STATUS -eq 0 ]; then
+    echo "========================================="
+    echo "  🎉 {tool_name} 安装成功！"
+    echo "  请返回 Docsy 点击「检测此工具」确认状态。"
+    echo "  终端窗口将在 3 秒后自动关闭..."
+    echo "========================================="
+    sleep 3
+    osascript -e 'tell application "Terminal" to close front window' & exit
+else
+    echo "========================================="
+    echo "  ❌ 安装未完成或遇到错误（退出码: $STATUS）。"
+    echo "  请查看上方日志排查原因。按任意键关闭此窗口..."
+    echo "========================================="
+    read -n 1
+    osascript -e 'tell application "Terminal" to close front window' & exit
+fi
+"#
+    )
+}
+
 pub fn install_via_terminal(tool_name: &str) -> anyhow::Result<()> {
     let script = match tool_name {
-        "homebrew" => {
-            r#"clear; echo "=== Docsy: 安装 Homebrew (国内极速镜像源) ==="; export NONINTERACTIVE=1; echo ""; /bin/zsh -c "$(curl -fsSL https://gitee.com/cunkai/HomebrewCN/raw/master/Homebrew.sh)"; echo ""; echo "=== 安装结束 ==="; echo "如果安装成功，请返回 Docsy 继续安装外部工具。""#.to_string()
-        }
-        "ffmpeg" => {
-            r#"clear; echo "=== Docsy: 正在通过 Homebrew 安装 FFmpeg (Full 完整版，含 drawtext 水印) ==="; export NONINTERACTIVE=1; export HOMEBREW_NO_AUTO_UPDATE=1; echo "1/2: 添加 ffmpeg tap 仓库..."; brew tap homebrew-ffmpeg/ffmpeg; echo "2/2: 安装 ffmpeg-full..."; brew install homebrew-ffmpeg/ffmpeg/ffmpeg-full || brew install ffmpeg-full || brew install ffmpeg; echo ""; echo "=== 执行完毕 ==="; echo "请返回 Docsy，点击「检测此工具」或「重新检测」确认状态。""#.to_string()
-        }
-        "qpdf" => {
-            r#"clear; echo "=== Docsy: 正在通过 Homebrew 安装 Qpdf ==="; export NONINTERACTIVE=1; export HOMEBREW_NO_AUTO_UPDATE=1; echo "执行命令: brew install qpdf"; echo ""; brew install qpdf; echo ""; echo "=== 执行完毕 ==="; echo "请返回 Docsy，点击「检测此工具」或「重新检测」确认状态。""#.to_string()
-        }
-        "poppler" => {
-            r#"clear; echo "=== Docsy: 正在通过 Homebrew 安装 Poppler ==="; export NONINTERACTIVE=1; export HOMEBREW_NO_AUTO_UPDATE=1; echo "执行命令: brew install poppler"; echo ""; brew install poppler; echo ""; echo "=== 执行完毕 ==="; echo "请返回 Docsy，点击「检测此工具」或「重新检测」确认状态。""#.to_string()
-        }
+        "homebrew" => wrap_terminal_script(
+            "安装 Homebrew (国内极速镜像源)",
+            r#"/bin/zsh -c "$(curl -fsSL https://gitee.com/cunkai/HomebrewCN/raw/master/Homebrew.sh)""#,
+            "Homebrew",
+        ),
+        "ffmpeg" => wrap_terminal_script(
+            "正在通过 Homebrew 安装 FFmpeg (Full 完整版，含 drawtext 水印)",
+            r#"echo "1/2: 添加 ffmpeg tap 仓库..."
+yes | brew tap homebrew-ffmpeg/ffmpeg
+echo "2/2: 安装 ffmpeg-full (自动跳过确认)..."
+yes | brew install homebrew-ffmpeg/ffmpeg/ffmpeg-full || yes | brew install ffmpeg-full || yes | brew install ffmpeg"#,
+            "FFmpeg",
+        ),
+        "qpdf" => wrap_terminal_script(
+            "正在通过 Homebrew 安装 Qpdf",
+            r#"yes | brew install qpdf"#,
+            "Qpdf",
+        ),
+        "poppler" => wrap_terminal_script(
+            "正在通过 Homebrew 安装 Poppler",
+            r#"yes | brew install poppler"#,
+            "Poppler",
+        ),
         other => anyhow::bail!("不支持通过终端安装工具 {other}"),
     };
     run_in_terminal(&script)
