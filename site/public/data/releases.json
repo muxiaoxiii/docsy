@@ -11,8 +11,8 @@
         {
           "platform": "macos",
           "name": "Docsy_1.0.1_aarch64.dmg",
-          "size": 19206369,
-          "sha256": "6f4a2696d8bd191bc2dd8f5c3e4d50302153fc53beddca1d5033c9053b4bd42f",
+          "size": 19208084,
+          "sha256": "1aa4ff4c2c02bdfa4d663b8ba9f2ecf8372e9a5d7eb37e26a37c6a6697c3bd69",
           "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.1/Docsy_1.0.1_aarch64.dmg",
           "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.1/Docsy_1.0.1_aarch64.dmg"
         },

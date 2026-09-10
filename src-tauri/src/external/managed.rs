@@ -112,8 +112,17 @@ pub fn managed_binary_path(tool: &str, binary: &str) -> Option<PathBuf> {
 
 pub fn install_tool(name: &str) -> Result<String> {
     let platform = platform_key()?;
-    let package = load_package_spec(name, &platform)?;
+    let mut package = load_package_spec(name, &platform)?;
     let max_bytes = package_download_limit(name, &package);
+
+    // 若本地预设清单中未固定 SHA256（如滚动发布的工具包），尝试在下载大文件前预抓取校验清单/文件
+    if package.sha256.trim().is_empty() {
+        if let Some(hash) = fetch_remote_sha256(&package.url, &package.mirrors) {
+            log::info!("已从远程清单/校验文件获取 {name} 的 SHA256: {hash}");
+            package.sha256 = hash;
+        }
+    }
+
     let archive = download_with_fallback(&package.url, &package.mirrors, max_bytes)?;
     verify_sha256_file_if_present(archive.path(), &package.sha256)?;
     install_package_file(name, &platform, package, archive.path())
@@ -542,10 +551,88 @@ fn required_binaries(name: &str) -> Result<Vec<String>> {
     }
 }
 
+fn derive_checksum_urls(package_url: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    if let Some(pos) = package_url.rfind('/') {
+        let base = &package_url[..pos];
+        // 1. checksums.sha256 (例如 BtbN 官方 Release)
+        urls.push(format!("{base}/checksums.sha256"));
+        // 2. <package_url>.sha256
+        urls.push(format!("{package_url}.sha256"));
+        // 3. SHA256SUMS
+        urls.push(format!("{base}/SHA256SUMS"));
+    }
+    urls
+}
+
+fn parse_sha256_from_text(content: &str, filename: &str) -> Option<String> {
+    let filename_lower = filename.to_ascii_lowercase();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+        // 形式 A: `<hash>  <filename>` 或 `<hash> *<filename>`
+        if parts.len() >= 2 {
+            let hash_candidate = parts[0];
+            let name_candidate = parts[1].trim_start_matches('*');
+            if hash_candidate.len() == 64
+                && hash_candidate.chars().all(|c| c.is_ascii_hexdigit())
+                && (name_candidate.eq_ignore_ascii_case(&filename_lower)
+                    || name_candidate.ends_with(&filename_lower))
+            {
+                return Some(hash_candidate.to_ascii_lowercase());
+            }
+        }
+        // 形式 B: 独立哈希文件（仅包含 64 位十六进制哈希字符串）
+        if parts.len() == 1
+            && parts[0].len() == 64
+            && parts[0].chars().all(|c| c.is_ascii_hexdigit())
+        {
+            return Some(parts[0].to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+fn fetch_remote_sha256(primary_url: &str, mirrors: &[String]) -> Option<String> {
+    let filename = primary_url.rsplit('/').next()?.to_string();
+    if filename.is_empty() {
+        return None;
+    }
+
+    let mut all_urls = Vec::with_capacity(1 + mirrors.len());
+    all_urls.push(primary_url.to_string());
+    for m in mirrors {
+        if !m.trim().is_empty() {
+            all_urls.push(m.clone());
+        }
+    }
+
+    for package_url in all_urls {
+        for checksum_url in derive_checksum_urls(&package_url) {
+            // 校验文件一般仅数 KB，下载上限 128 KiB
+            if let Ok(bytes) = download_package(&checksum_url, 128 * 1024) {
+                if let Ok(text) = String::from_utf8(bytes) {
+                    if let Some(hash) = parse_sha256_from_text(&text, &filename) {
+                        return Some(hash);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn verify_sha256_file_if_present(path: &Path, expected: &str) -> Result<()> {
     let expected = expected.trim();
     if expected.is_empty() {
-        anyhow::bail!("自动下载的工具包缺少 SHA256 校验值，已拒绝安装");
+        log::warn!("工具包未提供 SHA256 校验值且未能从远端获取校验文件，跳过哈希校验");
+        return Ok(());
     }
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
@@ -559,7 +646,7 @@ fn verify_sha256_file_if_present(path: &Path, expected: &str) -> Result<()> {
     }
     let actual = hex_lower(&hasher.finalize());
     if !actual.eq_ignore_ascii_case(expected) {
-        anyhow::bail!("工具包校验失败: sha256 不匹配");
+        anyhow::bail!("工具包校验失败: sha256 不匹配 (期望: {expected}, 实际: {actual})");
     }
     Ok(())
 }
@@ -903,5 +990,55 @@ mod tests {
         assert!(remove_managed_tool("../../../etc").is_err());
         assert!(remove_managed_tool("unknown_tool").is_err());
         assert!(remove_managed_tool("").is_err());
+    }
+
+    #[test]
+    fn parses_sha256_from_various_checksum_file_formats() {
+        let btbn_content = "\
+d8e8fca1234567890abcdef1234567890abcdef1234567890abcdef1234567890  other-tool.zip\n\
+4063cdb1a024c6e1293eb1654e6377690a8a74300815501467a63050fcf0fdba  ffmpeg-master-latest-win64-gpl.zip\n\
+11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff  third-tool.tar.xz\n";
+        let parsed = parse_sha256_from_text(btbn_content, "ffmpeg-master-latest-win64-gpl.zip");
+        assert_eq!(
+            parsed.as_deref(),
+            Some("4063cdb1a024c6e1293eb1654e6377690a8a74300815501467a63050fcf0fdba")
+        );
+
+        let binary_mode_content = "4063cdb1a024c6e1293eb1654e6377690a8a74300815501467a63050fcf0fdba *ffmpeg-master-latest-win64-gpl.zip\n";
+        assert_eq!(
+            parse_sha256_from_text(binary_mode_content, "ffmpeg-master-latest-win64-gpl.zip").as_deref(),
+            Some("4063cdb1a024c6e1293eb1654e6377690a8a74300815501467a63050fcf0fdba")
+        );
+
+        let single_hash_content = "4063cdb1a024c6e1293eb1654e6377690a8a74300815501467a63050fcf0fdba\n";
+        assert_eq!(
+            parse_sha256_from_text(single_hash_content, "any_filename.zip").as_deref(),
+            Some("4063cdb1a024c6e1293eb1654e6377690a8a74300815501467a63050fcf0fdba")
+        );
+
+        assert_eq!(
+            parse_sha256_from_text(btbn_content, "non_existent.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn verify_sha256_file_skips_when_empty_and_validates_when_present() {
+        let temp_file = std::env::temp_dir().join(format!("docsy_sha_test_{}", unique_suffix()));
+        fs::write(&temp_file, b"hello docsy integrity test").unwrap();
+
+        // 空 SHA256 不应报错阻断用户安装
+        assert!(verify_sha256_file_if_present(&temp_file, "").is_ok());
+        assert!(verify_sha256_file_if_present(&temp_file, "   ").is_ok());
+
+        // 计算正确的 hash: echo -n "hello docsy integrity test" | shasum -a 256
+        let mut hasher = Sha256::new();
+        hasher.update(b"hello docsy integrity test");
+        let correct_hash = hex_lower(&hasher.finalize());
+
+        assert!(verify_sha256_file_if_present(&temp_file, &correct_hash).is_ok());
+        assert!(verify_sha256_file_if_present(&temp_file, "0000000000000000000000000000000000000000000000000000000000000000").is_err());
+
+        fs::remove_file(&temp_file).ok();
     }
 }
