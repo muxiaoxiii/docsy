@@ -4,9 +4,34 @@
 
   /* 无 JS 或数据加载失败时的回退数据（与发布产物保持一致） */
   var FALLBACK = {
-    latest: '1.0.1',
+    latest: '1.0.2',
     githubUrl: 'https://github.com/muxiaoxiii/docsy/releases',
     releases: [
+      {
+        version: '1.0.2',
+        tag: 'v1.0.2',
+        published_at: '2026-09-14T11:40:00Z',
+        assets: [
+          {
+            platform: 'macos',
+            name: 'Docsy_1.0.2_aarch64.dmg',
+            size: 19250000,
+            sha256: '',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.2/Docsy_1.0.2_aarch64.dmg',
+            github_url:
+              'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.2/Docsy_1.0.2_aarch64.dmg',
+          },
+          {
+            platform: 'windows',
+            name: 'Docsy_1.0.2_x64-setup.exe',
+            size: 12750000,
+            sha256: '',
+            url: 'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.2/Docsy_1.0.2_x64-setup.exe',
+            github_url:
+              'https://github.com/muxiaoxiii/docsy/releases/download/v1.0.2/Docsy_1.0.2_x64-setup.exe',
+          },
+        ],
+      },
       {
         version: '1.0.1',
         tag: 'v1.0.1',
@@ -86,6 +111,20 @@
   };
 
   var FALLBACK_CHANGELOG = [
+    {
+      version: '1.0.2',
+      date: '2026-09-14',
+      sections: [
+        {
+          title: '新增与安全优化',
+          items: [
+            '**GitHub 镜像测速与自定义加速**：新增节点测速与私有反代镜像管理，工具包下载自动加速且支持空 SHA 容错。',
+            '**深度安全加固**：修补证据改名前缀路径穿越、限定 LibreOffice 程序名称、增加模板库目录边界防御并收窄 Capabilities 权限。',
+            '**任务取消统一与生命周期**：新增统一取消命令，同时强制终止异步任务与外部子进程；优化引导向导熔断与定时器清理。',
+          ],
+        },
+      ],
+    },
     {
       version: '1.0.1',
       date: '2026-09-09',
