@@ -4,8 +4,20 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::Emitter;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhProxySpeedResult {
+    pub name: String,
+    pub proxy_url: String,
+    pub latency_ms: Option<u64>,
+    pub is_available: bool,
+    pub is_direct: bool,
+    pub is_custom: bool,
+    pub error: Option<String>,
+}
 
 // TempArchive 与通用 TempPathGuard 语义相同（drop 时删除临时文件），收敛为别名。
 use crate::util::fs::TempPathGuard as TempArchive;
@@ -382,8 +394,42 @@ fn download_with_fallback(
     mirrors: &[String],
     max_bytes: u64,
 ) -> Result<TempArchive> {
-    let mut urls = vec![primary.to_string()];
-    urls.extend(mirrors.iter().cloned());
+    let settings = crate::services::history::get_settings().unwrap_or_default();
+    let mut urls = Vec::new();
+    let is_github = primary.contains("github.com") || primary.contains("githubusercontent.com");
+
+    if is_github {
+        if let Some(selected) = settings.selected_gh_proxy.as_deref() {
+            let selected = selected.trim();
+            if selected.eq_ignore_ascii_case("direct") {
+                urls.push(primary.to_string());
+            } else if !selected.is_empty() {
+                let base = selected.trim_end_matches('/');
+                urls.push(format!("{base}/{primary}"));
+            }
+        }
+        for custom in &settings.custom_gh_proxies {
+            let custom_clean = custom.trim();
+            if !custom_clean.is_empty() {
+                let base = custom_clean.trim_end_matches('/');
+                let candidate = format!("{base}/{primary}");
+                if !urls.contains(&candidate) {
+                    urls.push(candidate);
+                }
+            }
+        }
+    }
+
+    if !urls.contains(&primary.to_string()) {
+        urls.push(primary.to_string());
+    }
+
+    for m in mirrors {
+        if !urls.contains(m) {
+            urls.push(m.clone());
+        }
+    }
+
     let mut last_err = None;
     for url in &urls {
         match download_package_to_temp_file(url, max_bytes) {
@@ -395,6 +441,152 @@ fn download_with_fallback(
         }
     }
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("没有可用的下载地址")))
+}
+
+pub fn test_all_github_proxies() -> Vec<GhProxySpeedResult> {
+    let settings = crate::services::history::get_settings().unwrap_or_default();
+
+    struct Candidate {
+        name: String,
+        proxy_url: String,
+        is_direct: bool,
+        is_custom: bool,
+    }
+
+    let mut candidates = vec![
+        Candidate {
+            name: "直连 GitHub (Direct)".into(),
+            proxy_url: "".into(),
+            is_direct: true,
+            is_custom: false,
+        },
+        Candidate {
+            name: "gh-proxy.com".into(),
+            proxy_url: "https://gh-proxy.com/".into(),
+            is_direct: false,
+            is_custom: false,
+        },
+        Candidate {
+            name: "ghfast.top".into(),
+            proxy_url: "https://ghfast.top/".into(),
+            is_direct: false,
+            is_custom: false,
+        },
+        Candidate {
+            name: "gh-proxy.net".into(),
+            proxy_url: "https://gh-proxy.net/".into(),
+            is_direct: false,
+            is_custom: false,
+        },
+        Candidate {
+            name: "mirror.ghproxy.com".into(),
+            proxy_url: "https://mirror.ghproxy.com/".into(),
+            is_direct: false,
+            is_custom: false,
+        },
+    ];
+
+    for custom in &settings.custom_gh_proxies {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            candidates.push(Candidate {
+                name: format!("自定义: {trimmed}"),
+                proxy_url: trimmed.to_string(),
+                is_direct: false,
+                is_custom: true,
+            });
+        }
+    }
+
+    let handles: Vec<_> = candidates
+        .into_iter()
+        .map(|c| {
+            std::thread::spawn(move || {
+                let test_url = if c.is_direct {
+                    "https://raw.githubusercontent.com/muxiaoxiii/docsy/main/README.md".to_string()
+                } else {
+                    let base = c.proxy_url.trim_end_matches('/');
+                    format!("{base}/https://raw.githubusercontent.com/muxiaoxiii/docsy/main/README.md")
+                };
+
+                let client_res = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(4))
+                    .connect_timeout(Duration::from_secs(3))
+                    .redirect(reqwest::redirect::Policy::limited(2))
+                    .build();
+
+                let client = match client_res {
+                    Ok(cl) => cl,
+                    Err(e) => {
+                        return GhProxySpeedResult {
+                            name: c.name,
+                            proxy_url: c.proxy_url,
+                            latency_ms: None,
+                            is_available: false,
+                            is_direct: c.is_direct,
+                            is_custom: c.is_custom,
+                            error: Some(e.to_string()),
+                        };
+                    }
+                };
+
+                let start = Instant::now();
+                let resp = client
+                    .get(&test_url)
+                    .header(reqwest::header::RANGE, "bytes=0-100")
+                    .send();
+
+                match resp {
+                    Ok(r) if r.status().is_success() || r.status().as_u16() == 206 || r.status().as_u16() == 302 => {
+                        let latency = start.elapsed().as_millis() as u64;
+                        GhProxySpeedResult {
+                            name: c.name,
+                            proxy_url: c.proxy_url,
+                            latency_ms: Some(latency),
+                            is_available: true,
+                            is_direct: c.is_direct,
+                            is_custom: c.is_custom,
+                            error: None,
+                        }
+                    }
+                    Ok(r) => GhProxySpeedResult {
+                        name: c.name,
+                        proxy_url: c.proxy_url,
+                        latency_ms: None,
+                        is_available: false,
+                        is_direct: c.is_direct,
+                        is_custom: c.is_custom,
+                        error: Some(format!("HTTP {}", r.status())),
+                    },
+                    Err(e) => GhProxySpeedResult {
+                        name: c.name,
+                        proxy_url: c.proxy_url,
+                        latency_ms: None,
+                        is_available: false,
+                        is_direct: c.is_direct,
+                        is_custom: c.is_custom,
+                        error: Some(e.to_string()),
+                    },
+                }
+            })
+        })
+        .collect();
+
+    let mut results = Vec::new();
+    for h in handles {
+        if let Ok(res) = h.join() {
+            results.push(res);
+        }
+    }
+
+    results.sort_by(|a, b| match (a.latency_ms, b.latency_ms) {
+        (Some(l1), Some(l2)) => l1.cmp(&l2),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.name.cmp(&b.name),
+    });
+
+    results
 }
 
 fn download_package_to_temp_file(url: &str, max_bytes: u64) -> Result<TempArchive> {

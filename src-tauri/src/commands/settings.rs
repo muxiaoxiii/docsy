@@ -101,3 +101,13 @@ pub async fn open_terminal_to_install(tool_name: String) -> Result<(), DocsyErro
             message: e.to_string(),
         })
 }
+
+#[tauri::command]
+pub async fn test_github_proxies() -> Result<Vec<crate::external::managed::GhProxySpeedResult>, DocsyError> {
+    tauri::async_runtime::spawn_blocking(crate::external::managed::test_all_github_proxies)
+        .await
+        .map_err(|e| DocsyError::Unknown {
+            message: e.to_string(),
+        })
+}
+

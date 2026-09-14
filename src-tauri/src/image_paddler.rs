@@ -661,7 +661,7 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
         border_enabled,
         border_color: border_color.to_string(),
         scale_mode: args.scale_mode.clone(),
-        dpi: args.dpi,
+        dpi: if args.dpi == 0 { 300 } else { args.dpi.clamp(72, 1200) },
     };
 
     std::fs::create_dir_all(output_dir)?;
@@ -1012,8 +1012,9 @@ fn compute_placement(
     scale_mode: &str,
     dpi: u32,
 ) -> (f64, f64, f64, f64) {
-    let native_w_pt = img_w as f64 * 72.0 / dpi as f64;
-    let native_h_pt = img_h as f64 * 72.0 / dpi as f64;
+    let safe_dpi = if dpi == 0 { 300.0 } else { (dpi as f64).clamp(72.0, 1200.0) };
+    let native_w_pt = img_w as f64 * 72.0 / safe_dpi;
+    let native_h_pt = img_h as f64 * 72.0 / safe_dpi;
 
     let scale = match scale_mode {
         "original" => {

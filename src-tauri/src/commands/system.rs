@@ -389,6 +389,22 @@ pub async fn cancel_operation(
         })
 }
 
+/// 统一取消所有活跃操作（同时取消 OperationManager 异步任务与 SubprocessRegistry 外部子进程）
+#[tauri::command]
+pub async fn cancel_all_operations(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+    registry: tauri::State<'_, std::sync::Arc<crate::SubprocessRegistry>>,
+) -> Result<(), DocsyError> {
+    manager.cancel_all();
+    let registry = std::sync::Arc::clone(registry.inner());
+    tauri::async_runtime::spawn_blocking(move || registry.cancel_all())
+        .await
+        .map_err(|err| DocsyError::Unknown {
+            message: format!("终止子进程失败：{err}"),
+        })?;
+    Ok(())
+}
+
 /// List all currently active operations with metadata (for debugging and UI).
 #[tauri::command]
 pub fn list_active_operations(

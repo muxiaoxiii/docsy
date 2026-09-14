@@ -131,7 +131,7 @@ struct FooterConfig {
     y_offset: Option<f64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct IdentityConfig {
     prefix: Option<String>,
     start_number: Option<u32>,
@@ -748,7 +748,9 @@ fn apply_identity_rename(
     output_dir: &str,
     identity: &IdentityConfig,
 ) -> Result<Vec<String>> {
-    let prefix = identity.prefix.as_deref().unwrap_or("evidence");
+    let raw_prefix = identity.prefix.as_deref().unwrap_or("evidence");
+    let prefix = crate::util::fs::safe_file_stem(raw_prefix);
+    let prefix = if prefix.is_empty() { "evidence" } else { &prefix };
     let start = identity.start_number.unwrap_or(1);
 
     let rename_dir = Path::new(output_dir).join("_renamed");
@@ -756,7 +758,7 @@ fn apply_identity_rename(
 
     let mut result = Vec::new();
     for (i, input) in inputs.iter().enumerate() {
-        let num = start + i as u32;
+        let num = start.saturating_add(i as u32);
         let new_name = format!("{}{:04}.pdf", prefix, num);
         let new_path = rename_dir.join(&new_name);
         fs::copy(input, &new_path)?;
@@ -916,5 +918,32 @@ mod tests {
     #[test]
     fn safe_file_stem_keeps_common_chinese_names() {
         assert_eq!(safe_file_stem("证据 1（聊天记录）"), "证据 1_聊天记录");
+    }
+
+    #[test]
+    fn apply_identity_rename_blocks_path_traversal() {
+        let temp_dir = std::env::temp_dir().join(format!("docsy_rename_test_{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let sample_pdf = temp_dir.join("sample.pdf");
+        std::fs::write(&sample_pdf, b"%PDF-1.4 dummy").unwrap();
+
+        let identity = IdentityConfig {
+            prefix: Some("../../escaped".into()),
+            start_number: Some(1),
+            ..Default::default()
+        };
+
+        let result = apply_identity_rename(
+            &[sample_pdf.display().to_string()],
+            &temp_dir.display().to_string(),
+            &identity,
+        )
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        let path = Path::new(&result[0]);
+        assert!(path.starts_with(temp_dir.join("_renamed")));
+        assert_eq!(path.file_name().unwrap(), "escaped0001.pdf");
+        std::fs::remove_dir_all(&temp_dir).ok();
     }
 }

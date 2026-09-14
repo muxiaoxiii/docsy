@@ -10,6 +10,8 @@ pub struct AppSettings {
     pub libreoffice_path: Option<String>,
     pub tool_manifest_url: Option<String>,
     pub onboarding_completed: bool,
+    pub custom_gh_proxies: Vec<String>,
+    pub selected_gh_proxy: Option<String>,
 }
 
 pub fn get_settings() -> Result<AppSettings> {

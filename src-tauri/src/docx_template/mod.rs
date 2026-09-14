@@ -497,8 +497,38 @@ fn list_template_library_items(dir: &Path, trashed: bool) -> Result<Vec<Template
     Ok(items)
 }
 
+fn validate_template_library_path(path: &Path) -> Result<PathBuf> {
+    let root = template_library_dir();
+    std::fs::create_dir_all(&root).ok();
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("解析模板库根目录失败: {}", root.display()))?;
+
+    if !path.exists() {
+        anyhow::bail!("模板文件不存在: {}", path.display());
+    }
+    let canonical_path = path
+        .canonicalize()
+        .with_context(|| format!("解析模板路径失败: {}", path.display()))?;
+
+    if !canonical_path.starts_with(&canonical_root) || canonical_path == canonical_root {
+        anyhow::bail!("拒绝操作模板库目录之外的文件: {}", path.display());
+    }
+
+    if canonical_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("docsytpl"))
+        != Some(true)
+    {
+        anyhow::bail!("拒绝操作非 docsytpl 模板文件: {}", path.display());
+    }
+
+    Ok(canonical_path)
+}
+
 pub fn move_template_to_trash(args: TemplateDeleteArgs) -> Result<String> {
-    let source = PathBuf::from(args.path);
+    let source = validate_template_library_path(Path::new(&args.path))?;
     let manifest = read_template_manifest(&source)?;
     let target = move_template_file(&source, &template_trash_dir())?;
     crate::template_history::mark_template_trashed(&manifest.template.id, true)?;
@@ -506,7 +536,7 @@ pub fn move_template_to_trash(args: TemplateDeleteArgs) -> Result<String> {
 }
 
 pub fn restore_template_from_trash(args: TemplateRestoreArgs) -> Result<String> {
-    let source = PathBuf::from(args.path);
+    let source = validate_template_library_path(Path::new(&args.path))?;
     let manifest = read_template_manifest(&source)?;
     let target = move_template_file(&source, &template_library_dir())?;
     crate::template_history::mark_template_trashed(&manifest.template.id, false)?;
@@ -537,7 +567,7 @@ fn move_template_file(source: &Path, destination_dir: &Path) -> Result<PathBuf> 
 }
 
 pub fn permanently_delete_template(args: TemplatePermanentDeleteArgs) -> Result<()> {
-    let source = PathBuf::from(args.path);
+    let source = validate_template_library_path(Path::new(&args.path))?;
     let manifest = read_template_manifest(&source)?;
 
     // Delete or migrate the associated records before removing the source

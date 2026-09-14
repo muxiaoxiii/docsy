@@ -71,9 +71,20 @@ impl ExternalTool for LibreOfficeTool {
     }
 }
 
+fn is_valid_libreoffice_binary_name(file_name: &std::ffi::OsStr) -> bool {
+    let name = file_name.to_string_lossy().to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "soffice" | "soffice.bin" | "soffice.exe" | "libreoffice" | "libreoffice.exe"
+    )
+}
+
 fn resolve_libreoffice_path(path: PathBuf) -> Option<PathBuf> {
     if path.is_file() {
-        return Some(path);
+        if path.file_name().map(is_valid_libreoffice_binary_name).unwrap_or(false) {
+            return Some(path);
+        }
+        return None;
     }
     if !path.is_dir() {
         return None;
@@ -177,6 +188,15 @@ mod tests {
     fn rejects_existing_directory_without_binary() {
         let root = test_dir("missing");
         assert_eq!(resolve_libreoffice_path(root.clone()), None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_arbitrary_binary_file() {
+        let root = test_dir("arbitrary");
+        let fake_bin = root.join("malicious.exe");
+        fs::write(&fake_bin, b"test").unwrap();
+        assert_eq!(resolve_libreoffice_path(fake_bin), None);
         fs::remove_dir_all(root).unwrap();
     }
 }

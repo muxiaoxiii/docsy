@@ -146,6 +146,111 @@
       </el-form>
     </el-card>
 
+    <!-- GitHub Proxy & Acceleration Settings -->
+    <el-card class="settings-section" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>GitHub 镜像与下载加速 (网络优化)</span>
+          <el-button
+            size="small"
+            type="primary"
+            plain
+            :loading="testingProxies"
+            @click="runProxySpeedTest"
+          >
+            <el-icon><Refresh /></el-icon>
+            测试各节点延迟
+          </el-button>
+        </div>
+      </template>
+
+      <div class="proxy-explanation">
+        下载外部依赖工具（FFmpeg、qpdf、Poppler）时，若直连 GitHub 较慢或超时，Docsy 将按此处配置的加速镜像下载。
+      </div>
+
+      <div class="proxy-selection-row">
+        <span class="label">首选下载通道：</span>
+        <el-radio-group v-model="settings.selected_gh_proxy" @change="saveSettings">
+          <el-radio-button label="auto">自动选择最快 / 智能回退</el-radio-button>
+          <el-radio-button label="direct">直连 GitHub (官方源)</el-radio-button>
+        </el-radio-group>
+      </div>
+
+      <!-- Proxy Latency Results -->
+      <div v-if="proxyResults.length > 0" class="proxy-results-grid">
+        <div
+          v-for="p in proxyResults"
+          :key="p.name + p.proxyUrl"
+          class="proxy-result-card"
+          :class="{ 'is-selected': isProxySelected(p) }"
+        >
+          <div class="proxy-card-top">
+            <span class="proxy-card-title">{{ p.name }}</span>
+            <el-tag
+              v-if="p.isAvailable"
+              size="small"
+              :type="p.latencyMs < 400 ? 'success' : p.latencyMs < 900 ? 'warning' : 'info'"
+            >
+              {{ p.latencyMs }} ms
+            </el-tag>
+            <el-tag v-else size="small" type="danger">超时 / 不可用</el-tag>
+          </div>
+          <div class="proxy-card-url" :title="p.proxyUrl || 'https://github.com'">
+            {{ p.proxyUrl || 'https://github.com (官方直连)' }}
+          </div>
+          <div class="proxy-card-footer">
+            <el-button
+              v-if="p.isAvailable && !isProxySelected(p)"
+              size="small"
+              text
+              type="primary"
+              @click="selectSpecificProxy(p)"
+            >
+              设为首选
+            </el-button>
+            <span v-else-if="isProxySelected(p)" class="selected-badge">✓ 当前首选</span>
+            <el-button
+              v-if="p.isCustom"
+              size="small"
+              text
+              type="danger"
+              @click="removeCustomProxy(p.proxyUrl)"
+            >
+              删除
+            </el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add Custom Proxy -->
+      <div class="custom-proxy-box">
+        <div class="custom-proxy-title">自定义 GitHub 代理 / 反代加速镜像：</div>
+        <div class="custom-proxy-input-row">
+          <el-input
+            v-model="newCustomProxy"
+            placeholder="例如 https://gh.example.com/ 或自建反代地址"
+            clearable
+            @keyup.enter="addCustomProxy"
+          />
+          <el-button type="primary" :disabled="!newCustomProxy.trim()" @click="addCustomProxy">
+            添加镜像
+          </el-button>
+        </div>
+        <div v-if="settings.custom_gh_proxies?.length" class="custom-proxy-tags">
+          <el-tag
+            v-for="url in settings.custom_gh_proxies"
+            :key="url"
+            closable
+            type="info"
+            class="custom-tag"
+            @close="removeCustomProxy(url)"
+          >
+            {{ url }}
+          </el-tag>
+        </div>
+      </div>
+    </el-card>
+
     <!-- Diagnostics -->
     <el-card class="settings-section" shadow="never">
       <template #header>
@@ -181,7 +286,7 @@
 </template>
 
 <script setup>
-import { computed, ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, onUnmounted } from 'vue'
 import { openExternalUrl, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { DOCSY_TOOLS_URL } from '../../../core/siteConfig.js'
 import { defaultMenuOrder, getMenuModules } from '../../../core/moduleRegistry.js'
@@ -195,10 +300,16 @@ const settings = ref({
   menu_order: [],
   libreoffice_path: '',
   tool_manifest_url: '',
+  custom_gh_proxies: [],
+  selected_gh_proxy: 'auto',
 })
 const managedToolsDir = ref('')
 const checkingTools = ref(false)
 const composingLogEmail = ref(false)
+const testingProxies = ref(false)
+const proxyResults = ref([])
+const newCustomProxy = ref('')
+const activeInstallTimers = new Set()
 const menuModules = getMenuModules()
 const hasMissingTools = computed(() => tools.some((tool) => !tool.status?.available))
 const menuSettingsItems = computed(() =>
@@ -327,6 +438,8 @@ async function loadSettings() {
     settings.value.menu_order = Array.isArray(settings.value.menu_order) ? settings.value.menu_order : []
     settings.value.libreoffice_path = settings.value.libreoffice_path || ''
     settings.value.tool_manifest_url = settings.value.tool_manifest_url || ''
+    settings.value.custom_gh_proxies = Array.isArray(settings.value.custom_gh_proxies) ? settings.value.custom_gh_proxies : []
+    settings.value.selected_gh_proxy = settings.value.selected_gh_proxy || 'auto'
   } else {
     ElMessage.warning('设置加载失败')
   }
@@ -350,6 +463,8 @@ async function saveSettings() {
     menu_order: normalizedMenuOrder(),
     libreoffice_path: settings.value.libreoffice_path || null,
     tool_manifest_url: settings.value.tool_manifest_url || null,
+    custom_gh_proxies: settings.value.custom_gh_proxies || [],
+    selected_gh_proxy: settings.value.selected_gh_proxy || null,
   }
   const result = await tauriCallSafe('set_app_settings', { settings: payload })
   if (result.ok) {
@@ -467,10 +582,12 @@ async function installTool(name) {
       if (tool) await checkTool(tool)
       if (tool?.status?.available || checks > 150) {
         clearInterval(timer)
+        activeInstallTimers.delete(timer)
         if (tool) tool.installing = false
         await loadDiagnostic()
       }
     }, 2000)
+    activeInstallTimers.add(timer)
     return
   }
   if (tool) tool.installing = true
@@ -581,11 +698,80 @@ async function openToolDownload(tool) {
   await openToolDownloadWithGuide(tool.name, tool.downloadUrl, tool.label)
 }
 
+async function runProxySpeedTest() {
+  testingProxies.value = true
+  try {
+    const res = await tauriCallSafe('test_github_proxies')
+    if (res.ok && Array.isArray(res.data)) {
+      proxyResults.value = res.data
+      ElMessage.success('测速完成')
+    } else {
+      ElMessage.warning('测速未完成或返回异常')
+    }
+  } catch (err) {
+    ElMessage.error(userFacingError(err, '测速失败'))
+  } finally {
+    testingProxies.value = false
+  }
+}
+
+function isProxySelected(p) {
+  if (settings.value.selected_gh_proxy === 'direct' && p.isDirect) return true
+  if (settings.value.selected_gh_proxy === p.proxyUrl && !p.isDirect) return true
+  return false
+}
+
+function selectSpecificProxy(p) {
+  if (p.isDirect) {
+    settings.value.selected_gh_proxy = 'direct'
+  } else {
+    settings.value.selected_gh_proxy = p.proxyUrl
+  }
+  saveSettings()
+  ElMessage.success(`已将 ${p.name} 设为首选下载通道`)
+}
+
+async function addCustomProxy() {
+  const url = (newCustomProxy.value || '').trim()
+  if (!url) return
+  if (!url.startsWith('https://') && !url.startsWith('http://')) {
+    ElMessage.warning('代理地址必须以 https:// 或 http:// 开头')
+    return
+  }
+  const current = Array.isArray(settings.value.custom_gh_proxies) ? [...settings.value.custom_gh_proxies] : []
+  if (current.includes(url)) {
+    ElMessage.info('该代理地址已存在')
+    return
+  }
+  current.push(url)
+  settings.value.custom_gh_proxies = current
+  newCustomProxy.value = ''
+  await saveSettings()
+  ElMessage.success('已添加自定义代理镜像')
+  runProxySpeedTest()
+}
+
+async function removeCustomProxy(url) {
+  const current = (settings.value.custom_gh_proxies || []).filter((u) => u !== url)
+  settings.value.custom_gh_proxies = current
+  if (settings.value.selected_gh_proxy === url) {
+    settings.value.selected_gh_proxy = 'auto'
+  }
+  await saveSettings()
+  proxyResults.value = proxyResults.value.filter((p) => p.proxyUrl !== url)
+  ElMessage.success('已移除自定义代理')
+}
+
 onMounted(() => {
   loadSettings()
   loadManagedToolsDir()
   loadDiagnostic()
   checkTools()
+})
+
+onUnmounted(() => {
+  activeInstallTimers.forEach((timer) => clearInterval(timer))
+  activeInstallTimers.clear()
 })
 </script>
 
@@ -617,6 +803,116 @@ onMounted(() => {
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   box-shadow: var(--docsy-shadow-panel);
+}
+
+.proxy-explanation {
+  font-size: 13px;
+  color: var(--docsy-text-muted);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.proxy-selection-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.proxy-selection-row .label {
+  color: var(--docsy-text-regular);
+  font-weight: 500;
+}
+
+.proxy-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.proxy-result-card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.proxy-result-card.is-selected {
+  border-color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 8%, var(--docsy-surface));
+}
+
+.proxy-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.proxy-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--docsy-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proxy-card-url {
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+  font-family: ui-monospace, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proxy-card-footer {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.selected-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+
+.custom-proxy-box {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--docsy-border-subtle);
+}
+
+.custom-proxy-title {
+  font-size: 13px;
+  color: var(--docsy-text-regular);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.custom-proxy-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.custom-proxy-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.custom-tag {
+  font-family: ui-monospace, monospace;
 }
 
 .settings-section :deep(.el-card__header) {

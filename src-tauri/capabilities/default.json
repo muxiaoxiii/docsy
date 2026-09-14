@@ -28,7 +28,6 @@
         { "path": "$DOCUMENT/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
-        { "path": "$HOME/**" },
         { "path": "$TEMP/**" }
       ]
     }

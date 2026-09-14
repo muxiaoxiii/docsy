@@ -124,6 +124,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         settings::remove_managed_tool,
         settings::check_homebrew_installed,
         settings::open_terminal_to_install,
+        settings::test_github_proxies,
         // system
         system::open_path,
         system::open_external_url,
@@ -138,6 +139,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         system::list_system_fonts,
         system::respond_conversion_timeout,
         system::cancel_operation,
+        system::cancel_all_operations,
         system::list_active_operations,
         system::confirm_app_close,
         // template

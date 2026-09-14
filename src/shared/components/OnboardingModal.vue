@@ -278,10 +278,19 @@ async function startSetup() {
 
   if (isMac) {
     currentStatusText.value = '已打开系统终端执行安装，Doclet 正在实时检测就绪状态…'
-    await installToolsBatchViaTerminal(toInstall.map((item) => item.tool))
+    const started = await installToolsBatchViaTerminal(toInstall.map((item) => item.tool))
+    if (!started) {
+      currentStatusText.value = '唤起终端安装遇到问题，您可进入 Docsy 在「设置」中重试'
+      for (const item of toInstall) {
+        if (item.status !== 'ready') item.status = 'error'
+      }
+      return
+    }
 
     clearPolling()
+    let checks = 0
     pollTimer = setInterval(async () => {
+      checks++
       let pendingCount = 0
       for (const item of toInstall) {
         if (item.status === 'ready') continue
@@ -297,6 +306,15 @@ async function startSetup() {
         clearPolling()
         isAllDone.value = true
         currentStatusText.value = '🎉 所有组件已成功安装并验证就绪！'
+        if (!visible.value) {
+          ElMessage.success('🎉 外部依赖组件已在后台全部安装就绪！')
+        }
+      } else if (checks >= 150) {
+        clearPolling()
+        currentStatusText.value = '检测超时（终端可能已被关闭），您可随时在「设置」中查看并重试'
+        for (const item of toInstall) {
+          if (item.status !== 'ready') item.status = 'error'
+        }
       }
     }, 2000)
   } else {
@@ -322,10 +340,14 @@ async function startSetup() {
 }
 
 async function handleSkip() {
-  clearPolling()
   await appStore.completeOnboarding()
   visible.value = false
-  ElMessage.info('已跳过引导，您稍后可随时在「设置」中安装所需组件')
+  if (step.value === 'progress' && pollTimer) {
+    ElMessage.info('已进入 Docsy，终端安装在后台持续检测中，全部就绪后将通知您')
+  } else {
+    clearPolling()
+    ElMessage.info('已跳过引导，您稍后可随时在「设置」中安装所需组件')
+  }
 }
 
 async function finishOnboarding() {
@@ -336,8 +358,13 @@ async function finishOnboarding() {
 }
 
 function showModal() {
+  clearPolling()
   step.value = 'select'
   isAllDone.value = false
+  currentStatusText.value = 'Doclet 正在准备安装环境…'
+  setupCards.forEach((c) => {
+    c.status = 'pending'
+  })
   visible.value = true
   probeInitialTools()
 }

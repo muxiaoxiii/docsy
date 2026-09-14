@@ -63,14 +63,6 @@ impl SubprocessRegistry {
         false
     }
 
-    /// Check if an operation has been cancelled.
-    pub fn is_cancelled(&self, operation_id: &str) -> bool {
-        if let Ok(map) = self.pids.lock() {
-            !map.contains_key(operation_id)
-        } else {
-            false
-        }
-    }
 
     pub fn has_active(&self) -> bool {
         self.pids.lock().map(|map| !map.is_empty()).unwrap_or(false)
