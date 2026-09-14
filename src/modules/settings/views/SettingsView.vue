@@ -225,6 +225,9 @@
       <!-- Add Custom Proxy -->
       <div class="custom-proxy-box">
         <div class="custom-proxy-title">自定义 GitHub 代理 / 反代加速镜像：</div>
+        <div class="custom-proxy-tip">
+          💡 提示：自定义镜像由第三方服务器提供网络中转，请仅添加您了解并信任的 HTTPS 镜像地址。
+        </div>
         <div class="custom-proxy-input-row">
           <el-input
             v-model="newCustomProxy"
@@ -734,8 +737,8 @@ function selectSpecificProxy(p) {
 async function addCustomProxy() {
   const url = (newCustomProxy.value || '').trim()
   if (!url) return
-  if (!url.startsWith('https://') && !url.startsWith('http://')) {
-    ElMessage.warning('代理地址必须以 https:// 或 http:// 开头')
+  if (!url.startsWith('https://')) {
+    ElMessage.warning('出于安全性考虑，自定义代理镜像必须使用以 https:// 开头的地址')
     return
   }
   const current = Array.isArray(settings.value.custom_gh_proxies) ? [...settings.value.custom_gh_proxies] : []
@@ -895,8 +898,15 @@ onUnmounted(() => {
 .custom-proxy-title {
   font-size: 13px;
   color: var(--docsy-text-regular);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   font-weight: 500;
+}
+
+.custom-proxy-tip {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+  margin-bottom: 10px;
+  line-height: 1.4;
 }
 
 .custom-proxy-input-row {

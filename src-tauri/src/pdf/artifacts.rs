@@ -855,6 +855,7 @@ fn edit_header_footer_artifacts_qpdf(
 ) -> Result<HeaderFooterArtifactEditResult> {
     let inspection = inspect_meaningful_header_footer_artifacts_qpdf(input, 0)?;
     type EditKey = (String, usize, String);
+    let doc_total_pages = super::qpdf::page_count(&input.to_string_lossy()).unwrap_or(0);
     let mut referenced_pages: BTreeMap<EditKey, BTreeSet<u32>> = BTreeMap::new();
     let mut selected: BTreeMap<EditKey, Vec<(&HeaderFooterArtifactOccurrence, Option<String>)>> =
         BTreeMap::new();
@@ -907,13 +908,14 @@ fn edit_header_footer_artifacts_qpdf(
         let replacement = selected_target
             .and_then(|target| target.replacement_text.as_deref())
             .map(|template| {
-                expand_artifact_replacement(
-                    template,
-                    occurrence.page,
+                let total = if doc_total_pages > 0 {
+                    doc_total_pages
+                } else {
                     selected_target
                         .map(|target| target.page_end.max(target.page_start))
-                        .unwrap_or(occurrence.page),
-                )
+                        .unwrap_or(occurrence.page)
+                };
+                expand_artifact_replacement(template, occurrence.page, total)
             })
             .or_else(|| {
                 let values = if occurrence.region == "header" {

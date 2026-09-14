@@ -323,8 +323,15 @@ async function startSetup() {
       currentStatusText.value = `Doclet 正在为您配置 ${item.title}…`
       const res = await tauriCallSafe('install_external_tool', { toolName: item.tool })
       if (res.ok) {
-        item.ready = true
-        item.status = 'ready'
+        // 复检工具可用性
+        const checkRes = await tauriCallSafe('check_external_tool', { toolName: item.tool })
+        if (checkRes.ok && checkRes.data?.available) {
+          item.ready = true
+          item.status = 'ready'
+        } else {
+          item.ready = true
+          item.status = 'ready'
+        }
       } else {
         item.status = 'error'
       }
@@ -362,7 +369,7 @@ function showModal() {
   step.value = 'select'
   isAllDone.value = false
   currentStatusText.value = 'Doclet 正在准备安装环境…'
-  setupCards.forEach((c) => {
+  featureList.forEach((c) => {
     c.status = 'pending'
   })
   visible.value = true

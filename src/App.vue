@@ -284,9 +284,7 @@ onMounted(() => {
   window.addEventListener('docsy-operation-start', startOperation)
   window.addEventListener('docsy-operation-finish', finishOperation)
   window.addEventListener('docsy-operation-update', updateOperation)
-  window.addEventListener('open-onboarding-modal', () => {
-    onboardingModalRef.value?.show()
-  })
+  window.addEventListener('open-onboarding-modal', handleOpenOnboardingModal)
 
   // Listen for conversion timeout events from the backend
   listen('docsy-conversion-timeout', async () => {
@@ -332,6 +330,10 @@ onMounted(() => {
   })
 })
 
+function handleOpenOnboardingModal() {
+  onboardingModalRef.value?.show()
+}
+
 onBeforeUnmount(() => {
   clearTimeout(operationTimer)
   window.clearInterval(elapsedTimer)
@@ -340,6 +342,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('docsy-operation-start', startOperation)
   window.removeEventListener('docsy-operation-finish', finishOperation)
   window.removeEventListener('docsy-operation-update', updateOperation)
+  window.removeEventListener('open-onboarding-modal', handleOpenOnboardingModal)
   if (unlistenConversionTimeout) unlistenConversionTimeout()
   if (unlistenDownloadProgress) unlistenDownloadProgress()
   if (unlistenOperationProgress) unlistenOperationProgress()

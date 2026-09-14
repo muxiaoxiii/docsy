@@ -345,14 +345,6 @@ pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
             valid_runs.push(run);
         }
     }
-    if !orphaned_ids.is_empty() {
-        for template_id in &orphaned_ids {
-            let _ = conn.execute(
-                "UPDATE template_meta SET trashed = 1, updated_at = ?2 WHERE template_id = ?1 AND trashed = 0",
-                params![template_id, chrono::Utc::now().to_rfc3339()],
-            );
-        }
-    }
 
     let mut runs = valid_runs;
     // Batch-load summaries for all runs with a single query (avoids N+1).

@@ -1,6 +1,6 @@
 use super::{ExternalTool, ToolStatus};
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub struct LibreOfficeTool;
@@ -79,9 +79,21 @@ fn is_valid_libreoffice_binary_name(file_name: &std::ffi::OsStr) -> bool {
     )
 }
 
+fn is_plausible_libreoffice_location(path: &Path) -> bool {
+    let parent = path.parent().unwrap_or(path);
+    let lower = parent.to_string_lossy().to_ascii_lowercase();
+    lower.contains("libreoffice")
+        || lower.contains("soffice")
+        || lower.contains("openoffice")
+        || lower.contains("contents/macos")
+        || lower.contains("program")
+}
+
 fn resolve_libreoffice_path(path: PathBuf) -> Option<PathBuf> {
     if path.is_file() {
-        if path.file_name().map(is_valid_libreoffice_binary_name).unwrap_or(false) {
+        if path.file_name().map(is_valid_libreoffice_binary_name).unwrap_or(false)
+            && is_plausible_libreoffice_location(&path)
+        {
             return Some(path);
         }
         return None;
@@ -97,7 +109,9 @@ fn resolve_libreoffice_path(path: PathBuf) -> Option<PathBuf> {
     } else {
         vec![path.join("program/soffice"), path.join("soffice")]
     };
-    candidates.into_iter().find(|candidate| candidate.is_file())
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file() && is_plausible_libreoffice_location(candidate))
 }
 
 fn known_libreoffice_paths() -> Vec<PathBuf> {
@@ -195,6 +209,17 @@ mod tests {
     fn rejects_arbitrary_binary_file() {
         let root = test_dir("arbitrary");
         let fake_bin = root.join("malicious.exe");
+        fs::write(&fake_bin, b"test").unwrap();
+        assert_eq!(resolve_libreoffice_path(fake_bin), None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_arbitrary_binary_file_outside_libreoffice_dirs() {
+        let unique = format!("docsy-fake-bin-{}", std::process::id());
+        let root = std::env::temp_dir().join(unique);
+        fs::create_dir_all(&root).unwrap();
+        let fake_bin = root.join(if cfg!(windows) { "soffice.exe" } else { "soffice" });
         fs::write(&fake_bin, b"test").unwrap();
         assert_eq!(resolve_libreoffice_path(fake_bin), None);
         fs::remove_dir_all(root).unwrap();

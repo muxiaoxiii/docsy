@@ -9,6 +9,39 @@ pub fn get_app_settings() -> Result<crate::services::history::AppSettings, Docsy
 
 #[tauri::command]
 pub fn set_app_settings(settings: crate::services::history::AppSettings) -> Result<(), DocsyError> {
+    for proxy in &settings.custom_gh_proxies {
+        let trimmed = proxy.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let parsed = reqwest::Url::parse(trimmed).map_err(|_| DocsyError::Unknown {
+            message: format!("自定义代理地址格式无效: {trimmed}"),
+        })?;
+        if parsed.scheme() != "https" {
+            return Err(DocsyError::Unknown {
+                message: format!("自定义代理地址必须使用 HTTPS: {trimmed}"),
+            });
+        }
+        if parsed.host_str().is_none() {
+            return Err(DocsyError::Unknown {
+                message: format!("自定义代理地址缺少有效主机名: {trimmed}"),
+            });
+        }
+    }
+    if let Some(selected) = settings.selected_gh_proxy.as_deref() {
+        let trimmed = selected.trim();
+        if !trimmed.is_empty() && trimmed != "auto" && trimmed != "direct" {
+            let parsed = reqwest::Url::parse(trimmed).map_err(|_| DocsyError::Unknown {
+                message: format!("所选代理地址格式无效: {trimmed}"),
+            })?;
+            if parsed.scheme() != "https" {
+                return Err(DocsyError::Unknown {
+                    message: format!("所选代理地址必须使用 HTTPS: {trimmed}"),
+                });
+            }
+        }
+    }
+
     crate::services::history::save_settings(&settings).map_err(|e| DocsyError::Unknown {
         message: e.to_string(),
     })

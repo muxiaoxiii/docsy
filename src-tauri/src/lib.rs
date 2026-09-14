@@ -68,6 +68,14 @@ impl SubprocessRegistry {
         self.pids.lock().map(|map| !map.is_empty()).unwrap_or(false)
     }
 
+    pub fn list_active(&self) -> Vec<(String, u32)> {
+        if let Ok(map) = self.pids.lock() {
+            map.iter().map(|(k, v)| (k.clone(), *v)).collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Spawn a command, register its PID, wait for completion, unregister.
     /// This is the primary entry point for cancellable subprocesses.
     pub fn spawn_and_wait(

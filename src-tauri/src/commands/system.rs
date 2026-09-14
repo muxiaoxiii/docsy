@@ -409,8 +409,19 @@ pub async fn cancel_all_operations(
 #[tauri::command]
 pub fn list_active_operations(
     manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+    registry: tauri::State<'_, std::sync::Arc<crate::SubprocessRegistry>>,
 ) -> Vec<crate::operations::ActiveOperation> {
-    manager.list_active()
+    let mut list = manager.list_active();
+    for (op_id, pid) in registry.list_active() {
+        if !list.iter().any(|op| op.operation_id == op_id) {
+            list.push(crate::operations::ActiveOperation {
+                operation_id: op_id.clone(),
+                command: format!("subprocess:{op_id} (PID {pid})"),
+                elapsed_ms: 0,
+            });
+        }
+    }
+    list
 }
 
 /// Close the application after the frontend has confirmed that running work
