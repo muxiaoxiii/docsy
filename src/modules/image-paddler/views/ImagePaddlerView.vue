@@ -56,15 +56,16 @@
 
           <el-form-item label="每页最多">
             <el-select v-model="settings.layout">
-              <el-option label="1 张" value="1" />
-              <el-option label="2 张（左右）" value="1x2" />
-              <el-option label="2 张（上下）" value="2x1" />
-              <el-option label="3 张（左右）" value="1x3" />
-              <el-option label="4 张" value="4" />
-              <el-option label="6 张" value="2x3" />
-              <el-option label="9 张" value="3x3" />
-              <el-option label="自定义" value="custom" />
+              <el-option
+                v-for="value in ['1', '1x2', '2x1', '1x3', '4', '2x3', '3x3', 'custom']"
+                :key="value"
+                :label="optionLayoutLabel(value)"
+                :value="value"
+              />
             </el-select>
+            <div v-if="isFlowLayout" class="field-hint">
+              无表格模式仅支持上下排列；需要三张左右并排，请勾选「使用表格排版」。
+            </div>
           </el-form-item>
 
           <el-form-item v-if="settings.layout === 'custom'" label="行列">
@@ -88,17 +89,18 @@
             <div class="fixed-width-control">
               <el-slider
                 v-model="settings.fixed_width_mm"
-                :min="40"
-                :max="resolvedOrientation === 'landscape' ? 260 : 190"
-                :step="1"
+                :min="0.1"
+                :max="currentRecommendedWidth"
+                :step="0.1"
                 class="width-slider"
               />
               <div class="width-input-row">
                 <el-input-number
                   v-model="settings.fixed_width_mm"
-                  :min="30"
-                  :max="300"
-                  :step="5"
+                  :min="0.1"
+                  :max="currentRecommendedWidth"
+                  :step="0.1"
+                  :precision="1"
                   size="small"
                   controls-position="right"
                 />
@@ -107,7 +109,12 @@
                   推荐({{ currentRecommendedWidth }}mm)
                 </el-button>
               </div>
-              <div class="field-hint">超过版心时按整组图片统一缩小，保持等宽和原始比例。</div>
+              <div class="field-hint">
+                实际宽度 {{ actualImageWidth.toFixed(1) }} mm · 当前布局上限 {{ maximumImageWidth.toFixed(1) }} mm
+              </div>
+              <div v-if="widthIsLimited" class="field-hint" role="status">
+                设定宽度超过上限，已限制为实际宽度。要放大图片，请减少每页张数、切换横向或减小页边距。
+              </div>
             </div>
           </el-form-item>
 
@@ -233,7 +240,7 @@
               type="success"
               @click="run"
               :loading="generating"
-              :disabled="!analysis || !includedImages.length"
+              :disabled="analyzing || !analysis || !includedImages.length"
             >
               生成文档
             </el-button>
@@ -249,6 +256,7 @@
             <div>
               <strong>已生成</strong>
               <div v-for="path in generatedOutputPaths" :key="path" class="output-path">{{ path }}</div>
+              <div v-for="warning in generatedResult.warnings || []" :key="warning" role="alert">{{ warning }}</div>
             </div>
             <el-button size="small" type="primary" @click="openGeneratedOutput">打开文件</el-button>
           </div>
@@ -293,7 +301,7 @@
 
           <div class="preview-section">
             <div class="section-head">
-              <h4>第一页预览</h4>
+              <h4>第一页布局预览</h4>
               <div class="preview-toolbar">
                 <span>当前页 {{ previewImages.length }} 张</span>
                 <el-button size="small" text @click="adjustPageZoom(-10)">-</el-button>
@@ -302,6 +310,7 @@
                 <span class="zoom-value">{{ pageZoom }}%</span>
               </div>
             </div>
+            <div class="field-hint">预览按页面比例显示；Word/WPS 的字体替代和分页以打开导出文件后的结果为准。</div>
             <div class="page-preview-shell">
               <div class="page-preview" :class="resolvedOrientation" :style="previewPageStyle">
                 <div
@@ -383,6 +392,11 @@ import { useWorkspaceStore } from '../../../stores/workspace.js'
 const workspaceStore = useWorkspaceStore()
 
 const {
+  isFlowLayout,
+  optionLayoutLabel,
+  maximumImageWidth,
+  actualImageWidth,
+  widthIsLimited,
   folders,
   analyzing,
   generating,
@@ -654,6 +668,8 @@ const {
 }
 
 .page-preview {
+  position: relative;
+  container-type: inline-size;
   box-sizing: border-box;
   background: #fff;
   border: 1px solid var(--docsy-border-strong);
@@ -662,8 +678,7 @@ const {
 }
 
 .preview-grid {
-  width: 100%;
-  height: 100%;
+  position: absolute;
   display: grid;
   gap: 0;
 }
@@ -672,7 +687,7 @@ const {
   box-sizing: border-box;
   min-width: 0;
   min-height: 0;
-  border: 1px solid transparent;
+  border: none;
   background: var(--docsy-surface-elevated);
   display: flex;
   flex-direction: column;
@@ -682,7 +697,8 @@ const {
 }
 
 .preview-cell-bordered {
-  border: 2px solid var(--docsy-text-strong);
+  outline: 1px solid var(--docsy-text-strong);
+  outline-offset: -1px;
 }
 
 .preview-cell-white-border {
@@ -846,7 +862,7 @@ const {
 }
 
 .preview-grid-flow {
-  row-gap: 8px;
+  row-gap: 0;
 }
 
 .preview-cell-flow {

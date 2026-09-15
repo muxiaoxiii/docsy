@@ -6,6 +6,7 @@ import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { fileName as baseFileName, parentDir } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
+import { safeImageWidth, effectiveImageWidth, layoutOptionLabel } from './layoutPreview.js'
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
 const FILENAME_MAX_LINES = 3
@@ -82,6 +83,7 @@ export function useImagePaddlerState(options = {}) {
     preferenceRevision,
   })
 
+  const isFlowLayout = computed(() => settings.output_format === 'docx' && !settings.use_table)
   const layoutGrid = computed(() => {
     const grid = parseLayout(settings.layout, settings.custom_rows, settings.custom_cols)
     return settings.output_format === 'docx' && !settings.use_table ? { rows: grid.rows * grid.cols, cols: 1 } : grid
@@ -106,19 +108,22 @@ export function useImagePaddlerState(options = {}) {
   })
   const previewPageStyle = computed(() => ({
     aspectRatio: resolvedOrientation.value === 'landscape' ? '297 / 210' : '210 / 297',
-    padding: `${(Math.max(0, settings.margin_mm) / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}%`,
     width: `${pageZoom.value}%`,
     minWidth: '220px',
     boxSizing: 'border-box',
   }))
   const previewGridStyle = computed(() => ({
+    left: `${(settings.margin_mm / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}%`,
+    right: `${(settings.margin_mm / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}%`,
+    top: `${(settings.margin_mm / (resolvedOrientation.value === 'landscape' ? 210 : 297)) * 100}%`,
+    bottom: `${((Number(settings.margin_mm) + (settings.output_format === 'docx' ? 2 : 0)) / (resolvedOrientation.value === 'landscape' ? 210 : 297)) * 100}%`,
     gridTemplateColumns: `repeat(${previewLayoutGrid.value.cols}, minmax(0, 1fr))`,
     gridTemplateRows: `repeat(${previewLayoutGrid.value.rows}, minmax(0, 1fr))`,
   }))
   const previewCellStyle = computed(() => {
-    if (!settings.border_enabled) return { borderColor: 'transparent' }
+    if (!settings.border_enabled) return { outlineColor: 'transparent' }
     return {
-      borderColor: borderColorCss(settings.border_color),
+      outlineColor: borderColorCss(settings.border_color),
     }
   })
   const layoutMetrics = computed(() => {
@@ -166,10 +171,10 @@ export function useImagePaddlerState(options = {}) {
       height,
       minHeight: height,
       flexBasis: height,
-      fontSize: `${(metrics.filenameFontSizePt * 96) / 72}px`,
+      fontSize: `${((metrics.filenameFontSizePt * 25.4) / 72 / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}cqw`,
       fontFamily: filenameFontFamilyCss(settings.filename_font_family),
       color: { black: '#000000', gray: '#6B7280', blue: '#2563EB' }[settings.filename_color] || '#4B5563',
-      lineHeight: `${metrics.filenameLineHeightMm}mm`,
+      lineHeight: `${(metrics.filenameLineHeightMm / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}cqw`,
     }
   })
 
@@ -184,24 +189,32 @@ export function useImagePaddlerState(options = {}) {
     )
   }
 
-  const currentRecommendedWidth = computed(() => {
-    if (analysis.value?.recommended?.recommended_width_mm) {
-      return Number(analysis.value.recommended.recommended_width_mm)
-    }
-    const orientation = resolvedOrientation.value
-    const layout = settings.layout
-    if (orientation === 'landscape') {
-      if (layout === '1') return 240
-      if (layout === '1x2') return 125
-      if (layout === '2x1') return 180
-      return 120
-    } else {
-      if (layout === '1') return 170
-      if (layout === '2x1' || layout === '2') return 160
-      if (layout === '1x2') return 85
-      return 160
-    }
+  const maximumImageWidth = computed(() => {
+    const pageWidth = resolvedOrientation.value === 'landscape' ? 297 : 210
+    const pageHeight = resolvedOrientation.value === 'landscape' ? 210 : 297
+    const cellWidth = (pageWidth - settings.margin_mm * 2) / layoutGrid.value.cols
+    const fontSize = clampNumber(settings.filename_font_size_pt, 6, 24, 8)
+    const lines = Math.max(
+      1,
+      ...includedImages.value.map((image) =>
+        requiredFilenameLines(fileName(image.path), cellWidth, fontSize, FILENAME_MAX_LINES),
+      ),
+    )
+    const reserve = settings.show_filename
+      ? layoutMetrics.value.filenameLineHeightMm * lines +
+        (settings.output_format === 'docx' ? DOCX_FILENAME_SAFETY_MM : PDF_FILENAME_SAFETY_MM)
+      : 0
+    const height =
+      (pageHeight - settings.margin_mm * 2 - (settings.output_format === 'docx' ? 2 : 0)) / layoutGrid.value.rows -
+      reserve
+    return safeImageWidth(includedImages.value, cellWidth, height)
   })
+  const currentRecommendedWidth = computed(() => Math.floor(maximumImageWidth.value * 10) / 10)
+  const actualImageWidth = computed(() => effectiveImageWidth(settings.fixed_width_mm, maximumImageWidth.value))
+  const widthIsLimited = computed(() => Number(settings.fixed_width_mm) > maximumImageWidth.value)
+  function optionLayoutLabel(value) {
+    return layoutOptionLabel(value, isFlowLayout.value)
+  }
 
   async function selectFolder() {
     await addFolders()
@@ -238,9 +251,7 @@ export function useImagePaddlerState(options = {}) {
     explicitPaths.value = []
     folders.value.splice(index, 1)
     if (!folders.value.length) {
-      folder.value = ''
-      explicitPaths.value = []
-      analysis.value = null
+      clearAllSources()
     } else {
       folder.value = folders.value[0]
       scheduleAnalyze()
@@ -248,6 +259,9 @@ export function useImagePaddlerState(options = {}) {
   }
 
   function clearAllSources() {
+    analysisRequestId += 1
+    if (analyzeTimer) clearTimeout(analyzeTimer)
+    analyzing.value = false
     folders.value = []
     folder.value = ''
     explicitPaths.value = []
@@ -295,11 +309,11 @@ export function useImagePaddlerState(options = {}) {
     } else {
       ElMessage.error(userFacingError(result.error, '图片文件夹分析失败，请确认文件夹路径正确'))
     }
-    analyzing.value = false
+    if (requestId === analysisRequestId) analyzing.value = false
   }
 
   async function run() {
-    if (!folders.value.length) return
+    if (!folders.value.length || analyzing.value || generating.value) return
     if (!includedImages.value.length) {
       ElMessage.warning('当前没有参与排版的图片，请先恢复至少一张图片')
       return
@@ -312,6 +326,8 @@ export function useImagePaddlerState(options = {}) {
         image_paths: includedImages.value.map((image) => image.path),
         output_stem: inputContext.value.sourceStem || undefined,
         ...settings,
+        order_mode: 'custom',
+        fixed_width_mm: actualImageWidth.value,
         orientation: resolvedOrientation.value,
       },
     })
@@ -529,11 +545,7 @@ export function useImagePaddlerState(options = {}) {
     const nativeHeight = (img.height * 25.4) / settings.dpi
     let drawWidth, drawHeight
     if (settings.scale_mode === 'fixed_width') {
-      const fixedW = Math.min(
-        Math.max(10, Number(settings.fixed_width_mm) || 160),
-        metrics.cellWidth,
-        ...includedImages.value.map((image) => (metrics.imageCellHeight * image.width) / image.height),
-      )
+      const fixedW = actualImageWidth.value
       const ratio = img.width > 0 ? img.height / img.width : 1
       drawWidth = fixedW
       drawHeight = fixedW * ratio
@@ -594,6 +606,8 @@ export function useImagePaddlerState(options = {}) {
   }
 
   function scheduleAnalyze() {
+    analysisRequestId += 1
+    analyzing.value = true
     analysis.value = null
     generatedResult.value = null
     if (analyzeTimer) clearTimeout(analyzeTimer)
@@ -694,6 +708,7 @@ export function useImagePaddlerState(options = {}) {
   })
 
   onBeforeUnmount(() => {
+    analysisRequestId += 1
     if (analyzeTimer) clearTimeout(analyzeTimer)
     void preference.stop()
   })
@@ -758,6 +773,7 @@ export function useImagePaddlerState(options = {}) {
 
   function layoutLabel(value) {
     const grid = parseLayout(value, settings.custom_rows, settings.custom_cols)
+    if (isFlowLayout.value) return `${grid.rows * grid.cols} 张（上下）`
     if (value === '1') return '1 张'
     if (value === '1x2') return '2 张（左右）'
     if (value === '2x1') return '2 张（上下）'
@@ -771,6 +787,11 @@ export function useImagePaddlerState(options = {}) {
   }
 
   return {
+    isFlowLayout,
+    optionLayoutLabel,
+    maximumImageWidth,
+    actualImageWidth,
+    widthIsLimited,
     folder,
     folders,
     analyzing,
