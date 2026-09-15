@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-15T10:28:48Z",
+  "generated_at": "2026-09-15T15:10:38Z",
   "github_url": "https://github.com/muxiaoxiii/docsy/releases",
   "latest": "1.0.3",
   "releases": [
@@ -11,28 +11,30 @@
         {
           "platform": "macos",
           "name": "Docsy_1.0.3_aarch64.dmg",
-          "size": 19058682,
-          "sha256": "9a0704d171dc0668376add38a9c616735f58e31be932e9289b4aed5252f43925",
-          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_aarch64.dmg",
-          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_aarch64.dmg"
+          "size": 18988139,
+          "sha256": "35a80f6672d24303901ade13bbc2d74139de8e891ee7045f437d9c6afce22e85",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_aarch64.dmg?revision=bc62f56",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_aarch64.dmg?revision=bc62f56"
         },
         {
           "platform": "windows",
           "name": "Docsy_1.0.3_x64-setup.exe",
-          "size": 15143125,
-          "sha256": "de1dab57ddac94cbcf49ba18cefa208ce723b7375cdc803c781a79f49929cd84",
-          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x64-setup.exe",
-          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x64-setup.exe"
+          "size": 15155204,
+          "sha256": "a9f5737d0ac7d4d916ce544f28a6d8e782e99f698e5718ea3a30cc69ca680b53",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x64-setup.exe?revision=bc62f56",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x64-setup.exe?revision=bc62f56"
         },
         {
           "platform": "windows-x86",
           "name": "Docsy_1.0.3_x86-setup.exe",
-          "size": 14022613,
-          "sha256": "f99705ec227673606ece33713e265cebff3b32d3d9f55055cef0a5fb6a815b1f",
-          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x86-setup.exe",
-          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x86-setup.exe"
+          "size": 14005402,
+          "sha256": "ef9934fca73115e03a1740cda8351ce0d5fa757ebdaba28aa506d291d6b42503",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x86-setup.exe?revision=bc62f56",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x86-setup.exe?revision=bc62f56"
         }
-      ]
+      ],
+      "revision": "bc62f56",
+      "updated_at": "2026-09-15T15:10:38Z"
     },
     {
       "version": "1.0.2",
