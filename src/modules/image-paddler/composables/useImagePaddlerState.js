@@ -63,6 +63,7 @@ export function useImagePaddlerState(options = {}) {
     show_filename: true,
     filename_font_family: 'sans',
     filename_font_size_pt: 8,
+    filename_color: 'dark_gray',
     filename_without_ext: false,
     filename_remove_text: '',
     filename_rules: [],
@@ -70,6 +71,8 @@ export function useImagePaddlerState(options = {}) {
     order_mode: 'z',
     border_enabled: false,
     border_color: 'black',
+    use_table: true,
+    fixed_width_mm: 160,
   })
   const preference = useWorkspacePreferences('image-paddler.workspace', {
     settings,
@@ -79,7 +82,10 @@ export function useImagePaddlerState(options = {}) {
     preferenceRevision,
   })
 
-  const layoutGrid = computed(() => parseLayout(settings.layout, settings.custom_rows, settings.custom_cols))
+  const layoutGrid = computed(() => {
+    const grid = parseLayout(settings.layout, settings.custom_rows, settings.custom_cols)
+    return settings.output_format === 'docx' && !settings.use_table ? { rows: grid.rows * grid.cols, cols: 1 } : grid
+  })
   const isFrameSequence = computed(() => inputContext.value.sourceKind === 'video-frames')
   const resolvedOrientation = computed(() => {
     if (settings.orientation !== 'auto') return settings.orientation
@@ -162,6 +168,7 @@ export function useImagePaddlerState(options = {}) {
       flexBasis: height,
       fontSize: `${(metrics.filenameFontSizePt * 96) / 72}px`,
       fontFamily: filenameFontFamilyCss(settings.filename_font_family),
+      color: { black: '#000000', gray: '#6B7280', blue: '#2563EB' }[settings.filename_color] || '#4B5563',
       lineHeight: `${metrics.filenameLineHeightMm}mm`,
     }
   })
@@ -177,16 +184,75 @@ export function useImagePaddlerState(options = {}) {
     )
   }
 
+  const currentRecommendedWidth = computed(() => {
+    if (analysis.value?.recommended?.recommended_width_mm) {
+      return Number(analysis.value.recommended.recommended_width_mm)
+    }
+    const orientation = resolvedOrientation.value
+    const layout = settings.layout
+    if (orientation === 'landscape') {
+      if (layout === '1') return 240
+      if (layout === '1x2') return 125
+      if (layout === '2x1') return 180
+      return 120
+    } else {
+      if (layout === '1') return 170
+      if (layout === '2x1' || layout === '2') return 160
+      if (layout === '1x2') return 85
+      return 160
+    }
+  })
+
   async function selectFolder() {
+    await addFolders()
+  }
+
+  async function addFolders() {
     const selected = await open({ directory: true, multiple: true })
     if (selected) {
-      folders.value = Array.isArray(selected) ? selected : [selected]
-      folder.value = folders.value[0] || ''
+      const newFolders = Array.isArray(selected) ? selected : [selected]
+      folders.value = [...new Set([...folders.value, ...newFolders])]
       explicitPaths.value = []
+      if (!folder.value) folder.value = folders.value[0] || ''
       inputContext.value = { sourceKind: 'folder', sourceLabel: '', sourceStem: '' }
-      sourceDecisions.value = {}
       scheduleAnalyze()
     }
+  }
+
+  async function addImages() {
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'] }],
+    })
+    if (selected) {
+      const newPaths = Array.isArray(selected) ? selected : [selected]
+      explicitPaths.value = []
+      folders.value = [...new Set([...folders.value, ...newPaths])]
+      if (!folder.value) folder.value = folders.value[0] || ''
+      inputContext.value = { sourceKind: 'images', sourceLabel: '导入图片', sourceStem: '' }
+      scheduleAnalyze()
+    }
+  }
+
+  function removeFolder(index) {
+    explicitPaths.value = []
+    folders.value.splice(index, 1)
+    if (!folders.value.length) {
+      folder.value = ''
+      explicitPaths.value = []
+      analysis.value = null
+    } else {
+      folder.value = folders.value[0]
+      scheduleAnalyze()
+    }
+  }
+
+  function clearAllSources() {
+    folders.value = []
+    folder.value = ''
+    explicitPaths.value = []
+    analysis.value = null
+    generatedResult.value = null
   }
 
   function loadImagePaths(paths, context = {}) {
@@ -204,8 +270,8 @@ export function useImagePaddlerState(options = {}) {
         .filter((item) => item?.path)
         .map((item) => [item.path, { decision: item.decision || 'review', reason: item.reason || '' }]),
     )
-    folders.value = [...new Set(normalized.map((path) => parentDir(path)))]
-    folder.value = folders.value[0] || parentDir(normalized[0])
+    folders.value = normalized
+    folder.value = parentDir(normalized[0])
     settings.order_mode = 'custom'
     if (inputContext.value.sourceKind === 'video-frames') settings.output_mode = 'merged'
     scheduleAnalyze()
@@ -461,13 +527,25 @@ export function useImagePaddlerState(options = {}) {
     const metrics = layoutMetrics.value
     const nativeWidth = (img.width * 25.4) / settings.dpi
     const nativeHeight = (img.height * 25.4) / settings.dpi
-    const fitScale = Math.min(metrics.cellWidth / nativeWidth, metrics.imageCellHeight / nativeHeight)
-    const scale = settings.scale_mode === 'original' ? Math.min(fitScale, 1) : fitScale
-    const drawWidth = nativeWidth * scale
-    const drawHeight = nativeHeight * scale
+    let drawWidth, drawHeight
+    if (settings.scale_mode === 'fixed_width') {
+      const fixedW = Math.min(
+        Math.max(10, Number(settings.fixed_width_mm) || 160),
+        metrics.cellWidth,
+        ...includedImages.value.map((image) => (metrics.imageCellHeight * image.width) / image.height),
+      )
+      const ratio = img.width > 0 ? img.height / img.width : 1
+      drawWidth = fixedW
+      drawHeight = fixedW * ratio
+    } else {
+      const fitScale = Math.min(metrics.cellWidth / nativeWidth, metrics.imageCellHeight / nativeHeight)
+      const scale = settings.scale_mode === 'original' ? Math.min(fitScale, 1) : fitScale
+      drawWidth = nativeWidth * scale
+      drawHeight = nativeHeight * scale
+    }
     return {
-      width: `${Math.min(100, (drawWidth / metrics.cellWidth) * 100)}%`,
-      height: `${Math.min(100, (drawHeight / metrics.imageCellHeight) * 100)}%`,
+      width: `${(drawWidth / metrics.cellWidth) * 100}%`,
+      height: `${(drawHeight / metrics.imageCellHeight) * 100}%`,
       maxWidth: '100%',
       maxHeight: '100%',
       objectFit: 'contain',
@@ -571,7 +649,12 @@ export function useImagePaddlerState(options = {}) {
     if (!recommended) return
     settings.orientation = recommended.orientation || 'auto'
     settings.layout = recommended.layout || '2x1'
-    settings.scale_mode = recommended.scale_mode || 'fit'
+    if (recommended.recommended_width_mm) {
+      settings.fixed_width_mm = Number(recommended.recommended_width_mm)
+      settings.scale_mode = 'fixed_width'
+    } else {
+      settings.scale_mode = recommended.scale_mode || 'fit'
+    }
     settings.margin_mm = Number(recommended.margin_mm || 12)
     settings.show_filename = recommended.show_filename !== false
     if (showMessage) ElMessage.success('已应用推荐参数')
@@ -601,9 +684,9 @@ export function useImagePaddlerState(options = {}) {
       if (accepted.length < paths.length) {
         ElMessage.warning('已忽略不支持的文件类型')
       }
-      folders.value = accepted
-      folder.value = accepted[0]
-      explicitPaths.value = accepted.every(isExplicitImagePath) ? accepted : []
+      folders.value = [...new Set([...folders.value, ...accepted])]
+      folder.value = folders.value[0]
+      explicitPaths.value = []
       inputContext.value = { sourceKind: 'drop', sourceLabel: '', sourceStem: '' }
       sourceDecisions.value = {}
       scheduleAnalyze()
@@ -682,6 +765,7 @@ export function useImagePaddlerState(options = {}) {
   }
 
   function scaleModeLabel(value) {
+    if (value === 'fixed_width') return '统一图片宽度'
     if (value === 'original') return '不缩放'
     return '适应页面'
   }
@@ -715,6 +799,12 @@ export function useImagePaddlerState(options = {}) {
     previewImageAreaStyle,
     previewNameStyle,
     selectFolder,
+    addFolders,
+    addImages,
+    removeFolder,
+    clearAllSources,
+    currentRecommendedWidth,
+    baseFileName,
     loadImagePaths,
     analyze,
     run,

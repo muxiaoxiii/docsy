@@ -1,5 +1,23 @@
 use crate::error::DocsyError;
 
+#[cfg(test)]
+mod preview_tests {
+    use super::preview_image_data_url;
+    use base64::Engine;
+
+    #[test]
+    fn transparent_png_preview_preserves_alpha() {
+        let path = std::env::temp_dir().join(format!("docsy-alpha-{}.png", std::process::id()));
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([20, 40, 60, 80])).save(&path).unwrap();
+        let preview = preview_image_data_url(path.to_str().unwrap(), Some(160)).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(preview.strip_prefix("data:image/png;base64,").unwrap()).unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        assert_eq!(decoded.get_pixel(0, 0).0, [20, 40, 60, 80]);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
 #[tauri::command]
 pub fn open_path(path: String) -> Result<(), DocsyError> {
     let path = std::path::PathBuf::from(&path);
@@ -313,12 +331,18 @@ fn preview_image_data_url(path: &str, max_edge: Option<u32>) -> anyhow::Result<S
         .unwrap_or(DEFAULT_PREVIEW_EDGE)
         .clamp(160, DEFAULT_PREVIEW_EDGE);
     let preview = image.thumbnail(preview_edge, preview_edge);
+    let has_alpha = preview.color().has_alpha();
+    let (format, mime) = if has_alpha || ext == "png" || ext == "webp" {
+        (image::ImageFormat::Png, "image/png")
+    } else {
+        (image::ImageFormat::Jpeg, "image/jpeg")
+    };
     let mut bytes = Vec::new();
     preview
-        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+        .write_to(&mut Cursor::new(&mut bytes), format)
         .map_err(|error| anyhow::anyhow!("生成图片缩略图失败: {error}"))?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(format!("data:image/jpeg;base64,{encoded}"))
+    Ok(format!("data:{mime};base64,{encoded}"))
 }
 
 #[tauri::command]

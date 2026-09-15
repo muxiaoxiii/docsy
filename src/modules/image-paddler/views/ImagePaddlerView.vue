@@ -4,13 +4,29 @@
       <!-- Settings Panel -->
       <div class="settings-panel">
         <el-form label-width="80px" size="small">
-          <el-form-item :label="isFrameSequence ? '来源' : '文件夹'">
-            <el-button @click="selectFolder">选择文件夹</el-button>
-            <span v-if="isFrameSequence" class="folder-path transfer-source">
+          <el-form-item :label="isFrameSequence ? '来源' : '素材来源'">
+            <div class="source-actions">
+              <el-button @click="addFolders">添加文件夹</el-button>
+              <el-button @click="addImages">添加图片</el-button>
+              <el-button v-if="folders.length" text type="danger" size="small" @click="clearAllSources">清空</el-button>
+            </div>
+            <div v-if="isFrameSequence" class="folder-path transfer-source">
               {{ inputContext.sourceLabel || '视频抽帧筛选结果' }}
               <template v-if="analysis"> · {{ analysis.images.length }} 张</template>
-            </span>
-            <span v-else-if="folders.length" class="folder-path">{{ folders.join('；') }}</span>
+            </div>
+            <div v-else-if="folders.length" class="source-tags">
+              <el-tag
+                v-for="(f, idx) in folders"
+                :key="f"
+                closable
+                size="small"
+                type="info"
+                class="source-tag"
+                @close="removeFolder(idx)"
+              >
+                {{ baseFileName(f) || f }}
+              </el-tag>
+            </div>
           </el-form-item>
 
           <el-form-item label="输出格式">
@@ -18,6 +34,17 @@
               <el-option label="DOCX" value="docx" />
               <el-option label="PDF" value="pdf" />
             </el-select>
+          </el-form-item>
+
+          <el-form-item v-if="settings.output_format === 'docx'" label="排版方式">
+            <el-checkbox v-model="settings.use_table">使用表格排版</el-checkbox>
+            <div class="field-hint">
+              {{
+                settings.use_table
+                  ? '多列并排推荐；保持单元格网格对齐'
+                  : '无表格模式按每页张数上下排列，便于在 Word 中自由插入文字'
+              }}
+            </div>
           </el-form-item>
 
           <el-form-item v-if="!isFrameSequence && folders.length > 1" label="多文件夹">
@@ -51,9 +78,37 @@
 
           <el-form-item label="缩放模式">
             <el-select v-model="settings.scale_mode">
+              <el-option label="统一图片宽度（推荐）" value="fixed_width" />
               <el-option label="适应页面" value="fit" />
               <el-option label="不缩放" value="original" />
             </el-select>
+          </el-form-item>
+
+          <el-form-item v-if="settings.scale_mode === 'fixed_width'" label="图片宽度">
+            <div class="fixed-width-control">
+              <el-slider
+                v-model="settings.fixed_width_mm"
+                :min="40"
+                :max="resolvedOrientation === 'landscape' ? 260 : 190"
+                :step="1"
+                class="width-slider"
+              />
+              <div class="width-input-row">
+                <el-input-number
+                  v-model="settings.fixed_width_mm"
+                  :min="30"
+                  :max="300"
+                  :step="5"
+                  size="small"
+                  controls-position="right"
+                />
+                <span class="unit-label">mm</span>
+                <el-button size="small" text type="primary" @click="settings.fixed_width_mm = currentRecommendedWidth">
+                  推荐({{ currentRecommendedWidth }}mm)
+                </el-button>
+              </div>
+              <div class="field-hint">超过版心时按整组图片统一缩小，保持等宽和原始比例。</div>
+            </div>
           </el-form-item>
 
           <el-form-item label="方向">
@@ -69,7 +124,7 @@
             <span class="unit-label">mm</span>
           </el-form-item>
 
-          <el-form-item label="文件名">
+          <el-form-item label="标题 / 文件名">
             <div class="filename-panel">
               <div class="filename-panel-row">
                 <el-switch v-model="settings.show_filename" active-text="显示" inactive-text="隐藏" />
@@ -98,6 +153,15 @@
                     controls-position="right"
                   />
                   <span>pt</span>
+                </label>
+                <label class="filename-font-control">
+                  <span>颜色</span>
+                  <el-select v-model="settings.filename_color" :disabled="!settings.show_filename">
+                    <el-option label="深灰（默认）" value="dark_gray" />
+                    <el-option label="黑色" value="black" />
+                    <el-option label="灰色" value="gray" />
+                    <el-option label="蓝色" value="blue" />
+                  </el-select>
                 </label>
               </div>
               <div class="filename-rules">
@@ -240,15 +304,24 @@
             </div>
             <div class="page-preview-shell">
               <div class="page-preview" :class="resolvedOrientation" :style="previewPageStyle">
-                <div class="preview-grid" :style="previewGridStyle">
+                <div
+                  class="preview-grid"
+                  :class="{ 'preview-grid-flow': settings.output_format === 'docx' && !settings.use_table }"
+                  :style="previewGridStyle"
+                >
                   <div
                     v-for="(img, idx) in previewSlots"
                     :key="idx"
                     class="preview-cell"
                     :class="{
-                      'preview-cell-bordered': settings.border_enabled,
-                      'preview-cell-white-border': settings.border_enabled && settings.border_color === 'white',
+                      'preview-cell-bordered':
+                        (settings.output_format !== 'docx' || settings.use_table) && settings.border_enabled,
+                      'preview-cell-white-border':
+                        (settings.output_format !== 'docx' || settings.use_table) &&
+                        settings.border_enabled &&
+                        settings.border_color === 'white',
                       'preview-cell-no-name': !settings.show_filename,
+                      'preview-cell-flow': settings.output_format === 'docx' && !settings.use_table,
                     }"
                     :style="previewCellStyle"
                   >
@@ -334,7 +407,12 @@ const {
   previewCellStyle,
   previewImageAreaStyle,
   previewNameStyle,
-  selectFolder,
+  addFolders,
+  addImages,
+  removeFolder,
+  clearAllSources,
+  currentRecommendedWidth,
+  baseFileName,
   run,
   reorderLayoutImages,
   openGeneratedOutput,
@@ -714,5 +792,64 @@ const {
   .filename-rule-keep {
     grid-template-columns: 78px minmax(0, 1fr) auto;
   }
+}
+
+.source-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.source-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  max-height: 90px;
+  overflow-y: auto;
+}
+
+.source-tag {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+  line-height: 1.35;
+  margin-top: 4px;
+}
+
+.fixed-width-control {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.width-slider {
+  margin-bottom: 2px;
+}
+
+.width-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.width-input-row :deep(.el-input-number) {
+  width: 96px;
+}
+
+.preview-grid-flow {
+  row-gap: 8px;
+}
+
+.preview-cell-flow {
+  border: none !important;
 }
 </style>

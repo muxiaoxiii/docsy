@@ -59,6 +59,8 @@ pub struct RecommendedSettings {
     pub margin_mm: f64,
     pub show_filename: bool,
     pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommended_width_mm: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,6 +106,12 @@ pub struct RunArgs {
     pub output_mode: Option<String>,
     #[serde(default)]
     pub output_stem: Option<String>,
+    #[serde(default)]
+    pub use_table: Option<bool>,
+    #[serde(default)]
+    pub fixed_width_mm: Option<f64>,
+    #[serde(default)]
+    pub filename_color: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -163,6 +171,9 @@ struct LayoutConfig {
     border_color: String,
     scale_mode: String,
     dpi: u32,
+    use_table: bool,
+    fixed_width_mm: Option<f64>,
+    filename_color: String,
 }
 
 fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig {
@@ -254,36 +265,57 @@ fn parse_layout(
     }
 }
 
-fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
-    let mut images = Vec::new();
-    let dir = std::fs::read_dir(folder)?;
+fn scan_images_recursive(dir_path: &Path, images: &mut Vec<ImageInfo>) -> Result<()> {
+    let dir = match std::fs::read_dir(dir_path) {
+        Ok(d) => d,
+        Err(_) => return Ok(()),
+    };
 
     for entry in dir {
-        let entry = entry?;
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
         let path = entry.path();
-        if !path.is_file() {
+        if entry.file_type()?.is_symlink() {
             continue;
         }
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            let ext_lower = ext.to_lowercase();
-            if IMAGE_EXTENSIONS.contains(&ext_lower.as_str()) {
-                let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let (width, height) = match image::image_dimensions(&path) {
-                    Ok(dimensions) => dimensions,
-                    Err(_) => continue,
-                };
-                images.push(ImageInfo {
-                    path: path.display().to_string(),
-                    width,
-                    height,
-                    file_size,
-                });
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        if path.is_dir() {
+            let _ = scan_images_recursive(&path, images);
+        } else if path.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let ext_lower = ext.to_lowercase();
+                if IMAGE_EXTENSIONS.contains(&ext_lower.as_str()) {
+                    let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    let (width, height) = match image::image_dimensions(&path) {
+                        Ok(dimensions) => dimensions,
+                        Err(_) => continue,
+                    };
+                    images.push(ImageInfo {
+                        path: path.display().to_string(),
+                        width,
+                        height,
+                        file_size,
+                    });
+                }
             }
         }
     }
+    Ok(())
+}
 
+fn scan_images(folder: &str) -> Result<Vec<ImageInfo>> {
+    let mut images = Vec::new();
+    scan_images_recursive(Path::new(folder), &mut images)?;
     images.sort_by(|a, b| natural_cmp(&a.path, &b.path));
-
     Ok(images)
 }
 
@@ -317,6 +349,7 @@ fn scan_image_folders(folder: &str, folders: &Option<Vec<String>>) -> Result<Vec
         }
     }
     all.sort_by(|a, b| natural_cmp(&a.path, &b.path));
+    all.dedup_by(|first, second| first.path == second.path);
     Ok(all)
 }
 
@@ -352,6 +385,7 @@ fn recommend_settings(images: &[ImageInfo]) -> RecommendedSettings {
             margin_mm: 12.0,
             show_filename: true,
             reason: "未找到图片时使用保守的 A4 证据排版参数".into(),
+            recommended_width_mm: None,
         };
     }
 
@@ -425,6 +459,27 @@ fn recommend_settings(images: &[ImageInfo]) -> RecommendedSettings {
         )
     };
 
+    let recommended_width_mm = if orientation == "landscape" {
+        match layout {
+            "1" => Some(240.0),
+            "1x2" => Some(125.0),
+            "2x1" => Some(180.0),
+            _ => Some(120.0),
+        }
+    } else {
+        match layout {
+            "1" => Some(170.0),
+            "2x1" | "2" => {
+                // 上下 2 张图，根据宽高比计算高度安全的最大宽度（上限 165mm）
+                let max_h = 105.0;
+                let w = (max_h * aspect).clamp(120.0, 165.0);
+                Some((w / 5.0).round() * 5.0) // 规整到 5 的倍数，如 160.0
+            }
+            "1x2" => Some(85.0),
+            _ => Some(160.0),
+        }
+    };
+
     RecommendedSettings {
         orientation: orientation.into(),
         layout: layout.into(),
@@ -433,6 +488,7 @@ fn recommend_settings(images: &[ImageInfo]) -> RecommendedSettings {
         margin_mm: 12.0,
         show_filename: true,
         reason: reason.into(),
+        recommended_width_mm,
     }
 }
 
@@ -582,7 +638,10 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
         anyhow::bail!("未找到图片文件");
     }
 
-    let grid = parse_layout(&args.layout, args.custom_rows, args.custom_cols);
+    let mut grid = parse_layout(&args.layout, args.custom_rows, args.custom_cols);
+    if args.output_format == "docx" && args.use_table == Some(false) {
+        grid = LayoutGrid { rows: grid.rows * grid.cols, cols: 1 };
+    }
     let per_page = grid.rows * grid.cols;
     let margin_mm = args.margin_mm.unwrap_or(12.0);
     let show_filename = args.show_filename.unwrap_or(true);
@@ -642,7 +701,7 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
     let total_pages = images.len().div_ceil(per_page);
     reorder_images(&mut images, &grid, order_mode);
 
-    let config = LayoutConfig {
+    let mut config = LayoutConfig {
         page_w_mm: page_w,
         page_h_mm: page_h,
         margin_mm,
@@ -662,7 +721,21 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
         border_color: border_color.to_string(),
         scale_mode: args.scale_mode.clone(),
         dpi: if args.dpi == 0 { 300 } else { args.dpi.clamp(72, 1200) },
+        use_table: args.use_table.unwrap_or(true),
+        fixed_width_mm: args.fixed_width_mm,
+        filename_color: args
+            .filename_color
+            .as_deref()
+            .unwrap_or("dark_gray")
+            .to_string(),
     };
+
+    if config.scale_mode == "fixed_width" {
+        let safe_width = images.iter().fold(config.cell_w_mm, |width, image| {
+            width.min(config.image_cell_h_mm * image.width as f64 / image.height.max(1) as f64)
+        });
+        config.fixed_width_mm = Some(config.fixed_width_mm.unwrap_or(160.0).clamp(10.0, 500.0).min(safe_width));
+    }
 
     std::fs::create_dir_all(output_dir)?;
     let ext = if args.output_format == "pdf" {
@@ -1011,26 +1084,35 @@ fn compute_placement(
     cell_h_pt: f64,
     scale_mode: &str,
     dpi: u32,
+    fixed_width_mm: Option<f64>,
 ) -> (f64, f64, f64, f64) {
     let safe_dpi = if dpi == 0 { 300.0 } else { (dpi as f64).clamp(72.0, 1200.0) };
     let native_w_pt = img_w as f64 * 72.0 / safe_dpi;
     let native_h_pt = img_h as f64 * 72.0 / safe_dpi;
 
-    let scale = match scale_mode {
+    let (draw_w_pt, draw_h_pt) = match scale_mode {
+        "fixed_width" => {
+            let width_mm = fixed_width_mm.unwrap_or(160.0).clamp(0.1, 500.0);
+            let target_w_pt = width_mm * 72.0 / 25.4;
+            let ratio = if img_w > 0 { img_h as f64 / img_w as f64 } else { 1.0 };
+            (target_w_pt, target_w_pt * ratio)
+        }
         "original" => {
             let fit_scale = (cell_w_pt / native_w_pt).min(cell_h_pt / native_h_pt);
-            fit_scale.min(1.0)
+            let scale = fit_scale.min(1.0);
+            (native_w_pt * scale, native_h_pt * scale)
         }
         _ => {
             let scale_x = cell_w_pt / native_w_pt;
             let scale_y = cell_h_pt / native_h_pt;
-            scale_x.min(scale_y)
+            let scale = scale_x.min(scale_y);
+            (native_w_pt * scale, native_h_pt * scale)
         }
     };
 
     (
-        native_w_pt * scale,
-        native_h_pt * scale,
+        draw_w_pt,
+        draw_h_pt,
         native_w_pt,
         native_h_pt,
     )
@@ -1118,6 +1200,7 @@ fn generate_pdf(
                 cell_h_pt,
                 &config.scale_mode,
                 config.dpi,
+                config.fixed_width_mm,
             );
             let (target_width_px, target_height_px) =
                 target_pixel_size(draw_w_pt, draw_h_pt, config.dpi);
@@ -1167,8 +1250,9 @@ fn generate_pdf(
                         .clone(),
                     size: Pt(config.filename_font_size_pt as f32),
                 });
+                let (r, g, b) = text_rgb(&config.filename_color);
                 ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb::new(0.2, 0.2, 0.2, None)),
+                    col: Color::Rgb(Rgb::new(r, g, b, None)),
                 });
                 for (line_idx, line) in lines.iter().enumerate() {
                     let line_w_pt = name_units(line) as f64 * config.filename_font_size_pt * 0.56;
@@ -1413,6 +1497,90 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
         .page_orient(page_orientation)
         .page_margin(page_margin);
 
+    if !config.use_table {
+        let total_chunks = images.chunks(per_page).count();
+        for (chunk_idx, chunk) in images.chunks(per_page).enumerate() {
+            let page_config = layout_for_page(config, chunk);
+            let cfg = &page_config;
+            let cell_w_pt = cfg.cell_w_mm * 72.0 / 25.4;
+            let cell_h_pt = cfg.image_cell_h_mm * 72.0 / 25.4;
+
+            for img_info in chunk {
+                let (draw_w_pt, draw_h_pt, _, _) = compute_placement(
+                    img_info.width,
+                    img_info.height,
+                    cell_w_pt,
+                    cell_h_pt,
+                    &cfg.scale_mode,
+                    cfg.dpi,
+                    cfg.fixed_width_mm,
+                );
+                let (target_width_px, target_height_px) =
+                    target_pixel_size(draw_w_pt, draw_h_pt, cfg.dpi);
+                let (png_data, width_px, height_px) =
+                    image_as_png(&img_info.path, target_width_px, target_height_px)?;
+                let pic = Pic::new_with_dimensions(png_data, width_px, height_px)
+                    .size(pt_to_emu(draw_w_pt), pt_to_emu(draw_h_pt));
+
+                doc = doc.add_paragraph(
+                    Paragraph::new()
+                        .align(AlignmentType::Center)
+                        .line_spacing(LineSpacing::new().before(0).after(0))
+                        .add_run(Run::new().add_image(pic)),
+                );
+
+                if cfg.show_filename {
+                    let filename_lines = display_filename_lines(
+                        &img_info.path,
+                        cfg.filename_without_ext,
+                        &cfg.filename_remove_text,
+                        &cfg.filename_rules,
+                        cfg.cell_w_mm,
+                        cfg.filename_font_size_pt,
+                        cfg.filename_max_lines,
+                    );
+                    let font_name = docx_font_name(&cfg.filename_font_family);
+                    let mut filename_run = Run::new()
+                        .fonts(
+                            RunFonts::new()
+                                .ascii(font_name)
+                                .hi_ansi(font_name)
+                                .east_asia(font_name)
+                                .cs(font_name),
+                        )
+                        .size((cfg.filename_font_size_pt * 2.0).round() as usize)
+                        .color(docx_text_color(&cfg.filename_color));
+                    for (line_idx, line) in filename_lines.into_iter().enumerate() {
+                        if line_idx > 0 {
+                            filename_run = filename_run.add_break(BreakType::TextWrapping);
+                        }
+                        filename_run = filename_run.add_text(line);
+                    }
+                    doc = doc.add_paragraph(
+                        Paragraph::new()
+                            .align(AlignmentType::Center)
+                            .line_spacing(
+                                LineSpacing::new().before(0).after(0)
+                                    .line_rule(LineSpacingType::Exact)
+                                    .line(mm_to_twips(filename_line_height_mm(cfg.filename_font_size_pt))),
+                            )
+                            .add_run(filename_run),
+                    );
+                }
+            }
+
+            if chunk_idx + 1 < total_chunks {
+                doc = doc.add_paragraph(
+                    Paragraph::new().add_run(Run::new().add_break(BreakType::Page)),
+                );
+            }
+        }
+
+        let file = std::fs::File::create(output_path)?;
+        doc.build().pack(file)?;
+        return Ok(());
+    }
+
     for chunk in images.chunks(per_page) {
         let page_config = layout_for_page(config, chunk);
         let config = &page_config;
@@ -1442,6 +1610,7 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         cell_h_pt,
                         &config.scale_mode,
                         config.dpi,
+                        config.fixed_width_mm,
                     );
                     let (target_width_px, target_height_px) =
                         target_pixel_size(draw_w_pt, draw_h_pt, config.dpi);
@@ -1474,7 +1643,8 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                                     .east_asia(font_name)
                                     .cs(font_name),
                             )
-                            .size((config.filename_font_size_pt * 2.0).round() as usize);
+                            .size((config.filename_font_size_pt * 2.0).round() as usize)
+                            .color(docx_text_color(&config.filename_color));
                         for (line_idx, line) in filename_lines.into_iter().enumerate() {
                             if line_idx > 0 {
                                 filename_run = filename_run.add_break(BreakType::TextWrapping);
@@ -1541,6 +1711,15 @@ fn docx_border_color(color: &str) -> &'static str {
     }
 }
 
+fn docx_text_color(color: &str) -> &'static str {
+    match color {
+        "black" => "000000",
+        "gray" => "6B7280",
+        "blue" => "2563EB",
+        _ => "4B5563", // 默认深灰
+    }
+}
+
 fn border_rgb(color: &str) -> (f32, f32, f32) {
     match color {
         "white" => (1.0, 1.0, 1.0),
@@ -1550,6 +1729,15 @@ fn border_rgb(color: &str) -> (f32, f32, f32) {
         "yellow" => (0.851, 0.467, 0.024),
         "blue" => (0.145, 0.388, 0.922),
         _ => (0.0, 0.0, 0.0),
+    }
+}
+
+fn text_rgb(color: &str) -> (f32, f32, f32) {
+    match color {
+        "black" => (0.0, 0.0, 0.0),
+        "gray" => (0.42, 0.447, 0.502),
+        "blue" => (0.145, 0.388, 0.922),
+        _ => (0.294, 0.333, 0.388), // 默认深灰 (4B5563)
     }
 }
 
@@ -1741,6 +1929,9 @@ mod tests {
             border_color: None,
             output_mode: None,
             output_stem: None,
+            use_table: None,
+            fixed_width_mm: None,
+            filename_color: None,
         };
         assert_eq!(
             explicit_image_paths(&args).unwrap(),
@@ -1790,6 +1981,9 @@ mod tests {
             border_color: Some("dark_gray".into()),
             output_mode: None,
             output_stem: None,
+            use_table: None,
+            fixed_width_mm: None,
+            filename_color: None,
         };
 
         let first = run(&args).unwrap();
@@ -1830,6 +2024,7 @@ mod tests {
         assert!(document_xml.contains("<w:insideV"));
         assert!(document_xml.contains("<w:tcBorders>"));
         assert!(document_xml.contains("4B5563"));
+        assert!(document_xml.contains("w:color w:val=\"4B5563\""));
         assert!(document_xml.contains(docx_font_name("serif")));
         assert!(document_xml.contains("w:lineRule=\"exact\""));
         assert!(document_xml.contains("<w:br"));
@@ -1845,11 +2040,29 @@ mod tests {
     fn placement_fit_and_original_have_distinct_print_sizes() {
         let cell_w_pt = 180.0 * 72.0 / 25.4;
         let cell_h_pt = 120.0 * 72.0 / 25.4;
-        let (fit_w, fit_h, _, _) = compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "fit", 300);
+        let (fit_w, fit_h, _, _) = compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "fit", 300, None);
         let (original_w, original_h, _, _) =
-            compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "original", 300);
+            compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "original", 300, None);
+        let (fixed_w, fixed_h, _, _) =
+            compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "fixed_width", 300, Some(160.0));
         assert!(fit_w > original_w);
         assert!(fit_h > original_h);
+        assert!((fixed_w - (160.0 * 72.0 / 25.4)).abs() < 0.01);
+        assert!((fixed_h - (fixed_w * 1080.0 / 1920.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn recursive_sources_are_deduplicated() {
+        let root = std::env::temp_dir().join(format!("docsy-scan-{}", std::process::id()));
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let path = nested.join("evidence.png");
+        image::RgbImage::new(4, 4).save(&path).unwrap();
+        let sources = Some(vec![root.display().to_string(), nested.display().to_string(), path.display().to_string()]);
+        let images = scan_image_folders("", &sources).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].path, path.display().to_string());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1966,6 +2179,9 @@ mod tests {
             border_color: "black".into(),
             scale_mode: "fit".into(),
             dpi: 300,
+            use_table: true,
+            fixed_width_mm: None,
+            filename_color: "dark_gray".into(),
         };
 
         let images = vec![ImageInfo {
@@ -1988,5 +2204,75 @@ mod tests {
         let compact = compact_grid_for_count(&base, 3);
 
         assert_eq!(compact.rows * compact.cols, 3);
+    }
+
+    #[test]
+    fn flow_mode_docx_generates_paragraphs_without_tables() {
+        let root = std::env::temp_dir().join(format!(
+            "docsy_flow_test_{}_{}",
+            std::process::id(),
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let img_path1 = root.join("flow_img_1.png");
+        let img_path2 = root.join("flow_img_2.png");
+        let img_path3 = root.join("flow_img_3.png");
+        let img: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+            image::ImageBuffer::from_pixel(100, 100, image::Rgba([200, 200, 200, 255]));
+        img.save(&img_path1).unwrap();
+        img.save(&img_path2).unwrap();
+        img.save(&img_path3).unwrap();
+
+        let args = RunArgs {
+            folder: root.display().to_string(),
+            folders: None,
+            image_paths: None,
+            output_format: "docx".into(),
+            layout: "2x1".into(),
+            orientation: "portrait".into(),
+            dpi: 300,
+            scale_mode: "fixed_width".into(),
+            custom_rows: None,
+            custom_cols: None,
+            margin_mm: Some(15.0),
+            show_filename: Some(true),
+            filename_without_ext: Some(true),
+            filename_font_family: Some("sans".into()),
+            filename_font_size_pt: Some(9.0),
+            filename_remove_text: None,
+            filename_rules: None,
+            order_mode: None,
+            border_enabled: None,
+            border_color: None,
+            output_mode: None,
+            output_stem: Some("flow_evidence".into()),
+            use_table: Some(false),
+            fixed_width_mm: Some(160.0),
+            filename_color: Some("blue".into()),
+        };
+
+        let result = run(&args).unwrap();
+        let file = std::fs::File::open(&result.output_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut doc_xml = String::new();
+        archive
+            .by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut doc_xml)
+            .unwrap();
+
+        // 核心验证：段落流式排版中严禁出现表格标签 <w:tbl>
+        assert!(!doc_xml.contains("<w:tbl>"));
+        assert!(!doc_xml.contains("<w:tbl "));
+        // 包含图片绘图元素
+        assert!(doc_xml.contains("<wp:docPr"));
+        // 包含硬分页符
+        assert!(doc_xml.contains("w:type=\"page\""));
+        // 包含文件名
+        assert!(doc_xml.contains(">flow_img_1<"));
+        assert!(doc_xml.contains("w:color w:val=\"2563EB\""));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
