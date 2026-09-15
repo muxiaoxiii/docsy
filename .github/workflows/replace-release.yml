@@ -1,0 +1,33 @@
+name: Replace verified 1.0.3 packages
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  replace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tested build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run view 34983297419 --json conclusion,headSha > /tmp/build.json
+          jq -e '.conclusion == "success" and .headSha == "bc62f56a5d0f67f57970292c64b2f26e892b9f85"' /tmp/build.json
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 34983297419
+          pattern: docsy-*
+          merge-multiple: true
+          path: packages
+      - name: Replace release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -s packages/Docsy_1.0.3_aarch64.dmg
+          test -s packages/Docsy_1.0.3_x64-setup.exe
+          test -s packages/Docsy_1.0.3_x86-setup.exe
+          sha256sum packages/*
+          gh release upload v1.0.3 packages/* --clobber
