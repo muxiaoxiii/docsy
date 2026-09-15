@@ -4,9 +4,40 @@
 
   /* 无 JS 或数据加载失败时的回退数据（与发布产物保持一致） */
   var FALLBACK = {
-    latest: '1.0.2',
+    latest: '1.0.3',
     githubUrl: 'https://github.com/muxiaoxiii/docsy/releases',
     releases: [
+{
+  "version": "1.0.3",
+  "tag": "v1.0.3",
+  "published_at": "2026-09-15T10:28:48Z",
+  "assets": [
+    {
+      "platform": "macos",
+      "name": "Docsy_1.0.3_aarch64.dmg",
+      "size": 19058682,
+      "sha256": "9a0704d171dc0668376add38a9c616735f58e31be932e9289b4aed5252f43925",
+      "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_aarch64.dmg",
+      "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_aarch64.dmg"
+    },
+    {
+      "platform": "windows",
+      "name": "Docsy_1.0.3_x64-setup.exe",
+      "size": 15143125,
+      "sha256": "de1dab57ddac94cbcf49ba18cefa208ce723b7375cdc803c781a79f49929cd84",
+      "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x64-setup.exe",
+      "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x64-setup.exe"
+    },
+    {
+      "platform": "windows-x86",
+      "name": "Docsy_1.0.3_x86-setup.exe",
+      "size": 14022613,
+      "sha256": "f99705ec227673606ece33713e265cebff3b32d3d9f55055cef0a5fb6a815b1f",
+      "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x86-setup.exe",
+      "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.3/Docsy_1.0.3_x86-setup.exe"
+    }
+  ]
+},
       {
         version: '1.0.2',
         tag: 'v1.0.2',
@@ -111,6 +142,18 @@
   };
 
   var FALLBACK_CHANGELOG = [
+    {
+      version: '1.0.3',
+      date: '2026-09-15',
+      sections: [{
+        title: '图片排版与文字样式',
+        items: [
+          '标题 / 文件名支持字体、字号与颜色设置，默认深灰；预览、PDF 和 Word 同步生效。',
+          'Word 新增无表格段落排版；支持文件夹与图片增量导入、递归扫描和去重。',
+          '修复透明 PNG 预览；统一图片宽度并防止超出版心。',
+        ],
+      }],
+    },
     {
       version: '1.0.2',
       date: '2026-09-14',
