@@ -3,6 +3,48 @@ import { naturalCompare } from './useEvidencePdfSession.js'
 export const EXISTING_ELEMENT_KINDS = ['header', 'footerText', 'pageNumber']
 export const EXISTING_ELEMENT_DECISIONS = ['keep', 'ignore', 'delete', 'edit']
 
+export function elementRowFileKey(row) {
+  return row.file?.path || row.filePath || row.fileName || ''
+}
+
+export function groupElementRowsByFile(rows, direction = 'ascending') {
+  const groups = new Map()
+  for (const row of rows) {
+    const key = elementRowFileKey(row)
+    if (!groups.has(key)) groups.set(key, { key, fileName: row.fileName || key, rows: [] })
+    groups.get(key).rows.push(row)
+  }
+  const ordered = [...groups.values()].sort((left, right) => {
+    const comparison = naturalCompare(left.fileName, right.fileName) || naturalCompare(left.key, right.key)
+    return direction === 'descending' ? -comparison : comparison
+  })
+  return ordered.map(group => ({
+    ...group,
+    duplicateName: ordered.some(other => other.key !== group.key && other.fileName === group.fileName),
+  }))
+}
+
+export function sameSequenceRowKeys(rows, selectedRow) {
+  const { kind, detectedText } = selectedRow.element
+  const matching = rows.filter(row => row.element.kind === kind && elementRowFileKey(row) === elementRowFileKey(selectedRow))
+  if (kind !== 'pageNumber') return matching.filter(row => row.element.detectedText === detectedText).map(row => row.key)
+  const ordered = [...matching].sort((left, right) => left.element.pageStart - right.element.pageStart)
+  const groups = []
+  let current = []
+  let end = 0
+  for (const row of ordered) {
+    if (current.length && row.element.pageStart > end + 1) {
+      groups.push(current)
+      current = []
+      end = 0
+    }
+    current.push(row)
+    end = Math.max(end, row.element.pageEnd)
+  }
+  if (current.length) groups.push(current)
+  return (groups.find(group => group.some(row => row.key === selectedRow.key)) || []).map(row => row.key)
+}
+
 export function detectedElementFromCandidate(candidate, kind, index = 0) {
   const range = candidate?.pageRange || {}
   const text = String(candidate?.text || candidate?.normalizedText || '')

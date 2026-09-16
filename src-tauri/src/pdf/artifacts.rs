@@ -11,6 +11,9 @@ use super::{
     text_utils::{is_cjk_char, normalize_for_match},
 };
 
+#[path = "artifact_geometry.rs"]
+mod geometry;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteHeaderFooterArtifactsArgs {
@@ -171,6 +174,7 @@ fn inspect_meaningful_header_footer_artifacts_qpdf(
     let mut result = HeaderFooterArtifactInspection::default();
     let started = std::time::Instant::now();
     for page in &pages {
+        let mut page_result = HeaderFooterArtifactInspection::default();
         for content_ref in &page.contents {
             let stream = streams
                 .get(content_ref)
@@ -186,7 +190,7 @@ fn inspect_meaningful_header_footer_artifacts_qpdf(
                 content_ref,
             );
             attach_artifact_visual_forms(&mut direct, &stream.operations, &page.xobjects);
-            result.merge(direct);
+            page_result.merge(direct);
             inspect_qpdf_referenced_forms(
                 &index,
                 &streams,
@@ -197,9 +201,11 @@ fn inspect_meaningful_header_footer_artifacts_qpdf(
                 &path,
                 0,
                 &mut BTreeSet::new(),
-                &mut result,
+                &mut page_result,
             )?;
         }
+        geometry::correct_regions(&index, &streams, page, &mut page_result);
+        result.merge(page_result);
         if page.number % 25 == 0 || page.number as usize == pages.len() {
             crate::app_log::info(
                 "pdf.artifact.scan",
@@ -754,63 +760,29 @@ pub fn delete_header_footer_artifacts_file(
             pages_touched: 0,
         });
     }
-    let mut doc = Document::load(input).context("读取 PDF 失败")?;
-    let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
-    let mut removed = ArtifactRemovalStats::default();
-    let mut pages_touched = 0_usize;
-
-    for page_id in page_ids {
-        let content = match doc.get_and_decode_page_content(page_id) {
-            Ok(content) => content,
-            Err(_) => continue,
-        };
-        let properties = page_properties(&doc, page_id);
-        let (filtered, removed_on_page) =
-            remove_target_artifact_ranges(&content.operations, targets, &properties);
-        let mut nested_result = HeaderFooterArtifactEditResult::default();
-        let xobjects = page_xobjects(&doc, page_id);
-        if !xobjects.is_empty() {
-            let plan = HeaderFooterArtifactEditPlan {
-                remove_header: targets.header,
-                remove_footer: targets.footer,
-                ..Default::default()
-            };
-            nested_result = edit_referenced_form_artifacts(
-                &mut doc,
-                &content.operations,
-                &xobjects,
-                &plan,
-                0,
-                &mut BTreeSet::new(),
-            )?;
-        }
-        if removed_on_page.total() > 0 {
-            let encoded = Content {
-                operations: filtered,
-            }
-            .encode()
-            .context("编码删除标准页眉页脚后的内容流失败")?;
-            doc.change_page_content(page_id, encoded)
-                .context("写回删除标准页眉页脚后的内容流失败")?;
-        }
-        let nested_removed = nested_result.removed_header + nested_result.removed_footer;
-        if removed_on_page.total() > 0 || nested_removed > 0 {
-            removed.header += removed_on_page.header + nested_result.removed_header;
-            removed.footer += removed_on_page.footer + nested_result.removed_footer;
-            pages_touched += 1;
-        }
+    let removed = edit_header_footer_artifacts_qpdf(
+        input,
+        output,
+        &HeaderFooterArtifactEditPlan {
+            remove_header: targets.header,
+            remove_footer: targets.footer,
+            ..Default::default()
+        },
+    )?;
+    if removed.changed_count() == 0 {
+        std::fs::copy(input, output).context("复制 PDF 失败")?;
     }
-
-    doc.prune_objects();
-    doc.save(output)
-        .context("保存删除标准页眉页脚后的 PDF 失败")?;
+    let pages_touched = removed
+        .removed_header_pages
+        .union(&removed.removed_footer_pages)
+        .count();
 
     Ok(DeleteHeaderFooterArtifactsResult {
         input_path: input_path.to_string(),
         output_path: output_path.to_string(),
-        removed: removed.total(),
-        removed_header: removed.header,
-        removed_footer: removed.footer,
+        removed: removed.removed_header + removed.removed_footer,
+        removed_header: removed.removed_header,
+        removed_footer: removed.removed_footer,
         pages_touched,
     })
 }
@@ -856,7 +828,7 @@ fn edit_header_footer_artifacts_qpdf(
     let inspection = inspect_meaningful_header_footer_artifacts_qpdf(input, 0)?;
     type EditKey = (String, usize, String);
     let doc_total_pages = super::qpdf::page_count(&input.to_string_lossy()).unwrap_or(0);
-    let mut referenced_pages: BTreeMap<EditKey, BTreeSet<u32>> = BTreeMap::new();
+    let mut referenced_pages: BTreeMap<(String, usize), BTreeSet<u32>> = BTreeMap::new();
     let mut selected: BTreeMap<EditKey, Vec<(&HeaderFooterArtifactOccurrence, Option<String>)>> =
         BTreeMap::new();
     for occurrence in &inspection.occurrences {
@@ -869,7 +841,7 @@ fn edit_header_footer_artifacts_qpdf(
             occurrence.region.to_string(),
         );
         referenced_pages
-            .entry(key.clone())
+            .entry((object_ref.clone(), occurrence.operation_index))
             .or_default()
             .insert(occurrence.page);
         let targets = if occurrence.region == "header" {
@@ -939,12 +911,19 @@ fn edit_header_footer_artifacts_qpdf(
 
     let mut edits_by_object: BTreeMap<String, Vec<SelectedArtifactEdit>> = BTreeMap::new();
     for ((object_ref, operation_index, region), occurrences) in selected {
+        if inspection.occurrences.iter().any(|occurrence| {
+            occurrence.object_ref.as_ref() == Some(&object_ref)
+                && occurrence.operation_index == operation_index
+                && occurrence.region != region
+        }) {
+            anyhow::bail!("标准元素在不同位置共享同一内容流，无法安全单独编辑；原文件已保留");
+        }
         let selected_pages = occurrences
             .iter()
             .map(|(occurrence, _)| occurrence.page)
             .collect::<BTreeSet<_>>();
         let all_pages = referenced_pages
-            .get(&(object_ref.clone(), operation_index, region.clone()))
+            .get(&(object_ref.clone(), operation_index))
             .cloned()
             .unwrap_or_default();
         if selected_pages != all_pages {
@@ -1190,7 +1169,7 @@ fn replace_first_text_show(operations: &mut [Operation], replacement: &str) -> b
     replaced
 }
 
-fn artifact_occurrence_matches_target(
+pub(super) fn artifact_occurrence_matches_target(
     occurrence: &HeaderFooterArtifactOccurrence,
     target: &HeaderFooterArtifactEditTarget,
 ) -> bool {

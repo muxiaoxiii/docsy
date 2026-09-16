@@ -79,10 +79,13 @@
       </el-main>
       <Transition name="doclet-operation">
         <div v-if="operationVisible" class="doclet-operation-panel">
-          <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed" />
-          <button v-if="showCancel" class="doclet-cancel-btn" @click="cancelCurrentOperation" title="取消当前操作">
-            取消
-          </button>
+          <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed">
+            <template v-if="showCancel" #actions>
+              <button class="doclet-cancel-btn" @click="cancelCurrentOperation" title="取消当前操作">
+                取消
+              </button>
+            </template>
+          </DocletWorkingPet>
         </div>
       </Transition>
     </el-container>
@@ -210,12 +213,15 @@ function finishOperation(event) {
 
 function updateOperation(event) {
   const label = event.detail?.label
+  const entry = pendingOperations.get(event.detail?.id)
+  if (entry && label) entry.label = label
   if (label) {
     operationMessage.value = label
   }
 }
 
 async function cancelCurrentOperation() {
+  window.dispatchEvent(new CustomEvent('docsy-cancel-requested'))
   try {
     // 统一取消全部活跃操作（OperationManager 异步任务 + SubprocessRegistry 外部子进程）
     await tauriCallSafe('cancel_all_operations')

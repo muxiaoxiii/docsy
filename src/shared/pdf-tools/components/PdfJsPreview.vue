@@ -18,6 +18,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { readFile } from '@tauri-apps/plugin-fs'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 
 const props = defineProps({
@@ -65,7 +66,7 @@ onBeforeUnmount(() => {
   renderSeq += 1
   cancelRender()
   if (pdfDoc.value) {
-    pdfDoc.value.destroy()
+    void pdfDoc.value.loadingTask.destroy()
     pdfDoc.value = null
   }
 })
@@ -183,7 +184,7 @@ async function loadDocument(path, reloadKey) {
     return pdfDoc.value
   }
   if (pdfDoc.value) {
-    await pdfDoc.value.destroy()
+    await pdfDoc.value.loadingTask.destroy()
     pdfDoc.value = null
   }
   const data = await readFile(path)
@@ -200,11 +201,8 @@ async function loadDocument(path, reloadKey) {
 
 async function loadPdfJs() {
   if (!pdfjsLibPromise) {
-    pdfjsLibPromise = Promise.all([
-      import('pdfjs-dist/build/pdf.mjs'),
-      import('pdfjs-dist/build/pdf.worker.mjs?url'),
-    ]).then(([pdfjsLib, workerModule]) => {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default
+    pdfjsLibPromise = import('pdfjs-dist/build/pdf.mjs').then((pdfjsLib) => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
       return pdfjsLib
     })
   }

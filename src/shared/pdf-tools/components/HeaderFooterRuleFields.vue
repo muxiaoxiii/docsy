@@ -11,8 +11,8 @@
             <el-icon><Plus /></el-icon>
           </el-button>
           <UndoRedoButtons
-            :can-undo="headerHistory.canUndo"
-            :can-redo="headerHistory.canRedo"
+            :can-undo="headerHistory.canUndo.value"
+            :can-redo="headerHistory.canRedo.value"
             @undo="headerHistory.undo()"
             @redo="headerHistory.redo()"
             compact
@@ -168,8 +168,8 @@
             <el-icon><Plus /></el-icon>
           </el-button>
           <UndoRedoButtons
-            :can-undo="footerTextHistory.canUndo"
-            :can-redo="footerTextHistory.canRedo"
+            :can-undo="footerTextHistory.canUndo.value"
+            :can-redo="footerTextHistory.canRedo.value"
             @undo="footerTextHistory.undo()"
             @redo="footerTextHistory.redo()"
             compact
@@ -273,8 +273,8 @@
             <el-icon><Plus /></el-icon>
           </el-button>
           <UndoRedoButtons
-            :can-undo="pageNumberHistory.canUndo"
-            :can-redo="pageNumberHistory.canRedo"
+            :can-undo="pageNumberHistory.canUndo.value"
+            :can-redo="pageNumberHistory.canRedo.value"
             @undo="pageNumberHistory.undo()"
             @redo="pageNumberHistory.redo()"
             compact

@@ -69,6 +69,8 @@ def platform_of(name: str) -> str:
             return "macos-intel"
         return "macos"
     if lower.endswith(".exe"):
+        if "_x86-" in lower or "_i686" in lower:
+            return "windows-x86"
         return "windows"
     if lower.endswith(".deb"):
         return "linux-deb"
@@ -113,10 +115,12 @@ def parse_changelog(text: str):
     return entries
 
 
-def build_releases(api_json, assets_dir: Path, proxy: str) -> list:
+def build_releases(api_json, assets_dir: Path, proxy: str, remote_only: bool = False) -> list:
     """从 API 数据构建 releases 列表；同时补下载缺失的安装包。"""
     releases = []
     for release in api_json:
+        if release.get("draft") or release.get("prerelease"):
+            continue
         tag = release.get("tag_name", "")
         version = tag.lstrip("v") if tag else (release.get("name") or "")
         published = release.get("published_at", "")
@@ -125,7 +129,18 @@ def build_releases(api_json, assets_dir: Path, proxy: str) -> list:
             name = asset.get("name", "")
             if not name or not name.lower().startswith("docsy"):
                 continue
+            if platform_of(name) == "other":
+                continue
             size = int(asset.get("size") or 0)
+            github_url = asset.get("browser_download_url", f"{GITHUB_RELEASES_URL}/download/{tag}/{name}")
+            if remote_only:
+                digest = asset.get("digest") or ""
+                assets.append({
+                    "platform": platform_of(name), "name": name, "size": size,
+                    "sha256": digest.removeprefix("sha256:") if digest.startswith("sha256:") else "",
+                    "url": github_url, "github_url": github_url,
+                })
+                continue
             local = assets_dir / name
             if not local.exists() or local.stat().st_size != size:
                 # 只有最新版本自动补下载，旧版本交给手动/全量同步
@@ -278,6 +293,8 @@ def main() -> int:
     parser.add_argument("--changelog", required=True, help="CHANGELOG.md 路径")
     parser.add_argument("--out", required=True, help="输出目录")
     parser.add_argument("--proxy", default="", help="GitHub 下载代理前缀（可选）")
+    parser.add_argument("--remote-only", action="store_true", help="用于 GitHub Pages：只生成真实发布下载链接，不镜像安装包")
+    parser.add_argument("--sync-fallback", help="同步站点 main.js 的回退下载数据")
     args = parser.parse_args()
 
     assets_dir = Path(args.assets_dir)
@@ -290,7 +307,9 @@ def main() -> int:
     if isinstance(api_json, dict):
         api_json = api_json.get("releases", [api_json])
 
-    releases = build_releases(api_json, assets_dir, args.proxy)
+    releases = build_releases(api_json, assets_dir, args.proxy, args.remote_only)
+    if not releases:
+        raise ValueError("没有可发布的安装包，保留已有站点数据")
 
     with open(args.changelog, encoding="utf-8") as f:
         changelog_entries = parse_changelog(f.read())
@@ -304,6 +323,14 @@ def main() -> int:
     (out_dir / "releases.json").write_text(
         json.dumps(releases_data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    if args.sync_fallback:
+        fallback_path = Path(args.sync_fallback)
+        fallback = {"latest": releases[0]["version"], "githubUrl": GITHUB_RELEASES_URL, "releases": releases}
+        source = fallback_path.read_text(encoding="utf-8")
+        source, count = re.subn(r"  var FALLBACK = \{.*?\n  \};", lambda match: "  var FALLBACK = " + json.dumps(fallback, ensure_ascii=False, indent=2).replace("\n", "\n  ") + ";", source, count=1, flags=re.S)
+        if count != 1:
+            raise ValueError("未找到站点回退数据块")
+        fallback_path.write_text(source, encoding="utf-8")
     (out_dir / "changelog.json").write_text(
         json.dumps(changelog_entries, ensure_ascii=False, indent=2), encoding="utf-8"
     )

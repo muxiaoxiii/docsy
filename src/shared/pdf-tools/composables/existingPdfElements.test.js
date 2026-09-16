@@ -4,6 +4,8 @@ import {
   detectedElementFromCandidate,
   mergeExistingElements,
   mergeRangeSelection,
+  sameSequenceRowKeys,
+  groupElementRowsByFile,
 } from './existingPdfElements.js'
 
 const candidate = {
@@ -16,6 +18,19 @@ const candidate = {
 }
 
 describe('existingPdfElements', () => {
+  it('keeps interleaved elements in natural filename groups without mixing identical basenames', () => {
+    const rows = [
+      ['a', '/a/证据10.pdf', '证据10.pdf'],
+      ['b', '/b/证据2.pdf', '证据2.pdf'],
+      ['c', '/a/证据2.pdf', '证据2.pdf'],
+      ['d', '/a/证据10.pdf', '证据10.pdf'],
+      ['e', '/a/证据2.pdf', '证据2.pdf'],
+    ].map(([key, filePath, fileName]) => ({ key, filePath, fileName }))
+    const groups = groupElementRowsByFile(rows)
+    expect(groups.map(group => group.rows.map(row => row.key))).toEqual([['c', 'e'], ['b'], ['a', 'd']])
+    expect(groups.map(group => group.duplicateName)).toEqual([true, true, false])
+    expect(groups[0].rows[0]).toBe(rows[2])
+  })
   it('keeps a top page number classified as a page number', () => {
     const element = detectedElementFromCandidate(candidate, 'pageNumber')
     expect(element.kind).toBe('pageNumber')
@@ -61,5 +76,34 @@ describe('existingPdfElements', () => {
     const rows = ['a', 'b', 'c', 'd', 'e'].map((key) => ({ key }))
     expect(mergeRangeSelection(['a', 'e'], rows, 1, 3)).toEqual(['a', 'e', 'b', 'c', 'd'])
     expect(mergeRangeSelection([], rows, 3, 1)).toEqual(['b', 'c', 'd'])
+  })
+
+  it('isolates same-sequence selection for PDFs with the same basename', () => {
+    const rows = ['/case-a/report.pdf', '/case-b/report.pdf'].map((path, index) => ({
+      key: String(index), file: { path }, fileName: 'report.pdf',
+      element: { kind: 'header', detectedText: '证据1', pageStart: 1, pageEnd: 4 },
+    }))
+    expect(sameSequenceRowKeys(rows, rows[0])).toEqual(['0'])
+    const cleanupRows = rows.map(({ file, ...row }) => ({ ...row, filePath: file.path }))
+    expect(sameSequenceRowKeys(cleanupRows, cleanupRows[1])).toEqual(['1'])
+  })
+
+  it('keeps connected page ranges together despite nested ranges', () => {
+    const rows = [[1, 10], [2, 3], [11, 20], [25, 30]].map(([pageStart, pageEnd], index) => ({
+      key: String(index), filePath: '/case/report.pdf',
+      element: { kind: 'pageNumber', pageStart, pageEnd, detectedText: String(pageStart) },
+    }))
+    expect(sameSequenceRowKeys(rows, rows[1])).toEqual(['0', '1', '2'])
+    expect(sameSequenceRowKeys(rows, rows[3])).toEqual(['3'])
+  })
+
+  it('selects repeated text only within the same element type and file', () => {
+    const rows = [
+      ['header', '证据1'], ['header', '证据2'], ['footerText', '证据1'], ['header', '证据1'],
+    ].map(([kind, detectedText], index) => ({
+      key: String(index), filePath: '/case/report.pdf',
+      element: { kind, detectedText, pageStart: index + 1, pageEnd: index + 1 },
+    }))
+    expect(sameSequenceRowKeys(rows, rows[0])).toEqual(['0', '3'])
   })
 })

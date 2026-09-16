@@ -164,6 +164,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
@@ -193,6 +194,7 @@ const docxStyleHint = computed(() => docxStyleHints[docxStyle.value] || '')
 const pdfStartPage = ref(null)
 const pdfEndPage = ref(null)
 const activeBackendOperationId = ref('')
+const queueCancellation = useQueueCancellation()
 const PDF_CONVERT_OPERATION_ID = 'convert_pdf_text_layer:auto'
 const preference = useWorkspacePreferences('markdown-convert.workspace', {
   fileOfficeFormat,
@@ -353,9 +355,10 @@ async function runQueue() {
     return
   }
   converting.value = true
+  queueCancellation.reset()
   const processed = []
   try {
-    for (;;) {
+    while (!queueCancellation.cancelled.value) {
       const item = files.value.find((candidate) => candidate.status === 'pending')
       if (!item) break
       item.status = 'processing'
@@ -397,11 +400,13 @@ async function runQueue() {
       } else {
         const message = userFacingError(result.error, '转换失败')
         const cancelled = /操作已取消/.test(message)
+        if (cancelled) queueCancellation.cancel()
         item.status = cancelled ? 'cancelled' : 'failed'
         item.statusText = cancelled ? '已取消' : message
         item.statusType = cancelled ? 'info' : 'danger'
       }
       processed.push(item)
+      if (item.status === 'cancelled') break
     }
   } finally {
     converting.value = false
@@ -410,10 +415,11 @@ async function runQueue() {
   // 格式转换的输入/输出体积没有可比性，不沿用压缩场景的"共节省 xx"文案
   const done = processed.filter((item) => item.status === 'done')
   const failed = processed.filter((item) => item.status === 'failed')
-  summary.value = `转换完成 ${done.length}/${processed.length}`
+  const cancelled = queueCancellation.cancelled.value || processed.some((item) => item.status === 'cancelled')
+  summary.value = `${cancelled ? '转换已取消，已完成' : '转换完成'} ${done.length}/${processed.length}`
   if (failed.length) summary.value += `；失败：${failed.map((item) => item.name).join('、')}`
   ElNotification({
-    type: processed.some((item) => item.status === 'failed') ? 'warning' : 'success',
+    type: failed.length ? 'warning' : cancelled ? 'info' : 'success',
     title: summary.value,
     duration: 6000,
   })

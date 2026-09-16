@@ -349,24 +349,25 @@ pub async fn apply_anti_copy(
     input: String,
     output: String,
     method: String,
-) -> Result<usize, String> {
+) -> Result<crate::pdf::anti_ocr::AntiCopyOutput, String> {
     let m = crate::pdf::anti_ocr::AntiCopyMethod::parse(&method);
     run_blocking(move || {
-        crate::pdf::anti_ocr::apply_anti_copy(
+        crate::pdf::anti_ocr::process_copy(
             std::path::Path::new(&input),
             std::path::Path::new(&output),
-            m,
+            Some(m),
         )
     })
     .await
 }
 
 #[tauri::command]
-pub async fn remove_anti_copy(input: String, output: String) -> Result<usize, String> {
+pub async fn remove_anti_copy(input: String, output: String) -> Result<crate::pdf::anti_ocr::AntiCopyOutput, String> {
     run_blocking(move || {
-        crate::pdf::anti_ocr::remove_anti_copy(
+        crate::pdf::anti_ocr::process_copy(
             std::path::Path::new(&input),
             std::path::Path::new(&output),
+            None,
         )
     })
     .await

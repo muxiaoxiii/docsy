@@ -51,6 +51,7 @@ defineProps({
 
 .workspace-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
@@ -65,6 +66,7 @@ defineProps({
 
 .workspace-heading {
   min-width: 0;
+  flex: 1 1 280px;
 }
 
 .workspace-heading h2 {
@@ -135,6 +137,20 @@ defineProps({
   background: var(--docsy-surface-elevated);
 }
 
+@media (max-height: 760px) {
+  .tool-workspace {
+    padding: 10px 14px;
+  }
+
+  .workspace-header {
+    padding: 12px 16px;
+  }
+
+  .workspace-heading h2 {
+    font-size: 18px;
+  }
+}
+
 @media (max-width: 760px) {
   .tool-workspace {
     padding: 16px;
@@ -148,6 +164,10 @@ defineProps({
   .workspace-header-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .workspace-heading {
+    flex-basis: auto;
   }
 
   .workspace-toolbar,

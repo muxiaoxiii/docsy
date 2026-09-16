@@ -319,6 +319,7 @@ export function useImagePaddlerState(options = {}) {
       return
     }
     generating.value = true
+    const sourceRevision = analysisRequestId
     const result = await tauriCallSafe('run_image_paddler', {
       args: {
         folder: folder.value,
@@ -331,6 +332,8 @@ export function useImagePaddlerState(options = {}) {
         orientation: resolvedOrientation.value,
       },
     })
+    generating.value = false
+    if (sourceRevision !== analysisRequestId) return
     if (result.ok) {
       generatedResult.value = result.data
       const count = result.data.output_paths?.length || 1
@@ -342,7 +345,6 @@ export function useImagePaddlerState(options = {}) {
     } else {
       ElMessage.error(userFacingError(result.error, '图片排版文档生成失败，请确认图片文件未被占用'))
     }
-    generating.value = false
   }
 
   function reorderLayoutImages({ from, to }) {

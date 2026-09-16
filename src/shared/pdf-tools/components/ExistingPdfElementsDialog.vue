@@ -1,33 +1,42 @@
 <template>
   <el-dialog
     v-model="visibleModel"
-    title="确认原有页眉、页脚和页码"
+    :title="cleanupOnly ? '拆分时清除页眉、页脚和页码' : '确认原有页眉、页脚和页码'"
     width="min(1080px, 94vw)"
     append-to-body
     @click.self="clearSelection"
   >
     <div class="decision-toolbar">
-      <el-select v-model="fileFilter" size="small" placeholder="全部文件" clearable style="width: 200px">
-        <el-option v-for="f in fileNames" :key="f" :label="f" :value="f" />
+      <el-select v-if="fileOptions.length > 1" v-model="fileFilter" size="small" placeholder="全部文件" clearable style="width: 200px">
+        <el-option v-for="file in fileOptions" :key="file.key" :label="file.label" :value="file.key" />
       </el-select>
       <el-button size="small" @click="selectAll">全选</el-button>
       <el-button size="small" @click="invertSelection">反选</el-button>
-      <el-button size="small" @click="selectUndecided">选择未确认项</el-button>
+      <el-button v-if="!cleanupOnly" size="small" @click="selectUndecided">选择未确认项</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="clearSelection">取消选择</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('keep')">保留</el-button>
-      <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
+      <el-button v-if="!cleanupOnly" size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" type="danger" @click="applyDecision('delete')"
         >标记删除</el-button
       >
-      <el-button size="small" :disabled="!selectedKeys.length" type="primary" @click="applyDecision('edit')"
+      <el-button v-if="!cleanupOnly" size="small" :disabled="!selectedKeys.length" type="primary" @click="applyDecision('edit')"
         >标记编辑</el-button
       >
     </div>
+    <div class="element-groups">
+    <section v-for="group in fileGroups" :key="group.key" class="element-file-group" :aria-label="group.duplicateName ? group.key : group.fileName">
+    <div v-if="fileOptions.length > 1" class="file-group-header">
+      <div class="file-group-title">
+        <strong :title="group.key">{{ group.fileName }}</strong>
+        <span>{{ group.rows.length }} 项</span>
+        <small v-if="group.duplicateName" :title="group.key">{{ group.key }}</small>
+      </div>
+      <el-button size="small" @click="selectFileGroup(group)">选择本文件</el-button>
+    </div>
     <el-table
-      :data="filteredRows"
+      :data="group.rows"
       border
       size="small"
-      max-height="58vh"
       row-key="key"
       :row-class-name="rowClassName"
       @row-click="handleRowClick"
@@ -38,7 +47,7 @@
     >
       <el-table-column width="44" align="center">
         <template #header>
-          <el-checkbox :model-value="allSelected" @change="toggleAll" />
+          <el-checkbox :model-value="isGroupSelected(group)" :indeterminate="isGroupPartlySelected(group)" :aria-label="'选择 ' + group.fileName + ' 中的全部元素'" @change="value => toggleFileGroup(group, value)" />
         </template>
         <template #default="{ row }">
           <el-checkbox
@@ -47,40 +56,34 @@
           />
         </template>
       </el-table-column>
-      <el-table-column
-        column-key="fileName"
-        prop="fileName"
-        label="文件"
-        min-width="180"
-        sortable
-        show-overflow-tooltip
-        :tooltip-props="{ placement: 'right' }"
-      />
-      <el-table-column column-key="kind" prop="kind" label="类型" width="86" sortable>
+      <el-table-column column-key="kind" prop="kind" label="类型" width="86" sortable="custom">
         <template #default="{ row }">{{ elementKindText(row.element.kind) }}</template>
       </el-table-column>
       <el-table-column
         column-key="detectedText"
         prop="detectedText"
         label="检测文字"
-        min-width="180"
-        sortable
+        min-width="220"
+        sortable="custom"
         show-overflow-tooltip
         :tooltip-props="{ placement: 'right' }"
       >
         <template #default="{ row }">{{ row.element.detectedText || '-' }}</template>
       </el-table-column>
-      <el-table-column column-key="pageStart" prop="pageStart" label="页段" width="90" sortable>
+      <el-table-column column-key="pageStart" prop="pageStart" label="出现页段" width="96" sortable="custom">
         <template #default="{ row }">{{ row.element.pageStart }}-{{ row.element.pageEnd }}</template>
       </el-table-column>
-      <el-table-column column-key="decision" prop="decision" label="处理" width="100" sortable>
+      <el-table-column column-key="count" prop="count" label="出现次数" width="96" sortable="custom">
+        <template #default="{ row }">{{ row.element.count > 0 ? row.element.count : '—' }}</template>
+      </el-table-column>
+      <el-table-column column-key="decision" prop="decision" label="处理" width="90" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="decisionTagType(row.element.decision)" size="small">
             {{ elementDecisionText(row.element.decision) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="编辑后" min-width="180">
+      <el-table-column v-if="!cleanupOnly && filteredRows.some(row => row.element.decision === 'edit')" label="编辑后" min-width="180">
         <template #default="{ row }">
           <el-input
             v-if="row.element.decision === 'edit'"
@@ -91,7 +94,10 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="170" fixed="right">
+      <el-table-column v-if="fileOptions.length <= 1" column-key="fileName" prop="fileName" label="来源文件" min-width="130" sortable="custom" show-overflow-tooltip>
+        <template #default="{ row }"><span :title="elementRowFileKey(row)">{{ row.fileName }}</span></template>
+      </el-table-column>
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
           <el-button link size="small" type="primary" @click.stop="previewRow(row)">预览</el-button>
           <el-button link size="small" @click.stop="selectBySequence(row)">同序列</el-button>
@@ -101,6 +107,9 @@
         </template>
       </el-table-column>
     </el-table>
+    </section>
+    <el-empty v-if="!fileGroups.length" description="没有匹配的元素" :image-size="64" />
+    </div>
     <div
       v-if="shiftHeld && hoverRowIndex >= 0"
       class="shift-range-tooltip"
@@ -108,7 +117,7 @@
     >
       选取到这
     </div>
-    <p class="hint-text">点击行或勾选框切换选中，点击表格外取消全部选择</p>
+    <p class="hint-text">已选 {{ selectedKeys.length }} 项<span v-if="cleanupOnly"> · 选择后点击“标记删除”，仅在拆分输出时生效，原件不变</span><span v-else> · 点击行或勾选框切换选中，点击表格外取消全部选择</span></p>
     <template #footer>
       <el-button @click="visibleModel = false">完成</el-button>
     </template>
@@ -122,6 +131,9 @@ import {
   elementDecisionText,
   elementKindText,
   mergeRangeSelection,
+  elementRowFileKey,
+  sameSequenceRowKeys,
+  groupElementRowsByFile,
 } from '../composables/existingPdfElements.js'
 import { naturalCompare } from '../composables/useEvidencePdfSession.js'
 
@@ -129,6 +141,7 @@ const props = defineProps({
   visible: { type: Boolean, required: true },
   rows: { type: Array, default: () => [] },
   filter: { type: String, default: 'all' },
+  cleanupOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:visible', 'change', 'preview', 'jump-to-settings'])
 const selectedKeys = ref([])
@@ -154,10 +167,17 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
 })
-const fileNames = computed(() => [...new Set(props.rows.map((r) => r.fileName))].sort())
+const fileOptions = computed(() => {
+  const unique = [...new Map(props.rows.map(row => [elementRowFileKey(row), row])).values()]
+  return unique.map(row => ({
+    key: elementRowFileKey(row),
+    label: unique.filter(other => other.fileName === row.fileName).length > 1 ? elementRowFileKey(row) : row.fileName,
+  }))
+})
 const KIND_ORDER = { header: 0, footerText: 1, pageNumber: 2 }
 function handleSortChange({ prop, order }) {
   sortState.value = { prop: prop || '', order: order || '' }
+  lastClickedIndex.value = -1
 }
 function getColumnValue(row, prop) {
   switch (prop) {
@@ -169,6 +189,8 @@ function getColumnValue(row, prop) {
       return row.element.detectedText || ''
     case 'pageStart':
       return row.element.pageStart || 0
+    case 'count':
+      return row.element.count || 0
     case 'source':
       return row.element.source || ''
     case 'decision':
@@ -177,14 +199,13 @@ function getColumnValue(row, prop) {
       return ''
   }
 }
-// Sort priority within each file/kind group: undecided > lowConfidence > decided
 function decisionSortPriority(row) {
   if (!row.element.decision) {
     return row.lowConfidence ? 1 : 0 // undecided → top, low confidence just below
   }
   return 2 // already decided (keep/ignore/delete/edit) → bottom
 }
-const filteredRows = computed(() => {
+const sortedRows = computed(() => {
   let rows = props.rows
   if (props.filter !== 'all') {
     if (props.filter === 'delete' || props.filter === 'edit') {
@@ -193,7 +214,7 @@ const filteredRows = computed(() => {
       rows = rows.filter((row) => row.element.kind === props.filter)
     }
   }
-  if (fileFilter.value) rows = rows.filter((row) => row.fileName === fileFilter.value)
+  if (fileFilter.value) rows = rows.filter((row) => elementRowFileKey(row) === fileFilter.value)
   const { prop, order } = sortState.value
   if (prop && order) {
     const direction = order === 'descending' ? -1 : 1
@@ -205,36 +226,61 @@ const filteredRows = computed(() => {
       return result === 0 ? 0 : result * direction
     })
   }
-  // Default sort: by fileName → by kind → by decision priority → by pageStart
   return [...rows].sort((a, b) => {
-    const fa = a.fileName || '',
-      fb = b.fileName || ''
-    if (fa !== fb) return fa.localeCompare(fb)
     const ka = KIND_ORDER[a.element.kind] ?? 9,
       kb = KIND_ORDER[b.element.kind] ?? 9
     if (ka !== kb) return ka - kb
     const pa = decisionSortPriority(a),
       pb = decisionSortPriority(b)
     if (pa !== pb) return pa - pb
-    return (a.element.pageStart || 0) - (b.element.pageStart || 0)
+    return compareDetectedTextRows(a, b) || elementRowFileKey(a).localeCompare(elementRowFileKey(b)) || (a.element.pageStart || 0) - (b.element.pageStart || 0)
   })
 })
-const allSelected = computed(
-  () => filteredRows.value.length > 0 && filteredRows.value.every((row) => selectedKeys.value.includes(row.key)),
-)
+const fileGroups = computed(() => {
+  const groups = groupElementRowsByFile(sortedRows.value)
+  return groups.map(group => ({
+    ...group,
+    duplicateName: fileOptions.value.some(file => file.key === group.key && file.label !== group.fileName),
+  }))
+})
+const filteredRows = computed(() => fileGroups.value.flatMap(group => group.rows))
+
+function isGroupSelected(group) {
+  return group.rows.every(row => selectedKeys.value.includes(row.key))
+}
+function isGroupPartlySelected(group) {
+  return !isGroupSelected(group) && group.rows.some(row => selectedKeys.value.includes(row.key))
+}
+function toggleFileGroup(group, value) {
+  const selected = new Set(selectedKeys.value)
+  for (const row of group.rows) {
+    if (!value) selected.delete(row.key)
+    else if (!row.lowConfidence) selected.add(row.key)
+  }
+  selectedKeys.value = [...selected]
+  lastClickedIndex.value = -1
+}
+function selectFileGroup(group) {
+  selectedKeys.value = group.rows.filter(row => !row.lowConfidence).map(row => row.key)
+  lastClickedIndex.value = -1
+}
 
 watch(
-  () => [props.visible, props.filter],
+  () => [props.visible, props.filter, fileFilter.value],
   () => {
     selectedKeys.value = []
     lastClickedIndex.value = -1
   },
 )
 
-function rowClassName({ row, rowIndex }) {
+watch(fileOptions, options => {
+  if (!options.some(file => file.key === fileFilter.value)) fileFilter.value = ''
+})
+
+function rowClassName({ row }) {
   const classes = []
   if (row.lowConfidence) classes.push('low-confidence-row')
-  if (shiftHeld.value && hoverRowIndex.value === rowIndex) classes.push('shift-cursor')
+  if (shiftHeld.value && filteredRows.value[hoverRowIndex.value]?.key === row.key) classes.push('shift-cursor')
   return classes.join(' ')
 }
 function toggleAll(value) {
@@ -256,34 +302,7 @@ function clearSelection() {
   lastClickedIndex.value = -1
 }
 function selectBySequence(row) {
-  const { kind, detectedText } = row.element
-  const fileName = row.fileName || row.file?.name
-  if (kind === 'pageNumber') {
-    // Select all page numbers from same file whose page ranges form a continuous sequence
-    const filePageNumbers = filteredRows.value
-      .filter((r) => r.element.kind === 'pageNumber' && r.fileName === fileName)
-      .sort((a, b) => a.element.pageStart - b.element.pageStart)
-    // Build connected groups: pages are "connected" if ranges touch or overlap
-    const groups = []
-    let current = []
-    for (const r of filePageNumbers) {
-      if (current.length === 0 || r.element.pageStart <= current[current.length - 1].element.pageEnd + 1) {
-        current.push(r)
-      } else {
-        groups.push(current)
-        current = [r]
-      }
-    }
-    if (current.length) groups.push(current)
-    // Find the group containing the clicked row
-    const group = groups.find((g) => g.some((r) => r.key === row.key))
-    if (group) selectedKeys.value = group.map((r) => r.key)
-  } else {
-    // For headers/footers: select all with same text from same file
-    selectedKeys.value = filteredRows.value
-      .filter((r) => r.element.kind === kind && r.fileName === fileName && r.element.detectedText === detectedText)
-      .map((r) => r.key)
-  }
+  selectedKeys.value = sameSequenceRowKeys(filteredRows.value, row)
 }
 function invertSelection() {
   const selected = new Set(selectedKeys.value)
@@ -361,6 +380,7 @@ function applyDecision(decision) {
   selectedKeys.value = []
 }
 function setDecision(row, decision) {
+  if (props.cleanupOnly && !['keep', 'delete'].includes(decision)) return
   row.element.decision = decision
   if (decision === 'edit' && row.element.kind === 'pageNumber') {
     const template = String(row.element.normalizedText || '')
@@ -384,11 +404,49 @@ function decisionTagType(decision) {
 </script>
 
 <style scoped>
+.element-groups {
+  max-height: 58vh;
+  overflow: auto;
+}
+.element-file-group + .element-file-group {
+  margin-top: 20px;
+}
+.file-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-bottom: 0;
+  background: var(--docsy-surface-muted);
+}
+.file-group-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.file-group-title strong,
+.file-group-title small {
+  overflow-wrap: anywhere;
+}
+.file-group-title span,
+.file-group-title small {
+  color: var(--docsy-text-muted);
+}
+.file-group-title small {
+  flex-basis: 100%;
+}
 .decision-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+}
+.decision-toolbar :deep(.el-button) {
+  margin-left: 0;
 }
 .hint-text {
   margin: 8px 0 0;

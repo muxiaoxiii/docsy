@@ -81,7 +81,7 @@
             <el-button
               type="success"
               :loading="extractingPages"
-              :disabled="!extractFile || !extractPageText.trim()"
+              :disabled="!extractFile || !extractTotalPages || !extractPageText.trim()"
               @click="doExtractPages"
             >
               导出选中页面
@@ -119,6 +119,7 @@
           <div v-if="compressSummary" class="path-line">{{ compressSummary }}</div>
           <template #actions>
             <div class="compress-options">
+              <el-button v-if="!compressing && compressFiles.some(file => file.status === 'pending')" type="primary" @click="runCompressQueue">继续压缩</el-button>
               <el-checkbox v-model="compressImageReencode"> 进一步压缩图片（可能耗时较长） </el-checkbox>
               <div v-if="compressImageReencode" class="compress-level-row">
                 <span class="compress-level-label">图片压缩级别：</span>
@@ -342,6 +343,7 @@
             <template #meta="{ item }">
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
               <el-tag v-if="item.hasAntiOcr" type="warning" size="small">已防护</el-tag>
+              <el-button v-if="item.outputPath" link type="primary" @click="openPath(item.outputPath)">打开结果</el-button>
             </template>
           </FileQueuePanel>
           <template #actions>
@@ -369,6 +371,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
 import { ElMessage, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -379,7 +382,7 @@ import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vu
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { splitRangeWarnings } from '../../../shared/pdf-tools/composables/usePdfSplitRanges.js'
 import { sizeSavingText, batchSummaryText } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
-import { getPdfPageCount, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { getPdfPageCount, openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
@@ -500,9 +503,11 @@ async function batchUnlock() {
     return
   }
   unlocking.value = true
+  unlockCancellation.reset()
   let successCount = 0
   try {
     for (const file of encryptedFiles) {
+      if (unlockCancellation.cancelled.value) break
       file.statusText = '处理中'
       file.statusType = 'warning'
       const result = await tauriCallSafe('unlock_pdf', { input: file.path })
@@ -518,6 +523,7 @@ async function batchUnlock() {
       } else {
         file.statusText = result.error || '解锁失败'
         file.statusType = 'danger'
+        if (/操作已取消/.test(String(result.error))) unlockCancellation.cancel()
       }
     }
   } finally {
@@ -526,6 +532,9 @@ async function batchUnlock() {
   if (successCount) ElMessage.success(`已解锁 ${successCount} 个文件`)
 }
 
+const unlockCancellation = useQueueCancellation()
+const compressCancellation = useQueueCancellation()
+const antiCopyCancellation = useQueueCancellation()
 const mergeFiles = ref([])
 const merging = ref(false)
 const duplexSeparate = ref(false)
@@ -577,8 +586,8 @@ const preference = useWorkspacePreferences('pdf-tools.workspace', {
   splitPreviewRatio,
   showSplitNextPreview,
 })
-const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => !f.hasAntiOcr).length)
-const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr).length)
+const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr === false).length)
+const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr && f.hasBackup).length)
 
 function addAntiOcrFiles(paths) {
   const existing = new Set(antiOcrFiles.value.map((f) => f.path))
@@ -618,13 +627,14 @@ async function inspectAntiOcrFiles(paths) {
           item.statusText = result.error || '检测失败'
           item.statusType = 'danger'
         } else {
-          item.hasAntiOcr = result.data.has_anti_ocr
-          const { total_pages, pages_with_scrambled_cmap } = result.data
-          if (result.data.has_anti_ocr) {
-            item.statusText = `已防护 (${pages_with_scrambled_cmap}/${total_pages}页)`
+          item.hasAntiOcr = result.data.has_protection
+          item.hasBackup = result.data.has_backup
+          const { total_fonts, protected_fonts } = result.data
+          if (result.data.has_protection) {
+            item.statusText = `已防护（${protected_fonts}/${total_fonts} 个字体${item.hasBackup ? '' : '，无恢复备份'}）`
             item.statusType = 'warning'
           } else {
-            item.statusText = `正常 (${total_pages}页)`
+            item.statusText = `正常（${total_fonts} 个字体）`
             item.statusType = 'success'
           }
         }
@@ -655,63 +665,46 @@ function removeAntiOcrFile(index) {
 }
 
 async function batchAntiOcrApply() {
-  antiOcrProcessing.value = true
-  const targets = antiOcrFiles.value.filter((f) => !f.hasAntiOcr)
-  for (const file of targets) {
-    file.statusText = '处理中'
-    file.statusType = 'warning'
-    const dir = parentDir(file.path)
-    const stem = stripPdf(file.name)
-    const output = `${dir}/${stem}_anti_copy.pdf`
-    let timer
-    const result = await Promise.race([
-      tauriCallSafe('apply_anti_copy', { input: file.path, output, method: antiCopyMethod.value }),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)
-      }),
-    ])
-      .finally(() => clearTimeout(timer))
-      .catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
-    if (!result.ok) {
-      file.statusText = userFacingError(result.error, '处理失败')
-      file.statusType = 'danger'
-    } else {
-      file.hasAntiOcr = true
-      file.statusText = `已防护`
-      file.statusType = 'warning'
-    }
-  }
-  antiOcrProcessing.value = false
+  await processAntiCopy(false)
 }
 
 async function batchAntiOcrRemove() {
+  await processAntiCopy(true)
+}
+
+async function processAntiCopy(removeProtection) {
+  if (antiOcrProcessing.value) return
   antiOcrProcessing.value = true
-  const targets = antiOcrFiles.value.filter((f) => f.hasAntiOcr)
-  for (const file of targets) {
-    file.statusText = '处理中'
-    file.statusType = 'warning'
-    const dir = parentDir(file.path)
-    const stem = stripPdf(file.name)
-    const output = `${dir}/${stem}_restored.pdf`
-    let timer
-    const result = await Promise.race([
-      tauriCallSafe('remove_anti_copy', { input: file.path, output }),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('处理超时（30秒）')), 30000)
-      }),
-    ])
-      .finally(() => clearTimeout(timer))
-      .catch((err) => ({ ok: false, error: err?.message || '处理超时' }))
-    if (!result.ok) {
-      file.statusText = userFacingError(result.error, '处理失败')
-      file.statusType = 'danger'
-    } else {
-      file.hasAntiOcr = false
-      file.statusText = '已恢复'
-      file.statusType = 'success'
+  antiCopyCancellation.reset()
+  const method = antiCopyMethod.value
+  const targets = antiOcrFiles.value.filter(file => removeProtection
+    ? file.hasAntiOcr && file.hasBackup
+    : file.hasAntiOcr === false)
+  try {
+    for (const file of targets) {
+      if (antiCopyCancellation.cancelled.value) break
+      file.statusText = '处理中'
+      file.statusType = 'warning'
+      const input = file.outputPath || file.path
+      const output = `${parentDir(file.path)}/${stripPdf(file.name)}_${removeProtection ? 'restored' : 'anti_copy'}.pdf`
+      const result = await tauriCallSafe(removeProtection ? 'remove_anti_copy' : 'apply_anti_copy', {
+        input, output, ...(removeProtection ? {} : { method }),
+      })
+      if (!result.ok) {
+        file.statusText = userFacingError(result.error, '处理失败')
+        file.statusType = 'danger'
+        if (/操作已取消/.test(String(result.error))) antiCopyCancellation.cancel()
+        continue
+      }
+      file.outputPath = result.data.output_path
+      file.hasAntiOcr = result.data.detection.has_protection
+      file.hasBackup = result.data.detection.has_backup
+      file.statusText = removeProtection ? '已恢复到副本' : file.hasAntiOcr ? '已生成防复制副本' : '没有可处理的文字映射'
+      file.statusType = file.hasAntiOcr ? 'warning' : 'success'
     }
+  } finally {
+    antiOcrProcessing.value = false
   }
-  antiOcrProcessing.value = false
 }
 
 async function selectMergeFiles() {
@@ -746,7 +739,9 @@ function reorderMergeFiles({ from, to }) {
 }
 
 async function doMerge() {
+  if (merging.value || mergeFiles.value.length < 2) return
   merging.value = true
+  try {
   const output = await open({ directory: true })
   if (output) {
     const outputPath = `${output}/merged.pdf`
@@ -759,7 +754,9 @@ async function doMerge() {
       ? ElMessage.success('合并完成')
       : ElMessage.error(userFacingError(result.error, 'PDF 合并失败，请确认文件未损坏且未被其他程序占用'))
   }
-  merging.value = false
+  } finally {
+    merging.value = false
+  }
 }
 
 function makeQueueItems(paths) {
@@ -786,6 +783,7 @@ async function loadExtractFile(path) {
   extractTotalPages.value = 0
   extractOutputDir.value = parentDir(path)
   const pageCount = await getPdfPageCount(extractFile.value)
+  if (extractFile.value !== path) return
   if (pageCount.ok) {
     extractTotalPages.value = pageCount.data || 0
   } else {
@@ -799,7 +797,7 @@ async function selectExtractOutputDir() {
 }
 
 async function doExtractPages() {
-  if (!extractFile.value) return
+  if (extractingPages.value || !extractFile.value || !extractTotalPages.value) return
   const pages = parsePageSelection(extractPageText.value, extractTotalPages.value)
   if (!pages.length) {
     ElMessage.warning('请输入有效页码，例如：3,7,12-15')
@@ -879,11 +877,12 @@ watch([compressLevel, compressImageReencode], () => {
 async function runCompressQueue() {
   if (compressing.value) return
   compressing.value = true
+  compressCancellation.reset()
   const level = compressLevel.value
   const imageReencode = compressImageReencode.value
   const processed = []
   try {
-    for (;;) {
+    while (!compressCancellation.cancelled.value) {
       const item = compressFiles.value.find((f) => f.status === 'pending')
       if (!item) break
       item.status = 'processing'
@@ -902,9 +901,11 @@ async function runCompressQueue() {
         item.inputSize = Number(data.input_size) || 0
         item.outputSize = Number(data.output_size) || 0
       } else {
-        item.status = 'failed'
-        item.statusText = userFacingError(result.error, '压缩失败')
-        item.statusType = 'danger'
+        const cancelled = /操作已取消/.test(String(result.error))
+        if (cancelled) compressCancellation.cancel()
+        item.status = cancelled ? 'cancelled' : 'failed'
+        item.statusText = cancelled ? '已取消' : userFacingError(result.error, '压缩失败')
+        item.statusType = cancelled ? 'info' : 'danger'
       }
       processed.push(item)
     }
@@ -916,10 +917,10 @@ async function runCompressQueue() {
 
 function reportCompressSummary(processed) {
   if (!processed.length) return
-  const text = batchSummaryText('压缩完成', processed)
+  const text = batchSummaryText(compressCancellation.cancelled.value ? '压缩已停止' : '压缩完成', processed)
   compressSummary.value = text
   const hasFailed = processed.some((item) => item.status === 'failed')
-  ElNotification({ type: hasFailed ? 'warning' : 'success', title: text, duration: 6000 })
+  ElNotification({ type: hasFailed ? 'warning' : compressCancellation.cancelled.value ? 'info' : 'success', title: text, duration: 6000 })
 }
 
 async function selectSplitFile() {
@@ -931,15 +932,20 @@ async function selectSplitFile() {
 }
 
 async function loadSplitFile(path) {
+  if (splittingMerged.value) return
   splitFile.value = path
   splitPreviewPage.value = 1
-  splitTotalPages.value = 1
+  splitTotalPages.value = 0
+  splitRanges.value = []
   splitRunWarnings.value = []
   splitOutputDir.value = parentDir(path)
   const pageCount = await getPdfPageCount(path)
-  if (pageCount.ok) {
-    splitTotalPages.value = pageCount.data || 1
+  if (splitFile.value !== path) return
+  if (!pageCount.ok || Number(pageCount.data) < 1) {
+    ElMessage.error(userFacingError(pageCount.error, '读取页数失败，无法生成拆分页段'))
+    return
   }
+  splitTotalPages.value = Number(pageCount.data)
   splitRanges.value = [
     {
       name: stripPdf(fileName(path)),
@@ -1110,6 +1116,7 @@ function reorderSplitRanges(from, to) {
 }
 
 async function doSplitMerged() {
+  if (splittingMerged.value) return
   if (!splitFile.value || !splitOutputDir.value || !splitRanges.value.length) return
   const warnings = splitRangeWarnings(splitRanges.value, splitTotalPages.value)
   if (warnings.length) {

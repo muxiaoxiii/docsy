@@ -33,7 +33,11 @@ jobs:
 
       - name: Download release assets
         run: |
-          gh release download "${{ github.event.release.tag_name || github.ref_name }}" \
+          release_tag="${{ github.event.release.tag_name }}"
+          if [ -z "$release_tag" ]; then
+            release_tag="$(gh api repos/muxiaoxiii/docsy/releases/latest --jq .tag_name)"
+          fi
+          gh release download "$release_tag" \
             --dir site/public/downloads \
             --pattern 'Docsy_*' \
             --clobber
@@ -42,9 +46,7 @@ jobs:
 
       - name: Build site data
         run: |
-          gh release view "${{ github.event.release.tag_name || github.ref_name }}" \
-            --json tag_name,published_at,assets \
-            --jq '[.]' > /tmp/release.json
+          gh api 'repos/muxiaoxiii/docsy/releases?per_page=12' > /tmp/release.json
           python3 site/scripts/build-data.py \
             --api-json /tmp/release.json \
             --assets-dir site/public/downloads \

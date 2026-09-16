@@ -158,6 +158,9 @@ fn collect_supported_files(
         }
         let path = entry.path();
         if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with('_') || name.starts_with('.')) {
+                continue;
+            }
             collect_supported_files(&path, out)?;
             continue;
         }
@@ -192,6 +195,9 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
 
     for entry in fs::read_dir(root_path)? {
         let entry = entry?;
+        if entry.file_type()?.is_symlink() {
+            continue;
+        }
         let path = entry.path();
         if !path.is_dir() {
             continue;
@@ -214,8 +220,7 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
         groups.insert(dir_name, files);
     }
 
-    // Fallback: if no subdirectory groups found, treat root as a single group
-    if groups.is_empty() {
+    {
         let mut root_files = Vec::new();
         collect_supported_files(root_path, &mut root_files)?;
         // Filter out files in subdirectories (only keep root-level files)
@@ -227,7 +232,13 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("证据")
                 .to_string();
-            groups.insert(group_name, root_files);
+            let mut unique_name = group_name.clone();
+            let mut suffix = 1;
+            while groups.contains_key(&unique_name) {
+                unique_name = format!("{group_name}（根目录文件{suffix}）");
+                suffix += 1;
+            }
+            groups.insert(unique_name, root_files);
         }
     }
 
@@ -909,6 +920,23 @@ fn pt_to_mm(pt: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_includes_root_files_and_excludes_nested_outputs() {
+        let root = super::super::temp_named_path("docsy_scan_audit", "dir");
+        fs::create_dir_all(root.join("group/_evidence_output")).unwrap();
+        fs::write(root.join("root.pdf"), b"fixture").unwrap();
+        fs::write(root.join("group/10.pdf"), b"fixture").unwrap();
+        fs::write(root.join("group/2.pdf"), b"fixture").unwrap();
+        fs::write(root.join("group/_evidence_output/old.pdf"), b"fixture").unwrap();
+        let scanned = scan_folder(root.to_str().unwrap()).unwrap();
+        let groups = scanned["groups"].as_array().unwrap();
+        assert_eq!(groups.len(), 2);
+        let group = groups.iter().find(|group| group["name"] == "group").unwrap();
+        assert_eq!(group["files"].as_array().unwrap().len(), 2);
+        assert_eq!(group["files"][0]["name"], "2.pdf");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn safe_file_stem_blocks_path_segments() {

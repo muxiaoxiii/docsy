@@ -74,4 +74,18 @@ describe('image paddler state integration', () => {
     expect(state.optionLayoutLabel('1x3')).toBe('3 张（上下）')
     expect(state.previewNameStyle.value.color).toBe('#4B5563')
   })
+
+  it('清空素材后不会把旧导出结果显示为当前结果', async () => {
+    let finishExport
+    tauriCallSafe.mockImplementationOnce(() => new Promise(resolve => { finishExport = resolve }))
+    const state = useImagePaddlerState()
+    state.folders.value = ['/images']
+    state.analysis.value = { images }
+    const pending = state.run()
+    state.clearAllSources()
+    finishExport({ ok: true, data: { images: 6, pages: 1, output_path: '/old.pdf' } })
+    await pending
+    expect(state.generating.value).toBe(false)
+    expect(state.generatedResult.value).toBeNull()
+  })
 })

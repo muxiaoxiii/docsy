@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
 vi.mock('element-plus', () => ({
@@ -18,6 +18,11 @@ vi.mock('../../../core/tauriBridge.js', () => ({
 }))
 
 const { useBatchFill } = await import('./useBatchFill.js')
+const { open } = await import('@tauri-apps/plugin-dialog')
+const { tauriCallSafe } = await import('../../../core/tauriBridge.js')
+const { ElMessageBox } = await import('element-plus')
+
+beforeEach(() => vi.clearAllMocks())
 
 function makeBatchFill() {
   return useBatchFill(
@@ -50,5 +55,37 @@ describe('openBatchSaveDialog 批量保存对话框', () => {
     b.openBatchSaveDialog([])
     expect(b.batchSaveVisible.value).toBe(true)
     expect(b.batchSaveSelected.value).toEqual([])
+  })
+})
+
+describe('批量生成中的模板隔离', () => {
+  it('文件选择期间拦截重复执行，取消后释放状态', async () => {
+    let selectFile
+    open.mockImplementationOnce(() => new Promise(resolve => { selectFile = resolve }))
+    const batch = makeBatchFill()
+    const pending = batch.handleBatchCommand('import')
+    expect(batch.batchProcessing.value).toBe(true)
+    await batch.handleBatchCommand('import')
+    expect(open).toHaveBeenCalledTimes(1)
+    selectFile(null)
+    await pending
+    expect(batch.batchProcessing.value).toBe(false)
+  })
+
+  it('切换模板后仍用原模板生成并保存历史', async () => {
+    const templatePath = ref('/t/原模板.docsytpl')
+    const batch = useBatchFill(templatePath, ref({ fields: [] }), () => ({}), () => ({}), ref('、'))
+    open.mockResolvedValueOnce('/t/data.xlsx').mockResolvedValueOnce('/output')
+    tauriCallSafe.mockImplementation(async command => {
+      if (command === 'validate_batch_import') return { ok: true, data: { templateIdMatch: true, totalRows: 1, validRows: 1, warnings: [], errors: [] } }
+      if (command === 'batch_render_from_xlsx') return { ok: true, data: { success: 1, rows: [{ outputPath: '/output/1.docx', values: { name: 'A' } }] } }
+      return { ok: true, data: 1 }
+    })
+    ElMessageBox.confirm.mockImplementationOnce(async () => { templatePath.value = '/t/新模板.docsytpl' })
+    await batch.handleBatchCommand('import')
+    expect(tauriCallSafe).toHaveBeenCalledWith('batch_render_from_xlsx', expect.objectContaining({ templatePath: '/t/原模板.docsytpl' }))
+    batch.openBatchSaveFromCompletion()
+    await batch.submitBatchSave()
+    expect(tauriCallSafe).toHaveBeenCalledWith('save_batch_history_rows', { rows: [{ templatePath: '/t/原模板.docsytpl', outputPath: '/output/1.docx', values: { name: 'A' } }] })
   })
 })

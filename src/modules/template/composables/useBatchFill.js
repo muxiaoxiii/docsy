@@ -23,6 +23,7 @@ export function useBatchFill(
   const batchCompleteVisible = ref(false)
   const batchCompleteResult = ref({ success: 0, failed: 0, outputDir: '', rows: [] })
   const batchCompleteDataSaved = ref(false)
+  const batchSaveTemplatePath = ref('')
 
   async function handleBatchCommand(command) {
     if (command === 'export') {
@@ -62,8 +63,12 @@ export function useBatchFill(
   }
 
   async function importAndBatchRender() {
-    if (!templatePath.value || !templateManifest.value) return
-
+    if (batchProcessing.value || !templatePath.value || !templateManifest.value) return
+    const sourceTemplatePath = templatePath.value
+    const structureOverrides = normalizeStructureOverrides()
+    const itemSeparator = itemSeparatorSetting.value || '、'
+    batchProcessing.value = true
+    try {
     const selected = await open({
       multiple: false,
       filters: [{ name: 'Excel 文件', extensions: ['xlsx'] }],
@@ -72,10 +77,8 @@ export function useBatchFill(
 
     const xlsxPath = selected
 
-    batchProcessing.value = true
-    try {
       const validation = await tauriCallSafe('validate_batch_import', {
-        templatePath: templatePath.value,
+        templatePath: sourceTemplatePath,
         xlsxPath,
       })
 
@@ -93,20 +96,20 @@ export function useBatchFill(
       const outputDir = await open({
         directory: true,
         multiple: false,
-        defaultPath: parentDir(templatePath.value),
+        defaultPath: parentDir(sourceTemplatePath),
       })
       if (!outputDir) {
         return
       }
 
       const result = await tauriCallSafe('batch_render_from_xlsx', {
-        templatePath: templatePath.value,
+        templatePath: sourceTemplatePath,
         xlsxPath,
         outputDir,
         namePattern: '',
         skipRows,
-        structureOverrides: normalizeStructureOverrides(),
-        itemSeparator: itemSeparatorSetting.value || '、',
+        structureOverrides,
+        itemSeparator,
       })
 
       if (!result.ok) {
@@ -116,6 +119,7 @@ export function useBatchFill(
 
       const r = result.data
       batchCompleteResult.value = {
+        templatePath: sourceTemplatePath,
         success: r.success || 0,
         failed: r.failed || 0,
         outputDir: typeof outputDir === 'string' ? outputDir : '',
@@ -139,11 +143,12 @@ export function useBatchFill(
 
   function openBatchSaveFromCompletion() {
     if (batchCompleteResult.value.rows.length) {
-      openBatchSaveDialog(batchCompleteResult.value.rows)
+      openBatchSaveDialog(batchCompleteResult.value.rows, batchCompleteResult.value.templatePath)
     }
   }
 
-  function openBatchSaveDialog(rows) {
+  function openBatchSaveDialog(rows, sourceTemplatePath = templatePath.value) {
+    batchSaveTemplatePath.value = sourceTemplatePath
     batchSaveRows.value = (rows || []).map((row, index) => ({
       key: `${index}`,
       outputPath: row.outputPath || '',
@@ -201,7 +206,7 @@ export function useBatchFill(
       return
     }
     const payload = rows.map((row) => ({
-      templatePath: templatePath.value,
+      templatePath: batchSaveTemplatePath.value,
       outputPath: row.outputPath,
       values: row.values,
     }))

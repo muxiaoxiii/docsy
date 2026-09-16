@@ -1,14 +1,10 @@
 name: Deploy Docsy Site to GitHub Pages
 
 on:
-  push:
-    branches:
-      - v0.9-mdg
-      - main
-    paths:
-      - 'site/public/**'
-      - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
+  workflow_run:
+    workflows: ['Build desktop packages']
+    types: [completed]
 
 permissions:
   contents: read
@@ -21,6 +17,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -28,6 +25,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Refresh published download data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api 'repos/muxiaoxiii/docsy/releases?per_page=12' > /tmp/releases.json
+          python3 site/scripts/build-data.py \
+            --api-json /tmp/releases.json \
+            --assets-dir site/public/downloads \
+            --changelog CHANGELOG.md \
+            --out site/public/data \
+            --remote-only \
+            --sync-fallback site/public/js/main.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

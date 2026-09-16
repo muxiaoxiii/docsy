@@ -34,6 +34,32 @@ pub struct AntiCopyDetection {
     pub has_backup: bool,
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct AntiCopyOutput {
+    pub output_path: String,
+    pub modified_fonts: usize,
+    pub detection: AntiCopyDetection,
+}
+
+pub fn process_copy(input: &Path, requested_output: &Path, method: Option<AntiCopyMethod>) -> Result<AntiCopyOutput> {
+    let before = detect_anti_copy(input)?;
+    if method.is_some() && before.has_protection {
+        anyhow::bail!("文件已有防复制标记，请先核对或恢复，避免覆盖原始文字映射备份");
+    }
+    if method.is_none() && !before.has_backup {
+        anyhow::bail!("文件没有可恢复的原始文字映射备份");
+    }
+    let parent = requested_output.parent().unwrap_or_else(|| Path::new("."));
+    let stem = requested_output.file_stem().and_then(|name| name.to_str()).unwrap_or("result");
+    let output = crate::util::fs::unique_output_path(parent, stem, "pdf");
+    let modified_fonts = match method {
+        Some(method) => apply_anti_copy(input, &output, method)?,
+        None => remove_anti_copy(input, &output)?,
+    };
+    let detection = detect_anti_copy(&output)?;
+    Ok(AntiCopyOutput { output_path: output.to_string_lossy().into_owned(), modified_fonts, detection })
+}
+
 /// Detect anti-copy protection on a PDF
 pub fn detect_anti_copy(input: &Path) -> Result<AntiCopyDetection> {
     let doc = Document::load(input).context("读取 PDF 失败")?;
@@ -81,7 +107,6 @@ pub fn apply_anti_copy(input: &Path, output: &Path, method: AntiCopyMethod) -> R
 
     // Build backup data before modifying
     let backup = build_backup(&doc);
-    store_backup_meta(&mut doc, &backup);
 
     let page_ids = doc.get_pages();
     let mut modified = 0;
@@ -118,6 +143,9 @@ pub fn apply_anti_copy(input: &Path, output: &Path, method: AntiCopyMethod) -> R
         }
     }
 
+    if modified > 0 {
+        store_backup_meta(&mut doc, &backup);
+    }
     doc.save(output).context("保存防复制PDF失败")?;
     Ok(modified)
 }
@@ -297,7 +325,7 @@ fn get_tounicode_cmap(doc: &Document, font_id: ObjectId) -> Option<Vec<u8>> {
         Object::Stream(s) => s,
         _ => return None,
     };
-    Some(stream.content.clone())
+    stream.get_plain_content().ok()
 }
 
 fn set_tounicode_cmap(doc: &mut Document, font_id: ObjectId, data: &[u8]) {
@@ -426,4 +454,73 @@ fn scramble_hex(hex: &str) -> String {
         .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     let pua_char = 0xE000 + (hash % 0x1000);
     format!("{:04X}", pua_char)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lopdf::dictionary;
+
+    fn create_pdf(path: &Path, with_cmap: bool) -> ObjectId {
+        let mut doc = Document::with_version("1.7");
+        let pages = doc.new_object_id();
+        let cmap = b"begincmap\n1 begincodespacerange\n<00> <FF>\nendcodespacerange\n1 beginbfchar\n<41> <0041>\nendbfchar\nendcmap\n";
+        let mut stream = Stream::new(Dictionary::new(), cmap.to_vec());
+        stream.compress().unwrap();
+        let cmap_id = doc.add_object(stream);
+        let mut font = dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica" };
+        if with_cmap {
+            font.set("ToUnicode", cmap_id);
+        }
+        let font_id = doc.add_object(font);
+        let content = doc.add_object(Stream::new(Dictionary::new(), b"BT /F1 12 Tf 20 20 Td (A) Tj ET".to_vec()));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font_id } },
+            "Contents" => content,
+        });
+        doc.objects.insert(pages, Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 }));
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", catalog);
+        doc.save(path).unwrap();
+        font_id
+    }
+
+    #[test]
+    fn compressed_cmap_roundtrip_preserves_source_and_existing_outputs() {
+        let directory = crate::pdf::temp_named_path("anti_copy_roundtrip", "dir");
+        std::fs::create_dir_all(&directory).unwrap();
+        for (index, method) in [AntiCopyMethod::CmapScramble, AntiCopyMethod::CmapRemove].into_iter().enumerate() {
+            let input = directory.join(format!("source-{index}.pdf"));
+            let font_id = create_pdf(&input, true);
+            let original = std::fs::read(&input).unwrap();
+            let original_cmap = get_tounicode_cmap(&Document::load(&input).unwrap(), font_id).unwrap();
+            let protected = process_copy(&input, &input, Some(method)).unwrap();
+            assert_ne!(protected.output_path, input.to_string_lossy());
+            assert!(protected.detection.has_protection && protected.detection.has_backup);
+            assert_eq!(protected.modified_fonts, 1);
+            let protected_bytes = std::fs::read(&protected.output_path).unwrap();
+            let restored = process_copy(Path::new(&protected.output_path), Path::new(&protected.output_path), None).unwrap();
+            assert!(!restored.detection.has_protection);
+            assert_eq!(get_tounicode_cmap(&Document::load(restored.output_path).unwrap(), font_id).unwrap(), original_cmap);
+            assert_eq!(std::fs::read(&input).unwrap(), original);
+            assert_eq!(std::fs::read(&protected.output_path).unwrap(), protected_bytes);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn no_mapping_is_not_reported_as_protected_and_unbacked_restore_is_rejected() {
+        let directory = crate::pdf::temp_named_path("anti_copy_empty", "dir");
+        std::fs::create_dir_all(&directory).unwrap();
+        let input = directory.join("source.pdf");
+        create_pdf(&input, false);
+        let result = process_copy(&input, &directory.join("output.pdf"), Some(AntiCopyMethod::CmapScramble)).unwrap();
+        assert_eq!(result.modified_fonts, 0);
+        assert!(!result.detection.has_protection);
+        assert!(process_copy(&input, &directory.join("restore.pdf"), None).is_err());
+        assert!(!directory.join("restore.pdf").exists());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

@@ -1,7 +1,8 @@
-import { onActivated, onBeforeUnmount, onDeactivated, onMounted } from 'vue'
+import { getCurrentInstance, onActivated, onBeforeUnmount, onDeactivated, onMounted } from 'vue'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 
 export function useWindowFileDrop({ onEnter, onLeave, onDrop, onError } = {}) {
+  const instance = getCurrentInstance()
   let unlisten = null
   let disposed = false
   let active = true
@@ -11,6 +12,8 @@ export function useWindowFileDrop({ onEnter, onLeave, onDrop, onError } = {}) {
     try {
       const dispose = await getCurrentWebview().onDragDropEvent(async (event) => {
         if (disposed || !active) return
+        const element = instance?.proxy?.$el
+        if (element instanceof globalThis.Element && !element.getClientRects().length) return
         const type = event.payload.type
         if (type === 'enter' || type === 'over') {
           onEnter?.(event.payload.paths || [])

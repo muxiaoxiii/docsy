@@ -1,10 +1,10 @@
 <template>
   <div class="evidence-pdf-view">
     <el-tabs v-model="activeTab" tab-position="left" class="evidence-tabs">
-      <el-tab-pane label="分项证据处理" name="merge" lazy>
+      <el-tab-pane label="分项证据合并" name="merge" lazy>
         <EvidencePdfWorkbench workflow="merge" />
       </el-tab-pane>
-      <el-tab-pane label="合并证据处理" name="split" lazy>
+      <el-tab-pane label="合并证据拆分" name="split" lazy>
         <EvidencePdfWorkbench workflow="split" />
       </el-tab-pane>
       <el-tab-pane label="证据扫描" name="scan" lazy>
@@ -13,8 +13,8 @@
           description="扫描文件夹并按子文件夹自动整理、合并证据 PDF；合并时压平签章外观以便打印。"
         >
           <template #toolbar>
-            <el-button type="primary" @click="selectEvidenceFolder">选择证据文件夹</el-button>
-            <el-button v-if="evidenceFolder" :loading="scanning" @click="scanEvidence">重新扫描</el-button>
+            <el-button type="primary" :disabled="scanning || building" @click="selectEvidenceFolder">选择证据文件夹</el-button>
+            <el-button v-if="evidenceFolder" :loading="scanning" :disabled="building" @click="scanEvidence">重新扫描</el-button>
           </template>
           <div v-if="evidenceFolder" class="evidence-info">
             <span class="path-label">当前文件夹</span>
@@ -30,7 +30,7 @@
                 :items="group.files"
                 :clearable="false"
                 :removable="false"
-                sortable
+                :sortable="!scanning && !building"
                 max-height="240px"
                 @reorder="(payload) => reorderGroupFiles(group, payload)"
               />
@@ -63,7 +63,8 @@
             </div>
           </el-alert>
           <template #actions>
-            <el-button type="success" :disabled="!evidenceGroups.length" :loading="building" @click="buildEvidence">
+            <span v-if="evidenceOutputDir">输出目录：{{ evidenceOutputDir }}</span>
+            <el-button type="success" :disabled="!evidenceGroups.length || scanning" :loading="building" @click="buildEvidence">
               生成合并 PDF
             </el-button>
           </template>
@@ -75,66 +76,21 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { open } from '@tauri-apps/plugin-dialog'
 import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import evidenceIconUrl from '../../../assets/icons/evidence.svg?url'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
-import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { useEvidenceFolder } from '../../../shared/pdf-tools/composables/useEvidenceFolder.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 
 const activeTab = ref('merge')
-const evidenceFolder = ref('')
-const evidenceGroups = ref([])
-const scanning = ref(false)
-const building = ref(false)
-const conversionFailures = ref([])
+const { evidenceFolder, evidenceGroups, scanning, building, conversionFailures, evidenceOutputDir, selectEvidenceFolder, scanEvidence, buildEvidence } = useEvidenceFolder()
 const preference = useWorkspacePreferences('evidence-pdf.workspace', { activeTab })
 
 function reorderGroupFiles(group, { from, to }) {
-  group.files = moveItem(group.files, from, to)
-}
-
-async function selectEvidenceFolder() {
-  const selected = await open({ directory: true })
-  if (selected) evidenceFolder.value = selected
-}
-
-async function scanEvidence() {
-  if (!evidenceFolder.value) return
-  scanning.value = true
-  conversionFailures.value = []
-  const result = await tauriCallSafe('scan_evidence_folder', { root: evidenceFolder.value })
-  if (result.ok) {
-    evidenceGroups.value = result.data.groups || []
-  } else {
-    ElMessage.error(userFacingError(result.error, '扫描失败'))
-  }
-  scanning.value = false
-}
-
-async function buildEvidence() {
-  building.value = true
-  const result = await tauriCallSafe('build_evidence_group_pdfs', {
-    args: {
-      root: evidenceFolder.value,
-      groups: evidenceGroups.value,
-    },
-  })
-  if (result.ok) {
-    conversionFailures.value = result.data.failedConversions || []
-    if (conversionFailures.value.length) {
-      ElMessage.warning(`证据 PDF 已生成，${conversionFailures.value.length} 个 Word 文件未能转换`)
-    } else {
-      ElMessage.success('证据 PDF 生成完成')
-    }
-  } else {
-    ElMessage.error(userFacingError(result.error, '证据 PDF 生成失败'))
-  }
-  building.value = false
+  if (!scanning.value && !building.value) group.files = moveItem(group.files, from, to)
 }
 
 onMounted(() => void preference.start())

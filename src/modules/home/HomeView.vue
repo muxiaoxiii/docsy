@@ -7,9 +7,10 @@
         <p class="subtitle">在本地整理证据、转换文档、排版图片和生成文书。文件不离开设备，常用工具始终触手可及。</p>
       </div>
       <div class="hero-art">
-        <div class="doclet-stage">
-          <img src="../../assets/doclet-mascot-transparent.png" alt="Doclet" class="hero-mascot" />
-        </div>
+        <button class="doclet-stage" type="button" aria-label="和 Doclet 打个招呼" @click="greetDoclet">
+          <DocletSprite :size="208" :motion="petMotion" />
+          <span class="doclet-greeting" :class="{ 'is-visible': greetingVisible }" aria-live="polite">{{ greetingVisible ? petGreeting : '' }}</span>
+        </button>
       </div>
     </div>
 
@@ -47,6 +48,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import DocletSprite from '../../shared/components/DocletSprite.vue'
 import { getHomeCards } from '../../core/moduleRegistry.js'
 import { tauriCallSafe } from '../../core/tauriBridge.js'
 import evidenceIconUrl from '../../assets/icons/evidence.svg?url'
@@ -57,6 +59,28 @@ import videoFramesIconUrl from '../../assets/icons/video-frames.svg?url'
 import templateIconUrl from '../../assets/icons/template.svg?url'
 
 const router = useRouter()
+const petMotion = ref('greet')
+const greetingVisible = ref(false)
+const petGreeting = ref('')
+let greetingTimer
+let greetingIndex = 0
+const greetings = [
+  { motion: 'greet', text: '我在呢，慢慢来。' },
+  { motion: 'celebrate', text: '收到，给你打气！' },
+  { motion: 'look', text: '下一份文档，我陪你。' },
+]
+function settleDoclet() {
+  petMotion.value = 'idle'
+  greetingVisible.value = false
+}
+function greetDoclet() {
+  clearTimeout(greetingTimer)
+  const greeting = greetings[greetingIndex++ % greetings.length]
+  petMotion.value = greeting.motion
+  petGreeting.value = greeting.text
+  greetingVisible.value = true
+  greetingTimer = window.setTimeout(settleDoclet, 3600)
+}
 const settings = ref({
   menu_visibility: {},
   menu_order: [],
@@ -82,11 +106,13 @@ function applySettingsEvent(event) {
 }
 
 onMounted(() => {
+  greetingTimer = window.setTimeout(settleDoclet, 2800)
   loadData()
   window.addEventListener('docsy-settings-updated', applySettingsEvent)
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(greetingTimer)
   window.removeEventListener('docsy-settings-updated', applySettingsEvent)
 })
 </script>
@@ -191,24 +217,38 @@ onBeforeUnmount(() => {
 
 .doclet-stage {
   z-index: 1;
-  width: min(240px, 78%);
-  animation: doclet-idle 4.8s ease-in-out 700ms infinite;
-  transform-origin: 50% 88%;
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  cursor: pointer;
   transition: filter 220ms var(--ease-out);
 }
+.doclet-stage:focus-visible { outline: 2px solid var(--docsy-primary); outline-offset: 6px; }
+.doclet-greeting {
+  position: absolute;
+  bottom: 4px;
+  white-space: nowrap;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: 12px 12px 12px 3px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--docsy-text-strong);
+  background: var(--docsy-surface-elevated);
+  box-shadow: var(--docsy-shadow-soft);
+  opacity: 0;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
+.doclet-greeting.is-visible { opacity: 1; }
 
 .hero-art:hover .doclet-stage {
   filter: drop-shadow(0 6px 8px rgba(32, 65, 59, 0.08));
 }
 
-.hero-mascot {
-  display: block;
-  width: 100%;
-  max-height: clamp(210px, 34dvh, 270px);
-  object-fit: contain;
-  filter: drop-shadow(0 20px 28px rgba(32, 65, 59, 0.18));
-  animation: doclet-settle 700ms var(--ease-out) both;
-}
 
 .section {
   margin-top: clamp(22px, 4dvh, 34px);
@@ -327,32 +367,7 @@ onBeforeUnmount(() => {
   margin-top: 6px;
 }
 
-@keyframes doclet-settle {
-  from {
-    transform: translateY(16px) scale(0.96);
-    opacity: 0;
-  }
 
-  to {
-    transform: translateY(0) scale(1);
-    opacity: 1;
-  }
-}
-
-@keyframes doclet-idle {
-  0%,
-  100% {
-    transform: translateY(0) rotate(0deg);
-  }
-
-  45% {
-    transform: translateY(-7px) rotate(-1deg);
-  }
-
-  55% {
-    transform: translateY(-7px) rotate(1deg);
-  }
-}
 
 @keyframes doclet-ring {
   0%,

@@ -17,6 +17,17 @@ pub struct SplitMergedArgs {
     /// 拆分时移除无可视内容的空白页（默认关闭）。
     #[serde(default)]
     remove_blank_pages: bool,
+    #[serde(default)]
+    cleanup_targets: Vec<SplitCleanupTarget>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SplitCleanupTarget {
+    region: String,
+    normalized_text: String,
+    page_start: u32,
+    page_end: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -34,6 +45,8 @@ pub struct SplitMergedResult {
     warnings: Vec<String>,
     outputs: Vec<SplitOutput>,
     failed: Vec<SplitFailure>,
+    removed_headers: usize,
+    removed_footers: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,12 +90,48 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
     } else {
         BTreeSet::new()
     };
+    let mut plan = super::artifacts::HeaderFooterArtifactEditPlan::default();
+    let inspection = if args.cleanup_targets.is_empty() { None } else {
+        Some(super::artifacts::inspect_meaningful_header_footer_artifacts(Path::new(&args.input_path), 0)?)
+    };
+    for target in &args.cleanup_targets {
+        if target.normalized_text.trim().is_empty() || target.page_start == 0
+            || target.page_end < target.page_start || target.page_end > total_pages {
+            anyhow::bail!("清除元素的文本或页码范围无效，请重新检测");
+        }
+        let edit = super::artifacts::HeaderFooterArtifactEditTarget {
+            normalized_text: target.normalized_text.clone(),
+            page_start: target.page_start,
+            page_end: target.page_end,
+            ..Default::default()
+        };
+        if !inspection.as_ref().is_some_and(|inspection| inspection.occurrences.iter().any(|occurrence|
+            occurrence.region == target.region && super::artifacts::artifact_occurrence_matches_target(occurrence, &edit)
+        )) {
+            anyhow::bail!("所选元素已失配，请重新检测；未输出拆分文件");
+        }
+        match target.region.as_str() {
+            "header" => { plan.remove_header = true; plan.header_targets.push(edit); }
+            "footer" => { plan.remove_footer = true; plan.footer_targets.push(edit); }
+            _ => anyhow::bail!("清除元素区域无效"),
+        }
+    }
+    let cleaned = super::artifacts::edit_header_footer_artifacts_to_temp(&args.input_path, &plan)?;
+    if !args.cleanup_targets.is_empty() && cleaned.is_none() {
+        anyhow::bail!("所选标准元素未匹配到可删除内容，请重新检测；未输出拆分文件");
+    }
+    let (cleaned_guard, removed_headers, removed_footers) = match cleaned {
+        Some((path, stats)) => (Some(crate::util::fs::TempPathGuard::new(path)), stats.removed_header, stats.removed_footer),
+        None => (None, 0, 0),
+    };
+    let source = cleaned_guard.as_ref().map(|guard| guard.path().to_string_lossy().into_owned())
+        .unwrap_or_else(|| args.input_path.clone());
     let mut outputs = Vec::new();
     let mut failed = Vec::new();
 
     for item in &args.items {
         match validate_range(item, total_pages)
-            .and_then(|_| extract_range(&args.input_path, &args.output_dir, item, &blank_pages))
+            .and_then(|_| extract_range(&source, &args.output_dir, item, &blank_pages))
         {
             Ok((output_path, removed_blank_pages)) => outputs.push(SplitOutput {
                 name: item.name.clone(),
@@ -105,6 +154,8 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
         warnings,
         outputs,
         failed,
+        removed_headers,
+        removed_footers,
     })
 }
 
@@ -228,6 +279,32 @@ fn operation_is_visible(operation: &lopdf::content::Operation) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires DOCSY_ARTIFACT_FIXTURE and qpdf"]
+    fn split_cleans_only_selected_footer_and_preserves_original() {
+        let input = std::env::var("DOCSY_ARTIFACT_FIXTURE").unwrap();
+        let original = std::fs::read(&input).unwrap();
+        let inspected = crate::pdf::artifacts::inspect_meaningful_header_footer_artifacts(std::path::Path::new(&input), 0).unwrap();
+        let footer = inspected.occurrences.iter().find(|item| item.region == "footer").unwrap();
+        let output = crate::pdf::temp_named_path("docsy_split_cleanup_test", "dir");
+        let pages = crate::pdf::qpdf::page_count(&input).unwrap();
+        let mut args: super::SplitMergedArgs = serde_json::from_value(serde_json::json!({
+            "inputPath": input, "outputDir": output,
+            "items": [{"name": "cleaned", "pageStart": 1, "pageEnd": pages}],
+            "cleanupTargets": [{"region": "footer", "normalizedText": footer.text, "pageStart": footer.page, "pageEnd": footer.page}],
+        })).unwrap();
+        let result = super::split_merged(&args).unwrap();
+        assert!(result.failed.is_empty());
+        assert_eq!(result.removed_footers, 1);
+        assert_eq!(result.removed_headers, 0);
+        let after = crate::pdf::artifacts::inspect_meaningful_header_footer_artifacts(std::path::Path::new(&result.outputs[0].output_path), 0).unwrap();
+        assert_eq!(after.header_count, inspected.header_count);
+        assert_eq!(after.footer_count + 1, inspected.footer_count);
+        assert_eq!(std::fs::read(&input).unwrap(), original);
+        args.cleanup_targets[0].normalized_text = "missing-element-test".into();
+        assert!(super::split_merged(&args).is_err());
+        std::fs::remove_dir_all(output).unwrap();
+    }
     use super::*;
 
     #[test]
@@ -414,6 +491,7 @@ mod tests {
                 page_end: 4,
             }],
             remove_blank_pages: true,
+            cleanup_targets: vec![],
         })
         .expect("拆分失败");
 

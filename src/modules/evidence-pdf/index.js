@@ -21,7 +21,7 @@ export default {
   homeCards: [
     {
       title: '证据处理',
-      description: '分项证据处理、合并证据处理、证据扫描',
+      description: '分项证据合并、合并证据拆分、证据扫描',
       route: 'evidence-pdf',
       icon: 'DocumentChecked',
     },

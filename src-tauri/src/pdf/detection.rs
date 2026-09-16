@@ -72,6 +72,7 @@ pub struct SplitSuggestionResult {
     page_number_footer_pages: usize,
     warnings: Vec<String>,
     items: Vec<SplitSuggestionItem>,
+    cleanup_candidates: Vec<HeaderFooterCandidate>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -215,6 +216,20 @@ fn default_scan_artifacts() -> bool {
 }
 
 pub fn detect(args: &DetectionArgs) -> Result<DetectionResult> {
+    detect_inner(args).map_err(|error| {
+        crate::app_log::error(
+            "pdf.detect",
+            "failed",
+            serde_json::json!({
+                "file": args.input_path,
+                "message": format!("{error:#}"),
+            }),
+        );
+        error
+    })
+}
+
+fn detect_inner(args: &DetectionArgs) -> Result<DetectionResult> {
     let input = Path::new(&args.input_path);
     if !input.exists() {
         anyhow::bail!("PDF 不存在: {}", input.display());
@@ -370,7 +385,69 @@ pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestio
         page_number_footer_pages,
         warnings,
         items,
+        cleanup_candidates: detection.header_candidates.into_iter()
+            .chain(detection.footer_candidates)
+            .filter(|candidate| candidate.source == "artifact")
+            .collect(),
     })
+}
+
+#[cfg(test)]
+mod real_split_audit {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires DOCSY_ARTIFACT_FIXTURE, qpdf and pdftotext"]
+    fn audit_real_split_suggestions() {
+        let path = std::env::var("DOCSY_ARTIFACT_FIXTURE").unwrap();
+        let args: SplitSuggestionArgs = serde_json::from_value(serde_json::json!({
+            "inputPath": path, "headerZoneMm": 25, "footerZoneMm": 25,
+        })).unwrap();
+        let result = suggest_split_ranges(&args).unwrap();
+        eprintln!("{}", serde_json::to_string_pretty(&result).unwrap());
+        assert!(!result.items.is_empty());
+        assert_eq!(result.items.first().unwrap().page_start, 1);
+        assert_eq!(result.items.last().unwrap().page_end, result.total_pages);
+        for adjacent in result.items.windows(2) {
+            assert_eq!(adjacent[0].page_end + 1, adjacent[1].page_start);
+        }
+        let output = super::super::temp_named_path("docsy_evidence_audit", "dir");
+        let split_args = serde_json::from_value(serde_json::json!({
+            "inputPath": args.input_path, "outputDir": output,
+            "items": result.items,
+        })).unwrap();
+        let split = super::super::split::split_merged(&split_args).unwrap();
+        let split = serde_json::to_value(split).unwrap();
+        assert!(split["failed"].as_array().unwrap().is_empty());
+        let outputs = split["outputs"].as_array().unwrap();
+        let mut files = Vec::new();
+        for item in outputs {
+            let path = item["outputPath"].as_str().unwrap();
+            let count = super::super::qpdf::page_count(path).unwrap();
+            assert_eq!(u64::from(count), item["pageEnd"].as_u64().unwrap() - item["pageStart"].as_u64().unwrap() + 1);
+            files.push(serde_json::json!({"path": path, "fileType": "pdf"}));
+        }
+        let build_args = serde_json::from_value(serde_json::json!({
+            "root": output, "groups": [{"name": "roundtrip", "id": "audit", "files": files}],
+        })).unwrap();
+        let built = super::super::evidence::build_group_pdfs(&build_args, &std::sync::Arc::new(crate::ConversionState::new())).unwrap();
+        eprintln!("ROUNDTRIP {}", built);
+        assert_eq!(built["results"][0]["pageCount"].as_u64(), Some(u64::from(result.total_pages)));
+        let rule_args = serde_json::from_value(serde_json::json!({
+            "items": outputs.iter().enumerate().map(|(number, item)| serde_json::json!({
+                "inputPath": item["outputPath"],
+                "outputPath": output.join(format!("processed-{number}.pdf")),
+            })).collect::<Vec<_>>(),
+            "merge": {"enabled": true, "outputPath": output.join("session-merged.pdf"), "outputMode": "files_and_merge"},
+        })).unwrap();
+        let processed = super::super::evidence_session::apply_rules_cancellable(
+            &rule_args, &tokio_util::sync::CancellationToken::new(), &|_| {},
+        ).unwrap();
+        assert!(processed.failed.is_empty());
+        assert_eq!(processed.merge.status.as_deref(), Some("done"));
+        assert_eq!(super::super::qpdf::page_count(processed.merge.output_path.as_deref().unwrap()).unwrap(), result.total_pages);
+        std::fs::remove_dir_all(output).unwrap();
+    }
 }
 
 fn artifact_summary(
@@ -438,16 +515,7 @@ fn build_artifact_candidates(
                     candidate.page_range.end >= page_start && candidate.page_range.start <= page_end
                 })
                 .filter(|candidate| candidate.normalized_text == normalized_text)
-                .max_by_key(|candidate| candidate.count)
-                .or_else(|| {
-                    region_candidates
-                        .iter()
-                        .filter(|candidate| {
-                            candidate.page_range.end >= page_start
-                                && candidate.page_range.start <= page_end
-                        })
-                        .max_by_key(|candidate| candidate.count)
-                });
+                .max_by_key(|candidate| candidate.count);
 
             let mut labels = labels_for(&normalized_text);
             if is_evidence_label_text(&normalized_text)

@@ -17,20 +17,15 @@
           <el-button v-if="workflowMode !== 'split'" type="primary" @click="selectOverlayFiles">{{
             splitImportButtonText
           }}</el-button>
-          <el-button v-if="workflowMode !== 'merge'" :loading="importingMergedPdf" @click="importMergedPdfAsEvidence">{{
+          <el-button v-if="workflowMode !== 'merge'" type="primary" :loading="importingMergedPdf" :disabled="batchRunning || detectingMergedImport || splittingMergedImport" @click="importMergedPdfAsEvidence">{{
             mergedImportButtonText
           }}</el-button>
         </div>
       </div>
 
-      <div v-if="importingMergedPdf" v-loading="true" element-loading-text="正在导入合并 PDF" class="local-processing">
-        <p>正在读取文件页数并建立一个覆盖全文的手动页段。</p>
-      </div>
-      <div v-if="detectingMergedImport" v-loading="true" element-loading-text="正在检测页段" class="local-processing">
-        <p>检测会完整分析标准页眉页脚、重复文本和页码；大文件等待时间较长，完成后请逐项核对候选页段。</p>
-      </div>
-      <div v-if="splittingMergedImport" v-loading="true" element-loading-text="正在拆分 PDF" class="local-processing">
-        <p>大文件会按页段逐个输出，当前只占用合并证据处理区域；请先不要重复点击确认拆分。</p>
+      <div v-if="mergedOperationStatus" class="local-processing" role="status" aria-live="polite" aria-atomic="true">
+        <strong>{{ mergedOperationStatus.title }}</strong>
+        <p>{{ mergedOperationStatus.description }}</p>
       </div>
       <div v-if="overlaying" class="local-processing">
         <p>{{ overlayProgressText }}</p>
@@ -58,13 +53,17 @@
         </div>
       </div>
 
+      <div v-if="workflowMode === 'split' && !mergedImportPlans.length && !mergedImportPlan && !overlayFiles.length" class="rule-block">
+        <div class="block-title">按证据页段拆分合并 PDF</div>
+        <p class="hint">导入 PDF → 检测页段 → 核对名称与页段 → 确认拆分</p>
+      </div>
       <div v-if="showSplitResultActions" class="split-result-actions">
         <div>
-          <div class="block-title">{{ splitResultActionTitle }}</div>
-          <p class="hint">{{ splitResultActionHint }}</p>
-          <p class="path-text">输出文件夹：{{ splitReplacementOutputDirValue }}</p>
+          <div class="block-title">拆分结果：{{ overlayFiles.length }} 个证据文件</div>
+          <p class="hint">已按确认页段输出。下表可核对每份证据的来源页段；如需重新合并，请使用“分项证据合并”。</p>
+          <p class="path-text">输出文件夹：{{ overlayOutputDir }}</p>
         </div>
-        <div class="plan-actions">
+        <div v-if="workflowMode !== 'split'" class="plan-actions">
           <el-button size="small" @click="selectSplitReplacementOutputDir">输出目录</el-button>
           <el-button size="small" @click="openHeaderFooterSettings">设置页眉页脚</el-button>
           <el-button
@@ -102,19 +101,20 @@
               </span>
             </el-button>
             <el-button
-              size="small"
+              type="primary"
               class="stable-action-button"
               :disabled="deepDetecting"
               :aria-busy="deepDetecting"
               @click="deepDetectAllHeaderFooter"
             >
               <span class="stable-button-content" :class="{ 'is-loading': deepDetecting }">
-                <span>元素检测</span>
+                <span>检测现有页眉页脚</span>
                 <span v-if="deepDetecting" class="internal-progress-spinner" aria-hidden="true"></span>
               </span>
             </el-button>
           </div>
         </div>
+        <p class="hint">需要识别原页眉页脚时，请手动点击“检测现有页眉页脚”。检测会扫描文件，大文件耗时较长，当前无法准确预估剩余时间。</p>
         <div class="existing-summary-grid">
           <button
             type="button"
@@ -419,38 +419,64 @@
         <template #title>{{ processingNotes.join('；') }}</template>
       </el-alert>
 
-      <div v-if="mergedImportPlan" class="merged-import-plan">
-        <div class="plan-head">
-          <div>
-            <div class="block-title">合并证据页段确认</div>
-            <p class="hint">核对页段后拆成证据列表</p>
+      <div v-if="mergedImportPlans.length > 1" class="split-batch-toolbar">
+        <span>{{ mergedImportPlans.length }} 份源文件</span>
+        <el-button :disabled="mergedBatchBusy || !pendingDetectionCount" @click="detectAllMergedImports">检测未完成文件</el-button>
+        <el-button :disabled="mergedBatchBusy || !allSplitCleanupCount" @click="openSplitCleanup('all')">清除标记</el-button>
+        <el-button type="primary" :disabled="mergedBatchBusy || !reviewedPlanCount" @click="splitReviewedMergedImports">拆分已核对（{{ reviewedPlanCount }}）</el-button>
+        <el-button v-if="batchRunning" :disabled="batchStopRequested" @click="requestStopMergedBatch">{{ batchStopRequested ? '当前文件完成后停止' : '停止后续任务' }}</el-button>
+      </div>
+      <section v-for="filePlan in mergedImportPlans" :key="filePlan.inputPath" class="split-source-group" :class="{ 'is-active': filePlan === mergedImportPlan }">
+        <div class="split-source-header">
+          <button type="button" class="split-source-name" :disabled="mergedBatchBusy" @click="activateMergedImportPlan(filePlan)">
+            <strong>{{ fileName(filePlan.inputPath) }}</strong>
+            <span :title="filePlan.inputPath">{{ filePlan.inputPath }}</span>
+          </button>
+          <el-tag size="small" :type="filePlan.splitError || filePlan.detectionError ? 'warning' : filePlan.splitStatus === 'complete' ? 'success' : 'info'">{{ mergedPlanStatus(filePlan) }}</el-tag>
+          <el-button text size="small" :disabled="mergedBatchBusy" :aria-label="'移除 ' + fileName(filePlan.inputPath)" title="仅移出列表，不删除文件" @click="removeMergedImportPlan(filePlan)"><el-icon><Delete /></el-icon></el-button>
+        </div>
+        <div class="split-source-summary">
+          <span>{{ filePlan.totalPages || '—' }} 页 · {{ filePlan.detectionAttempted ? filePlan.items.length : '—' }} 个页段</span>
+          <el-checkbox v-if="mergedImportPlans.length > 1 && filePlan.detectionAttempted && filePlan.totalPages && filePlan.splitStatus !== 'complete'" v-model="filePlan.reviewed" :disabled="mergedBatchBusy">已核对本文件</el-checkbox>
+          <el-button v-if="filePlan !== mergedImportPlan && !filePlan.splitRequest" size="small" :disabled="mergedBatchBusy" @click="activateMergedImportPlan(filePlan)">展开核对</el-button>
+        </div>
+        <div v-if="mergedImportPlan === filePlan && !filePlan.splitRequest" class="merged-import-plan">
+        <fieldset :disabled="mergedBatchBusy" style="border: 0; padding: 0; margin: 0; min-width: 0">
+        <div class="plan-head split-plan-head">
+          <div class="split-plan-title">
+            <div class="block-title">拆分方案 <el-tag size="small" type="info">{{ mergedImportPlan.pagesAnalyzed ? '待核对' : '未检测' }}</el-tag></div>
+            <div class="split-plan-utilities">
+              <el-popover trigger="click" title="拆分说明" :width="300">
+                <template #reference><el-button text aria-label="查看拆分帮助">帮助</el-button></template>
+                <p>检测后核对下方页段，再确认拆分。大文件可能耗时较长。清除标记只作用于输出副本。</p>
+              </el-popover>
+              <el-button text @click="cancelMergedImportPlan">取消</el-button>
+            </div>
           </div>
-          <div class="plan-actions">
+          <div class="plan-actions split-plan-actions">
             <el-button
-              size="small"
-              type="primary"
-              plain
+              :type="mergedImportPlan.pagesAnalyzed ? 'default' : 'primary'"
               :loading="detectingMergedImport"
               @click="detectMergedImportPlan"
-              >检测页段</el-button
+              >{{ mergedImportPlan.pagesAnalyzed ? '重新检测' : '检测页段' }}</el-button
             >
-            <el-button size="small" @click="addMergedImportRange">添加页段</el-button>
-            <el-button size="small" @click="selectMergedImportOutputDir">输出目录</el-button>
-            <el-button size="small" @click="cancelMergedImportPlan">取消</el-button>
-            <el-button size="small" type="primary" :loading="splittingMergedImport" @click="executeMergedImportPlan">
+            <el-button @click="splitOptionsVisible = true">输出设置</el-button>
+            <el-button type="primary" class="split-confirm" :loading="splittingMergedImport" :disabled="mergedBatchBusy || !mergedImportPlan.detectionAttempted || !mergedImportPlan.totalPages" @click="executeMergedImportPlan">
               确认拆分
             </el-button>
           </div>
         </div>
-        <div class="import-plan-meta">
-          <span>总页数：{{ mergedImportPlan.totalPages || '-' }}</span>
-          <span>已扫描：{{ mergedImportPlan.pagesAnalyzed || '-' }} 页</span>
-          <span>页眉：{{ mergedImportPlan.headerPages || 0 }} 页</span>
-          <span>页码页脚：{{ mergedImportPlan.pageNumberFooterPages || 0 }} 页</span>
-          <span>输出目录：{{ mergedImportPlan.outputDir }}</span>
+        <div class="existing-summary-grid split-summary-grid">
+          <div class="summary-pill"><span>文档页数</span><strong>{{ mergedImportPlan.totalPages }}</strong></div>
+          <div class="summary-pill"><span>证据页段</span><strong>{{ mergedImportPlan.pagesAnalyzed ? mergedImportPlan.items.length : '—' }}</strong></div>
+          <button type="button" class="summary-pill is-actionable" :disabled="!mergedImportPlan.pagesAnalyzed || mergedBatchBusy" @click="openSplitCleanup()"><span>可清除元素 · 选择</span><strong>{{ mergedImportPlan.pagesAnalyzed ? mergedImportPlan.cleanupCandidates?.length || 0 : '—' }}<el-icon aria-hidden="true"><ArrowRight /></el-icon></strong></button>
+          <button type="button" class="summary-pill is-actionable" :disabled="!mergedImportPlan.pagesAnalyzed || mergedBatchBusy" @click="openSplitCleanup()"><span>已选清除 · 调整</span><strong>{{ mergedImportPlan.cleanupCandidates?.filter(candidate => candidate.selected).length || 0 }}<el-icon aria-hidden="true"><ArrowRight /></el-icon></strong></button>
         </div>
+        <el-dialog v-model="splitOptionsVisible" title="输出设置" width="640px" append-to-body>
         <div class="split-name-options">
-          <div class="block-title">拆分文件名</div>
+          <div class="block-title">输出目录 <el-button size="small" @click="selectMergedImportOutputDir">更改</el-button></div>
+          <p class="path-text">{{ mergedImportPlan.outputDir }}</p>
+          <div class="block-title">文件命名</div>
           <div class="rule-grid">
             <div class="rule-item">
               <label>前缀</label>
@@ -483,19 +509,21 @@
         <div class="split-options-row">
           <div class="block-title">拆分选项</div>
           <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
-          <span class="split-option-note"
-            >拆分时自动移除无可视内容的空白页（分隔页、扫描背面等），输出页数可能少于页段页数。</span
-          >
+          <el-tooltip content="仅移除无可视内容的空白页，输出页数可能减少。"><span class="hint">说明</span></el-tooltip>
         </div>
+          <template #footer><el-button type="primary" @click="splitOptionsVisible = false">完成</el-button></template>
+        </el-dialog>
         <el-alert
-          v-if="mergedImportWarnings.length"
+          v-if="splitActionableWarnings.length"
           type="warning"
           :closable="false"
           show-icon
           class="import-plan-warning"
         >
-          <template #title>{{ mergedImportWarnings.join('；') }}</template>
+          <template #title>{{ splitActionableWarnings.join('；') }}</template>
         </el-alert>
+        <section v-if="mergedImportPlan.detectionAttempted" class="split-ranges-section" aria-label="证据页段">
+        <div class="block-title-row"><div class="block-title">证据页段</div><el-button size="small" @click="addMergedImportRange">添加页段</el-button></div>
         <el-table
           :data="mergedImportPlan.items"
           size="small"
@@ -521,52 +549,45 @@
               </button>
             </template>
           </el-table-column>
-          <el-table-column type="index" label="#" width="44" />
-          <el-table-column label="文件名" prop="name" sortable="custom" min-width="150">
+          <el-table-column label="文件名" prop="name" sortable="custom" min-width="140">
             <template #default="{ row, $index }">
               <div class="merged-name-cell">
                 <el-input v-model="row.name" size="small" />
-                <span class="merged-output-name">{{ splitOutputNamePreview(row, $index) }}.pdf</span>
+                <span class="merged-output-name" :title="splitOutputNamePreview(row, $index) + '.pdf'">{{ mergedImportSourceText(row) }} · {{ splitOutputNamePreview(row, $index) }}.pdf</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="起始页" prop="pageStart" sortable="custom" width="120">
+          <el-table-column label="起止页" prop="pageStart" sortable="custom" width="182">
             <template #default="{ row, $index }">
+              <div class="merged-page-range">
               <el-input-number
                 v-model="row.pageStart"
                 :min="1"
                 :max="mergedImportPlan.totalPages || 999999"
                 size="small"
                 controls-position="right"
-                style="width: 96px"
+                style="width: 72px"
+                :aria-label="'第 ' + ($index + 1) + ' 段起始页'"
                 @change="(value) => onMergedRangeStartChanged($index, value)"
               />
-            </template>
-          </el-table-column>
-          <el-table-column label="结束页" prop="pageEnd" sortable="custom" width="120">
-            <template #default="{ row, $index }">
+              <span>–</span>
               <el-input-number
                 v-model="row.pageEnd"
                 :min="1"
                 :max="mergedImportPlan.totalPages || 999999"
                 size="small"
                 controls-position="right"
-                style="width: 96px"
+                style="width: 72px"
+                :aria-label="'第 ' + ($index + 1) + ' 段结束页'"
                 @change="(value) => onMergedRangeEndChanged($index, value)"
               />
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="页数" prop="pageCount" sortable="custom" width="60">
+          <el-table-column label="页数" prop="pageCount" sortable="custom" width="68">
             <template #default="{ row }">{{ mergedImportRangePageCount(row) || '-' }}</template>
           </el-table-column>
-          <el-table-column label="识别来源" prop="source" sortable="custom" width="88">
-            <template #default="{ row }">
-              <el-tag :type="mergedImportSourceType(row)" size="small">
-                {{ mergedImportSourceText(row) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="128">
+          <el-table-column label="操作" width="128" fixed="right">
             <template #default="{ row, $index }">
               <el-button link type="primary" size="small" @click.stop="selectMergedImportRange(row)">跳转</el-button>
               <el-button link type="primary" size="small" @click.stop="insertMergedImportRangeAfter($index)"
@@ -576,7 +597,36 @@
             </template>
           </el-table-column>
         </el-table>
+        </section>
+        <el-empty v-else description="点击检测页段，结果将在这里显示" :image-size="96">
+          <template #image><DocletSprite :size="96" :motion="detectingMergedImport ? 'review' : 'waiting'" /></template>
+        </el-empty>
+        </fieldset>
       </div>
+      <div v-if="filePlan.splitRequest" class="split-source-results">
+        <div class="block-title-row">
+          <DocletSprite v-if="filePlan.splitStatus === 'complete'" :size="48" motion="celebrate" />
+          <strong>已输出 {{ filePlan.outputs?.length || 0 }} 个文件</strong>
+          <el-button size="small" @click="openPath(filePlan.outputDir)">打开输出目录</el-button>
+          <el-button v-if="filePlan.splitStatus !== 'complete'" size="small" type="primary" :disabled="mergedBatchBusy" @click="retryMergedPlan(filePlan)">重试未完成页段</el-button>
+          <el-button v-if="filePlan.splitStatus !== 'complete' && !filePlan.outputs?.length" size="small" :disabled="mergedBatchBusy" @click="reopenMergedImportPlan(filePlan)">重新核对</el-button>
+        </div>
+        <p class="path-text">{{ filePlan.outputDir }}</p>
+        <el-table v-if="filePlan.outputs?.length" :data="filePlan.outputs" size="small" border>
+          <el-table-column label="输出文件" min-width="180"><template #default="{ row }"><el-button link @click="openPath(row.outputPath)">{{ fileName(row.outputPath) }}</el-button></template></el-table-column>
+          <el-table-column label="来源页段" width="110"><template #default="{ row }">{{ row.pageStart }}–{{ row.pageEnd }}</template></el-table-column>
+        </el-table>
+        <el-alert v-if="filePlan.splitWarnings?.length" :title="filePlan.splitWarnings.join('；')" type="warning" :closable="false" />
+      </div>
+      <el-alert v-if="filePlan.splitError" :title="filePlan.splitError" type="error" :closable="false" />
+      </section>
+      <ExistingPdfElementsDialog
+        v-model:visible="splitCleanupVisible"
+        :rows="splitCleanupRows"
+        cleanup-only
+        @change="changeSplitCleanupDecision"
+        @preview="previewSplitCleanupElement"
+      />
 
       <el-alert
         v-if="existingBookmarkCount > 0 && existingBookmarkAlertVisible"
@@ -596,7 +646,7 @@
       </el-alert>
 
       <el-table
-        v-if="overlayFiles.length"
+        v-if="overlayFiles.length && !(workflowMode === 'split' && mergedImportPlans.length)"
         :data="overlayRows"
         :row-key="(row) => row.path"
         size="small"
@@ -896,8 +946,8 @@
         <div class="preview-controls">
           <div v-if="mergedImportPlan" class="merged-preview-toolbar">
             <div class="merged-preview-primary-row">
-              <el-button size="small" :disabled="!canUndoMergedImport" @click="undoMergedImportEdit">撤销</el-button>
-              <el-button size="small" :disabled="!canRedoMergedImport" @click="redoMergedImportEdit">重做</el-button>
+              <el-button size="small" :disabled="mergedBatchBusy || mergedImportPlan.splitRequest || !canUndoMergedImport" @click="undoMergedImportEdit">撤销</el-button>
+              <el-button size="small" :disabled="mergedBatchBusy || mergedImportPlan.splitRequest || !canRedoMergedImport" @click="redoMergedImportEdit">重做</el-button>
               <el-button size="small" :disabled="previewPage <= 1" @click="movePreviewPage(-1)">上一页</el-button>
               <el-input-number v-model="previewPage" :min="1" :max="previewMaxPage" size="small" />
               <el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)"
@@ -913,7 +963,7 @@
                 {{ showNextPagePreview ? '隐藏下一页预览' : '显示下一页预览' }}
               </el-button>
             </div>
-            <div class="merged-preview-secondary-row">
+            <fieldset class="merged-preview-secondary-row" :disabled="!mergedImportPlan.detectionAttempted || mergedImportPlan.splitRequest || mergedBatchBusy">
               <el-button
                 size="small"
                 :disabled="!canMergeCurrentMergedImportRange"
@@ -938,7 +988,7 @@
               <el-button size="small" type="primary" plain @click="splitMergedImportFromCurrentPage"
                 >从本页拆</el-button
               >
-            </div>
+            </fieldset>
           </div>
           <div v-else class="preview-utility-actions">
             <el-input-number
@@ -1041,7 +1091,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
+import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -1051,6 +1101,7 @@ import NextPageThumbnail from '../../../shared/pdf-tools/components/NextPageThum
 import HeaderFooterRuleFields from '../../../shared/pdf-tools/components/HeaderFooterRuleFields.vue'
 import PageNumberRuleDialog from '../../../shared/pdf-tools/components/PageNumberRuleDialog.vue'
 import ExistingPdfElementsDialog from '../../../shared/pdf-tools/components/ExistingPdfElementsDialog.vue'
+import DocletSprite from '../../../shared/components/DocletSprite.vue'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   buildEvidencePdfRulePayload,
@@ -1148,25 +1199,38 @@ const props = defineProps({
 })
 
 const workflowMode = computed(() => (['merge', 'split'].includes(props.workflow) ? props.workflow : 'all'))
+const mergedOperationStatus = computed(() => {
+  if (batchRunning.value) return {
+    title: batchProgress.value || '正在准备文件队列',
+    description: batchStopRequested.value ? '当前文件完成后停止后续任务。' : '按文件顺序处理，结果分别保存在各自分组。',
+  }
+  if (splittingMergedImport.value) return {
+    title: '正在拆分 PDF',
+    description: '正在按确认页段输出文件，原件保持不变。右下角显示任务状态与已用时间。',
+  }
+  if (detectingMergedImport.value) return {
+    title: '正在检测证据页段',
+    description: '正在分析页眉、页脚和证据边界，大文件可能耗时较长。完成后请核对页段，不会自动拆分。',
+  }
+  if (importingMergedPdf.value) return {
+    title: '正在导入合并 PDF',
+    description: '正在读取页数；导入后由你手动启动检测，不会自动扫描全文。',
+  }
+  return null
+})
 const workflowTitle = computed(() => {
-  if (workflowMode.value === 'merge') return '分项证据处理'
-  if (workflowMode.value === 'split') return '合并证据处理'
+  if (workflowMode.value === 'merge') return '分项证据合并'
+  if (workflowMode.value === 'split') return '合并证据拆分'
   return '证据处理'
 })
 const workflowHint = computed(() => {
   if (workflowMode.value === 'merge')
     return '处理分项证据 PDF 的页眉、连续页码、A4、批注，并按需合并输出；合并时压平签章外观以便打印'
-  if (workflowMode.value === 'split') return '处理已合并证据 PDF；单个文件可识别页段拆分，多个文件可按统一规则批量处理'
+  if (workflowMode.value === 'split') return '识别证据页段，核对后拆分为独立 PDF'
   return '按法律证据包流程处理页眉、页码、A4、批注、合并与反向拆分'
 })
 const splitImportButtonText = computed(() => '导入分项证据 PDF')
 const mergedImportButtonText = computed(() => '导入合并证据 PDF')
-const splitResultActionTitle = computed(() => (hasSourceSplitRanges.value ? '分项文件后处理' : '合并证据批量处理'))
-const splitResultActionHint = computed(() =>
-  hasSourceSplitRanges.value
-    ? '处理后文件会输出到新文件夹，不覆盖原分项文件。'
-    : '多个合并证据 PDF 会按同一规则批量输出到新文件夹，不覆盖原文件。',
-)
 
 const overlayFiles = ref([])
 const overlayOutputDir = ref('')
@@ -1211,6 +1275,50 @@ const splittingMergedImport = ref(false)
 const selectedOverlayIndex = ref(0)
 const selectedMergedImportIndex = ref(0)
 const mergedImportPlan = ref(null)
+const mergedImportPlans = ref([])
+const splitCleanupVisible = ref(false)
+const splitCleanupScope = ref('current')
+const splitOptionsVisible = ref(false)
+const allSplitCleanupCount = computed(() => mergedImportPlans.value.filter(plan => !plan.splitRequest).reduce((total, plan) => total + (plan.cleanupCandidates?.length || 0), 0))
+const splitCleanupRows = computed(() => (splitCleanupScope.value === 'all' ? mergedImportPlans.value : [mergedImportPlan.value])
+  .filter(plan => plan && !plan.splitRequest)
+  .flatMap(plan => (plan.cleanupCandidates || []).map((candidate, index) => ({
+  key: `${plan.inputPath}|split-cleanup-${index}`,
+  plan,
+  candidate,
+  filePath: plan.inputPath,
+  fileName: fileName(plan.inputPath),
+  element: {
+    kind: candidate.labels?.includes('page-number') ? 'pageNumber' : candidate.region === 'header' ? 'header' : 'footerText',
+    detectedText: candidate.text,
+    normalizedText: candidate.normalizedText,
+    pageStart: candidate.pageRange.start,
+    pageEnd: candidate.pageRange.end,
+    count: candidate.count,
+    decision: candidate.selected ? 'delete' : 'keep',
+    source: candidate.source,
+  },
+}))))
+function openSplitCleanup(scope = 'current') {
+  splitCleanupScope.value = scope
+  splitCleanupVisible.value = true
+}
+function changeSplitCleanupDecision(row) {
+  if (mergedBatchBusy.value || row.plan.splitRequest) return
+  row.candidate.selected = row.element.decision === 'delete'
+  row.plan.reviewed = false
+}
+function previewSplitCleanupElement(row) {
+  activateMergedImportPlan(row.plan)
+  previewPage.value = row.element.pageStart
+  truePreview.value = null
+  safeRefreshPreview()
+}
+const splitActionableWarnings = computed(() => mergedImportWarnings.value.filter(message => !message.startsWith('拆分识别概况：')))
+watch([mergedImportPlan, detectingMergedImport, splittingMergedImport], () => {
+  splitCleanupVisible.value = false
+  splitOptionsVisible.value = false
+})
 const splitNamePrefix = ref('')
 const splitNameSuffix = ref('[YYYYMMDD]')
 const splitNameDateValue = ref(todayCompact())
@@ -2009,9 +2117,6 @@ const {
   onCancel: () => finishListReorder(),
 })
 const hasSourceSplitRanges = computed(() => overlayFiles.value.some((file) => Number(file.sourcePageStart || 0) > 0))
-const hasMergedBatchImports = computed(
-  () => workflowMode.value === 'split' && overlayFiles.value.length > 0 && !hasSourceSplitRanges.value,
-)
 
 const activePreviewFilePath = computed(() => mergedImportPlan.value?.inputPath || selectedOverlayFile.value?.path || '')
 const previewMaxPage = computed(() => {
@@ -2112,22 +2217,23 @@ const processingNotes = computed(() => {
   return notes
 })
 const showProcessingControls = computed(
-  () => !mergedImportPlan.value && (workflowMode.value !== 'split' || hasMergedBatchImports.value),
+  () => !mergedImportPlan.value && workflowMode.value !== 'split',
 )
 const showSessionSummary = computed(
   () =>
     overlayFiles.value.length > 0 &&
     !mergedImportPlan.value &&
-    (workflowMode.value !== 'split' || hasMergedBatchImports.value),
+    workflowMode.value !== 'split',
 )
 const showSplitResultActions = computed(
   () =>
     workflowMode.value === 'split' &&
+    !mergedImportPlans.value.length &&
     overlayFiles.value.length > 0 &&
     !mergedImportPlan.value &&
     hasSourceSplitRanges.value,
 )
-const showExistingHeaderFooterControls = computed(() => overlayFiles.value.length > 0 && !mergedImportPlan.value)
+const showExistingHeaderFooterControls = computed(() => workflowMode.value !== 'split' && overlayFiles.value.length > 0 && !mergedImportPlan.value)
 const showRuleActionNotes = computed(
   () => (showProcessingControls.value || showSplitResultActions.value) && processingNotes.value.length > 0,
 )
@@ -2218,7 +2324,7 @@ const hasUnresolvedExistingOverlapRisk = computed(() => {
   )
 })
 const canApplyOverlay = computed(
-  () => overlayFiles.value.length > 0 && totalOverlayPages.value > 0 && hasApplicableProcessingRule.value,
+  () => overlayFiles.value.length > 0 && overlayFiles.value.every(file => Number(file.pages) > 0) && !checkingOverlayPages.value && !overlaying.value && !deepDetecting.value && hasApplicableProcessingRule.value,
 )
 const canApplySplitReplacement = computed(
   () =>
@@ -2229,6 +2335,8 @@ const canApplySplitReplacement = computed(
 )
 const hasApplicableProcessingRule = computed(
   () =>
+    outputMode.value !== 'files_only' ||
+    optimizeSizeEnabled.value ||
     normalizeA4.value ||
     removeAnnotations.value ||
     bookmarkEnabled.value ||
@@ -2393,6 +2501,18 @@ const {
 })
 
 const {
+  batchRunning,
+  batchStopRequested,
+  batchProgress,
+  reviewedPlanCount,
+  pendingDetectionCount,
+  removeMergedImportPlan,
+  activateMergedImportPlan,
+  requestStopMergedBatch,
+  detectAllMergedImports,
+  splitReviewedMergedImports,
+  mergedPlanStatus,
+  reopenMergedImportPlan,
   mergedImportWarnings,
   selectedMergedImportRange,
   canUndoMergedImport,
@@ -2420,7 +2540,6 @@ const {
   removeMergedImportRange,
   sortMergedImportItems,
   mergedImportRangePageCount,
-  mergedImportSourceType,
   mergedImportSourceText,
 } = useEvidencePdfMergedImport({
   overlayFiles,
@@ -2429,6 +2548,7 @@ const {
   detectingMergedImport,
   splittingMergedImport,
   mergedImportPlan,
+  mergedImportPlans,
   selectedMergedImportIndex,
   selectedOverlayIndex,
   previewPage,
@@ -2449,6 +2569,27 @@ const {
   applyWorkflowDefaults,
   refreshOverlayPageCounts,
 })
+
+const mergedBatchBusy = computed(() => batchRunning.value || importingMergedPdf.value || detectingMergedImport.value || splittingMergedImport.value)
+function retryMergedPlan(plan) {
+  if (mergedBatchBusy.value) return
+  activateMergedImportPlan(plan)
+  void executeMergedImportPlan()
+}
+watch(
+  () => ({
+    plan: mergedImportPlan.value,
+    contents: JSON.stringify([
+      mergedImportPlan.value?.items,
+      mergedImportPlan.value?.outputDir,
+      splitNamePrefix.value, splitNameSuffix.value, splitNameDateValue.value,
+      splitNameSeparator.value, splitNameCustomSeparator.value, removeBlankPages.value,
+    ]),
+  }),
+  (current, previous) => {
+    if (current.plan && current.plan === previous?.plan && current.contents !== previous.contents) current.plan.reviewed = false
+  },
+)
 
 watch(selectedOverlayFile, (newFile, oldFile) => {
   previewPage.value = 1
@@ -2534,11 +2675,20 @@ async function selectOverlayFiles() {
 async function handleEvidenceDrop(paths) {
   const pdfPaths = paths.filter((p) => p.toLowerCase().endsWith('.pdf'))
   if (!pdfPaths.length) return
+  if (workflowMode.value === 'split') {
+    await importMergedPdfAsEvidence(pdfPaths)
+    return
+  }
   await loadEvidenceFiles(pdfPaths)
 }
 
 async function loadEvidenceFiles(paths) {
+  if (mergedBatchBusy.value || checkingOverlayPages.value || overlaying.value || deepDetecting.value) {
+    ElMessage.warning('当前正在读取或处理证据，请完成后再导入')
+    return
+  }
   mergedImportPlan.value = null
+  mergedImportPlans.value = []
   overlayFiles.value = paths.map(createEvidenceFile)
   selectedOverlayIndex.value = 0
   await refreshOverlayPageCounts()
@@ -4172,6 +4322,13 @@ onUnmounted(() => {
   margin: 3px 0 0;
   color: var(--docsy-text);
   font-size: 12px;
+  line-height: 1.6;
+}
+
+.local-processing strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 h3 {
@@ -4570,6 +4727,174 @@ h3 {
   justify-content: flex-end;
 }
 
+.split-plan-head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.split-batch-toolbar,
+.split-source-header,
+.split-source-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.split-batch-toolbar {
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.split-batch-toolbar :deep(.el-button) {
+  margin-left: 0;
+}
+.split-source-group {
+  padding: 12px;
+  margin-top: 12px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+}
+.split-source-group.is-active {
+  border-color: var(--docsy-primary);
+}
+.split-source-name {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.split-source-name strong,
+.split-source-name span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.split-source-name span,
+.split-source-summary {
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+}
+.split-source-summary {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.split-source-group .merged-import-plan {
+  padding: 0;
+  margin-bottom: 0;
+  border: 0;
+}
+.split-source-results {
+  margin-top: 12px;
+}
+
+.split-plan-head .block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.split-plan-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-content: stretch;
+}
+
+.split-plan-actions :deep(.el-button) {
+  height: 34px;
+  margin: 0;
+  padding: 0 12px;
+}
+
+.split-plan-title,
+.split-plan-utilities {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.split-plan-title {
+  justify-content: space-between;
+}
+
+.split-plan-utilities :deep(.el-button) {
+  margin: 0;
+  padding: 0 8px;
+}
+
+.split-ranges-section {
+  margin-top: 20px;
+}
+
+.merged-page-range {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.split-ranges-section :deep(.el-button + .el-button) {
+  margin-left: 8px;
+}
+
+.split-summary-grid div.summary-pill {
+  cursor: default;
+  border-color: transparent;
+  background: var(--docsy-surface-muted);
+}
+
+.split-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.split-summary-grid .summary-pill {
+  min-width: 0;
+  width: 100%;
+  min-height: 64px;
+  align-items: center;
+  gap: 8px;
+  border-color: var(--docsy-border-subtle);
+}
+
+.split-summary-grid .summary-pill span {
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.split-summary-grid .is-actionable strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.split-summary-grid .is-actionable :deep(.el-icon) {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+}
+
+.split-summary-grid .is-actionable:not(:disabled):hover {
+  border-color: var(--docsy-primary);
+  background: var(--docsy-surface-muted-hover);
+}
+
+.split-summary-grid .is-actionable:focus-visible {
+  outline: 2px solid var(--docsy-primary);
+  outline-offset: 2px;
+}
+
 .file-link {
   appearance: none;
   border: 0;
@@ -4784,6 +5109,20 @@ h3 {
 .merged-preview-primary-row :deep(.el-button + .el-button),
 .merged-preview-secondary-row :deep(.el-button + .el-button) {
   margin-left: 0;
+}
+
+.merged-preview-secondary-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.merged-preview-secondary-row :deep(.el-button) {
+  min-width: 0;
+  padding: 0 6px;
 }
 
 .preview-utility-actions {

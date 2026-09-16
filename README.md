@@ -3,7 +3,7 @@
 > 一个专为法律人、行政党、文字工作者打造的本地文档处理效率工具 ✨  
 > 所有操作 100% 在本地电脑完成，**断网可用，绝不上传云端** 🔒
 
-[![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
+[![Version](https://img.shields.io/badge/version-1.0.5-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/muxiaoxiii/docsy/releases)
 
@@ -16,6 +16,8 @@
 左侧导航栏支持一键展开/收缩（切换紧凑图标模式），工作区设置具备**自动记忆能力**：切换页面或重新打开之前处理过的文件，上一次的选项、排序与调整进度自动为你恢复。
 
 还有一只超可爱的桌宠 **Doclet** 🐾，在遇到大批文件处理或外部工具调用时，它会在界面一角安静地陪你等待～
+
+1.0.5 将 Doclet 的八种动态接入首页互动、等待、检测、处理与完成反馈，透明小狗与文字气泡分开显示；离屏时暂停动画，支持系统减少动态效果偏好。
 
 ![Docsy 主页界面](site/public/assets/screenshots/home.png)
 
@@ -61,6 +63,8 @@
 - **双面打印防混淆模式**：
   - 勾选后，合并时若某份证据为单数页，Docsy 会自动在其末尾补一页同尺寸的空白页，让每份证据都独占完整纸张，**绝不会出现两份不同的证据印在同一张纸正反面的情况**。
 - **合并证据拆分与无缝调整**：
+  - 支持同时导入多份合并 PDF，手动触发后逐份检测、逐份拆分；页段与输出按来源文件分组，各自核对、命名和设置。
+  - 拆分时可选清除已检测且能精确匹配的标准页眉、页脚、页码；默认保留，在临时副本上处理，不修改原件。
   - 面对他人发来的整本大 PDF 扫描件，支持拖拽调整分栏宽度、页面放大定位。
   - 提供“从本页拆”、“从上一页拆”与自由“添加新页段”按钮，边界修改后相邻页段自动无缝接续；删除某个页段会自动并入上一段，杜绝页码空洞。
   - **自动移除空白页**：拆分与导入时可勾选自动过滤纯白扫描背面与多余分隔页，处理完毕明确提示清理页数。

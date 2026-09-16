@@ -6,7 +6,9 @@
     :aria-live="state === 'error' ? 'assertive' : 'polite'"
     :aria-busy="state === 'loading'"
   >
+    <DocletSprite v-if="mascot && !compact" :size="104" :motion="state === 'loading' ? 'working' : state === 'error' ? 'error' : 'waiting'" />
     <span
+      v-else
       class="empty-state-icon"
       :style="{ '--empty-icon-url': `url(&quot;${iconUrl || defaultIconUrl}&quot;)` }"
       aria-hidden="true"
@@ -23,8 +25,10 @@
 <script setup>
 import { computed } from 'vue'
 import defaultIconUrl from '../../assets/icons/documents.svg?url'
+import DocletSprite from './DocletSprite.vue'
 
 const props = defineProps({
+  mascot: { type: Boolean, default: true },
   title: {
     type: String,
     default: '等待添加文件',

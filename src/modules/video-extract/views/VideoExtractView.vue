@@ -235,7 +235,7 @@
           <el-button v-if="resultImages.length" size="small" @click="settingsCollapsed = !settingsCollapsed">
             {{ settingsCollapsed ? '显示抽帧设置' : '收起抽帧设置' }}
           </el-button>
-          <el-button size="small" @click="selectExistingResultDirectory">打开已有图片目录</el-button>
+          <el-button size="small" :disabled="extracting || analyzingSelection" @click="selectExistingResultDirectory">打开已有图片目录</el-button>
         </div>
 
         <WorkspaceEmptyState
@@ -278,7 +278,7 @@
 <script setup>
 import { ref, reactive, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { openExternalUrl, tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
 import { CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
@@ -420,6 +420,10 @@ async function handleDroppedPaths(paths) {
 }
 
 async function loadVideo(path) {
+  if (extracting.value) {
+    ElMessage.warning('请等待当前抽帧结束后再切换视频')
+    return
+  }
   settingsCollapsed.value = false
   videoPath.value = path
   clearFrameDraftSafely()
@@ -434,6 +438,7 @@ async function loadVideo(path) {
   mediaReadyToSave = false
 
   const res = await tauriCallSafe('probe_video', { path })
+  if (videoPath.value !== path) return
   if (res.ok) {
     videoInfo.value = res.data
   } else {
@@ -442,6 +447,7 @@ async function loadVideo(path) {
 }
 
 function clearVideo() {
+  if (extracting.value) return
   settingsCollapsed.value = false
   clearFrameDraftSafely()
   videoPath.value = ''
@@ -457,7 +463,7 @@ function clearVideo() {
 }
 
 async function extractFrames() {
-  if (!videoPath.value) return
+  if (!videoPath.value || extracting.value) return
   if (settings.timestamp.enabled && !ffmpegStatus.has_drawtext) {
     ElMessage.error('当前 FFmpeg 不支持 drawtext。请关闭水印或安装支持 drawtext 的 FFmpeg。')
     return
@@ -517,8 +523,9 @@ async function loadResultImages(dir) {
 }
 
 async function selectExistingResultDirectory() {
+  if (extracting.value || analyzingSelection.value) return
   const selected = await open({ directory: true, multiple: false })
-  if (selected) {
+  if (selected && !extracting.value && !analyzingSelection.value) {
     extractResult.value = null
     await loadResultImages(normalizeSelectedPath(selected))
   }

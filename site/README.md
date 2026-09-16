@@ -1,14 +1,15 @@
 # Docsy 下载站（软件主页）
 
-Docsy 的软件主页与下载镜像站，部署在 **https://docsy.muxiaoxi.top**（Caddy 自动 HTTPS）。
-解决国内用户从 GitHub 下载安装包困难的问题。
+Docsy 官网部署在 **https://docsy.muxiaoxi.top**，目前使用 GitHub Pages。下方 NAS/Caddy 步骤保留为可选自托管方案。
+
+正式桌面构建成功后，`deploy-pages.yml` 自动从 GitHub Releases 读取已发布安装包，更新版本、下载链接和 SHA256，再部署官网。`build-data.py --remote-only` 不下载或镜像安装包，避免 Pages 出现无对应文件的 `/downloads/` 链接；`--sync-fallback` 同步 JavaScript 回退数据。草稿和预发布版本不会成为默认下载。
 
 - 页面：
   - `index.html` 软件主页（介绍 + 下载 + 软件截图 + 更新日志）
   - `features.html` 功能详情页（六大核心功能模块详细介绍）
   - `tools.html` 外部工具下载页（qpdf / Poppler / FFmpeg 的系统-版本对照 + 官方地址 + 风险提示）
-- 部署：极空间（或任意支持 Docker Compose 的 NAS）上跑一个 Caddy 容器
-- 同步：GitHub Actions 发布时推送（主通道）+ NAS 定时任务拉取（兜底）
+- 当前部署：GitHub Pages；可在 Actions 手动运行 Deploy Docsy Site to GitHub Pages。
+- 可选镜像：NAS/Caddy 部署及定时同步，仅在配置对应 Secrets 后使用。
 
 ```
 site/
@@ -43,7 +44,7 @@ docsy-site/
 └── public/          （含 downloads/ 安装包与 data/ 数据）
 ```
 
-> 仓库里的 `site/public/downloads/` 已包含最新版安装包（beta26）。
+> 安装包不纳入仓库，`site/public/downloads/` 由同步脚本填充。
 > 部署后也可以手动运行同步脚本补齐/更新，见下文"四、同步安装包"。
 
 ### 2. 确认域名

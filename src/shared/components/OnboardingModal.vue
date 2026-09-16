@@ -86,14 +86,7 @@
     <!-- Step 2: Doclet Working & Installation Progress -->
     <div v-else class="onboarding-step-progress">
       <div class="doclet-mascot-box">
-        <div
-          class="doclet-animated-sprite"
-          :class="{ 'is-cheering': isAllDone }"
-          :style="{ backgroundImage: `url(${spritesheet})` }"
-        />
-        <div class="doclet-current-status">
-          {{ currentStatusText }}
-        </div>
+        <DocletWorkingPet :message="currentStatusText" :motion="isAllDone ? 'celebrate' : activeSetupItems.some(item => item.status === 'installing') ? 'working' : activeSetupItems.some(item => item.status === 'error') ? 'error' : 'waiting'" />
       </div>
 
       <el-progress
@@ -158,7 +151,7 @@ import { ElMessage } from 'element-plus'
 import { useAppStore } from '../../stores/app.js'
 import { tauriCallSafe } from '../../core/tauriBridge.js'
 import { isMac, installToolsBatchViaTerminal } from '../../core/terminalInstall.js'
-import spritesheet from '../../assets/doclet-v2-spritesheet.webp'
+import DocletWorkingPet from './DocletWorkingPet.vue'
 
 const appStore = useAppStore()
 
@@ -329,8 +322,8 @@ async function startSetup() {
           item.ready = true
           item.status = 'ready'
         } else {
-          item.ready = true
-          item.status = 'ready'
+          item.ready = false
+          item.status = 'error'
         }
       } else {
         item.status = 'error'
@@ -590,24 +583,7 @@ onMounted(async () => {
   margin-bottom: 18px;
 }
 
-.doclet-animated-sprite {
-  width: 144px;
-  height: 156px;
-  background-repeat: no-repeat;
-  background-size: 1152px 1716px;
-  background-position: 0 -1404px;
-  animation: doclet-look-around 5.6s steps(1, end) infinite;
-  transform: scale(1.1);
-  margin-bottom: 8px;
-}
 
-.doclet-current-status {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  margin-top: 6px;
-  text-align: center;
-}
 
 .progress-bar {
   width: 100%;
@@ -655,66 +631,4 @@ onMounted(async () => {
   width: 100%;
 }
 
-@keyframes doclet-look-around {
-  0%,
-  6.24% {
-    background-position: 0 -1404px;
-  }
-  6.25%,
-  12.49% {
-    background-position: -144px -1404px;
-  }
-  12.5%,
-  18.74% {
-    background-position: -288px -1404px;
-  }
-  18.75%,
-  24.99% {
-    background-position: -432px -1404px;
-  }
-  25%,
-  31.24% {
-    background-position: -576px -1404px;
-  }
-  31.25%,
-  37.49% {
-    background-position: -720px -1404px;
-  }
-  37.5%,
-  43.74% {
-    background-position: -864px -1404px;
-  }
-  43.75%,
-  49.99% {
-    background-position: -1008px -1404px;
-  }
-  50%,
-  56.24% {
-    background-position: -864px -1404px;
-  }
-  56.25%,
-  62.49% {
-    background-position: -720px -1404px;
-  }
-  62.5%,
-  68.74% {
-    background-position: -576px -1404px;
-  }
-  68.75%,
-  74.99% {
-    background-position: -432px -1404px;
-  }
-  75%,
-  81.24% {
-    background-position: -288px -1404px;
-  }
-  81.25%,
-  87.49% {
-    background-position: -144px -1404px;
-  }
-  87.5%,
-  100% {
-    background-position: 0 -1404px;
-  }
-}
 </style>
