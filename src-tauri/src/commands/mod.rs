@@ -95,6 +95,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         pdf::remove_anti_copy,
         pdf::has_pdf_bookmarks,
         pdf::remove_pdf_bookmarks,
+        pdf::detect_pdf_signatures,
         // image_paddler
         image_paddler::analyze_image_paddler_folder,
         image_paddler::run_image_paddler,

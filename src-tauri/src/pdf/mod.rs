@@ -19,6 +19,7 @@ pub mod preview;
 pub mod qpdf;
 pub(crate) mod qpdf_stream;
 pub mod split;
+pub(crate) mod signatures;
 pub(crate) mod text_utils;
 
 // 通用 fs 工具已收敛到 crate::util::fs；此处 re-export 保持原有调用路径不变。

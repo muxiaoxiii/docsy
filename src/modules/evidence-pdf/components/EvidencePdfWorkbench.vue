@@ -2529,6 +2529,7 @@ const {
   pendingMergedImportCount,
   pendingMergedImportNextName,
   clearPendingMergedImport,
+  confirmPdfSignatureRisk,
   selectedMergedImportRange,
   canUndoMergedImport,
   canRedoMergedImport,
@@ -3121,6 +3122,14 @@ async function applyHeaderFooter() {
   try {
     // Sync existingElement decisions back to legacy file properties before building payload
     overlayRows.value.forEach((file) => syncLegacyExistingElementState(file))
+    // 任一输入含电子签章时统一确认一次（压平/重写可能使数字签名失效）
+    for (const file of overlayRows.value) {
+      const signatureOk = await confirmPdfSignatureRisk(file.path)
+      if (!signatureOk) {
+        overlaying.value = false
+        return
+      }
+    }
     const conflictConfirmed = await checkAndConfirmKeepInsertConflicts(overlayRows.value, currentRules.value)
     if (!conflictConfirmed) {
       overlaying.value = false

@@ -307,6 +307,27 @@ export function useEvidencePdfMergedImport({
     await importMergedPdfAsEvidence(paths)
   }
 
+  /** 处理前检测电子签名：有则要求用户确认（压平/重写可能使签章证书失效）。 */
+  async function confirmPdfSignatureRisk(inputPath) {
+    const result = await tauriCallSafe('detect_pdf_signatures', { input: inputPath })
+    if (!result.ok) return true // 检测失败不阻断，由后续步骤暴露错误
+    if (!result.data?.hasSignatures) return true
+    try {
+      await ElMessageBox.confirm(
+        `「${fileName(inputPath)}」${result.data.summary}。继续处理可能会压平签章外观或使数字签名失效（可见图像通常仍保留）。是否继续？`,
+        '检测到电子签章',
+        {
+          type: 'warning',
+          confirmButtonText: '继续处理',
+          cancelButtonText: '取消',
+        },
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+
   async function executeMergedImportPlan() {
     if (!mergedImportPlan.value || splittingMergedImport.value || detectingMergedImport.value || importingMergedPdf.value) return
     splittingMergedImport.value = true
@@ -326,6 +347,8 @@ export function useEvidencePdfMergedImport({
         ElMessage.warning(`请先核对页段：${blockingWarnings[0]}`)
         return
       }
+      const signatureOk = await confirmPdfSignatureRisk(mergedImportPlan.value.inputPath)
+      if (!signatureOk) return
       if (overlayFiles.value.length) {
         try {
           await ElMessageBox.confirm('确认拆分后会替换当前证据列表。', '替换当前列表', {
@@ -407,13 +430,36 @@ export function useEvidencePdfMergedImport({
         ? `；清除源副本页眉 ${split.data.removedHeaders || 0} 处、页脚 ${split.data.removedFooters || 0} 处` : ''
 
       if (failed > 0) {
+        const failedDetails = (split.data.failed || [])
+          .map((f) => `${f.name || f.outputPath || '?'}：${f.message || '未知错误'}`)
+          .join('；')
         if (mergedImportPlan.value) {
           mergedImportPlan.value.warnings = [
-            `拆分存在 ${failed} 项失败：${(split.data.failed || []).map((f) => f.name || f.outputPath).join(', ')}`,
+            `拆分存在 ${failed} 项失败：${failedDetails}`,
             ...(warnings || []),
           ]
         }
-        ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个${blankSuffix}；拆分计划已保留供检查与重试`)
+        if (pendingMergedImportPaths.value.length) {
+          try {
+            await ElMessageBox.confirm(
+              `本份已生成 ${outputs.length} 个证据，失败 ${failed} 个（${failedDetails}）。队列中还有 ${pendingMergedImportPaths.value.length} 份。是否跳过失败项并继续下一份？`,
+              '拆分部分失败',
+              {
+                type: 'warning',
+                confirmButtonText: '跳过并继续',
+                cancelButtonText: '留在本份重试',
+              },
+            )
+            mergedImportPlan.value = null
+            resetMergedImportHistory()
+            await advancePendingMergedImportIfAny()
+            ElMessage.warning(`已跳过失败项；本份成功输出 ${outputs.length} 个证据${blankSuffix}`)
+          } catch {
+            ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个；已留在本份供检查重试`)
+          }
+        } else {
+          ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个（${failedDetails}）${blankSuffix}；计划已保留供重试`)
+        }
       } else {
         mergedImportPlan.value = null
         resetMergedImportHistory()
@@ -731,6 +777,7 @@ export function useEvidencePdfMergedImport({
     pendingMergedImportNextName,
     clearPendingMergedImport,
     advancePendingMergedImportIfAny,
+    confirmPdfSignatureRisk,
     selectedMergedImportRange,
     canUndoMergedImport,
     canRedoMergedImport,

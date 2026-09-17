@@ -71,6 +71,7 @@ describe('合并证据拆分导入', () => {
         ok: true,
         data: input.includes('two') ? 20 : 10,
       }),
+      detect_pdf_signatures: () => ({ ok: true, data: { hasSignatures: false, count: 0, summary: '未检测到电子签名' } }),
       split_merged_evidence_pdf: () => ({
         ok: true,
         data: {
@@ -128,6 +129,7 @@ describe('合并证据拆分导入', () => {
       ],
     }
     mockTauri({
+      detect_pdf_signatures: () => ({ ok: true, data: { hasSignatures: false, count: 0, summary: '未检测到电子签名' } }),
       split_merged_evidence_pdf: () => ({
         ok: true,
         data: {
@@ -139,11 +141,12 @@ describe('合并证据拆分导入', () => {
     })
     await api.executeMergedImportPlan()
     expect(state.overlayFiles.value[0].pages).toBe(8)
-    expect(tauriCallSafe.mock.calls[0][1].args.cleanupTargets).toMatchObject([
+    const splitCall = tauriCallSafe.mock.calls.find(([cmd]) => cmd === 'split_merged_evidence_pdf')
+    expect(splitCall[1].args.cleanupTargets).toMatchObject([
       { region: 'footer', normalizedText: '第 {page} 页', pageStart: 1, pageEnd: 10 },
     ])
     expect(state.mergedImportPlan.value).toBeNull()
-    expect(tauriCallSafe).toHaveBeenCalledTimes(1)
+    expect(splitCall).toBeTruthy()
   })
 
   it('检测期间禁止取消页段和执行拆分', async () => {
