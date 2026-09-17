@@ -786,6 +786,7 @@ async function loadExtractFile(path) {
   extractTotalPages.value = 0
   extractOutputDir.value = parentDir(path)
   const pageCount = await getPdfPageCount(extractFile.value)
+  if (extractFile.value !== path) return
   if (pageCount.ok) {
     extractTotalPages.value = pageCount.data || 0
   } else {
@@ -931,15 +932,20 @@ async function selectSplitFile() {
 }
 
 async function loadSplitFile(path) {
+  if (splittingMerged.value) return
   splitFile.value = path
   splitPreviewPage.value = 1
-  splitTotalPages.value = 1
+  splitTotalPages.value = 0
+  splitRanges.value = []
   splitRunWarnings.value = []
   splitOutputDir.value = parentDir(path)
   const pageCount = await getPdfPageCount(path)
-  if (pageCount.ok) {
-    splitTotalPages.value = pageCount.data || 1
+  if (splitFile.value !== path) return
+  if (!pageCount.ok || Number(pageCount.data) < 1) {
+    ElMessage.error(userFacingError(pageCount.error, '读取页数失败，无法生成拆分页段'))
+    return
   }
+  splitTotalPages.value = Number(pageCount.data)
   splitRanges.value = [
     {
       name: stripPdf(fileName(path)),
@@ -1110,6 +1116,7 @@ function reorderSplitRanges(from, to) {
 }
 
 async function doSplitMerged() {
+  if (splittingMerged.value) return
   if (!splitFile.value || !splitOutputDir.value || !splitRanges.value.length) return
   const warnings = splitRangeWarnings(splitRanges.value, splitTotalPages.value)
   if (warnings.length) {

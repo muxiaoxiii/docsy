@@ -120,7 +120,7 @@ pub fn apply_rules_cancellable(
 
     // Extract typed data from the args struct
     let items = extract_job_items_from_args(args)?;
-    let annotation_rule = extract_annotation_rule_from_args(args);
+    let (annotation_rule, annotation_rule_warning) = extract_annotation_rule_from_args(args);
     let merge = extract_merge_from_args(args);
     let optimize_output = args
         .extra
@@ -168,6 +168,16 @@ pub fn apply_rules_cancellable(
     let mut results = restore_original_inputs(batch_result.results, &original_input_by_temp);
     let mut failed = batch_result.failed;
     failed.extend(annotation_failed);
+    if let Some(warning) = annotation_rule_warning {
+        if let Some(first) = results.first_mut() {
+            first.warnings.push(warning);
+        } else {
+            failed.push(header_footer::HeaderFooterFailure {
+                path: String::new(),
+                message: warning,
+            });
+        }
+    }
 
     if batch_result.cancelled || token.is_cancelled() {
         cleanup_temp_paths(temp_paths);
@@ -190,8 +200,21 @@ pub fn apply_rules_cancellable(
     if optimize_output {
         optimize_summary = optimize_result_outputs(&mut results, Some(token), progress);
         if token.is_cancelled() {
+            // 与 overlay 阶段取消语义对齐：保留已成功输出，不整批丢弃
             cleanup_temp_paths(temp_paths);
-            anyhow::bail!("操作已取消");
+            return Ok(ApplyRulesResult {
+                session: args.session.clone(),
+                summary: ApplyRulesSummary {
+                    total: results.len() + failed.len(),
+                    success: results.len(),
+                    failed: failed.len(),
+                },
+                results,
+                failed,
+                merge: MergeResult::skipped("体积优化阶段已取消，未合并未优化的 PDF"),
+                optimize: optimize_summary,
+                cancelled: true,
+            });
         }
     }
 
@@ -244,7 +267,7 @@ fn extract_job_items_from_args(
 
 fn extract_annotation_rule_from_args(
     args: &crate::commands::pdf::ApplyEvidencePdfRulesArgs,
-) -> AnnotationRule {
+) -> (AnnotationRule, Option<String>) {
     // Try session.annotationRule first, then annotationRule
     let rule_value = args
         .session
@@ -252,9 +275,15 @@ fn extract_annotation_rule_from_args(
         .and_then(|s| s.get("annotationRule"))
         .or(args.annotation_rule.as_ref());
     let Some(value) = rule_value else {
-        return AnnotationRule::default();
+        return (AnnotationRule::default(), None);
     };
-    serde_json::from_value(value.clone()).unwrap_or_default()
+    match serde_json::from_value(value.clone()) {
+        Ok(rule) => (rule, None),
+        Err(err) => (
+            AnnotationRule::default(),
+            Some(format!("批注规则解析失败，本次未执行批注删除: {err}")),
+        ),
+    }
 }
 
 fn extract_merge_from_args(args: &crate::commands::pdf::ApplyEvidencePdfRulesArgs) -> MergeSpec {
@@ -594,9 +623,27 @@ mod tests {
             annotation_rule: None,
             extra: std::collections::HashMap::new(),
         };
-        let rule = extract_annotation_rule_from_args(&args);
+        let (rule, warning) = extract_annotation_rule_from_args(&args);
+        assert!(warning.is_none());
         assert!(rule.remove);
         assert_eq!(rule.kinds, vec!["Stamp"]);
+    }
+
+    #[test]
+    fn extract_annotation_rule_invalid_json_returns_warning() {
+        let args = crate::commands::pdf::ApplyEvidencePdfRulesArgs {
+            items: None,
+            jobs: None,
+            merge: None,
+            session: Some(json!({
+                "annotationRule": { "remove": "not-a-bool" }
+            })),
+            annotation_rule: None,
+            extra: std::collections::HashMap::new(),
+        };
+        let (rule, warning) = extract_annotation_rule_from_args(&args);
+        assert!(!rule.remove);
+        assert!(warning.as_deref().unwrap_or_default().contains("批注规则解析失败"));
     }
 
     #[test]

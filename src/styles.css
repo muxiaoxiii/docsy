@@ -165,6 +165,35 @@ select {
   font-weight: 500;
 }
 
+:where(.workspace-toolbar, .workspace-actions, .workspace-header-actions, .section-actions, .plan-actions, .block-actions, .toolbar) > .el-button + .el-button {
+  margin-left: 0;
+}
+
+.el-switch {
+  --el-switch-on-color: var(--docsy-primary);
+  --el-switch-off-color: var(--docsy-border-strong);
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.el-switch__label {
+  color: var(--docsy-text);
+  font-weight: 500;
+}
+
+.el-switch:has(input:focus-visible) .el-switch__core {
+  outline: 3px solid var(--docsy-focus-ring);
+  outline-offset: 3px;
+}
+
+.el-dialog {
+  max-width: calc(100vw - 32px);
+}
+
+.el-dialog__body {
+  overflow-wrap: anywhere;
+}
+
 :where(button, a, [role='button'], [tabindex]:not([tabindex='-1'])):focus-visible {
   outline: 3px solid var(--docsy-focus-ring);
   outline-offset: 2px;

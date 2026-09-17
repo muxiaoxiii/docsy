@@ -79,10 +79,13 @@
       </el-main>
       <Transition name="doclet-operation">
         <div v-if="operationVisible" class="doclet-operation-panel">
-          <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed" />
-          <button v-if="showCancel" class="doclet-cancel-btn" @click="cancelCurrentOperation" title="取消当前操作">
+          <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed">
+          <template v-if="showCancel" #actions>
+          <button class="doclet-cancel-btn" @click="cancelCurrentOperation" title="取消当前操作">
             取消
           </button>
+          </template>
+          </DocletWorkingPet>
         </div>
       </Transition>
     </el-container>

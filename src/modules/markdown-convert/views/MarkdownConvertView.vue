@@ -402,6 +402,7 @@ async function runQueue() {
         item.statusType = cancelled ? 'info' : 'danger'
       }
       processed.push(item)
+      if (item.status === 'cancelled') break
     }
   } finally {
     converting.value = false
@@ -410,10 +411,11 @@ async function runQueue() {
   // 格式转换的输入/输出体积没有可比性，不沿用压缩场景的"共节省 xx"文案
   const done = processed.filter((item) => item.status === 'done')
   const failed = processed.filter((item) => item.status === 'failed')
-  summary.value = `转换完成 ${done.length}/${processed.length}`
+  const cancelled = processed.some((item) => item.status === 'cancelled')
+  summary.value = `${cancelled ? '转换已取消，已完成' : '转换完成'} ${done.length}/${processed.length}`
   if (failed.length) summary.value += `；失败：${failed.map((item) => item.name).join('、')}`
   ElNotification({
-    type: processed.some((item) => item.status === 'failed') ? 'warning' : 'success',
+    type: failed.length ? 'warning' : cancelled ? 'info' : 'success',
     title: summary.value,
     duration: 6000,
   })

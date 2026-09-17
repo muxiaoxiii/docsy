@@ -19,7 +19,7 @@ const operationLabels = {
   install_external_tool: 'Doclet 正在下载安装工具…',
   install_external_tool_from_package: 'Doclet 正在安装工具包…',
   inspect_docx_template: 'Doclet 正在读取 Word 模板…',
-  inspect_merged_evidence_pdf: 'Doclet 正在分析合并 PDF…',
+  inspect_merged_evidence_pdf: 'Doclet 正在检测证据页段…',
   inspect_docsytpl: 'Doclet 正在打开模板…',
   analyze_image_paddler_folder: 'Doclet 正在分析图片文件夹…',
   render_pdf_preview: 'Doclet 正在生成 PDF 预览…',

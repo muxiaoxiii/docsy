@@ -808,8 +808,8 @@ fn apply_identity_rename(
     let mut result = Vec::new();
     for (i, input) in inputs.iter().enumerate() {
         let num = start.saturating_add(i as u32);
-        let new_name = format!("{}{:04}.pdf", prefix, num);
-        let new_path = rename_dir.join(&new_name);
+        let new_stem = format!("{}{:04}", prefix, num);
+        let new_path = unique_output_path(&rename_dir, &new_stem, "pdf");
         fs::copy(input, &new_path)?;
         result.push(new_path.display().to_string());
     }

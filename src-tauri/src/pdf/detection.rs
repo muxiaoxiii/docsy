@@ -390,8 +390,11 @@ pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestio
             .into_iter()
             .chain(detection.footer_candidates)
             .filter(|candidate| {
+                // artifact 始终展示；evidence-label / page-number 有业务语义；
+                // repeating 已要求 position_stable 与最小重复次数，不再叠加置信度门槛，
+                // 避免大文件里稀疏但稳定的公文页眉被滤掉。
                 candidate.source == "artifact"
-                    || (candidate.repeating && candidate.confidence >= 0.3)
+                    || candidate.repeating
                     || candidate
                         .labels
                         .iter()

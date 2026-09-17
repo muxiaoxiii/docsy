@@ -83,11 +83,15 @@ impl SubprocessRegistry {
         operation_id: &str,
         mut cmd: std::process::Command,
     ) -> std::io::Result<std::process::Output> {
-        let child = cmd.spawn()?;
+        let child = cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
         let pid = child.id();
-        self.register(operation_id, pid);
+        let registration_id = format!("{operation_id}:{pid}");
+        self.register(&registration_id, pid);
         let result = child.wait_with_output();
-        self.unregister(operation_id);
+        self.unregister(&registration_id);
         result
     }
 
@@ -326,6 +330,19 @@ mod close_request_tests {
         registry.register("test", 42);
         assert!(registry.has_active());
         registry.unregister("test");
+        assert!(!registry.has_active());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn registered_subprocess_captures_output() {
+        let registry = SubprocessRegistry::new();
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "printf '7'; printf 'diagnostic' >&2"]);
+        let output = registry.spawn_and_wait("capture", command).unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"7");
+        assert_eq!(output.stderr, b"diagnostic");
         assert!(!registry.has_active());
     }
 }
