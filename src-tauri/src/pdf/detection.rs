@@ -72,6 +72,7 @@ pub struct SplitSuggestionResult {
     page_number_footer_pages: usize,
     warnings: Vec<String>,
     items: Vec<SplitSuggestionItem>,
+    cleanup_candidates: Vec<HeaderFooterCandidate>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -215,6 +216,20 @@ fn default_scan_artifacts() -> bool {
 }
 
 pub fn detect(args: &DetectionArgs) -> Result<DetectionResult> {
+    detect_inner(args).map_err(|error| {
+        crate::app_log::error(
+            "pdf.detect",
+            "failed",
+            serde_json::json!({
+                "file": args.input_path,
+                "message": format!("{error:#}"),
+            }),
+        );
+        error
+    })
+}
+
+fn detect_inner(args: &DetectionArgs) -> Result<DetectionResult> {
     let input = Path::new(&args.input_path);
     if !input.exists() {
         anyhow::bail!("PDF 不存在: {}", input.display());
@@ -370,7 +385,78 @@ pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestio
         page_number_footer_pages,
         warnings,
         items,
+        cleanup_candidates: detection
+            .header_candidates
+            .into_iter()
+            .chain(detection.footer_candidates)
+            .filter(|candidate| {
+                candidate.source == "artifact"
+                    || candidate.repeating
+                    || candidate
+                        .labels
+                        .iter()
+                        .any(|label| label == "evidence-label" || label == "page-number")
+            })
+            .collect(),
     })
+}
+
+#[cfg(test)]
+mod real_split_audit {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires DOCSY_ARTIFACT_FIXTURE, qpdf and pdftotext"]
+    fn audit_real_split_suggestions() {
+        let path = std::env::var("DOCSY_ARTIFACT_FIXTURE").unwrap();
+        let args: SplitSuggestionArgs = serde_json::from_value(serde_json::json!({
+            "inputPath": path, "headerZoneMm": 25, "footerZoneMm": 25,
+        })).unwrap();
+        let result = suggest_split_ranges(&args).unwrap();
+        eprintln!("{}", serde_json::to_string_pretty(&result).unwrap());
+        assert!(!result.items.is_empty());
+        assert_eq!(result.items.first().unwrap().page_start, 1);
+        assert_eq!(result.items.last().unwrap().page_end, result.total_pages);
+        for adjacent in result.items.windows(2) {
+            assert_eq!(adjacent[0].page_end + 1, adjacent[1].page_start);
+        }
+        let output = super::super::temp_named_path("docsy_evidence_audit", "dir");
+        let split_args = serde_json::from_value(serde_json::json!({
+            "inputPath": args.input_path, "outputDir": output,
+            "items": result.items,
+        })).unwrap();
+        let split = super::super::split::split_merged(&split_args).unwrap();
+        let split = serde_json::to_value(split).unwrap();
+        assert!(split["failed"].as_array().unwrap().is_empty());
+        let outputs = split["outputs"].as_array().unwrap();
+        let mut files = Vec::new();
+        for item in outputs {
+            let path = item["outputPath"].as_str().unwrap();
+            let count = super::super::qpdf::page_count(path).unwrap();
+            assert_eq!(u64::from(count), item["pageEnd"].as_u64().unwrap() - item["pageStart"].as_u64().unwrap() + 1);
+            files.push(serde_json::json!({"path": path, "fileType": "pdf"}));
+        }
+        let build_args = serde_json::from_value(serde_json::json!({
+            "root": output, "groups": [{"name": "roundtrip", "id": "audit", "files": files}],
+        })).unwrap();
+        let built = super::super::evidence::build_group_pdfs(&build_args, &std::sync::Arc::new(crate::ConversionState::new())).unwrap();
+        eprintln!("ROUNDTRIP {}", built);
+        assert_eq!(built["results"][0]["pageCount"].as_u64(), Some(u64::from(result.total_pages)));
+        let rule_args = serde_json::from_value(serde_json::json!({
+            "items": outputs.iter().enumerate().map(|(number, item)| serde_json::json!({
+                "inputPath": item["outputPath"],
+                "outputPath": output.join(format!("processed-{number}.pdf")),
+            })).collect::<Vec<_>>(),
+            "merge": {"enabled": true, "outputPath": output.join("session-merged.pdf"), "outputMode": "files_and_merge"},
+        })).unwrap();
+        let processed = super::super::evidence_session::apply_rules_cancellable(
+            &rule_args, &tokio_util::sync::CancellationToken::new(), &|_| {},
+        ).unwrap();
+        assert!(processed.failed.is_empty());
+        assert_eq!(processed.merge.status.as_deref(), Some("done"));
+        assert_eq!(super::super::qpdf::page_count(processed.merge.output_path.as_deref().unwrap()).unwrap(), result.total_pages);
+        std::fs::remove_dir_all(output).unwrap();
+    }
 }
 
 fn artifact_summary(
@@ -438,16 +524,7 @@ fn build_artifact_candidates(
                     candidate.page_range.end >= page_start && candidate.page_range.start <= page_end
                 })
                 .filter(|candidate| candidate.normalized_text == normalized_text)
-                .max_by_key(|candidate| candidate.count)
-                .or_else(|| {
-                    region_candidates
-                        .iter()
-                        .filter(|candidate| {
-                            candidate.page_range.end >= page_start
-                                && candidate.page_range.start <= page_end
-                        })
-                        .max_by_key(|candidate| candidate.count)
-                });
+                .max_by_key(|candidate| candidate.count);
 
             let mut labels = labels_for(&normalized_text);
             if is_evidence_label_text(&normalized_text)
@@ -1525,10 +1602,18 @@ fn split_page_number_sequence<'a>(
 /// Extract the denominator (total) from a page number string like "1/3 页" or "2/13".
 /// Returns None if the text doesn't contain a "/" total separator.
 fn parsed_page_number_total(text: &str) -> Option<u32> {
+    let normalized = text
+        .replace('／', "/")
+        .chars()
+        .map(|ch| match ch {
+            '０'..='９' => char::from_u32(ch as u32 - '０' as u32 + '0' as u32).unwrap_or(ch),
+            _ => ch,
+        })
+        .collect::<String>();
     static RE_SLASH_TOTAL: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\d+\s*/\s*(\d+)").expect("valid slash-total regex"));
     RE_SLASH_TOTAL
-        .captures(text)
+        .captures(&normalized)
         .and_then(|caps| caps.get(1)?.as_str().parse().ok())
 }
 
@@ -1687,9 +1772,67 @@ fn is_noise(text: &str, normalized_text: &str) -> bool {
 /// (e.g. "证据1（合同）").
 fn is_evidence_label_text(normalized_text: &str) -> bool {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^(证据|对比文件)\s*[0-9A-Za-z一二三四五六七八九十百千]+").unwrap()
+        Regex::new(r"^(证据|对比文件)\s*[0-9０-９A-Za-z一二三四五六七八九十百千]+").unwrap()
     });
     RE.is_match(normalized_text.trim())
+}
+
+/// 对拆分页段名称进行规范化清洗：
+/// 1. 全角数字、全角英文字母转为半角；
+/// 2. 剔除中文字符（CJK）与中文字符之间的排版空格（如“国 家 知 识 产 权 局” -> “国家知识产权局”）；
+/// 3. 剔除中文字符与数字/字母间的空格（如“证据 6” -> “证据6”，“6 译文” -> “6译文”）；
+/// 4. 剔除中文字符/数字与常见括号等标点之间的多余空格；
+/// 5. 英文单词之间保留单空格（如“Exhibit 1”）。
+pub fn normalize_split_item_name(text: &str) -> String {
+    let converted: String = text
+        .chars()
+        .map(|ch| match ch {
+            '０'..='９' => char::from_u32(ch as u32 - '０' as u32 + '0' as u32).unwrap_or(ch),
+            'Ａ'..='Ｚ' => char::from_u32(ch as u32 - 'Ａ' as u32 + 'A' as u32).unwrap_or(ch),
+            'ａ'..='ｚ' => char::from_u32(ch as u32 - 'ａ' as u32 + 'a' as u32).unwrap_or(ch),
+            _ => ch,
+        })
+        .collect();
+
+    let collapsed = converted
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    static RE_HAN_SPACE_HAN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([\p{sc=Han}])\s+([\p{sc=Han}])").unwrap()
+    });
+    static RE_HAN_SPACE_NUM: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([\p{sc=Han}])\s+([0-9A-Za-z])").unwrap()
+    });
+    static RE_NUM_SPACE_HAN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([0-9A-Za-z])\s+([\p{sc=Han}])").unwrap()
+    });
+    static RE_HAN_PUNCT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([\p{sc=Han}0-9A-Za-z])\s+([（）()【】\[\]《》、，。：:])").unwrap()
+    });
+    static RE_PUNCT_HAN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([（）()【】\[\]《》、，。：:])\s+([\p{sc=Han}0-9A-Za-z])").unwrap()
+    });
+
+    let mut res = collapsed;
+    while RE_HAN_SPACE_HAN.is_match(&res) {
+        res = RE_HAN_SPACE_HAN.replace_all(&res, "$1$2").to_string();
+    }
+    while RE_HAN_SPACE_NUM.is_match(&res) {
+        res = RE_HAN_SPACE_NUM.replace_all(&res, "$1$2").to_string();
+    }
+    while RE_NUM_SPACE_HAN.is_match(&res) {
+        res = RE_NUM_SPACE_HAN.replace_all(&res, "$1$2").to_string();
+    }
+    while RE_HAN_PUNCT.is_match(&res) {
+        res = RE_HAN_PUNCT.replace_all(&res, "$1$2").to_string();
+    }
+    while RE_PUNCT_HAN.is_match(&res) {
+        res = RE_PUNCT_HAN.replace_all(&res, "$1$2").to_string();
+    }
+
+    res.trim().to_string()
 }
 
 fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSuggestionItem> {
@@ -1819,7 +1962,14 @@ fn eligible_split_header(
 /// 基于三层检测结果生成拆分建议（与分项证据处理共用同一套候选）。
 fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionItem> {
     let base_items = build_split_suggestions_from_candidates(detection);
-    organize_splits_around_evidence_labels(detection, base_items)
+    let items = organize_splits_around_evidence_labels(detection, base_items);
+    items
+        .into_iter()
+        .map(|mut item| {
+            item.name = normalize_split_item_name(&item.name);
+            item
+        })
+        .collect()
 }
 
 /// 先按普通 artifact / 重复页眉生成基础页段；若存在强证据标签，后续会
@@ -3647,5 +3797,33 @@ mod tests {
                 result.footer_candidates.len(),
             );
         }
+    }
+
+    #[test]
+    fn test_normalize_split_item_name() {
+        assert_eq!(
+            normalize_split_item_name("国 家 知 识 产 权 局"),
+            "国家知识产权局"
+        );
+        assert_eq!(
+            normalize_split_item_name("复 审 无 效 宣 告 程 序 意 见 陈 述 书"),
+            "复审无效宣告程序意见陈述书"
+        );
+        assert_eq!(normalize_split_item_name("证据６"), "证据6");
+        assert_eq!(normalize_split_item_name("证据 ６"), "证据6");
+        assert_eq!(normalize_split_item_name("证据１０"), "证据10");
+        assert_eq!(normalize_split_item_name("证据１７译文"), "证据17译文");
+        assert_eq!(normalize_split_item_name("证据 17 译文"), "证据17译文");
+        assert_eq!(
+            normalize_split_item_name("Exhibit 1 - Translation"),
+            "Exhibit 1 - Translation"
+        );
+    }
+
+    #[test]
+    fn test_evidence_label_fullwidth() {
+        assert!(is_evidence_label_text("证据６"));
+        assert!(is_evidence_label_text("证据１０"));
+        assert!(is_evidence_label_text("对比文件３"));
     }
 }

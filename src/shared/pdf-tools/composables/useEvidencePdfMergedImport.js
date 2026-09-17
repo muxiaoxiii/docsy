@@ -12,7 +12,7 @@ import {
   smartSetRangeStart,
 } from '../../../core/pdfUtils.js'
 import { createEvidenceFile, sortByNatural } from './useEvidencePdfSession.js'
-import { formatSplitFileName } from './splitFileName.js'
+import { formatSplitFileName, cleanSplitBaseName } from './splitFileName.js'
 import { splitRangeWarnings } from './usePdfSplitRanges.js'
 import { headerFooterDetectionZoneMm } from './useEvidencePdfDetection.js'
 
@@ -45,11 +45,9 @@ export function useEvidencePdfMergedImport({
   previewMaxPage,
   cleanupHeaderHeightMm,
   cleanupFooterHeightMm,
-  detectAllHeaderFooter,
   refreshPreview,
   safeRefreshPreview,
   applyWorkflowDefaults,
-  refreshOverlayPageCounts,
 }) {
   const mergedImportWarnings = computed(() => {
     if (!mergedImportPlan.value) return []
@@ -96,6 +94,7 @@ export function useEvidencePdfMergedImport({
   }
 
   function runMergedImportMutation(mutate) {
+    if (detectingMergedImport.value || splittingMergedImport.value) return
     const before = mergedImportSnapshot()
     const beforeItems = JSON.stringify(before.items)
     const result = mutate()
@@ -113,6 +112,7 @@ export function useEvidencePdfMergedImport({
   }
 
   function undoMergedImportEdit() {
+    if (detectingMergedImport.value || splittingMergedImport.value) return false
     const snapshot = mergedImportUndoStack.value.pop()
     if (!snapshot || !mergedImportPlan.value) return false
     mergedImportRedoStack.value.push(mergedImportSnapshot())
@@ -120,43 +120,49 @@ export function useEvidencePdfMergedImport({
   }
 
   function redoMergedImportEdit() {
+    if (detectingMergedImport.value || splittingMergedImport.value) return false
     const snapshot = mergedImportRedoStack.value.pop()
     if (!snapshot || !mergedImportPlan.value) return false
     mergedImportUndoStack.value.push(mergedImportSnapshot())
     return restoreMergedImportSnapshot(snapshot)
   }
 
-  async function importMergedPdfAsEvidence() {
-    if (importingMergedPdf.value) return
+  async function importMergedPdfAsEvidence(providedPaths) {
+    if (importingMergedPdf.value || detectingMergedImport.value || splittingMergedImport.value) return
     importingMergedPdf.value = true
     let knownTotalPages = 1
     let input = ''
     let outputDir = ''
     try {
-      const selected = await open({
-        multiple: true,
+      const selected = Array.isArray(providedPaths) ? providedPaths : await open({
+        multiple: false,
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       })
       if (!selected) return
       const paths = Array.isArray(selected) ? selected : [selected]
       if (!paths.length) return
       if (paths.length > 1) {
-        await importMergedPdfsForBatch(paths)
+        ElMessage.warning('请一次导入一个合并证据 PDF，自动检测并确认拆分后再处理下一份')
         return
       }
       input = paths[0]
       outputDir = defaultMergedImportOutputDir(input)
 
       const countResult = await tauriCallSafe('get_pdf_page_count', { input })
-      const totalPages = countResult.ok ? Number(countResult.data || 0) : 0
+      if (!countResult.ok || Number(countResult.data) < 1) {
+        ElMessage.error(countResult.error || '无法读取 PDF 页数，请检查文件后重新导入')
+        return
+      }
+      const totalPages = Number(countResult.data)
       knownTotalPages = Math.max(1, totalPages || 1)
       mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages)
+      overlayFiles.value = []
       resetMergedImportHistory()
       selectedMergedImportIndex.value = 0
       previewPage.value = 1
       truePreview.value = null
       safeRefreshPreview()
-      ElMessage.success('PDF 已导入；需要自动分组时请点击“检测页段”')
+      ElMessage.success('PDF 已导入，点击“检测证据页段”生成拆分建议；检测耗时取决于文件大小和页数')
     } catch (err) {
       mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages, [
         `导入流程中断：${String(err?.message || err || '未知错误')}`,
@@ -175,8 +181,9 @@ export function useEvidencePdfMergedImport({
 
   async function detectMergedImportPlan() {
     const plan = mergedImportPlan.value
-    if (!plan || detectingMergedImport.value) return
+    if (!plan || detectingMergedImport.value || splittingMergedImport.value || importingMergedPdf.value) return
     detectingMergedImport.value = true
+    for (const candidate of plan.cleanupCandidates || []) candidate.selected = false
     try {
       const headerScanMm = headerFooterDetectionZoneMm(cleanupHeaderHeightMm.value)
       const footerScanMm = headerFooterDetectionZoneMm(cleanupFooterHeightMm.value)
@@ -206,9 +213,11 @@ export function useEvidencePdfMergedImport({
       plan.headerPages = Number(inspect.data.headerPages || 0)
       plan.pageNumberFooterPages = Number(inspect.data.pageNumberFooterPages || 0)
       plan.warnings = [...(inspect.data.warnings || [])]
-      runMergedImportMutation(() => {
-        plan.items = items
-      })
+      plan.cleanupCandidates = (inspect.data.cleanupCandidates || [])
+        .map(candidate => ({ ...candidate, selected: false }))
+      mergedImportUndoStack.value.push(mergedImportSnapshot())
+      mergedImportRedoStack.value = []
+      plan.items = items
       selectedMergedImportIndex.value = 0
       previewPage.value = items[0].pageStart
       truePreview.value = null
@@ -220,8 +229,9 @@ export function useEvidencePdfMergedImport({
   }
 
   function detectedMergedImportItem(item, inputPath, index) {
+    const rawName = String(item.name || '').trim()
     return {
-      name: String(item.name || '').trim() || defaultMergedImportName(inputPath, index),
+      name: cleanSplitBaseName(rawName) || defaultMergedImportName(inputPath, index),
       pageStart: Number(item.pageStart),
       pageEnd: Number(item.pageEnd),
       source: item.source || 'unknown',
@@ -231,36 +241,11 @@ export function useEvidencePdfMergedImport({
   }
 
   async function importMergedPdfsForBatch(paths) {
-    importingMergedPdf.value = true
-    try {
-      mergedImportPlan.value = null
-      resetMergedImportHistory()
-      overlayFiles.value = paths.map((path) => ({
-        ...createEvidenceFile(path),
-        header: stripPdf(fileName(path)),
-        sourceDetectionSource: 'merged_pdf',
-        detectionSummary: '作为合并证据 PDF 批量处理',
-        statusText: '等待',
-        statusType: 'info',
-      }))
-      overlayOutputDir.value = defaultMergedBatchOutputDir(paths)
-      splitReplacementOutputDir.value = overlayOutputDir.value
-      selectedOverlayIndex.value = 0
-      selectedMergedImportIndex.value = 0
-      previewPage.value = 1
-      truePreview.value = null
-      applyWorkflowDefaults()
-      await refreshOverlayPageCounts()
-      await detectAllHeaderFooter({ silent: true })
-      refreshPreview()
-      ElMessage.success(`已导入 ${paths.length} 个合并证据 PDF，可按统一规则批量处理`)
-    } finally {
-      importingMergedPdf.value = false
-    }
+    await importMergedPdfAsEvidence(paths)
   }
 
   async function executeMergedImportPlan() {
-    if (!mergedImportPlan.value || splittingMergedImport.value) return
+    if (!mergedImportPlan.value || splittingMergedImport.value || detectingMergedImport.value || importingMergedPdf.value) return
     splittingMergedImport.value = true
     const items = normalizedMergedImportItems()
     try {
@@ -296,6 +281,17 @@ export function useEvidencePdfMergedImport({
           outputDir: mergedImportPlan.value.outputDir,
           items,
           removeBlankPages: Boolean(removeBlankPages?.value),
+          cleanupTargets: (mergedImportPlan.value.cleanupCandidates || [])
+            .filter(candidate => candidate.selected)
+            .map(candidate => ({
+              region: candidate.region,
+              normalizedText: candidate.normalizedText,
+              pageStart: candidate.pageRange?.start || candidate.pageStart,
+              pageEnd: candidate.pageRange?.end || candidate.pageEnd,
+              source: candidate.source || 'content-text',
+              text: candidate.text,
+              bbox: candidate.bbox,
+            })),
         },
       })
       if (!split.ok) {
@@ -313,7 +309,7 @@ export function useEvidencePdfMergedImport({
       )
       overlayFiles.value = outputs.map((output) => {
         const sourceItem = rawItemByRange.get(sourcePageRangeKey(output)) || {}
-        const pages = Math.max(0, Number(output.pageEnd || 0) - Number(output.pageStart || 0) + 1)
+        const pages = Math.max(0, Number(output.pageEnd || 0) - Number(output.pageStart || 0) + 1 - Number(output.removedBlankPages || 0))
         const needsReview =
           sourceItem.source === 'fallback' ||
           sourceItem.source === 'manual' ||
@@ -338,18 +334,19 @@ export function useEvidencePdfMergedImport({
       mergedImportPlan.value = null
       resetMergedImportHistory()
       refreshPreview()
-      await detectAllHeaderFooter({ silent: true })
 
       const failed = split.data.failed?.length || 0
       const warnings = split.data.warnings || []
       const removedBlanks = (outputs || []).reduce((sum, output) => sum + Number(output.removedBlankPages || 0), 0)
       const blankSuffix = removedBlanks > 0 ? `（已删除 ${removedBlanks} 个空白页）` : ''
+      const cleanupSuffix = Number(split.data.removedHeaders || 0) + Number(split.data.removedFooters || 0) > 0
+        ? `；清除源副本标准页眉 ${split.data.removedHeaders || 0} 处、页脚 ${split.data.removedFooters || 0} 处` : ''
       if (failed) {
         ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个${blankSuffix}`)
       } else if (warnings.length) {
         ElMessage.warning(`已生成 ${outputs.length} 个证据，需核对页段提示${blankSuffix}`)
       } else {
-        ElMessage.success(`已生成 ${outputs.length} 个证据${blankSuffix}`)
+        ElMessage.success(`已生成 ${outputs.length} 个证据${blankSuffix}${cleanupSuffix}`)
       }
     } finally {
       splittingMergedImport.value = false
@@ -357,6 +354,7 @@ export function useEvidencePdfMergedImport({
   }
 
   async function selectMergedImportOutputDir() {
+    if (detectingMergedImport.value || splittingMergedImport.value) return
     if (!mergedImportPlan.value) return
     const selected = await open({ directory: true })
     if (!selected) return
@@ -364,6 +362,7 @@ export function useEvidencePdfMergedImport({
   }
 
   function cancelMergedImportPlan() {
+    if (detectingMergedImport.value || splittingMergedImport.value || importingMergedPdf.value) return
     mergedImportPlan.value = null
     resetMergedImportHistory()
     selectedMergedImportIndex.value = 0
@@ -593,6 +592,7 @@ export function useEvidencePdfMergedImport({
   }
 
   function sortMergedImportItems({ prop, order }) {
+    if (detectingMergedImport.value || splittingMergedImport.value) return
     if (!mergedImportPlan.value || !prop || !order) return
     const selected = selectedMergedImportRange.value
     mergedImportPlan.value.items = sortByNatural(
