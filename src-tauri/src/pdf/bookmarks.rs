@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use lopdf::{dictionary, Document, Object};
 use std::path::Path;
 
+use crate::external::ExternalTool;
+
 #[cfg(test)]
 use crate::util::fs::temp_named_path;
 #[cfg(test)]
@@ -101,21 +103,50 @@ pub fn apply_bookmarks(
     save_replacing(doc, output, temp.path(), "保存书签 PDF 失败")
 }
 
-/// 检查 PDF 的 Catalog 是否包含 /Outlines（即已有书签）
+/// 检查 PDF 的 Catalog 是否包含 /Outlines（即已有书签）。
+/// 使用 qpdf 对象字典（不拉流），避免大扫描件整档进内存。
 pub fn has_pdf_bookmarks(path: &Path) -> Result<bool> {
-    let doc = Document::load(path).with_context(|| format!("加载 PDF 失败: {}", path.display()))?;
-    let catalog_id = doc
-        .trailer
-        .get(b"Root")
-        .and_then(|obj| obj.as_reference())
-        .context("找不到 PDF Catalog")?;
-    let has = doc
-        .objects
-        .get(&catalog_id)
-        .and_then(|obj| obj.as_dict().ok())
-        .map(|dict| dict.has(b"Outlines"))
-        .unwrap_or(false);
-    Ok(has)
+    let qpdf_bin = crate::external::QpdfTool.binary_path()?;
+    let output = crate::external::hidden_command(qpdf_bin)
+        .arg("--json=1")
+        .arg("--json-key=objects")
+        .arg("--json-stream-data=none")
+        .arg(path)
+        .output()
+        .with_context(|| format!("读取 PDF 书签信息失败: {}", path.display()))?;
+    if !super::qpdf::status_is_success(&output.status) {
+        anyhow::bail!(
+            "读取 PDF 书签信息失败：{}",
+            crate::external::command_failure_detail(&output)
+        );
+    }
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("解析 PDF 书签 JSON 失败")?;
+    let Some(objects) = json.get("objects").and_then(|v| v.as_object()) else {
+        return Ok(false);
+    };
+    // 找到 catalog：含 /Type /Catalog 的对象
+    for (_key, object) in objects {
+        let Some(dict) = object_dict_of(object) else {
+            continue;
+        };
+        let is_catalog = dict
+            .get("/Type")
+            .and_then(|v| v.as_str())
+            .is_some_and(|t| t.trim_start_matches('/').eq_ignore_ascii_case("catalog"));
+        if is_catalog && dict.contains_key("/Outlines") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn object_dict_of(object: &serde_json::Value) -> Option<&serde_json::Map<String, serde_json::Value>> {
+    let map = object.as_object()?;
+    if map.contains_key("/Type") || map.contains_key("/Outlines") || map.contains_key("/Pages") {
+        return Some(map);
+    }
+    map.get("value").and_then(|v| v.as_object())
 }
 
 /// 删除 PDF 的 /Outlines 对象并从 Catalog 移除引用

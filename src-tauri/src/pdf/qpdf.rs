@@ -155,6 +155,31 @@ pub fn merge(inputs: &[String], output: &str, duplex_separate: bool) -> Result<S
     Ok(output_path.display().to_string())
 }
 
+/// 无损拼接分段结果（不压平批注、不做图像重编码），供分段处理收尾使用。
+pub fn merge_lossless(inputs: &[String], output: &Path) -> Result<()> {
+    if inputs.is_empty() {
+        anyhow::bail!("没有可合并的分段结果");
+    }
+    let qpdf = crate::external::QpdfTool;
+    let bin = qpdf.binary_path()?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    add_optimization_args(&mut cmd);
+    cmd.arg("--empty").arg("--pages");
+    for input in inputs {
+        cmd.arg(input);
+    }
+    cmd.arg("--").arg(output);
+    let result = run_cancellable("合并分段", cmd)?;
+    if !status_is_success(&result.status) {
+        anyhow::bail!(
+            "合并分段结果失败（{}）：{}",
+            bin.display(),
+            crate::external::command_failure_detail(&result)
+        );
+    }
+    Ok(())
+}
+
 /// 生成与 `input` 最后一页同尺寸的空白页，用于双面打印分隔。
 fn make_blank_page_for(input: &str) -> Result<crate::util::fs::TempPathGuard> {
     let pages = super::page_info::get_page_infos(input)
