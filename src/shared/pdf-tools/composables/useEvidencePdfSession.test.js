@@ -10,10 +10,12 @@ import {
   canWriteFooter,
   canWriteHeader,
   candidateTargetRange,
+  clearStaleKeepInsertFlags,
   createDefaultHeaderGroup,
   createDefaultFooterTextGroup,
   createDefaultPageNumberGroup,
   createEvidenceFile,
+  detectKeepInsertConflicts,
   expandPlaceholders,
   naturalCompare,
   pageRangeText,
@@ -1058,5 +1060,131 @@ describe('Evidence PDF session helpers', () => {
     // 基础范围 2-4 全部隐藏，范围外的第 1、5 页本来就没有页眉
     expect(items[0].header).toBeNull()
     expect(items[0].extraOverlays.filter((o) => o.artifactKind === 'HeaderText')).toHaveLength(0)
+  })
+
+  it('suppresses new header injection only when suppressNewHeader is set and keep remains', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/doc1.pdf'),
+        pages: 3,
+        keepExistingHeader: true,
+        suppressNewHeader: true,
+      },
+      {
+        ...createEvidenceFile('/case/doc2.pdf'),
+        pages: 2,
+        keepExistingHeader: true,
+        suppressNewHeader: false,
+      },
+      {
+        ...createEvidenceFile('/case/doc3.pdf'),
+        pages: 2,
+        keepExistingHeader: false,
+        suppressNewHeader: true,
+      },
+    ]
+    const rules = {
+      ...baseRules,
+      headerInsertEnabled: true,
+      headerMode: 'filename',
+    }
+    const items = buildHeaderFooterItems(files, rules, '/out')
+    expect(items[0].header).toBeNull()
+    expect(items[1].header?.text).toBe('doc2')
+    expect(items[2].header?.text).toBe('doc3')
+  })
+
+  it('clears stale suppress flags when keep is removed', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/doc1.pdf'),
+        pages: 1,
+        keepExistingHeader: false,
+        removeExistingHeader: false,
+        suppressNewHeader: true,
+        allowOverlapHeader: true,
+      },
+      {
+        ...createEvidenceFile('/case/doc2.pdf'),
+        pages: 1,
+        keepExistingHeader: true,
+        suppressNewHeader: true,
+      },
+    ]
+    clearStaleKeepInsertFlags(files)
+    expect(files[0].suppressNewHeader).toBe(false)
+    expect(files[0].allowOverlapHeader).toBe(false)
+    expect(files[1].suppressNewHeader).toBe(true)
+  })
+
+  it('detects potential keep-insert conflicts across files', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/doc1.pdf'),
+        pages: 3,
+        keepExistingHeader: true,
+        existingHeaderText: '国家知识产权局',
+      },
+      {
+        ...createEvidenceFile('/case/doc2.pdf'),
+        pages: 2,
+      },
+    ]
+    const rules = {
+      ...baseRules,
+      headerInsertEnabled: true,
+      headerMode: 'filename',
+    }
+    const conflicts = detectKeepInsertConflicts(files, rules)
+    expect(conflicts.length).toBe(1)
+    expect(conflicts[0].region).toBe('header')
+    expect(conflicts[0].existingText).toBe('国家知识产权局')
+    expect(conflicts[0].newText).toBe('doc1')
+    expect(conflicts[0].action).toBe('suppress')
+  })
+
+  it('detects footer group and page number group conflicts', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/doc1.pdf'),
+        pages: 2,
+        keepExistingFooter: true,
+        existingFooterText: '原页脚',
+        keepExistingPageNumber: true,
+        existingPageNumberText: '1/2',
+      },
+    ]
+    const rules = {
+      ...baseRules,
+      headerInsertEnabled: false,
+      headerMode: 'none',
+      footerInsertEnabled: true,
+      footerTextContent: '',
+      footerTextGroups: [{ id: 'ft1', enabled: true, text: '机密文件' }],
+      pageNumberEnabled: true,
+      pageNumberGroups: [{ id: 'pn1', enabled: true, template: '第{page}页' }],
+    }
+    const conflicts = detectKeepInsertConflicts(files, rules)
+    const regions = conflicts.map((item) => item.region).sort()
+    expect(regions).toEqual(['footer', 'pageNumber'])
+    expect(conflicts.find((item) => item.region === 'footer')?.newText).toBe('机密文件')
+  })
+
+  it('detects keep-insert conflicts from existingElements keep decision', () => {
+    const file = {
+      ...createEvidenceFile('/case/doc1.pdf'),
+      pages: 2,
+      existingElements: [{ kind: 'header', decision: 'keep', detectedText: '原件页眉' }],
+      existingHeaderText: '原件页眉',
+    }
+    const rules = {
+      ...baseRules,
+      headerInsertEnabled: true,
+      headerMode: 'filename',
+    }
+    const conflicts = detectKeepInsertConflicts([file], rules)
+    expect(conflicts).toHaveLength(1)
+    expect(conflicts[0].existingText).toBe('原件页眉')
+    expect(conflicts[0].newText).toBe('doc1')
   })
 })

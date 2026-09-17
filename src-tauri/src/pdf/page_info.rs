@@ -36,13 +36,16 @@ fn get_page_infos_with_qpdf(input: &str) -> Result<Vec<PageSize>> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
 
-    // 只拉 pages：页面框通常就在条目上；避免 --json 全量 dump 把扫描件对象打进内存。
+    // qpdf 的 pages 条目本身不含 CropBox/MediaBox，只有 object 引用；
+    // 因此需要同时拉 objects 字典，但禁止内联图像流，避免扫描件整档进内存。
     let output = crate::external::hidden_command(&bin)
         .arg("--json=1")
         .arg("--json-key=pages")
+        .arg("--json-key=objects")
+        .arg("--json-stream-data=none")
         .arg(input)
         .output()
-        .context("执行 qpdf --json-key=pages 失败")?;
+        .context("执行 qpdf 页面尺寸 JSON 失败")?;
 
     if !super::qpdf::status_is_success(&output.status) {
         anyhow::bail!(
@@ -53,29 +56,7 @@ fn get_page_infos_with_qpdf(input: &str) -> Result<Vec<PageSize>> {
     }
 
     let json: Value = serde_json::from_slice(&output.stdout).context("解析 qpdf JSON 失败")?;
-    parse_page_sizes_from_pages_only(&json).context("qpdf pages 元数据缺少页面框")
-}
-
-/// 仅从 --json-key=pages 的输出解析尺寸；条目必须自带 cropBox/mediaBox。
-fn parse_page_sizes_from_pages_only(json: &Value) -> Result<Vec<PageSize>> {
-    let pages = json
-        .get("pages")
-        .and_then(Value::as_array)
-        .context("qpdf JSON 中无 pages 数组")?;
-    if pages.is_empty() {
-        anyhow::bail!("PDF 无页面");
-    }
-    let mut sizes = Vec::with_capacity(pages.len());
-    for (index, page) in pages.iter().enumerate() {
-        let size = page_size_from_page_entry(page).with_context(|| {
-            format!(
-                "第 {} 页缺少 CropBox/MediaBox，无法安全计算 A4 定位",
-                index + 1
-            )
-        })?;
-        sizes.push(size);
-    }
-    Ok(sizes)
+    parse_page_sizes(&json).context("qpdf 页面元数据缺少页面框")
 }
 
 fn get_page_infos_with_lopdf(input: &Path) -> Result<Vec<PageSize>> {
@@ -172,14 +153,33 @@ pub(crate) fn parse_page_sizes(json: &Value) -> Result<Vec<PageSize>> {
         .get("pages")
         .and_then(|v| v.as_array())
         .context("qpdf JSON 中无 pages 数组")?;
-    let objects = json.get("qpdf").and_then(|v| v.as_array());
+    // 兼容两种 qpdf JSON 形态：
+    // - 旧：`qpdf: [{...metadata...}, { "obj:N 0 R": {...} }]`
+    // - 新（--json=1）：`objects: { "N 0 R": {...} }` 或 `obj:N 0 R`
+    let objects_map = json
+        .get("objects")
+        .and_then(Value::as_object)
+        .map(|map| map as &dyn ObjectLookup)
+        .or_else(|| {
+            json.get("qpdf")
+                .and_then(Value::as_array)
+                .map(|arr| arr as &dyn ObjectLookup)
+        });
 
     let mut sizes = Vec::new();
-    for page in pages {
+    for (index, page) in pages.iter().enumerate() {
         let obj_ref = page.get("object").and_then(|v| v.as_str());
         let size = page_size_from_page_entry(page)
-            .or_else(|| obj_ref.and_then(|r| resolve_page_size(objects, r)))
-            .with_context(|| "无法读取 PDF 页面尺寸，已停止处理以避免按错误 A4 尺寸定位内容")?;
+            .or_else(|| {
+                objects_map
+                    .and_then(|lookup| lookup.resolve_page_size(obj_ref?))
+            })
+            .with_context(|| {
+                format!(
+                    "第 {} 页缺少 CropBox/MediaBox，无法安全计算 A4 定位",
+                    index + 1
+                )
+            })?;
         sizes.push(size);
     }
 
@@ -188,6 +188,103 @@ pub(crate) fn parse_page_sizes(json: &Value) -> Result<Vec<PageSize>> {
     }
 
     Ok(sizes)
+}
+
+/// 在 qpdf objects 表中按页面引用解析尺寸（含 /Parent 继承）。
+trait ObjectLookup {
+    fn object_dict(&self, obj_ref: &str) -> Option<serde_json::Map<String, Value>>;
+    fn resolve_page_size(&self, obj_ref: &str) -> Option<PageSize> {
+        let mut current_ref = obj_ref.to_string();
+        let mut visited = std::collections::HashSet::new();
+        for _ in 0..32 {
+            if !visited.insert(current_ref.clone()) {
+                return None;
+            }
+            let dict = self.object_dict(&current_ref)?;
+            let box_value = dict
+                .get("/CropBox")
+                .or_else(|| dict.get("CropBox"))
+                .or_else(|| dict.get("/MediaBox"))
+                .or_else(|| dict.get("MediaBox"));
+            if let Some(size) = box_value.and_then(page_size_from_box) {
+                let rotate = dict
+                    .get("/Rotate")
+                    .or_else(|| dict.get("Rotate"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0)
+                    .rem_euclid(360) as i32;
+                return Some(apply_rotation(size, rotate));
+            }
+            let parent = dict
+                .get("/Parent")
+                .or_else(|| dict.get("Parent"))
+                .and_then(reference_string)?;
+            current_ref = parent;
+        }
+        None
+    }
+}
+
+fn reference_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(raw) => Some(raw.trim_end_matches(" R").trim().to_string()),
+        Value::Array(items) if items.len() >= 2 => {
+            let num = items[0].as_i64()?;
+            let gen = items[1].as_i64().unwrap_or(0);
+            Some(format!("{num} {gen}"))
+        }
+        _ => None,
+    }
+}
+
+impl ObjectLookup for serde_json::Map<String, Value> {
+    fn object_dict(&self, obj_ref: &str) -> Option<serde_json::Map<String, Value>> {
+        let trimmed = obj_ref.trim_end_matches(" R").trim();
+        for key in [
+            trimmed.to_string(),
+            format!("{trimmed} R"),
+            format!("obj:{trimmed}"),
+            format!("obj:{trimmed} R"),
+        ] {
+            if let Some(entry) = self.get(&key) {
+                if let Some(dict) = dict_value_of(entry) {
+                    return Some(dict);
+                }
+            }
+        }
+        None
+    }
+}
+
+impl ObjectLookup for Vec<Value> {
+    fn object_dict(&self, obj_ref: &str) -> Option<serde_json::Map<String, Value>> {
+        for obj in self {
+            // qpdf emits a metadata object before the object map.
+            if let Some(dict) = obj.as_object().and_then(|map| {
+                if map.contains_key("jsonversion") || map.contains_key("pdfversion") {
+                    return None;
+                }
+                map.get(obj_ref)
+                    .or_else(|| map.get(format!("obj:{obj_ref}").as_str()))
+                    .or_else(|| {
+                        let trimmed = obj_ref.trim_end_matches(" R").trim();
+                        map.get(format!("{trimmed} R").as_str())
+                    })
+                    .and_then(dict_value_of)
+            }) {
+                return Some(dict);
+            }
+        }
+        None
+    }
+}
+
+fn dict_value_of(entry: &Value) -> Option<serde_json::Map<String, Value>> {
+    let map = entry.as_object()?;
+    if map.contains_key("/Type") || map.contains_key("/MediaBox") || map.contains_key("/CropBox") {
+        return Some(map.clone());
+    }
+    map.get("value").and_then(Value::as_object).cloned()
 }
 
 fn page_size_from_page_entry(page: &Value) -> Option<PageSize> {
@@ -204,44 +301,6 @@ fn page_size_from_page_entry(page: &Value) -> Option<PageSize> {
         .unwrap_or(0)
         .rem_euclid(360);
     Some(apply_rotation(size, rotate as i32))
-}
-
-fn resolve_page_size(objects: Option<&Vec<Value>>, obj_ref: &str) -> Option<PageSize> {
-    let objects = objects?;
-
-    for obj in objects {
-        // qpdf emits a metadata object before the object map. A missing page
-        // key in that first entry is normal, not a reason to abandon the
-        // remaining object maps.
-        let Some(page_obj) = obj
-            .get(obj_ref)
-            .or_else(|| obj.get(format!("obj:{obj_ref}").as_str()))
-        else {
-            continue;
-        };
-        let Some(value) = page_obj.get("value") else {
-            continue;
-        };
-        let Some(box_value) = value
-            .get("/CropBox")
-            .or_else(|| value.get("CropBox"))
-            .or_else(|| value.get("/MediaBox"))
-            .or_else(|| value.get("MediaBox"))
-        else {
-            continue;
-        };
-        if let Some(size) = page_size_from_box(box_value) {
-            let rotate = value
-                .get("/Rotate")
-                .or_else(|| value.get("Rotate"))
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0)
-                .rem_euclid(360) as i32;
-            return Some(apply_rotation(size, rotate));
-        }
-    }
-
-    None
 }
 
 fn apply_rotation(size: PageSize, rotate: i32) -> PageSize {
@@ -408,6 +467,60 @@ mod tests {
         let pages = parse_page_sizes(&value).expect("page size should be read after metadata");
         assert_eq!(pages[0].width_pt, 612.0);
         assert_eq!(pages[0].height_pt, 792.0);
+    }
+
+    #[test]
+    fn parses_modern_objects_map_layout() {
+        // qpdf --json=1 实际输出：objects 顶层映射，键为 "N 0 R"，无 obj: 前缀。
+        let value = json!({
+            "pages": [{ "object": "4 0 R" }],
+            "objects": {
+                "4 0 R": {
+                    "value": { "/Type": "/Page", "/MediaBox": [0.0, 0.0, 612, 792], "/Parent": "2 0 R" }
+                }
+            }
+        });
+        let pages = parse_page_sizes(&value).expect("modern objects map should parse");
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].width_pt, 612.0);
+        assert_eq!(pages[0].height_pt, 792.0);
+    }
+
+    #[test]
+    fn resolves_inherited_media_box_from_parent() {
+        let value = json!({
+            "pages": [{ "object": "3 0 R" }],
+            "objects": {
+                "3 0 R": { "value": { "/Type": "/Page", "/Parent": "2 0 R" } },
+                "2 0 R": { "value": { "/Type": "/Pages", "/MediaBox": [0, 0, 595.28, 841.89] } }
+            }
+        });
+        let pages = parse_page_sizes(&value).expect("inherited box should resolve");
+        assert_eq!(pages[0].width_pt, 595.28);
+        assert_eq!(pages[0].height_pt, 841.89);
+    }
+
+    #[test]
+    fn real_qpdf_pages_do_not_embed_boxes_so_objects_are_required() {
+        // 契约测试：真实 qpdf pages 条目不含 mediaBox；必须能从 objects 解析。
+        let value = json!({
+            "version": 1,
+            "pages": [{
+                "contents": [],
+                "images": [],
+                "label": null,
+                "object": "4 0 R",
+                "outlines": [],
+                "pageposfrom1": 1
+            }],
+            "objects": {
+                "4 0 R": {
+                    "value": { "/MediaBox": [0.0, 0.0, 612, 792], "/Type": "/Page" }
+                }
+            }
+        });
+        let pages = parse_page_sizes(&value).expect("must resolve via objects");
+        assert_eq!(pages[0].width_pt, 612.0);
     }
 
     #[test]
