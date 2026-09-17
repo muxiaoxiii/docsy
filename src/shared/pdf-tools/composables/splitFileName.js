@@ -28,11 +28,11 @@ export function cleanSplitBaseName(name) {
     str = str.replace(/([0-9a-zA-Z])\s+([\p{Script=Han}])/gu, '$1$2')
   }
   // 6. 去除汉字/数字与标点间的空格
-  while (/([\p{Script=Han}0-9a-zA-Z])\s+([（）()【】\[\]《》、，。：:])/u.test(str)) {
-    str = str.replace(/([\p{Script=Han}0-9a-zA-Z])\s+([（）()【】\[\]《》、，。：:])/gu, '$1$2')
+  while (/([\p{Script=Han}0-9a-zA-Z])\s+([（）()【】[\]《》、，。：:])/u.test(str)) {
+    str = str.replace(/([\p{Script=Han}0-9a-zA-Z])\s+([（）()【】[\]《》、，。：:])/gu, '$1$2')
   }
-  while (/([（）()【】\[\]《》、，。：:])\s+([\p{Script=Han}0-9a-zA-Z])/u.test(str)) {
-    str = str.replace(/([（）()【】\[\]《》、，。：:])\s+([\p{Script=Han}0-9a-zA-Z])/gu, '$1$2')
+  while (/([（）()【】[\]《》、，。：:])\s+([\p{Script=Han}0-9a-zA-Z])/u.test(str)) {
+    str = str.replace(/([（）()【】[\]《》、，。：:])\s+([\p{Script=Han}0-9a-zA-Z])/gu, '$1$2')
   }
   return str.trim()
 }
