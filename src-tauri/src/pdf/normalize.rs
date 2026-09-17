@@ -15,6 +15,23 @@ pub fn normalize_pdf_to_a4(
 ) -> Result<PathBuf> {
     let input_str = input.to_string_lossy().to_string();
     let pages = get_page_infos(&input_str)?;
+    let page_count = pages.len() as u32;
+
+    // 大文件：按页段规范化再合并，避免整档 Document::load
+    if super::chunked::should_chunk(input, page_count) && page_count > 0 {
+        let output = temp_named_path("docsy_a4_normalized", "pdf");
+        super::chunked::process_pdf_chunked(input, &output, page_count, |chunk_in, chunk_out, _, _, _| {
+            normalize_pdf_to_a4_whole(
+                chunk_in,
+                orientation,
+                content_rotation,
+                content_margin_mm,
+                chunk_out,
+            )
+        })?;
+        return Ok(output);
+    }
+
     let mut doc = Document::load(input).context("读取待规范化 PDF 失败")?;
     let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
 
@@ -44,6 +61,40 @@ pub fn normalize_pdf_to_a4(
     // large scan streams here would decode the same images twice and does not
     // improve coordinate correctness or PDF validity.
     Ok(output)
+}
+
+fn normalize_pdf_to_a4_whole(
+    input: &Path,
+    orientation: &str,
+    content_rotation: &str,
+    content_margin_mm: f32,
+    output: &Path,
+) -> Result<()> {
+    let input_str = input.to_string_lossy().to_string();
+    let pages = get_page_infos(&input_str)?;
+    let mut doc = Document::load(input).context("读取待规范化 PDF 失败")?;
+    let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
+    for (idx, page_id) in page_ids.iter().enumerate() {
+        let Some(page) = pages.get(idx) else {
+            continue;
+        };
+        let transform = a4_transform(
+            page,
+            orientation,
+            content_rotation,
+            mm_to_pt(content_margin_mm),
+        );
+        normalize_page_content(&mut doc, *page_id, &transform)?;
+        set_page_box(
+            &mut doc,
+            *page_id,
+            transform.page_w,
+            transform.page_h,
+            transform.preserve_rotation,
+        )?;
+    }
+    doc.save(output).context("写入 A4 规范化分段失败")?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]

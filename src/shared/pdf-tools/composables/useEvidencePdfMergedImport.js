@@ -1,6 +1,6 @@
 import { computed, getCurrentScope, onScopeDispose, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { emitOperationUpdate, hideLoading, showLoading, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import {
@@ -12,7 +12,7 @@ import {
   smartSetRangeStart,
 } from '../../../core/pdfUtils.js'
 import { createEvidenceFile, naturalCompare, sortByNatural } from './useEvidencePdfSession.js'
-import { formatSplitFileName } from './splitFileName.js'
+import { formatSplitFileName, cleanSplitBaseName } from './splitFileName.js'
 import { splitRangeWarnings } from './usePdfSplitRanges.js'
 import { headerFooterDetectionZoneMm } from './useEvidencePdfDetection.js'
 
@@ -336,8 +336,9 @@ export function useEvidencePdfMergedImport({
   }
 
   function detectedMergedImportItem(item, inputPath, index) {
+    const rawName = String(item.name || '').trim()
     return {
-      name: String(item.name || '').trim() || defaultMergedImportName(inputPath, index),
+      name: cleanSplitBaseName(rawName) || defaultMergedImportName(inputPath, index),
       pageStart: Number(item.pageStart),
       pageEnd: Number(item.pageEnd),
       source: item.source || 'unknown',
@@ -348,6 +349,21 @@ export function useEvidencePdfMergedImport({
 
   async function importMergedPdfsForBatch(paths) {
     await importMergedPdfAsEvidence(paths)
+  }
+
+  async function confirmPdfSignatureRisk(inputPath) {
+    const result = await tauriCallSafe('detect_pdf_signatures', { input: inputPath })
+    if (!result.ok || !result.data?.hasSignatures) return true
+    try {
+      await ElMessageBox.confirm(
+        `「${fileName(inputPath)}」${result.data.summary}。继续处理可能会压平签章外观或使数字签名失效（可见图像通常仍保留）。是否继续？`,
+        '检测到电子签章',
+        { type: 'warning', confirmButtonText: '继续处理', cancelButtonText: '取消' },
+      )
+      return true
+    } catch {
+      return false
+    }
   }
 
   async function executeMergedImportPlan(options = {}) {
@@ -373,18 +389,29 @@ export function useEvidencePdfMergedImport({
           ElMessage.warning(plan.splitError)
           return
         }
+        if (!(await confirmPdfSignatureRisk(plan.inputPath))) {
+          plan.splitStatus = ''
+          return
+        }
+        const headerScanMm = headerFooterDetectionZoneMm(cleanupHeaderHeightMm?.value)
+        const footerScanMm = headerFooterDetectionZoneMm(cleanupFooterHeightMm?.value)
         plan.splitRequest = {
           inputPath: plan.inputPath,
           outputDir: plan.outputDir,
           items,
           removeBlankPages: Boolean(removeBlankPages?.value),
+          headerZoneMm: headerScanMm,
+          footerZoneMm: footerScanMm,
           cleanupTargets: (plan.cleanupCandidates || [])
             .filter(candidate => candidate.selected)
             .map(candidate => ({
               region: candidate.region,
               normalizedText: candidate.normalizedText,
-              pageStart: candidate.pageRange.start,
-              pageEnd: candidate.pageRange.end,
+              pageStart: candidate.pageRange?.start || candidate.pageStart,
+              pageEnd: candidate.pageRange?.end || candidate.pageEnd,
+              source: candidate.source || 'content-text',
+              text: candidate.text,
+              bbox: candidate.bbox,
             })),
         }
       }

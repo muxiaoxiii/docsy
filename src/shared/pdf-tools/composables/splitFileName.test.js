@@ -42,4 +42,55 @@ describe('split file name helpers', () => {
       }),
     ).toBe('405案-证据9-1-20260420')
   })
+
+  it('cleans base names removing cjk spaces and converting fullwidth digits', () => {
+    expect(
+      formatSplitFileName({
+        base: '国 家 知 识 产 权 局',
+        suffix: '20260917',
+      }),
+    ).toBe('国家知识产权局-20260917')
+
+    expect(
+      formatSplitFileName({
+        base: '复 审 无 效 宣 告 程 序 意 见 陈 述 书',
+        suffix: '20260917',
+      }),
+    ).toBe('复审无效宣告程序意见陈述书-20260917')
+
+    expect(
+      formatSplitFileName({
+        base: '证据６',
+        suffix: '20260917',
+      }),
+    ).toBe('证据6-20260917')
+
+    expect(
+      formatSplitFileName({
+        base: '证据１０',
+        suffix: '20260917',
+      }),
+    ).toBe('证据10-20260917')
+
+    expect(
+      formatSplitFileName({
+        base: '证据１７译文',
+        suffix: '20260917',
+      }),
+    ).toBe('证据17译文-20260917')
+
+    expect(
+      formatSplitFileName({
+        base: '证据 17 译文',
+        suffix: '20260917',
+      }),
+    ).toBe('证据17译文-20260917')
+
+    expect(
+      formatSplitFileName({
+        base: 'Exhibit 1 - Translation',
+        suffix: '20260917',
+      }),
+    ).toBe('Exhibit 1 - Translation-20260917')
+  })
 })

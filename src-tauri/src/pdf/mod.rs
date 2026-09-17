@@ -3,6 +3,7 @@ pub mod anti_ocr;
 pub mod artifacts;
 pub(crate) mod blank;
 pub(crate) mod bookmarks;
+pub(crate) mod chunked;
 pub(crate) mod cmap;
 pub mod compress;
 pub mod content_text;
@@ -18,6 +19,7 @@ pub mod page_info;
 pub mod preview;
 pub mod qpdf;
 pub(crate) mod qpdf_stream;
+pub mod signatures;
 pub mod split;
 pub(crate) mod text_utils;
 

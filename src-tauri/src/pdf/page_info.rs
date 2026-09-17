@@ -36,22 +36,46 @@ fn get_page_infos_with_qpdf(input: &str) -> Result<Vec<PageSize>> {
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
 
+    // 只拉 pages：页面框通常就在条目上；避免 --json 全量 dump 把扫描件对象打进内存。
     let output = crate::external::hidden_command(&bin)
-        .arg("--json")
+        .arg("--json=1")
+        .arg("--json-key=pages")
         .arg(input)
         .output()
-        .context("执行 qpdf --json 失败")?;
+        .context("执行 qpdf --json-key=pages 失败")?;
 
     if !super::qpdf::status_is_success(&output.status) {
         anyhow::bail!(
-            "qpdf --json 失败（{}）：{}",
+            "qpdf 读取页面尺寸失败（{}）：{}",
             bin.display(),
             crate::external::command_failure_detail(&output)
         );
     }
 
     let json: Value = serde_json::from_slice(&output.stdout).context("解析 qpdf JSON 失败")?;
-    parse_page_sizes(&json)
+    parse_page_sizes_from_pages_only(&json).context("qpdf pages 元数据缺少页面框")
+}
+
+/// 仅从 --json-key=pages 的输出解析尺寸；条目必须自带 cropBox/mediaBox。
+fn parse_page_sizes_from_pages_only(json: &Value) -> Result<Vec<PageSize>> {
+    let pages = json
+        .get("pages")
+        .and_then(Value::as_array)
+        .context("qpdf JSON 中无 pages 数组")?;
+    if pages.is_empty() {
+        anyhow::bail!("PDF 无页面");
+    }
+    let mut sizes = Vec::with_capacity(pages.len());
+    for (index, page) in pages.iter().enumerate() {
+        let size = page_size_from_page_entry(page).with_context(|| {
+            format!(
+                "第 {} 页缺少 CropBox/MediaBox，无法安全计算 A4 定位",
+                index + 1
+            )
+        })?;
+        sizes.push(size);
+    }
+    Ok(sizes)
 }
 
 fn get_page_infos_with_lopdf(input: &Path) -> Result<Vec<PageSize>> {

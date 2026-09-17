@@ -90,6 +90,31 @@ pub fn compress_pdf_with_progress(
     options: &CompressOptions,
     progress: &mut dyn FnMut(CompressProgress),
 ) -> Result<()> {
+    let page_count = super::qpdf::page_count(&input.to_string_lossy()).unwrap_or(0);
+    if page_count > 0 && super::chunked::should_chunk(input, page_count) {
+        progress(CompressProgress::phase("大文件分段压缩"));
+        super::chunked::process_pdf_chunked(input, output, page_count, |chunk_in, chunk_out, index, start, end| {
+            progress(CompressProgress::item(
+                "压缩分段",
+                index + 1,
+                ((page_count + super::chunked::CHUNK_SIZE_PAGES - 1)
+                    / super::chunked::CHUNK_SIZE_PAGES) as usize,
+            ));
+            log::info!("压缩分段 {start}-{end}");
+            compress_pdf_whole(chunk_in, chunk_out, options, &mut |_| {})
+        })?;
+        progress(CompressProgress::done());
+        return Ok(());
+    }
+    compress_pdf_whole(input, output, options, progress)
+}
+
+fn compress_pdf_whole(
+    input: &Path,
+    output: &Path,
+    options: &CompressOptions,
+    progress: &mut dyn FnMut(CompressProgress),
+) -> Result<()> {
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
 
     let image_ids = collect_image_xobjects(&doc);

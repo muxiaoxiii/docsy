@@ -28,7 +28,7 @@ export function isFirstPageEvidenceCandidate(candidate) {
   if (pageStart !== 1) return false
   if (candidate?.labels?.includes?.('evidence-label')) return true
   const texts = [candidate?.normalizedText, candidate?.text].filter(Boolean)
-  return texts.some((t) => /^(证据|对比文件)\s*[0-9一二三四五六七八九十百千]+/.test(String(t).trim()))
+  return texts.some((t) => /^(证据|对比文件)\s*[0-9０-９a-zA-Z一二三四五六七八九十百千]+/.test(String(t).trim()))
 }
 
 export function useEvidencePdfDetection({

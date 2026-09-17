@@ -380,6 +380,14 @@ pub async fn has_pdf_bookmarks(input: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub async fn detect_pdf_signatures(
+    input: String,
+) -> Result<crate::pdf::signatures::SignatureInspection, String> {
+    run_blocking(move || crate::pdf::signatures::inspect_signatures(std::path::Path::new(&input)))
+        .await
+}
+
+#[tauri::command]
 pub async fn remove_pdf_bookmarks(input: String) -> Result<(), String> {
     run_blocking(move || {
         crate::pdf::header_footer::remove_pdf_bookmarks(std::path::Path::new(&input))

@@ -7,6 +7,36 @@ export function todayCompact(date = new Date()) {
   return `${yyyy}${mm}${dd}`
 }
 
+export function cleanSplitBaseName(name) {
+  let str = String(name || '')
+  // 1. 全角数字转半角
+  str = str.replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xff10 + 0x30))
+  // 2. 全角英文字母转半角
+  str = str.replace(/[Ａ-Ｚ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xff21 + 0x41))
+  str = str.replace(/[ａ-ｚ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xff41 + 0x61))
+  // 3. 折叠连续空白为单个空格
+  str = str.replace(/\s+/g, ' ').trim()
+  // 4. 去除汉字(CJK)与汉字之间的空格（覆盖扩展区所有汉字）
+  while (/([\p{Script=Han}])\s+([\p{Script=Han}])/u.test(str)) {
+    str = str.replace(/([\p{Script=Han}])\s+([\p{Script=Han}])/gu, '$1$2')
+  }
+  // 5. 去除汉字与数字/字母间的空格
+  while (/([\p{Script=Han}])\s+([0-9a-zA-Z])/u.test(str)) {
+    str = str.replace(/([\p{Script=Han}])\s+([0-9a-zA-Z])/gu, '$1$2')
+  }
+  while (/([0-9a-zA-Z])\s+([\p{Script=Han}])/u.test(str)) {
+    str = str.replace(/([0-9a-zA-Z])\s+([\p{Script=Han}])/gu, '$1$2')
+  }
+  // 6. 去除汉字/数字与标点间的空格
+  while (/([\p{Script=Han}0-9a-zA-Z])\s+([（）()【】\[\]《》、，。：:])/u.test(str)) {
+    str = str.replace(/([\p{Script=Han}0-9a-zA-Z])\s+([（）()【】\[\]《》、，。：:])/gu, '$1$2')
+  }
+  while (/([（）()【】\[\]《》、，。：:])\s+([\p{Script=Han}0-9a-zA-Z])/u.test(str)) {
+    str = str.replace(/([（）()【】\[\]《》、，。：:])\s+([\p{Script=Han}0-9a-zA-Z])/gu, '$1$2')
+  }
+  return str.trim()
+}
+
 export function formatSplitFileName({
   base,
   index = 0,
@@ -16,7 +46,8 @@ export function formatSplitFileName({
   separator = '-',
   customSeparator = '',
 }) {
-  const fallback = String(base || `文件${index + 1}`).trim() || `文件${index + 1}`
+  const cleanedBase = cleanSplitBaseName(base)
+  const fallback = cleanedBase || `文件${index + 1}`
   const parts = [
     expandSplitNameTokens(prefix, index, dateValue),
     expandSplitNameTokens(fallback, index, dateValue),

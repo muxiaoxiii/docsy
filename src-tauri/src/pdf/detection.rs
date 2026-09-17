@@ -385,9 +385,21 @@ pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestio
         page_number_footer_pages,
         warnings,
         items,
-        cleanup_candidates: detection.header_candidates.into_iter()
+        cleanup_candidates: detection
+            .header_candidates
+            .into_iter()
             .chain(detection.footer_candidates)
-            .filter(|candidate| candidate.source == "artifact")
+            .filter(|candidate| {
+                // artifact 始终展示；evidence-label / page-number 有业务语义；
+                // repeating 已要求 position_stable 与最小重复次数，不再叠加置信度门槛，
+                // 避免大文件里稀疏但稳定的公文页眉被滤掉。
+                candidate.source == "artifact"
+                    || candidate.repeating
+                    || candidate
+                        .labels
+                        .iter()
+                        .any(|label| label == "evidence-label" || label == "page-number")
+            })
             .collect(),
     })
 }
@@ -1593,10 +1605,18 @@ fn split_page_number_sequence<'a>(
 /// Extract the denominator (total) from a page number string like "1/3 页" or "2/13".
 /// Returns None if the text doesn't contain a "/" total separator.
 fn parsed_page_number_total(text: &str) -> Option<u32> {
+    let normalized = text
+        .replace('／', "/")
+        .chars()
+        .map(|ch| match ch {
+            '０'..='９' => char::from_u32(ch as u32 - '０' as u32 + '0' as u32).unwrap_or(ch),
+            _ => ch,
+        })
+        .collect::<String>();
     static RE_SLASH_TOTAL: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\d+\s*/\s*(\d+)").expect("valid slash-total regex"));
     RE_SLASH_TOTAL
-        .captures(text)
+        .captures(&normalized)
         .and_then(|caps| caps.get(1)?.as_str().parse().ok())
 }
 
@@ -1755,9 +1775,67 @@ fn is_noise(text: &str, normalized_text: &str) -> bool {
 /// (e.g. "证据1（合同）").
 fn is_evidence_label_text(normalized_text: &str) -> bool {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^(证据|对比文件)\s*[0-9A-Za-z一二三四五六七八九十百千]+").unwrap()
+        Regex::new(r"^(证据|对比文件)\s*[0-9０-９A-Za-z一二三四五六七八九十百千]+").unwrap()
     });
     RE.is_match(normalized_text.trim())
+}
+
+/// 对拆分页段名称进行规范化清洗：
+/// 1. 全角数字、全角英文字母转为半角；
+/// 2. 剔除中文字符（CJK）与中文字符之间的排版空格（如“国 家 知 识 产 权 局” -> “国家知识产权局”）；
+/// 3. 剔除中文字符与数字/字母间的空格（如“证据 6” -> “证据6”，“6 译文” -> “6译文”）；
+/// 4. 剔除中文字符/数字与常见括号等标点之间的多余空格；
+/// 5. 英文单词之间保留单空格（如“Exhibit 1”）。
+pub fn normalize_split_item_name(text: &str) -> String {
+    let converted: String = text
+        .chars()
+        .map(|ch| match ch {
+            '０'..='９' => char::from_u32(ch as u32 - '０' as u32 + '0' as u32).unwrap_or(ch),
+            'Ａ'..='Ｚ' => char::from_u32(ch as u32 - 'Ａ' as u32 + 'A' as u32).unwrap_or(ch),
+            'ａ'..='ｚ' => char::from_u32(ch as u32 - 'ａ' as u32 + 'a' as u32).unwrap_or(ch),
+            _ => ch,
+        })
+        .collect();
+
+    let collapsed = converted
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    static RE_HAN_SPACE_HAN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([\p{sc=Han}])\s+([\p{sc=Han}])").unwrap()
+    });
+    static RE_HAN_SPACE_NUM: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([\p{sc=Han}])\s+([0-9A-Za-z])").unwrap()
+    });
+    static RE_NUM_SPACE_HAN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([0-9A-Za-z])\s+([\p{sc=Han}])").unwrap()
+    });
+    static RE_HAN_PUNCT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([\p{sc=Han}0-9A-Za-z])\s+([（）()【】\[\]《》、，。：:])").unwrap()
+    });
+    static RE_PUNCT_HAN: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"([（）()【】\[\]《》、，。：:])\s+([\p{sc=Han}0-9A-Za-z])").unwrap()
+    });
+
+    let mut res = collapsed;
+    while RE_HAN_SPACE_HAN.is_match(&res) {
+        res = RE_HAN_SPACE_HAN.replace_all(&res, "$1$2").to_string();
+    }
+    while RE_HAN_SPACE_NUM.is_match(&res) {
+        res = RE_HAN_SPACE_NUM.replace_all(&res, "$1$2").to_string();
+    }
+    while RE_NUM_SPACE_HAN.is_match(&res) {
+        res = RE_NUM_SPACE_HAN.replace_all(&res, "$1$2").to_string();
+    }
+    while RE_HAN_PUNCT.is_match(&res) {
+        res = RE_HAN_PUNCT.replace_all(&res, "$1$2").to_string();
+    }
+    while RE_PUNCT_HAN.is_match(&res) {
+        res = RE_PUNCT_HAN.replace_all(&res, "$1$2").to_string();
+    }
+
+    res.trim().to_string()
 }
 
 fn build_split_suggestions_from_pages(pages: &[PageDetection]) -> Vec<SplitSuggestionItem> {
@@ -1887,7 +1965,14 @@ fn eligible_split_header(
 /// 基于三层检测结果生成拆分建议（与分项证据处理共用同一套候选）。
 fn build_split_suggestions(detection: &DetectionResult) -> Vec<SplitSuggestionItem> {
     let base_items = build_split_suggestions_from_candidates(detection);
-    organize_splits_around_evidence_labels(detection, base_items)
+    let items = organize_splits_around_evidence_labels(detection, base_items);
+    items
+        .into_iter()
+        .map(|mut item| {
+            item.name = normalize_split_item_name(&item.name);
+            item
+        })
+        .collect()
 }
 
 /// 先按普通 artifact / 重复页眉生成基础页段；若存在强证据标签，后续会
@@ -3715,5 +3800,33 @@ mod tests {
                 result.footer_candidates.len(),
             );
         }
+    }
+
+    #[test]
+    fn test_normalize_split_item_name() {
+        assert_eq!(
+            normalize_split_item_name("国 家 知 识 产 权 局"),
+            "国家知识产权局"
+        );
+        assert_eq!(
+            normalize_split_item_name("复 审 无 效 宣 告 程 序 意 见 陈 述 书"),
+            "复审无效宣告程序意见陈述书"
+        );
+        assert_eq!(normalize_split_item_name("证据６"), "证据6");
+        assert_eq!(normalize_split_item_name("证据 ６"), "证据6");
+        assert_eq!(normalize_split_item_name("证据１０"), "证据10");
+        assert_eq!(normalize_split_item_name("证据１７译文"), "证据17译文");
+        assert_eq!(normalize_split_item_name("证据 17 译文"), "证据17译文");
+        assert_eq!(
+            normalize_split_item_name("Exhibit 1 - Translation"),
+            "Exhibit 1 - Translation"
+        );
+    }
+
+    #[test]
+    fn test_evidence_label_fullwidth() {
+        assert!(is_evidence_label_text("证据６"));
+        assert!(is_evidence_label_text("证据１０"));
+        assert!(is_evidence_label_text("对比文件３"));
     }
 }

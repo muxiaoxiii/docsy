@@ -19,6 +19,10 @@ pub struct SplitMergedArgs {
     remove_blank_pages: bool,
     #[serde(default)]
     cleanup_targets: Vec<SplitCleanupTarget>,
+    #[serde(default)]
+    header_zone_mm: Option<f32>,
+    #[serde(default)]
+    footer_zone_mm: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -28,6 +32,24 @@ struct SplitCleanupTarget {
     normalized_text: String,
     page_start: u32,
     page_end: u32,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    bbox: Option<SplitCleanupBBox>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SplitCleanupBBox {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    page: u32,
+    width: f32,
+    height: f32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -84,48 +106,137 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
     std::fs::create_dir_all(&args.output_dir).context("创建拆分输出目录失败")?;
 
     let total_pages = super::qpdf::page_count(&args.input_path)?;
-    let warnings = validate_split_layout(&args.items, total_pages);
+    let mut warnings = validate_split_layout(&args.items, total_pages);
     let blank_pages = if args.remove_blank_pages {
         detect_blank_pages(&args.input_path)?
     } else {
         BTreeSet::new()
     };
-    let mut plan = super::artifacts::HeaderFooterArtifactEditPlan::default();
-    let inspection = if args.cleanup_targets.is_empty() { None } else {
-        Some(super::artifacts::inspect_meaningful_header_footer_artifacts(Path::new(&args.input_path), 0)?)
+    let mut artifact_plan = super::artifacts::HeaderFooterArtifactEditPlan::default();
+    let mut plain_header_targets = Vec::new();
+    let mut plain_footer_targets = Vec::new();
+
+    let has_artifact_targets = args
+        .cleanup_targets
+        .iter()
+        .any(|t| t.source.as_deref() == Some("artifact"));
+    let inspection = if has_artifact_targets {
+        Some(super::artifacts::inspect_meaningful_header_footer_artifacts(
+            Path::new(&args.input_path),
+            0,
+        )?)
+    } else {
+        None
     };
+
     for target in &args.cleanup_targets {
-        if target.normalized_text.trim().is_empty() || target.page_start == 0
-            || target.page_end < target.page_start || target.page_end > total_pages {
+        if target.normalized_text.trim().is_empty()
+            || target.page_start == 0
+            || target.page_end < target.page_start
+            || target.page_end > total_pages
+        {
             anyhow::bail!("清除元素的文本或页码范围无效，请重新检测");
         }
-        let edit = super::artifacts::HeaderFooterArtifactEditTarget {
-            normalized_text: target.normalized_text.clone(),
-            page_start: target.page_start,
-            page_end: target.page_end,
-            ..Default::default()
+
+        let is_artifact = target.source.as_deref() == Some("artifact");
+        if is_artifact {
+            let edit = super::artifacts::HeaderFooterArtifactEditTarget {
+                normalized_text: target.normalized_text.clone(),
+                page_start: target.page_start,
+                page_end: target.page_end,
+                ..Default::default()
+            };
+            if !inspection.as_ref().is_some_and(|inspection| {
+                inspection.occurrences.iter().any(|occurrence| {
+                    occurrence.region == target.region
+                        && super::artifacts::artifact_occurrence_matches_target(occurrence, &edit)
+                })
+            }) {
+                anyhow::bail!("所选标准水印元素已失配，请重新检测；未输出拆分文件");
+            }
+            match target.region.as_str() {
+                "header" => {
+                    artifact_plan.remove_header = true;
+                    artifact_plan.header_targets.push(edit);
+                }
+                "footer" => {
+                    artifact_plan.remove_footer = true;
+                    artifact_plan.footer_targets.push(edit);
+                }
+                _ => anyhow::bail!("清除元素区域无效"),
+            }
+        } else {
+            let raw_text = target
+                .text
+                .as_deref()
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or(&target.normalized_text);
+            let plain_target = super::content_text::PlainTextTarget {
+                text: raw_text.to_string(),
+                normalized_text: target.normalized_text.clone(),
+                page_start: target.page_start,
+                page_end: target.page_end,
+                bbox: target.bbox.map(|b| super::content_text::PlainTextTargetBBox {
+                    x0: b.x0,
+                    y0: b.y0,
+                    x1: b.x1,
+                    y1: b.y1,
+                    page: b.page,
+                    width: b.width,
+                    height: b.height,
+                }),
+            };
+            match target.region.as_str() {
+                "header" => plain_header_targets.push(plain_target),
+                "footer" => plain_footer_targets.push(plain_target),
+                _ => anyhow::bail!("清除元素区域无效"),
+            }
+        }
+    }
+
+    let mut current_source = args.input_path.clone();
+    let mut total_removed_headers = 0;
+    let mut total_removed_footers = 0;
+    let mut _temp_guards: Vec<crate::util::fs::TempPathGuard> = Vec::new();
+
+    if artifact_plan.remove_header || artifact_plan.remove_footer {
+        if let Some((path, stats)) = super::artifacts::edit_header_footer_artifacts_to_temp(
+            &current_source,
+            &artifact_plan,
+        )? {
+            total_removed_headers += stats.removed_header;
+            total_removed_footers += stats.removed_footer;
+            current_source = path.to_string_lossy().into_owned();
+            _temp_guards.push(crate::util::fs::TempPathGuard::new(path));
+        }
+    }
+
+    if !plain_header_targets.is_empty() || !plain_footer_targets.is_empty() {
+        let header_zone_mm = args.header_zone_mm.unwrap_or(35.0).clamp(10.0, 100.0);
+        let footer_zone_mm = args.footer_zone_mm.unwrap_or(35.0).clamp(10.0, 100.0);
+        let plain_plan = super::content_text::PlainTextCleanupPlan {
+            header_targets: plain_header_targets,
+            footer_targets: plain_footer_targets,
+            header_zone_mm,
+            footer_zone_mm,
         };
-        if !inspection.as_ref().is_some_and(|inspection| inspection.occurrences.iter().any(|occurrence|
-            occurrence.region == target.region && super::artifacts::artifact_occurrence_matches_target(occurrence, &edit)
-        )) {
-            anyhow::bail!("所选元素已失配，请重新检测；未输出拆分文件");
+        let mut plain_removed = 0;
+        if let Some((path, stats)) = super::content_text::delete_plain_header_footer_to_temp(
+            &current_source,
+            &plain_plan,
+        )? {
+            plain_removed = stats.removed();
+            total_removed_headers += stats.removed_header;
+            total_removed_footers += stats.removed_footer;
+            current_source = path.to_string_lossy().into_owned();
+            _temp_guards.push(crate::util::fs::TempPathGuard::new(path));
         }
-        match target.region.as_str() {
-            "header" => { plan.remove_header = true; plan.header_targets.push(edit); }
-            "footer" => { plan.remove_footer = true; plan.footer_targets.push(edit); }
-            _ => anyhow::bail!("清除元素区域无效"),
+        if plain_removed == 0 {
+            warnings.push("已勾选清除普通文本页眉/页脚，但在对应页段内容流中未匹配到可安全剔除的文字，原文未修改".to_string());
         }
     }
-    let cleaned = super::artifacts::edit_header_footer_artifacts_to_temp(&args.input_path, &plan)?;
-    if !args.cleanup_targets.is_empty() && cleaned.is_none() {
-        anyhow::bail!("所选标准元素未匹配到可删除内容，请重新检测；未输出拆分文件");
-    }
-    let (cleaned_guard, removed_headers, removed_footers) = match cleaned {
-        Some((path, stats)) => (Some(crate::util::fs::TempPathGuard::new(path)), stats.removed_header, stats.removed_footer),
-        None => (None, 0, 0),
-    };
-    let source = cleaned_guard.as_ref().map(|guard| guard.path().to_string_lossy().into_owned())
-        .unwrap_or_else(|| args.input_path.clone());
+
+    let source = current_source;
     let mut outputs = Vec::new();
     let mut failed = Vec::new();
 
@@ -154,8 +265,8 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
         warnings,
         outputs,
         failed,
-        removed_headers,
-        removed_footers,
+        removed_headers: total_removed_headers,
+        removed_footers: total_removed_footers,
     })
 }
 
@@ -238,10 +349,11 @@ fn extract_range(
         .arg(selection)
         .arg("--")
         .arg(&output_path);
-    let status = cmd.status().context("执行 qpdf 页段拆分失败")?;
+    let output = cmd.output().context("执行 qpdf 页段拆分失败")?;
 
-    if !super::qpdf::status_is_success(&status) {
-        anyhow::bail!("qpdf 页段拆分失败");
+    if !super::qpdf::status_is_success(&output.status) {
+        let detail = crate::external::command_failure_detail(&output);
+        anyhow::bail!("qpdf 页段拆分失败: {detail}");
     }
     Ok((
         output_path.to_string_lossy().to_string(),
@@ -249,31 +361,28 @@ fn extract_range(
     ))
 }
 
-/// 检测 PDF 中"无可视内容"的空白页（无文本、无图像绘制）。
+/// 检测 PDF 中"无可视内容"的空白页（无文本、无图像、无矢量路径绘制）。
 ///
-/// 判定规则：页面内容流中没有任何文本算子（Tj/TJ/'/"）、
-/// 图像绘制算子（Do / 内联图像 BI/ID）即视为空白页，覆盖：
-/// 分隔页、双面扫描的背面、仅白色填充的扫描空白页等。
+/// 流式实现：仅通过 qpdf 拉取页面元数据与内容流，不整档载入扫描件图像对象。
+/// 判定规则：页面内容流中没有任何文本算子、图像绘制算子（Do/BI/ID/EI）
+/// 或矢量路径构造与着色算子（re/m/l/c/v/y/h/f/F/f*/S/s/B/B*/b/b*/sh）即视为空白页。
 /// 内容流解析失败时保守视为有内容，避免误删。
 fn detect_blank_pages(input: &str) -> Result<BTreeSet<u32>> {
-    let doc = lopdf::Document::load(input).context("读取 PDF 分析空白页失败")?;
-    let mut blank = BTreeSet::new();
-    for (page_number, page_id) in doc.get_pages() {
-        let has_visible_content = match doc.get_and_decode_page_content(page_id) {
-            Ok(content) => content.operations.iter().any(operation_is_visible),
-            Err(_) => true,
-        };
-        if !has_visible_content {
-            blank.insert(page_number);
-        }
-    }
-    Ok(blank)
+    super::qpdf_stream::detect_blank_pages_streaming(Path::new(input))
+        .context("读取 PDF 分析空白页失败")
 }
 
-fn operation_is_visible(operation: &lopdf::content::Operation) -> bool {
+pub(crate) fn operation_is_visible(operation: &lopdf::content::Operation) -> bool {
     matches!(
         operation.operator.as_str(),
-        "Tj" | "TJ" | "'" | "\"" | "Do" | "BI" | "ID"
+        // 文本输出
+        "Tj" | "TJ" | "'" | "\"" |
+        // XObject 与图像
+        "Do" | "BI" | "ID" | "EI" |
+        // 矢量路径构建（矩形、点线、曲线、闭合）
+        "re" | "m" | "l" | "c" | "v" | "y" | "h" |
+        // 矢量路径绘制（填充、描边、着色、网格）
+        "f" | "F" | "f*" | "S" | "s" | "B" | "B*" | "b" | "b*" | "sh"
     )
 }
 
@@ -291,7 +400,7 @@ mod tests {
         let mut args: super::SplitMergedArgs = serde_json::from_value(serde_json::json!({
             "inputPath": input, "outputDir": output,
             "items": [{"name": "cleaned", "pageStart": 1, "pageEnd": pages}],
-            "cleanupTargets": [{"region": "footer", "normalizedText": footer.text, "pageStart": footer.page, "pageEnd": footer.page}],
+            "cleanupTargets": [{"region": "footer", "source": "artifact", "normalizedText": footer.text, "pageStart": footer.page, "pageEnd": footer.page}],
         })).unwrap();
         let result = super::split_merged(&args).unwrap();
         assert!(result.failed.is_empty());
@@ -336,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn operation_visibility_classifies_text_and_images() {
+    fn operation_visibility_classifies_text_images_and_vectors() {
         use lopdf::content::Operation;
         assert!(operation_is_visible(&Operation::new("Tj", vec![])));
         assert!(operation_is_visible(&Operation::new("TJ", vec![])));
@@ -344,10 +453,13 @@ mod tests {
         assert!(operation_is_visible(&Operation::new("\"", vec![])));
         assert!(operation_is_visible(&Operation::new("Do", vec![])));
         assert!(operation_is_visible(&Operation::new("BI", vec![])));
-        assert!(!operation_is_visible(&Operation::new("re", vec![])));
-        assert!(!operation_is_visible(&Operation::new("f", vec![])));
+        assert!(operation_is_visible(&Operation::new("re", vec![])));
+        assert!(operation_is_visible(&Operation::new("f", vec![])));
+        assert!(operation_is_visible(&Operation::new("S", vec![])));
         assert!(!operation_is_visible(&Operation::new("cm", vec![])));
         assert!(!operation_is_visible(&Operation::new("q", vec![])));
+        assert!(!operation_is_visible(&Operation::new("Q", vec![])));
+        assert!(!operation_is_visible(&Operation::new("BT", vec![])));
         assert!(!operation_is_visible(&Operation::new("ET", vec![])));
     }
 
@@ -492,6 +604,8 @@ mod tests {
             }],
             remove_blank_pages: true,
             cleanup_targets: vec![],
+            header_zone_mm: None,
+            footer_zone_mm: None,
         })
         .expect("拆分失败");
 

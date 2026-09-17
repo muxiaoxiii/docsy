@@ -8,7 +8,10 @@ vi.mock('../../../core/tauriBridge.js', () => ({
   showLoading: vi.fn(), hideLoading: vi.fn(), emitOperationUpdate: vi.fn(),
 }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
-vi.mock('element-plus', () => ({ ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() }, ElMessageBox: {} }))
+vi.mock('element-plus', () => ({
+  ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+  ElMessageBox: { confirm: vi.fn().mockResolvedValue('confirm') },
+}))
 
 function setup() {
   const state = {
@@ -26,7 +29,16 @@ function setup() {
 }
 
 describe('合并证据拆分导入', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // 默认：无电子签章，不弹确认框
+    tauriCallSafe.mockImplementation(async (command) => {
+      if (command === 'detect_pdf_signatures') {
+        return { ok: true, data: { hasSignatures: false, count: 0, summary: '未检测到电子签名' } }
+      }
+      return { ok: false, error: `unexpected command ${command}` }
+    })
+  })
 
   it('导入不自动扫描，手动检测后生成拆分页段', async () => {
     tauriCallSafe.mockResolvedValueOnce({ ok: true, data: 10 }).mockResolvedValueOnce({
@@ -76,12 +88,21 @@ describe('合并证据拆分导入', () => {
       { selected: true, region: 'footer', normalizedText: '第 {page} 页', pageRange: { start: 1, end: 10 } },
       { selected: false, region: 'header', normalizedText: '证据1', pageRange: { start: 1, end: 10 } },
     ] }
-    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: { outputs: [{ name: '证据1', pageStart: 1, pageEnd: 10, removedBlankPages: 2, outputPath: '/out/1.pdf' }], failed: [], warnings: [] } })
+    tauriCallSafe.mockImplementation(async (command) => {
+      if (command === 'detect_pdf_signatures') {
+        return { ok: true, data: { hasSignatures: false, count: 0, summary: '未检测到电子签名' } }
+      }
+      if (command === 'split_merged_evidence_pdf') {
+        return { ok: true, data: { outputs: [{ name: '证据1', pageStart: 1, pageEnd: 10, removedBlankPages: 2, outputPath: '/out/1.pdf' }], failed: [], warnings: [] } }
+      }
+      return { ok: false, error: `unexpected ${command}` }
+    })
     await api.executeMergedImportPlan()
     expect(state.overlayFiles.value[0].pages).toBe(8)
-    expect(tauriCallSafe.mock.calls[0][1].args.cleanupTargets).toEqual([{ region: 'footer', normalizedText: '第 {page} 页', pageStart: 1, pageEnd: 10 }])
+    expect(tauriCallSafe.mock.calls.find(([cmd]) => cmd === 'split_merged_evidence_pdf')[1].args.cleanupTargets).toMatchObject([
+      { region: 'footer', normalizedText: '第 {page} 页', pageStart: 1, pageEnd: 10 },
+    ])
     expect(state.mergedImportPlan.value).toBeNull()
-    expect(tauriCallSafe).toHaveBeenCalledTimes(1)
   })
 
   it('检测期间禁止取消页段和执行拆分', async () => {
@@ -155,7 +176,10 @@ describe('合并证据拆分导入', () => {
     first.detectionAttempted = second.detectionAttempted = true
     first.cleanupCandidates = [{ selected: true, region: 'header', normalizedText: '甲', pageRange: { start: 1, end: 10 } }]
     const requests = []
-    tauriCallSafe.mockImplementation(async (_command, { args }) => {
+    tauriCallSafe.mockImplementation(async (command, { args }) => {
+      if (command === 'detect_pdf_signatures') {
+        return { ok: true, data: { hasSignatures: false, count: 0, summary: '未检测到电子签名' } }
+      }
       requests.push(args)
       return { ok: true, data: { outputs: [{ ...args.items[0], outputPath: args.outputDir + '/证据.pdf' }] } }
     })
@@ -180,16 +204,30 @@ describe('合并证据拆分导入', () => {
       { name: '证据1', pageStart: 1, pageEnd: 4 },
       { name: '证据2', pageStart: 5, pageEnd: 10 },
     ]
-    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: {
-      outputs: [{ name: '证据2', pageStart: 5, pageEnd: 10, outputPath: '/out/2.pdf' }],
-      failed: ['证据1：磁盘写入失败'],
-    } })
+    tauriCallSafe.mockImplementation(async (command) => {
+      if (command === 'detect_pdf_signatures') {
+        return { ok: true, data: { hasSignatures: false, count: 0, summary: '未检测到电子签名' } }
+      }
+      if (command === 'split_merged_evidence_pdf') {
+        return { ok: true, data: {
+          outputs: [{ name: '证据2', pageStart: 5, pageEnd: 10, outputPath: '/out/2.pdf' }],
+          failed: ['证据1：磁盘写入失败'],
+        } }
+      }
+      return { ok: false, error: `unexpected ${command}` }
+    })
     await api.executeMergedImportPlan()
     expect(plan.splitStatus).toBe('partial')
     state.splitNamePrefix.value = '不应改变重试请求'
-    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: {
-      outputs: [{ name: '证据1', pageStart: 1, pageEnd: 4, outputPath: '/out/1.pdf' }],
-    } })
+    tauriCallSafe.mockImplementation(async (command, { args }) => {
+      if (command === 'detect_pdf_signatures') {
+        return { ok: true, data: { hasSignatures: false, count: 0, summary: '未检测到电子签名' } }
+      }
+      expect(args.items).toEqual([{ name: '证据1', pageStart: 1, pageEnd: 4, source: 'unknown' }])
+      return { ok: true, data: {
+        outputs: [{ name: '证据1', pageStart: 1, pageEnd: 4, outputPath: '/out/1.pdf' }],
+      } }
+    })
     await api.executeMergedImportPlan()
     expect(tauriCallSafe.mock.lastCall[1].args.items).toEqual([{ name: '证据1', pageStart: 1, pageEnd: 4, source: 'unknown' }])
     expect(plan.outputs.map(output => output.pageStart)).toEqual([1, 5])

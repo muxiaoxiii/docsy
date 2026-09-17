@@ -49,6 +49,39 @@ pub fn delete_annotations_file(
         }
     }
 
+    let page_count = super::qpdf::page_count(input_path).unwrap_or(0);
+    if page_count > 0 && super::chunked::should_chunk(input, page_count) {
+        let mut removed = 0_usize;
+        let mut pages_touched = 0_usize;
+        super::chunked::process_pdf_chunked(input, output, page_count, |chunk_in, chunk_out, _, _, _| {
+            let chunk_out_str = chunk_out.to_string_lossy().to_string();
+            let result = delete_annotations_whole(
+                &chunk_in.to_string_lossy(),
+                &chunk_out_str,
+                kinds,
+            )?;
+            removed += result.removed;
+            pages_touched += result.pages_touched;
+            Ok(())
+        })?;
+        return Ok(DeleteAnnotationsResult {
+            input_path: input_path.to_string(),
+            output_path: output_path.to_string(),
+            removed,
+            pages_touched,
+        });
+    }
+
+    delete_annotations_whole(input_path, output_path, kinds)
+}
+
+fn delete_annotations_whole(
+    input_path: &str,
+    output_path: &str,
+    kinds: &[String],
+) -> Result<DeleteAnnotationsResult> {
+    let input = Path::new(input_path);
+    let output = Path::new(output_path);
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
     let targets = AnnotationKinds::from_user_values(kinds);
     let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();

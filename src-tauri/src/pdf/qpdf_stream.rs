@@ -53,6 +53,8 @@ impl QpdfObjectIndex {
             .arg("--json=1")
             .arg("--json-key=pages")
             .arg("--json-key=objects")
+            // 索引只需要字典/引用关系；扫描件图像流体积巨大，禁止内联以免整档进内存。
+            .arg("--json-stream-data=none")
             .arg(input)
             .output()
             .context("读取 qpdf 内容流索引失败")?;
@@ -474,6 +476,96 @@ pub(crate) fn object_selector(reference: &str) -> Option<String> {
     let object = parts.next()?.parse::<u32>().ok()?;
     let generation = parts.next()?.parse::<u16>().ok()?;
     Some(format!("{object},{generation}"))
+}
+
+/// 仅拉取 pages 元数据（不含 objects），避免扫描件把图像对象整档载入内存。
+pub(crate) fn load_pages_metadata(input: &Path) -> Result<Vec<(u32, Vec<String>)>> {
+    let qpdf_bin = crate::external::QpdfTool.binary_path()?;
+    let output = crate::external::hidden_command(qpdf_bin)
+        .arg("--json=1")
+        .arg("--json-key=pages")
+        .arg(input)
+        .output()
+        .context("读取 qpdf 页面元数据失败")?;
+    if !super::qpdf::status_is_success(&output.status) {
+        anyhow::bail!(
+            "qpdf 页面元数据失败：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let json: Value = serde_json::from_slice(&output.stdout).context("解析 qpdf 页面元数据失败")?;
+    let raw_pages = json
+        .get("pages")
+        .and_then(Value::as_array)
+        .context("qpdf 页面元数据缺少 pages")?;
+    Ok(raw_pages
+        .iter()
+        .enumerate()
+        .map(|(page_index, page)| {
+            let contents = page
+                .get("contents")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            ((page_index as u32) + 1, contents)
+        })
+        .collect())
+}
+
+/// 流式检测空白页：只加载各页内容流，不载入图像/XObject 等大对象。
+/// 判定与整档 lopdf 路径一致：无文本/图像/矢量可见算子即空白；解析失败保守视为有内容。
+pub(crate) fn detect_blank_pages_streaming(input: &Path) -> Result<BTreeSet<u32>> {
+    let pages = load_pages_metadata(input)?;
+    let mut content_refs: Vec<String> = Vec::new();
+    let mut page_contents: Vec<(u32, Vec<String>)> = Vec::with_capacity(pages.len());
+    for (number, contents) in pages {
+        for reference in &contents {
+            if !content_refs.contains(reference) {
+                content_refs.push(reference.clone());
+            }
+        }
+        page_contents.push((number, contents));
+    }
+
+    let streams = load_raw_streams(input, &content_refs, "分析空白页")?;
+    let mut blank = BTreeSet::new();
+    for (number, contents) in page_contents {
+        if contents.is_empty() {
+            blank.insert(number);
+            continue;
+        }
+        let mut has_visible = false;
+        let mut decode_failed = false;
+        for reference in &contents {
+            let Some(bytes) = streams.get(reference) else {
+                decode_failed = true;
+                break;
+            };
+            match lopdf::content::Content::decode(bytes) {
+                Ok(content) => {
+                    if content
+                        .operations
+                        .iter()
+                        .any(super::split::operation_is_visible)
+                    {
+                        has_visible = true;
+                        break;
+                    }
+                }
+                Err(_) => {
+                    decode_failed = true;
+                    break;
+                }
+            }
+        }
+        if !has_visible && !decode_failed {
+            blank.insert(number);
+        }
+    }
+    Ok(blank)
 }
 
 pub(crate) fn load_editable_streams(
