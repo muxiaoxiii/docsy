@@ -901,6 +901,7 @@
       width="820px"
       append-to-body
       :close-on-click-modal="false"
+      :before-close="cancelKeepConflictConfirm"
     >
       <div class="keep-conflict-dialog-body">
         <el-alert
@@ -1134,6 +1135,7 @@ import {
   createDefaultNumberingDefaults,
   createDefaultPageNumberGroup,
   createEvidenceFile,
+  clearStaleKeepInsertFlags,
   detectKeepInsertConflicts,
   effectiveHeaderNumbering,
   effectivePageNumbering,
@@ -2958,12 +2960,13 @@ function batchSetKeepConflictAction(action) {
   })
 }
 
-function cancelKeepConflictConfirm() {
+function cancelKeepConflictConfirm(done) {
   keepConflictDialogVisible.value = false
   if (keepConflictResolver) {
     keepConflictResolver(false)
     keepConflictResolver = null
   }
+  if (typeof done === 'function') done()
 }
 
 function confirmKeepConflictDecisions() {
@@ -2999,6 +3002,7 @@ function confirmKeepConflictDecisions() {
 }
 
 async function checkAndConfirmKeepInsertConflicts(files, rules) {
+  clearStaleKeepInsertFlags(files)
   const conflicts = detectKeepInsertConflicts(files, rules)
   if (!conflicts.length) return true
   return await openKeepConflictConfirmDialog(conflicts)
@@ -3210,8 +3214,18 @@ async function applyHeaderFooter() {
     if (merge?.status === 'done') {
       const cleanupText =
         merge.outputMode === 'merge_only' ? `，已清理 ${merge.removedIntermediates || 0} 个中间副本` : ''
-      const msg = `已完成 ${successCount} 个 PDF，并已合并${cleanupText}`
-      ElNotification({ title: '处理完成', message: msg, type: 'success', duration: 0 })
+      if (failedCount > 0) {
+        const failedFileNames = (result.data.failed || [])
+          .map((f) => fileName(f.path))
+          .filter(Boolean)
+          .join('、')
+        const failSuffix = failedFileNames ? `（失败文件：${failedFileNames}）` : ''
+        const msg = merge.message || `已完成并合并 ${successCount} 个 PDF，失败 ${failedCount} 个${failSuffix}${cleanupText}`
+        ElNotification({ title: '处理完成（部分失败）', message: msg, type: 'warning', duration: 0 })
+      } else {
+        const msg = `已完成 ${successCount} 个 PDF，并已合并${cleanupText}`
+        ElNotification({ title: '处理完成', message: msg, type: 'success', duration: 0 })
+      }
       if (warningDetails.length) {
         ElNotification({
           title: '处理提示（已汇总）',
@@ -3221,7 +3235,12 @@ async function applyHeaderFooter() {
         })
       }
     } else if (failedCount) {
-      ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个`)
+      ElNotification({
+        title: '处理存在失败项',
+        message: `已完成 ${successCount} 个，失败 ${failedCount} 个${merge?.message ? `；${merge.message}` : ''}`,
+        type: 'warning',
+        duration: 0,
+      })
     } else if (warningDetails.length) {
       ElNotification({
         title: `已完成 ${successCount} 个 PDF（提示已汇总）`,

@@ -572,33 +572,18 @@ fn process_job(
         .arg("--overlay")
         .arg(overlay_path.path())
         .arg("--")
-        .arg(overlay_output.path())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    let command_status = run_qpdf_overlay(&mut command, token)?;
+        .arg(overlay_output.path());
+    let command_output = run_qpdf_overlay(&mut command, token)?;
     let qpdf_elapsed = t4.elapsed().as_millis();
-
-    if !super::qpdf::status_is_success(&command_status) {
-        let err_detail = crate::external::hidden_command(&bin)
-            .arg(work_input)
-            .arg("--overlay")
-            .arg(overlay_path.path())
-            .arg("--")
-            .arg(overlay_output.path())
-            .output()
-            .ok()
-            .map(|out| crate::external::command_failure_detail(&out))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| format!("退出码: {}", command_status.code().unwrap_or(-1)));
-        cleanup_temp(normalized_path);
-        cleanup_plain_text_temp(plain_deleted_path);
-        cleanup_semantic_temp(semantic_deleted_path);
-        anyhow::bail!("qpdf overlay 失败: {err_detail}");
-    }
 
     cleanup_temp(normalized_path);
     cleanup_plain_text_temp(plain_deleted_path);
     cleanup_semantic_temp(semantic_deleted_path);
+
+    if !super::qpdf::status_is_success(&command_output.status) {
+        let err_detail = crate::external::command_failure_detail(&command_output);
+        anyhow::bail!("qpdf overlay 失败: {err_detail}");
+    }
     // qpdf 刚生成的临时结果文件，收紧权限（非 unix 为 no-op）
     let _ = set_private_permissions(overlay_output.path());
     write_overlay_result(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;
@@ -627,12 +612,16 @@ fn process_job(
 fn run_qpdf_overlay(
     command: &mut std::process::Command,
     token: Option<&tokio_util::sync::CancellationToken>,
-) -> Result<std::process::ExitStatus> {
+) -> Result<std::process::Output> {
     let Some(token) = token else {
-        return command.status().context("执行 qpdf overlay 失败");
+        return command.output().context("执行 qpdf overlay 失败");
     };
 
-    let mut child = command.spawn().context("启动 qpdf overlay 失败")?;
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("启动 qpdf overlay 失败")?;
     let operation_id = format!("qpdf:overlay:{}", child.id());
     if let Some(registry) = crate::get_subprocess_registry() {
         registry.register(&operation_id, child.id());
@@ -645,7 +634,7 @@ fn run_qpdf_overlay(
             break Err(anyhow::anyhow!("操作已取消"));
         }
         match child.try_wait().context("等待 qpdf overlay 失败")? {
-            Some(status) => break Ok(status),
+            Some(_) => break child.wait_with_output().context("读取 qpdf overlay 输出失败"),
             None => std::thread::sleep(std::time::Duration::from_millis(80)),
         }
     };

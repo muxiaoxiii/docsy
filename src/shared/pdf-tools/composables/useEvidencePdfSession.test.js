@@ -14,6 +14,7 @@ import {
   createDefaultFooterTextGroup,
   createDefaultPageNumberGroup,
   createEvidenceFile,
+  clearStaleKeepInsertFlags,
   detectKeepInsertConflicts,
   expandPlaceholders,
   naturalCompare,
@@ -640,17 +641,25 @@ describe('Evidence PDF session helpers', () => {
     expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'prefix_seq', headerText: '原告' })).toBe('原告证据3')
   })
 
-  it('suppresses new header injection only when suppressNewHeader is explicitly set', () => {
+  it('suppresses new header injection only when suppressNewHeader is set and keep remains', () => {
     const files = [
       {
         ...createEvidenceFile('/case/doc1.pdf'),
         pages: 3,
-        suppressNewHeader: true, // 用户在确认列表中选择跳过新插入
+        keepExistingHeader: true,
+        suppressNewHeader: true,
       },
       {
         ...createEvidenceFile('/case/doc2.pdf'),
         pages: 2,
-        suppressNewHeader: false, // 用户选择允许重叠插入，不拒绝用户操作
+        keepExistingHeader: true,
+        suppressNewHeader: false,
+      },
+      {
+        ...createEvidenceFile('/case/doc3.pdf'),
+        pages: 2,
+        keepExistingHeader: false,
+        suppressNewHeader: true, // 陈旧标志：已不再保留原件
       },
     ]
     const rules = {
@@ -659,10 +668,33 @@ describe('Evidence PDF session helpers', () => {
       headerMode: 'filename',
     }
     const items = buildHeaderFooterItems(files, rules, '/out')
-    // 第一个文件被抑制为 null
     expect(items[0].header).toBeNull()
-    // 第二个文件即使有原件保留，也尊重用户选择，正常生成新页眉
     expect(items[1].header?.text).toBe('doc2')
+    // 不再 keep 时，残留 suppress 不应挡住新插入
+    expect(items[2].header?.text).toBe('doc3')
+  })
+
+  it('clears stale suppress flags when keep is removed', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/doc1.pdf'),
+        pages: 1,
+        keepExistingHeader: false,
+        removeExistingHeader: false,
+        suppressNewHeader: true,
+        allowOverlapHeader: true,
+      },
+      {
+        ...createEvidenceFile('/case/doc2.pdf'),
+        pages: 1,
+        keepExistingHeader: true,
+        suppressNewHeader: true,
+      },
+    ]
+    clearStaleKeepInsertFlags(files)
+    expect(files[0].suppressNewHeader).toBe(false)
+    expect(files[0].allowOverlapHeader).toBe(false)
+    expect(files[1].suppressNewHeader).toBe(true)
   })
 
   it('detects potential keep-insert conflicts across files', () => {
@@ -689,6 +721,34 @@ describe('Evidence PDF session helpers', () => {
     expect(conflicts[0].existingText).toBe('国家知识产权局')
     expect(conflicts[0].newText).toBe('doc1')
     expect(conflicts[0].action).toBe('suppress')
+  })
+
+  it('detects footer group and page number group conflicts', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/doc1.pdf'),
+        pages: 2,
+        keepExistingFooter: true,
+        existingFooterText: '原页脚',
+        keepExistingPageNumber: true,
+        existingPageNumberText: '1/2',
+      },
+    ]
+    const rules = {
+      ...baseRules,
+      headerInsertEnabled: false,
+      headerMode: 'none',
+      footerInsertEnabled: true,
+      footerTextContent: '',
+      footerTextGroups: [{ id: 'ft1', enabled: true, text: '机密文件' }],
+      pageNumberEnabled: true,
+      pageNumberGroups: [{ id: 'pn1', enabled: true, template: '第{page}页' }],
+    }
+    const conflicts = detectKeepInsertConflicts(files, rules)
+    const regions = conflicts.map((item) => item.region).sort()
+    expect(regions).toEqual(['footer', 'pageNumber'])
+    expect(conflicts.find((item) => item.region === 'footer')?.newText).toBe('机密文件')
+    expect(conflicts.find((item) => item.region === 'pageNumber')?.newText).toBe('第{page}页')
   })
 
   it('expands continuous page number placeholders', () => {

@@ -17,8 +17,8 @@ pub fn same_path(left: &Path, right: &Path) -> bool {
 }
 
 fn comparable_path(path: &Path) -> PathBuf {
-    if let Ok(path) = path.canonicalize() {
-        return path;
+    if let Ok(canon) = path.canonicalize() {
+        return canon;
     }
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -27,7 +27,18 @@ fn comparable_path(path: &Path) -> PathBuf {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     };
-    normalize_path_components(&absolute)
+    let normalized = normalize_path_components(&absolute);
+    if let Ok(canon) = normalized.canonicalize() {
+        return canon;
+    }
+    if let Some(parent) = normalized.parent() {
+        if let Ok(parent_canon) = parent.canonicalize() {
+            if let Some(name) = normalized.file_name() {
+                return parent_canon.join(name);
+            }
+        }
+    }
+    normalized
 }
 
 fn normalize_path_components(path: &Path) -> PathBuf {

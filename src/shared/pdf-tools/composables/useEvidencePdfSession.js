@@ -665,9 +665,12 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         footerTextGroup.enabled !== false &&
         Boolean(footerTextGroup.text || rules.footerTextContent)
       : rules.footerInsertEnabled !== false
-    const suppressHeader = file.suppressNewHeader === true
-    const suppressFooter = file.suppressNewFooter === true
-    const suppressPageNumber = file.suppressNewPageNumber === true
+    const stillKeepsHeader = fileStillKeepsRegion(file, 'header')
+    const stillKeepsFooter = fileStillKeepsRegion(file, 'footer')
+    const stillKeepsPageNumber = fileStillKeepsRegion(file, 'pageNumber')
+    const suppressHeader = file.suppressNewHeader === true && stillKeepsHeader
+    const suppressFooter = file.suppressNewFooter === true && stillKeepsFooter
+    const suppressPageNumber = file.suppressNewPageNumber === true && stillKeepsPageNumber
 
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const effectiveHeaderGroup = headerGroup
@@ -1295,27 +1298,106 @@ function ensurePdfFileName(name) {
   return /\.pdf$/i.test(value) ? value : `${value}.pdf`
 }
 
+const KEEP_REGION_LEGACY = {
+  header: { legacy: 'Header', elementKind: 'header' },
+  footer: { legacy: 'Footer', elementKind: 'footerText' },
+  pageNumber: { legacy: 'PageNumber', elementKind: 'pageNumber' },
+}
+
+function fileStillKeepsRegion(file, region) {
+  const meta = KEEP_REGION_LEGACY[region]
+  if (!meta || !file) return false
+  const elements = file.existingElements || []
+  return (
+    (file[`keepExisting${meta.legacy}`] ||
+      elements.some((element) => element.kind === meta.elementKind && element.decision === 'keep')) &&
+    !file[`removeExisting${meta.legacy}`]
+  )
+}
+
+/** 清理已不再保留原件时残留的 suppress/allowOverlap 标志，避免误抑制后续插入。 */
+export function clearStaleKeepInsertFlags(files) {
+  if (!Array.isArray(files)) return
+  for (const file of files) {
+    for (const [region, meta] of Object.entries(KEEP_REGION_LEGACY)) {
+      if (fileStillKeepsRegion(file, region)) continue
+      if (file[`suppressNew${meta.legacy}`] != null) file[`suppressNew${meta.legacy}`] = false
+      if (file[`allowOverlap${meta.legacy}`] != null) file[`allowOverlap${meta.legacy}`] = false
+    }
+  }
+}
+
+function preferredConflictAction(file, region) {
+  const meta = KEEP_REGION_LEGACY[region]
+  if (file[`allowOverlap${meta.legacy}`]) return 'overlap'
+  return 'suppress'
+}
+
+function plannedHeaderText(file, index, rules) {
+  if (rules.headerInsertEnabled === false) return ''
+  const headerMode = rules.headerMode !== undefined ? rules.headerMode : 'filename'
+  if (headerMode === 'none') {
+    // 主规则关闭时，额外 header group 仍可能插入
+    const groups = rules.headerGroups?.length ? rules.headerGroups : file.headerGroups || []
+    for (const group of groups) {
+      if (group?.enabled === false || group?.mode === 'none') continue
+      const text = buildHeaderTextForGroup(file, index, group, rules)
+      if (text) return text
+    }
+    return ''
+  }
+  const main = buildHeaderText(file, index, rules)
+  if (main) return main
+  const groups = rules.headerGroups?.length ? rules.headerGroups : file.headerGroups || []
+  for (const group of groups) {
+    if (group?.enabled === false || group?.mode === 'none') continue
+    const text = buildHeaderTextForGroup(file, index, group, rules)
+    if (text) return text
+  }
+  return ''
+}
+
+function plannedFooterText(file, index, rules) {
+  if (!rules.footerInsertEnabled) return ''
+  // 优先用户当前配置的 footerTextContent / footer groups，避免旧 footerText 字段干扰
+  if (rules.footerTextContent) {
+    return resolveTextTemplate(rules.footerTextContent, file, index, rules)
+  }
+  const groups = rules.footerTextGroups?.length ? rules.footerTextGroups : file.footerTextGroups || []
+  for (const group of groups) {
+    if (group?.enabled === false || !group?.text) continue
+    const text = resolveTextTemplate(group.text, file, index, rules)
+    if (text) return text
+  }
+  if (rules.footerText) return resolveTextTemplate(rules.footerText, file, index, rules)
+  return ''
+}
+
+function pageNumberInsertWillHappen(rules) {
+  if (rules._globalApply) {
+    return Boolean(rules.pageNumberGroups?.length || rules.pageNumberEnabled || rules.footerEnabled)
+  }
+  return Boolean(rules.pageNumberEnabled ?? rules.footerEnabled ?? false)
+}
+
+function plannedPageNumberText(rules) {
+  const groups = rules.pageNumberGroups || []
+  const group = groups.find((item) => item?.enabled !== false)
+  return group?.template || rules.pageNumberTemplate || '{page}/{total}'
+}
+
 export function detectKeepInsertConflicts(files, rules) {
   if (!Array.isArray(files) || !files.length) return []
   const conflicts = []
   const rangedFiles = assignPageRanges(files)
 
   rangedFiles.forEach((file, index) => {
-    const elements = file.existingElements || []
-
-    // 检查页眉冲突：原件保留了旧页眉，但本次配置又启用了新页眉插入
-    const keepHeader =
-      (file.keepExistingHeader || elements.some((e) => e.kind === 'header' && e.decision === 'keep')) &&
-      !file.removeExistingHeader
-    const headerInserting =
-      rules.headerInsertEnabled !== false &&
-      (rules.headerMode ? rules.headerMode !== 'none' : true)
-    if (keepHeader && headerInserting) {
+    if (fileStillKeepsRegion(file, 'header')) {
       const existingText =
         file.existingHeaderText ||
-        elements.find((e) => e.kind === 'header' && e.decision === 'keep')?.detectedText ||
+        (file.existingElements || []).find((e) => e.kind === 'header' && e.decision === 'keep')?.detectedText ||
         '（原件保留页眉）'
-      const newText = buildHeaderText(file, index, rules)
+      const newText = plannedHeaderText(file, index, rules)
       if (newText) {
         conflicts.push({
           id: `${file.path}-header`,
@@ -1325,24 +1407,17 @@ export function detectKeepInsertConflicts(files, rules) {
           regionLabel: '页眉',
           existingText,
           newText,
-          action: file.suppressNewHeader ? 'suppress' : file.allowOverlapHeader ? 'overlap' : 'suppress',
+          action: preferredConflictAction(file, 'header'),
         })
       }
     }
 
-    // 检查页脚冲突：原件保留了旧页脚，但本次配置又启用了新页脚插入
-    const keepFooter =
-      (file.keepExistingFooter || elements.some((e) => e.kind === 'footerText' && e.decision === 'keep')) &&
-      !file.removeExistingFooter
-    const footerInserting = Boolean(
-      rules.footerInsertEnabled && (rules.footerTextContent || rules.footerText),
-    )
-    if (keepFooter && footerInserting) {
+    if (fileStillKeepsRegion(file, 'footer')) {
       const existingText =
         file.existingFooterText ||
-        elements.find((e) => e.kind === 'footerText' && e.decision === 'keep')?.detectedText ||
+        (file.existingElements || []).find((e) => e.kind === 'footerText' && e.decision === 'keep')?.detectedText ||
         '（原件保留页脚）'
-      const newText = rules.footerTextContent || rules.footerText || ''
+      const newText = plannedFooterText(file, index, rules)
       if (newText) {
         conflicts.push({
           id: `${file.path}-footer`,
@@ -1352,22 +1427,16 @@ export function detectKeepInsertConflicts(files, rules) {
           regionLabel: '页脚',
           existingText,
           newText,
-          action: file.suppressNewFooter ? 'suppress' : file.allowOverlapFooter ? 'overlap' : 'suppress',
+          action: preferredConflictAction(file, 'footer'),
         })
       }
     }
 
-    // 检查页码冲突：原件保留了旧页码，但本次配置又启用了新页码插入
-    const keepPageNumber =
-      (file.keepExistingPageNumber || elements.some((e) => e.kind === 'pageNumber' && e.decision === 'keep')) &&
-      !file.removeExistingPageNumber
-    const pageNumberInserting = Boolean(rules.pageNumberEnabled ?? rules.footerEnabled ?? false)
-    if (keepPageNumber && pageNumberInserting) {
+    if (fileStillKeepsRegion(file, 'pageNumber') && pageNumberInsertWillHappen(rules)) {
       const existingText =
         file.existingPageNumberText ||
-        elements.find((e) => e.kind === 'pageNumber' && e.decision === 'keep')?.detectedText ||
+        (file.existingElements || []).find((e) => e.kind === 'pageNumber' && e.decision === 'keep')?.detectedText ||
         '（原件保留页码）'
-      const newText = rules.pageNumberTemplate || '{page}/{total}'
       conflicts.push({
         id: `${file.path}-pageNumber`,
         filePath: file.path,
@@ -1375,8 +1444,8 @@ export function detectKeepInsertConflicts(files, rules) {
         region: 'pageNumber',
         regionLabel: '页码',
         existingText,
-        newText,
-        action: file.suppressNewPageNumber ? 'suppress' : file.allowOverlapPageNumber ? 'overlap' : 'suppress',
+        newText: plannedPageNumberText(rules),
+        action: preferredConflictAction(file, 'pageNumber'),
       })
     }
   })

@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visibleModel"
-    title="确认原有页眉、页脚和页码"
+    :title="cleanupOnly ? '拆分时清除页眉、页脚和页码' : '确认原有页眉、页脚和页码'"
     width="min(1080px, 94vw)"
     append-to-body
     @click.self="clearSelection"
@@ -12,14 +12,14 @@
       </el-select>
       <el-button size="small" @click="selectAll">全选</el-button>
       <el-button size="small" @click="invertSelection">反选</el-button>
-      <el-button size="small" @click="selectUndecided">选择未确认项</el-button>
+      <el-button v-if="!cleanupOnly" size="small" @click="selectUndecided">选择未确认项</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="clearSelection">取消选择</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('keep')">保留</el-button>
-      <el-button size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
+      <el-button v-if="!cleanupOnly" size="small" :disabled="!selectedKeys.length" @click="applyDecision('ignore')">忽略识别</el-button>
       <el-button size="small" :disabled="!selectedKeys.length" type="danger" @click="applyDecision('delete')"
         >标记删除</el-button
       >
-      <el-button size="small" :disabled="!selectedKeys.length" type="primary" @click="applyDecision('edit')"
+      <el-button v-if="!cleanupOnly" size="small" :disabled="!selectedKeys.length" type="primary" @click="applyDecision('edit')"
         >标记编辑</el-button
       >
     </div>
@@ -80,7 +80,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="编辑后" min-width="180">
+      <el-table-column v-if="!cleanupOnly" label="编辑后" min-width="180">
         <template #default="{ row }">
           <el-input
             v-if="row.element.decision === 'edit'"
@@ -108,7 +108,7 @@
     >
       选取到这
     </div>
-    <p class="hint-text">点击行或勾选框切换选中，点击表格外取消全部选择</p>
+    <p class="hint-text">已选 {{ selectedKeys.length }} 项<span v-if="cleanupOnly"> · 选择后点击“标记删除”，仅在拆分输出时生效，原件不变</span><span v-else> · 点击行或勾选框切换选中，点击表格外取消全部选择</span></p>
     <template #footer>
       <el-button @click="visibleModel = false">完成</el-button>
     </template>
@@ -129,6 +129,7 @@ const props = defineProps({
   visible: { type: Boolean, required: true },
   rows: { type: Array, default: () => [] },
   filter: { type: String, default: 'all' },
+  cleanupOnly: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:visible', 'change', 'preview', 'jump-to-settings'])
 const selectedKeys = ref([])
@@ -361,6 +362,7 @@ function applyDecision(decision) {
   selectedKeys.value = []
 }
 function setDecision(row, decision) {
+  if (props.cleanupOnly && !['keep', 'delete'].includes(decision)) return
   row.element.decision = decision
   if (decision === 'edit' && row.element.kind === 'pageNumber') {
     const template = String(row.element.normalizedText || '')

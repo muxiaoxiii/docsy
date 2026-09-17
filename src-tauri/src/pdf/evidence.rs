@@ -8,8 +8,7 @@ use std::sync::Arc;
 use crate::external::ExternalTool;
 use crate::sort_utils::natural_cmp;
 
-use super::fnv1a_hash;
-use super::safe_file_stem;
+use super::{fnv1a_hash, safe_file_stem, same_path, unique_output_path};
 use crate::ConversionState;
 
 const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm"];
@@ -412,22 +411,31 @@ pub fn merge_all(args: &MergeAllArgs) -> Result<String> {
         anyhow::bail!("没有可合并的分组 PDF");
     }
 
-    let output_path_str = args.output_path.clone().unwrap_or_else(|| {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        Path::new(&args.evidence_dir)
-            .join(format!("evidence_merged_{}.pdf", ts))
+    let output_path_str = match &args.output_path {
+        Some(custom) => custom.clone(),
+        None => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            unique_output_path(
+                Path::new(&args.evidence_dir),
+                &format!("evidence_merged_{ts}"),
+                "pdf",
+            )
             .display()
             .to_string()
-    });
+        }
+    };
 
-    let out_canonical = Path::new(&output_path_str);
+    let out_path = Path::new(&output_path_str);
     for in_p in &args.group_pdfs {
-        if Path::new(in_p) == out_canonical {
+        if same_path(Path::new(in_p), out_path) {
             anyhow::bail!("合并总输出路径不能与待合并的输入文件路径相同: {output_path_str}");
         }
+    }
+    if let Some(parent) = out_path.parent() {
+        fs::create_dir_all(parent)?;
     }
 
     let qpdf_bin = crate::external::QpdfTool.binary_path()?;
@@ -1002,6 +1010,29 @@ mod tests {
         let path = Path::new(&result[0]);
         assert!(path.starts_with(temp_dir.join("_renamed")));
         assert_eq!(path.file_name().unwrap(), "escaped0001.pdf");
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn merge_all_rejects_same_input_output_path_variants() {
+        let temp_dir = std::env::temp_dir().join(format!("docsy_merge_collision_{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let sample_pdf = temp_dir.join("sample.pdf");
+        std::fs::write(&sample_pdf, b"%PDF-1.4 dummy").unwrap();
+
+        // 构造相对等价路径，例如 "sample.pdf" vs "./sample.pdf" 或带父目录
+        let relative_target = temp_dir.join("sub/../sample.pdf");
+        let args = MergeAllArgs {
+            evidence_dir: temp_dir.display().to_string(),
+            group_pdfs: vec![sample_pdf.display().to_string()],
+            output_path: Some(relative_target.display().to_string()),
+            identity: None,
+            overlay: None,
+        };
+
+        let err = merge_all(&args).unwrap_err();
+        assert!(err.to_string().contains("不能与待合并的输入文件路径相同"));
+
         std::fs::remove_dir_all(&temp_dir).ok();
     }
 }

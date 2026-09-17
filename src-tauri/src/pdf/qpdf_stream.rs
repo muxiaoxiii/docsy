@@ -31,6 +31,7 @@ pub(crate) struct QpdfIndexedPage {
     pub xobjects: BTreeMap<String, String>,
     pub properties: Dictionary,
     pub page_box: Option<QpdfBox>,
+    pub rotation: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +96,11 @@ impl QpdfObjectIndex {
                     fonts: index.fonts_from_resources(resources),
                     xobjects: index.xobjects_from_resources(resources),
                     properties: index.properties_from_resources(resources),
+                    rotation: index
+                        .inherited_value(page_ref, "/Rotate")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .rem_euclid(360),
                     page_box: index
                         .inherited_value(page_ref, "/CropBox")
                         .and_then(|value| index.parse_box_value(value))
@@ -277,6 +283,10 @@ impl QpdfObjectIndex {
             matrix[i] = f64::from(json_number(value)?);
         }
         Some(matrix)
+    }
+
+    pub(crate) fn form_box(&self, object_ref: &str) -> Option<QpdfBox> {
+        self.parse_box_value(self.object_dictionary(object_ref)?.get("/BBox")?)
     }
 
     fn parse_box_value(&self, value: &Value) -> Option<QpdfBox> {
