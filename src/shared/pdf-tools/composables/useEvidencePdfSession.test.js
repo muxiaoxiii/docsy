@@ -639,6 +639,31 @@ describe('Evidence PDF session helpers', () => {
     expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'prefix_seq', headerText: '原告' })).toBe('原告证据3')
   })
 
+  it('suppresses new header injection when user marks existing header as keep to prevent double header', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/doc1.pdf'),
+        pages: 3,
+        keepExistingHeader: true,
+      },
+      {
+        ...createEvidenceFile('/case/doc2.pdf'),
+        pages: 2,
+        keepExistingHeader: false,
+      },
+    ]
+    const rules = {
+      ...baseRules,
+      headerInsertEnabled: true,
+      headerMode: 'filename',
+    }
+    const items = buildHeaderFooterItems(files, rules, '/out')
+    // 第一个文件明确 keep 原页眉，新页眉必须被抑制为 null，不注入 overlay
+    expect(items[0].header).toBeNull()
+    // 第二个文件未 keep 原页眉，正常生成新页眉配置
+    expect(items[1].header?.text).toBe('doc2')
+  })
+
   it('expands continuous page number placeholders', () => {
     expect(expandPlaceholders('第{page}页，共{total}页', 7, 31)).toBe('第7页，共31页')
     expect(expandPlaceholders('{range}', 7, 31)).toBe('7/31')

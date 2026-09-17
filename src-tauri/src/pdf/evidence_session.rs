@@ -403,9 +403,6 @@ fn apply_merge_if_requested(
     if !merge.enabled {
         return Ok(MergeResult::disabled());
     }
-    if !failed.is_empty() {
-        return Ok(MergeResult::skipped("存在处理失败的 PDF，已跳过合并"));
-    }
     if merge.output_path.trim().is_empty() {
         return Ok(MergeResult::skipped("未设置合并输出路径"));
     }
@@ -416,7 +413,11 @@ fn apply_merge_if_requested(
         .filter(|p| !p.is_empty())
         .collect();
     if inputs.is_empty() {
-        return Ok(MergeResult::skipped("没有可合并的处理结果"));
+        return Ok(MergeResult::skipped(if !failed.is_empty() {
+            "全部 PDF 处理失败，已跳过合并"
+        } else {
+            "没有可合并的处理结果"
+        }));
     }
 
     if let Some(parent) = Path::new(&merge.output_path).parent() {
@@ -436,17 +437,26 @@ fn apply_merge_if_requested(
             .context("合并 PDF 写入书签失败")?;
     }
 
-    let removed = if merge.output_mode == "merge_only" {
+    // 若存在部分失败，即使是 merge_only 也不删除中间文件，以防用户数据丢失
+    let removed = if merge.output_mode == "merge_only" && failed.is_empty() {
         remove_intermediate_outputs(results, &merge.output_path)
     } else {
         0
     };
 
-    Ok(MergeResult::done(
+    let mut res = MergeResult::done(
         output,
         merge.output_mode.clone(),
         removed,
-    ))
+    );
+    if !failed.is_empty() {
+        res.message = Some(format!(
+            "已合并 {} 个成功文件（另有 {} 个文件处理失败已跳过）",
+            results.len(),
+            failed.len()
+        ));
+    }
+    Ok(res)
 }
 
 fn collect_merge_bookmarks(
@@ -456,12 +466,20 @@ fn collect_merge_bookmarks(
     let mut bookmarks = Vec::new();
     let mut page_offset: u32 = 0;
 
-    for (item, result) in items.iter().zip(results.iter()) {
-        for bm in &item.bookmarks {
-            if bm.enabled && !bm.label.is_empty() {
-                let mut adjusted = bm.clone();
-                adjusted.page_index += page_offset;
-                bookmarks.push(adjusted);
+    for result in results {
+        if result.output_path.is_empty() {
+            continue;
+        }
+        // 找到与当前成功结果对应的 item（匹配 output_path 或 input_path），避免 zip 错位
+        if let Some(item) = items.iter().find(|j| {
+            j.output_path == result.output_path || j.input_path == result.input_path
+        }) {
+            for bm in &item.bookmarks {
+                if bm.enabled && !bm.label.is_empty() {
+                    let mut adjusted = bm.clone();
+                    adjusted.page_index += page_offset;
+                    bookmarks.push(adjusted);
+                }
             }
         }
         page_offset += result.pages;

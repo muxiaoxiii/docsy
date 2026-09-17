@@ -578,16 +578,27 @@ fn process_job(
     let command_status = run_qpdf_overlay(&mut command, token)?;
     let qpdf_elapsed = t4.elapsed().as_millis();
 
+    if !super::qpdf::status_is_success(&command_status) {
+        let err_detail = crate::external::hidden_command(&bin)
+            .arg(work_input)
+            .arg("--overlay")
+            .arg(overlay_path.path())
+            .arg("--")
+            .arg(overlay_output.path())
+            .output()
+            .ok()
+            .map(|out| crate::external::command_failure_detail(&out))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("退出码: {}", command_status.code().unwrap_or(-1)));
+        cleanup_temp(normalized_path);
+        cleanup_plain_text_temp(plain_deleted_path);
+        cleanup_semantic_temp(semantic_deleted_path);
+        anyhow::bail!("qpdf overlay 失败: {err_detail}");
+    }
+
     cleanup_temp(normalized_path);
     cleanup_plain_text_temp(plain_deleted_path);
     cleanup_semantic_temp(semantic_deleted_path);
-
-    if !super::qpdf::status_is_success(&command_status) {
-        anyhow::bail!(
-            "qpdf overlay 失败，退出码: {}",
-            command_status.code().unwrap_or(-1)
-        );
-    }
     // qpdf 刚生成的临时结果文件，收紧权限（非 unix 为 no-op）
     let _ = set_private_permissions(overlay_output.path());
     write_overlay_result(overlay_output.path(), output).context("写入页眉页脚处理结果失败")?;

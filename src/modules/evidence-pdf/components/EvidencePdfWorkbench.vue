@@ -17,20 +17,15 @@
           <el-button v-if="workflowMode !== 'split'" type="primary" @click="selectOverlayFiles">{{
             splitImportButtonText
           }}</el-button>
-          <el-button v-if="workflowMode !== 'merge'" :loading="importingMergedPdf" @click="importMergedPdfAsEvidence">{{
+          <el-button v-if="workflowMode !== 'merge'" type="primary" :loading="importingMergedPdf" :disabled="detectingMergedImport || splittingMergedImport" @click="importMergedPdfAsEvidence">{{
             mergedImportButtonText
           }}</el-button>
         </div>
       </div>
 
-      <div v-if="importingMergedPdf" v-loading="true" element-loading-text="正在导入合并 PDF" class="local-processing">
-        <p>正在读取文件页数并建立一个覆盖全文的手动页段。</p>
-      </div>
-      <div v-if="detectingMergedImport" v-loading="true" element-loading-text="正在检测页段" class="local-processing">
-        <p>检测会完整分析标准页眉页脚、重复文本和页码；大文件等待时间较长，完成后请逐项核对候选页段。</p>
-      </div>
-      <div v-if="splittingMergedImport" v-loading="true" element-loading-text="正在拆分 PDF" class="local-processing">
-        <p>大文件会按页段逐个输出，当前只占用合并证据处理区域；请先不要重复点击确认拆分。</p>
+      <div v-if="mergedOperationStatus" class="local-processing" role="status" aria-live="polite" aria-atomic="true">
+        <strong>{{ mergedOperationStatus.title }}</strong>
+        <p>{{ mergedOperationStatus.description }}</p>
       </div>
       <div v-if="overlaying" class="local-processing">
         <p>{{ overlayProgressText }}</p>
@@ -58,13 +53,18 @@
         </div>
       </div>
 
+      <div v-if="workflowMode === 'split' && !mergedImportPlan && !overlayFiles.length" class="rule-block">
+        <div class="block-title">按证据页段拆分合并 PDF</div>
+        <p class="hint">导入 PDF → 点击“检测证据页段” → 核对证据名称和起止页 → 确认拆分。</p>
+        <p class="hint">检测页眉中的证据标签等线索生成页段建议；已有页眉页脚清单不等于拆分方案，页码和报告续页文字不能直接当作证据边界。</p>
+      </div>
       <div v-if="showSplitResultActions" class="split-result-actions">
         <div>
-          <div class="block-title">{{ splitResultActionTitle }}</div>
-          <p class="hint">{{ splitResultActionHint }}</p>
-          <p class="path-text">输出文件夹：{{ splitReplacementOutputDirValue }}</p>
+          <div class="block-title">拆分结果：{{ overlayFiles.length }} 个证据文件</div>
+          <p class="hint">已按确认页段输出。下表可核对每份证据的来源页段；如需重新合并，请使用“分项证据合并”。</p>
+          <p class="path-text">输出文件夹：{{ overlayOutputDir }}</p>
         </div>
-        <div class="plan-actions">
+        <div v-if="workflowMode !== 'split'" class="plan-actions">
           <el-button size="small" @click="selectSplitReplacementOutputDir">输出目录</el-button>
           <el-button size="small" @click="openHeaderFooterSettings">设置页眉页脚</el-button>
           <el-button
@@ -102,19 +102,20 @@
               </span>
             </el-button>
             <el-button
-              size="small"
+              type="primary"
               class="stable-action-button"
               :disabled="deepDetecting"
               :aria-busy="deepDetecting"
               @click="deepDetectAllHeaderFooter"
             >
               <span class="stable-button-content" :class="{ 'is-loading': deepDetecting }">
-                <span>元素检测</span>
+                <span>检测现有页眉页脚</span>
                 <span v-if="deepDetecting" class="internal-progress-spinner" aria-hidden="true"></span>
               </span>
             </el-button>
           </div>
         </div>
+        <p class="hint">需要识别原页眉页脚时，请手动点击“检测现有页眉页脚”。检测会扫描文件，大文件耗时较长，当前无法准确预估剩余时间。</p>
         <div class="existing-summary-grid">
           <button
             type="button"
@@ -420,37 +421,47 @@
       </el-alert>
 
       <div v-if="mergedImportPlan" class="merged-import-plan">
-        <div class="plan-head">
+        <fieldset :disabled="detectingMergedImport || splittingMergedImport" style="border: 0; padding: 0; margin: 0; min-width: 0">
+        <div class="plan-head split-plan-head">
           <div>
-            <div class="block-title">合并证据页段确认</div>
-            <p class="hint">核对页段后拆成证据列表</p>
+            <div class="block-title">拆分方案 <el-tag size="small" type="info">{{ mergedImportPlan.pagesAnalyzed ? '待核对' : '未检测' }}</el-tag></div>
           </div>
-          <div class="plan-actions">
+          <div class="plan-actions split-plan-actions">
             <el-button
-              size="small"
-              type="primary"
-              plain
+              :type="mergedImportPlan.pagesAnalyzed ? 'default' : 'primary'"
               :loading="detectingMergedImport"
               @click="detectMergedImportPlan"
-              >检测页段</el-button
+              >{{ mergedImportPlan.pagesAnalyzed ? '重新检测' : '检测页段' }}</el-button
             >
-            <el-button size="small" @click="addMergedImportRange">添加页段</el-button>
-            <el-button size="small" @click="selectMergedImportOutputDir">输出目录</el-button>
-            <el-button size="small" @click="cancelMergedImportPlan">取消</el-button>
-            <el-button size="small" type="primary" :loading="splittingMergedImport" @click="executeMergedImportPlan">
+            <el-button @click="splitOptionsVisible = true">输出设置</el-button>
+            <el-popover trigger="click" title="拆分说明" :width="300">
+              <template #reference><el-button text>帮助</el-button></template>
+              <p>手动检测后核对页段，再确认拆分。大文件检测耗时较长，暂不提供剩余时间估计。清除仅作用于副本，默认保留所有元素；报告原有文字请谨慎勾选。</p>
+            </el-popover>
+            <el-button text @click="cancelMergedImportPlan">取消</el-button>
+            <el-button type="primary" class="split-confirm" :loading="splittingMergedImport" :disabled="detectingMergedImport || importingMergedPdf || !mergedImportPlan.pagesAnalyzed" @click="executeMergedImportPlan">
               确认拆分
             </el-button>
           </div>
         </div>
-        <div class="import-plan-meta">
-          <span>总页数：{{ mergedImportPlan.totalPages || '-' }}</span>
-          <span>已扫描：{{ mergedImportPlan.pagesAnalyzed || '-' }} 页</span>
-          <span>页眉：{{ mergedImportPlan.headerPages || 0 }} 页</span>
-          <span>页码页脚：{{ mergedImportPlan.pageNumberFooterPages || 0 }} 页</span>
-          <span>输出目录：{{ mergedImportPlan.outputDir }}</span>
+        <div class="existing-summary-grid split-summary-grid">
+          <div class="summary-pill"><span>文档页数</span><strong>{{ mergedImportPlan.totalPages }}</strong></div>
+          <button type="button" class="summary-pill" :disabled="!mergedImportPlan.pagesAnalyzed || detectingMergedImport || splittingMergedImport" @click="splitRangesVisible = true"><span>证据页段 · 查看</span><strong>{{ mergedImportPlan.pagesAnalyzed ? mergedImportPlan.items.length : '—' }}</strong></button>
+          <button type="button" class="summary-pill" :disabled="!mergedImportPlan.pagesAnalyzed || detectingMergedImport || splittingMergedImport" @click="splitCleanupVisible = true"><span>可清除元素 · 选择</span><strong>{{ mergedImportPlan.pagesAnalyzed ? mergedImportPlan.cleanupCandidates?.length || 0 : '—' }}</strong></button>
+          <button type="button" class="summary-pill" :disabled="!mergedImportPlan.pagesAnalyzed || detectingMergedImport || splittingMergedImport" @click="splitCleanupVisible = true"><span>已选清除</span><strong>{{ mergedImportPlan.cleanupCandidates?.filter(candidate => candidate.selected).length || 0 }}</strong></button>
         </div>
+        <ExistingPdfElementsDialog
+          v-model:visible="splitCleanupVisible"
+          :rows="splitCleanupRows"
+          cleanup-only
+          @change="changeSplitCleanupDecision"
+          @preview="previewSplitCleanupElement"
+        />
+        <el-dialog v-model="splitOptionsVisible" title="输出设置" width="640px" append-to-body>
         <div class="split-name-options">
-          <div class="block-title">拆分文件名</div>
+          <div class="block-title">输出目录 <el-button size="small" @click="selectMergedImportOutputDir">更改</el-button></div>
+          <p class="path-text">{{ mergedImportPlan.outputDir }}</p>
+          <div class="block-title">文件命名</div>
           <div class="rule-grid">
             <div class="rule-item">
               <label>前缀</label>
@@ -483,19 +494,21 @@
         <div class="split-options-row">
           <div class="block-title">拆分选项</div>
           <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
-          <span class="split-option-note"
-            >拆分时自动移除无可视内容的空白页（分隔页、扫描背面等），输出页数可能少于页段页数。</span
-          >
+          <el-tooltip content="仅移除无可视内容的空白页，输出页数可能减少。"><span class="hint">说明</span></el-tooltip>
         </div>
+          <template #footer><el-button type="primary" @click="splitOptionsVisible = false">完成</el-button></template>
+        </el-dialog>
         <el-alert
-          v-if="mergedImportWarnings.length"
+          v-if="splitActionableWarnings.length"
           type="warning"
           :closable="false"
           show-icon
           class="import-plan-warning"
         >
-          <template #title>{{ mergedImportWarnings.join('；') }}</template>
+          <template #title>{{ splitActionableWarnings.join('；') }}</template>
         </el-alert>
+        <el-dialog v-model="splitRangesVisible" title="核对证据页段" width="960px" append-to-body>
+        <div class="plan-actions"><el-button size="small" @click="addMergedImportRange">添加页段</el-button></div>
         <el-table
           :data="mergedImportPlan.items"
           size="small"
@@ -576,6 +589,9 @@
             </template>
           </el-table-column>
         </el-table>
+          <template #footer><el-button type="primary" @click="splitRangesVisible = false">完成核对</el-button></template>
+        </el-dialog>
+        </fieldset>
       </div>
 
       <el-alert
@@ -1148,25 +1164,34 @@ const props = defineProps({
 })
 
 const workflowMode = computed(() => (['merge', 'split'].includes(props.workflow) ? props.workflow : 'all'))
+const mergedOperationStatus = computed(() => {
+  if (splittingMergedImport.value) return {
+    title: '正在拆分 PDF',
+    description: '正在按确认页段输出文件，原件保持不变。右下角显示任务状态与已用时间。',
+  }
+  if (detectingMergedImport.value) return {
+    title: '正在检测证据页段',
+    description: '正在分析页眉、页脚和证据边界，大文件可能耗时较长。完成后请核对页段，不会自动拆分。',
+  }
+  if (importingMergedPdf.value) return {
+    title: '正在导入合并 PDF',
+    description: '正在读取页数；导入后由你手动启动检测，不会自动扫描全文。',
+  }
+  return null
+})
 const workflowTitle = computed(() => {
-  if (workflowMode.value === 'merge') return '分项证据处理'
-  if (workflowMode.value === 'split') return '合并证据处理'
+  if (workflowMode.value === 'merge') return '分项证据合并'
+  if (workflowMode.value === 'split') return '合并证据拆分'
   return '证据处理'
 })
 const workflowHint = computed(() => {
   if (workflowMode.value === 'merge')
     return '处理分项证据 PDF 的页眉、连续页码、A4、批注，并按需合并输出；合并时压平签章外观以便打印'
-  if (workflowMode.value === 'split') return '处理已合并证据 PDF；单个文件可识别页段拆分，多个文件可按统一规则批量处理'
+  if (workflowMode.value === 'split') return '导入一个合并证据 PDF，点击“检测证据页段”自动识别拆分边界，核对后拆分为分项证据；导入不会自动开始检测'
   return '按法律证据包流程处理页眉、页码、A4、批注、合并与反向拆分'
 })
 const splitImportButtonText = computed(() => '导入分项证据 PDF')
 const mergedImportButtonText = computed(() => '导入合并证据 PDF')
-const splitResultActionTitle = computed(() => (hasSourceSplitRanges.value ? '分项文件后处理' : '合并证据批量处理'))
-const splitResultActionHint = computed(() =>
-  hasSourceSplitRanges.value
-    ? '处理后文件会输出到新文件夹，不覆盖原分项文件。'
-    : '多个合并证据 PDF 会按同一规则批量输出到新文件夹，不覆盖原文件。',
-)
 
 const overlayFiles = ref([])
 const overlayOutputDir = ref('')
@@ -1211,6 +1236,38 @@ const splittingMergedImport = ref(false)
 const selectedOverlayIndex = ref(0)
 const selectedMergedImportIndex = ref(0)
 const mergedImportPlan = ref(null)
+const splitRangesVisible = ref(false)
+const splitCleanupVisible = ref(false)
+const splitOptionsVisible = ref(false)
+const splitCleanupRows = computed(() => (mergedImportPlan.value?.cleanupCandidates || []).map((candidate, index) => ({
+  key: `split-cleanup-${index}`,
+  candidate,
+  fileName: fileName(mergedImportPlan.value.inputPath),
+  element: {
+    kind: candidate.region === 'header' ? 'header' : candidate.labels?.includes('page-number') ? 'pageNumber' : 'footerText',
+    detectedText: candidate.text,
+    normalizedText: candidate.normalizedText,
+    pageStart: candidate.pageRange?.start ?? candidate.pageStart ?? 1,
+    pageEnd: candidate.pageRange?.end ?? candidate.pageEnd ?? 1,
+    decision: candidate.selected ? 'delete' : 'keep',
+    source: candidate.source,
+  },
+})))
+function changeSplitCleanupDecision(row) {
+  if (detectingMergedImport.value || splittingMergedImport.value) return
+  row.candidate.selected = row.element.decision === 'delete'
+}
+function previewSplitCleanupElement(row) {
+  previewPage.value = row.element.pageStart
+  truePreview.value = null
+  safeRefreshPreview()
+}
+const splitActionableWarnings = computed(() => mergedImportWarnings.value.filter(message => !message.startsWith('拆分识别概况：')))
+watch([mergedImportPlan, detectingMergedImport, splittingMergedImport], () => {
+  splitRangesVisible.value = false
+  splitCleanupVisible.value = false
+  splitOptionsVisible.value = false
+})
 const splitNamePrefix = ref('')
 const splitNameSuffix = ref('[YYYYMMDD]')
 const splitNameDateValue = ref(todayCompact())
@@ -2009,9 +2066,6 @@ const {
   onCancel: () => finishListReorder(),
 })
 const hasSourceSplitRanges = computed(() => overlayFiles.value.some((file) => Number(file.sourcePageStart || 0) > 0))
-const hasMergedBatchImports = computed(
-  () => workflowMode.value === 'split' && overlayFiles.value.length > 0 && !hasSourceSplitRanges.value,
-)
 
 const activePreviewFilePath = computed(() => mergedImportPlan.value?.inputPath || selectedOverlayFile.value?.path || '')
 const previewMaxPage = computed(() => {
@@ -2112,13 +2166,13 @@ const processingNotes = computed(() => {
   return notes
 })
 const showProcessingControls = computed(
-  () => !mergedImportPlan.value && (workflowMode.value !== 'split' || hasMergedBatchImports.value),
+  () => !mergedImportPlan.value && workflowMode.value !== 'split',
 )
 const showSessionSummary = computed(
   () =>
     overlayFiles.value.length > 0 &&
     !mergedImportPlan.value &&
-    (workflowMode.value !== 'split' || hasMergedBatchImports.value),
+    workflowMode.value !== 'split',
 )
 const showSplitResultActions = computed(
   () =>
@@ -2127,7 +2181,7 @@ const showSplitResultActions = computed(
     !mergedImportPlan.value &&
     hasSourceSplitRanges.value,
 )
-const showExistingHeaderFooterControls = computed(() => overlayFiles.value.length > 0 && !mergedImportPlan.value)
+const showExistingHeaderFooterControls = computed(() => workflowMode.value !== 'split' && overlayFiles.value.length > 0 && !mergedImportPlan.value)
 const showRuleActionNotes = computed(
   () => (showProcessingControls.value || showSplitResultActions.value) && processingNotes.value.length > 0,
 )
@@ -2218,17 +2272,21 @@ const hasUnresolvedExistingOverlapRisk = computed(() => {
   )
 })
 const canApplyOverlay = computed(
-  () => overlayFiles.value.length > 0 && totalOverlayPages.value > 0 && hasApplicableProcessingRule.value,
+  () => overlayFiles.value.length > 0 && overlayFiles.value.every(file => Number(file.pages) > 0) && !checkingOverlayPages.value && !overlaying.value && !deepDetecting.value && !detectingAllHeaderFooter.value && hasApplicableProcessingRule.value,
 )
 const canApplySplitReplacement = computed(
   () =>
     showSplitResultActions.value &&
     totalOverlayPages.value > 0 &&
     !overlaying.value &&
+    !deepDetecting.value &&
+    !detectingAllHeaderFooter.value &&
     hasApplicableProcessingRule.value,
 )
 const hasApplicableProcessingRule = computed(
   () =>
+    outputMode.value !== 'files_only' ||
+    optimizeSizeEnabled.value ||
     normalizeA4.value ||
     removeAnnotations.value ||
     bookmarkEnabled.value ||
@@ -2534,10 +2592,18 @@ async function selectOverlayFiles() {
 async function handleEvidenceDrop(paths) {
   const pdfPaths = paths.filter((p) => p.toLowerCase().endsWith('.pdf'))
   if (!pdfPaths.length) return
+  if (workflowMode.value === 'split') {
+    await importMergedPdfAsEvidence(pdfPaths)
+    return
+  }
   await loadEvidenceFiles(pdfPaths)
 }
 
 async function loadEvidenceFiles(paths) {
+  if (checkingOverlayPages.value || overlaying.value || deepDetecting.value || detectingAllHeaderFooter.value) {
+    ElMessage.warning('当前正在读取、检测或处理证据，请完成后再导入')
+    return
+  }
   mergedImportPlan.value = null
   overlayFiles.value = paths.map(createEvidenceFile)
   selectedOverlayIndex.value = 0
@@ -3224,6 +3290,7 @@ function syncLegacyExistingElementState(file) {
     const edited = matches.find((element) => element.decision === 'edit')
     const representative = edited || matches.find((element) => element.decision !== 'ignore') || matches[0]
     file[`removeExisting${legacyName}`] = matches.some((element) => element.decision === 'delete')
+    file[`keepExisting${legacyName}`] = matches.some((element) => element.decision === 'keep')
     file[`existing${legacyName}Text`] = representative
       ? representative.decision === 'edit'
         ? representative.editedText
@@ -3266,12 +3333,8 @@ function keepAllExistingElements() {
     file.statusType = status.type
     syncLegacyExistingElementState(file)
   }
-  // TODO: When user marks existing header/footer as 'keep' AND headerInsertEnabled/footerInsertEnabled is true,
-  // the original header is preserved AND a new group header is inserted, resulting in a double header.
-  // Preview only shows the existing text, masking this mismatch. Consider suppressing the new group header
-  // when the corresponding existing element is kept, or updating the preview to show both.
   if (count > 0) {
-    ElMessage.success(`已保留 ${count} 个检测项`)
+    ElMessage.success(`已保留 ${count} 个检测项；保留区域已自动抑制同位置新插入以防止叠字`)
   } else {
     ElMessage.info('没有待确认的检测项')
   }
@@ -4172,6 +4235,13 @@ onUnmounted(() => {
   margin: 3px 0 0;
   color: var(--docsy-text);
   font-size: 12px;
+  line-height: 1.6;
+}
+
+.local-processing strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 h3 {
@@ -4568,6 +4638,56 @@ h3 {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.split-plan-head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.split-plan-head .block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.split-plan-actions {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(90px, 1fr) auto auto;
+  justify-content: stretch;
+}
+
+.split-plan-actions :deep(.el-button) {
+  height: 34px;
+  margin: 0;
+  padding: 0 12px;
+}
+
+.split-plan-actions .split-confirm {
+  grid-column: 1 / -1;
+}
+
+.split-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.split-summary-grid .summary-pill {
+  min-width: 0;
+  width: 100%;
+  min-height: 64px;
+  align-items: center;
+  gap: 8px;
+  border-color: var(--docsy-border-subtle);
+}
+
+.split-summary-grid .summary-pill span {
+  white-space: normal;
+  line-height: 1.5;
 }
 
 .file-link {

@@ -106,12 +106,14 @@ impl FileType {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OverlayConfig {
     header: Option<HeaderConfig>,
     footer: Option<FooterConfig>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct HeaderConfig {
     enabled: bool,
     #[serde(default)]
@@ -123,6 +125,7 @@ struct HeaderConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct FooterConfig {
     enabled: bool,
     #[serde(default)]
@@ -132,6 +135,7 @@ struct FooterConfig {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct IdentityConfig {
     prefix: Option<String>,
     start_number: Option<u32>,
@@ -158,6 +162,9 @@ fn collect_supported_files(
         }
         let path = entry.path();
         if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with('_') || name.starts_with('.')) {
+                continue;
+            }
             collect_supported_files(&path, out)?;
             continue;
         }
@@ -192,6 +199,9 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
 
     for entry in fs::read_dir(root_path)? {
         let entry = entry?;
+        if entry.file_type()?.is_symlink() {
+            continue;
+        }
         let path = entry.path();
         if !path.is_dir() {
             continue;
@@ -214,8 +224,7 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
         groups.insert(dir_name, files);
     }
 
-    // Fallback: if no subdirectory groups found, treat root as a single group
-    if groups.is_empty() {
+    {
         let mut root_files = Vec::new();
         collect_supported_files(root_path, &mut root_files)?;
         // Filter out files in subdirectories (only keep root-level files)
@@ -227,7 +236,13 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("证据")
                 .to_string();
-            groups.insert(group_name, root_files);
+            let mut unique_name = group_name.clone();
+            let mut suffix = 1;
+            while groups.contains_key(&unique_name) {
+                unique_name = format!("{group_name}（根目录文件{suffix}）");
+                suffix += 1;
+            }
+            groups.insert(unique_name, root_files);
         }
     }
 
@@ -295,6 +310,7 @@ pub fn build_group_pdfs(
 
     let mut results = Vec::new();
     let mut failed_conversions = Vec::new();
+    let mut failed_groups = Vec::new();
 
     for group in &args.groups {
         let group_name = &group.name;
@@ -336,9 +352,26 @@ pub fn build_group_pdfs(
             safe_file_stem(group_name),
             fnv1a_hash(group_id)
         ));
-        merge_pdfs_with_qpdf(&qpdf_bin, &pdf_paths, &group_output)?;
+        if let Err(err) = merge_pdfs_with_qpdf(&qpdf_bin, &pdf_paths, &group_output) {
+            failed_groups.push(serde_json::json!({
+                "groupId": group_id,
+                "name": group_name,
+                "reason": format!("合并分组失败: {err}"),
+            }));
+            continue;
+        }
 
-        let page_count = qpdf_page_count(&qpdf_bin, &group_output.display().to_string())?;
+        let page_count = match qpdf_page_count(&qpdf_bin, &group_output.display().to_string()) {
+            Ok(count) => count,
+            Err(err) => {
+                failed_groups.push(serde_json::json!({
+                    "groupId": group_id,
+                    "name": group_name,
+                    "reason": format!("读取合并页数失败: {err}"),
+                }));
+                continue;
+            }
+        };
 
         results.push(serde_json::json!({
             "groupId": group_id,
@@ -357,6 +390,7 @@ pub fn build_group_pdfs(
         "evidenceDir": evidence_dir.display().to_string(),
         "results": results,
         "failedConversions": failed_conversions,
+        "failedGroups": failed_groups,
     }))
 }
 
@@ -388,6 +422,13 @@ pub fn merge_all(args: &MergeAllArgs) -> Result<String> {
             .display()
             .to_string()
     });
+
+    let out_canonical = Path::new(&output_path_str);
+    for in_p in &args.group_pdfs {
+        if Path::new(in_p) == out_canonical {
+            anyhow::bail!("合并总输出路径不能与待合并的输入文件路径相同: {output_path_str}");
+        }
+    }
 
     let qpdf_bin = crate::external::QpdfTool.binary_path()?;
 
@@ -909,6 +950,23 @@ fn pt_to_mm(pt: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_includes_root_files_and_excludes_nested_outputs() {
+        let root = super::super::temp_named_path("docsy_scan_audit", "dir");
+        fs::create_dir_all(root.join("group/_evidence_output")).unwrap();
+        fs::write(root.join("root.pdf"), b"fixture").unwrap();
+        fs::write(root.join("group/10.pdf"), b"fixture").unwrap();
+        fs::write(root.join("group/2.pdf"), b"fixture").unwrap();
+        fs::write(root.join("group/_evidence_output/old.pdf"), b"fixture").unwrap();
+        let scanned = scan_folder(root.to_str().unwrap()).unwrap();
+        let groups = scanned["groups"].as_array().unwrap();
+        assert_eq!(groups.len(), 2);
+        let group = groups.iter().find(|group| group["name"] == "group").unwrap();
+        assert_eq!(group["files"].as_array().unwrap().len(), 2);
+        assert_eq!(group["files"][0]["name"], "2.pdf");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn safe_file_stem_blocks_path_segments() {

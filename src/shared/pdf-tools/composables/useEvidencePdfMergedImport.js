@@ -164,16 +164,18 @@ export function useEvidencePdfMergedImport({
       safeRefreshPreview()
       ElMessage.success('PDF 已导入，点击“检测证据页段”生成拆分建议；检测耗时取决于文件大小和页数')
     } catch (err) {
-      mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages, [
-        `导入流程中断：${String(err?.message || err || '未知错误')}`,
-        '已生成一个覆盖全文的手动页段',
-      ])
-      resetMergedImportHistory()
-      selectedMergedImportIndex.value = 0
-      previewPage.value = 1
-      truePreview.value = null
-      safeRefreshPreview()
-      ElMessage.warning('导入中断，已进入手动拆分页段确认')
+      if (input) {
+        mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages, [
+          `导入流程中断：${String(err?.message || err || '未知错误')}`,
+          '已生成一个覆盖全文的手动页段',
+        ])
+        resetMergedImportHistory()
+        selectedMergedImportIndex.value = 0
+        previewPage.value = 1
+        truePreview.value = null
+        safeRefreshPreview()
+        ElMessage.warning('导入中断，已进入手动拆分页段确认')
+      }
     } finally {
       importingMergedPdf.value = false
     }
@@ -335,9 +337,6 @@ export function useEvidencePdfMergedImport({
       selectedOverlayIndex.value = 0
       previewPage.value = 1
       applyWorkflowDefaults()
-      mergedImportPlan.value = null
-      resetMergedImportHistory()
-      refreshPreview()
 
       const failed = split.data.failed?.length || 0
       const warnings = split.data.warnings || []
@@ -345,13 +344,25 @@ export function useEvidencePdfMergedImport({
       const blankSuffix = removedBlanks > 0 ? `（已删除 ${removedBlanks} 个空白页）` : ''
       const cleanupSuffix = Number(split.data.removedHeaders || 0) + Number(split.data.removedFooters || 0) > 0
         ? `；清除源副本页眉 ${split.data.removedHeaders || 0} 处、页脚 ${split.data.removedFooters || 0} 处` : ''
-      if (failed) {
-        ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个${blankSuffix}`)
-      } else if (warnings.length) {
-        ElMessage.warning(`已生成 ${outputs.length} 个证据${blankSuffix}${cleanupSuffix}；提示：${warnings[0]}`)
+
+      if (failed > 0) {
+        if (mergedImportPlan.value) {
+          mergedImportPlan.value.warnings = [
+            `拆分存在 ${failed} 项失败：${(split.data.failed || []).map((f) => f.name || f.outputPath).join(', ')}`,
+            ...(warnings || []),
+          ]
+        }
+        ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个${blankSuffix}；拆分计划已保留供检查与重试`)
       } else {
-        ElMessage.success(`已生成 ${outputs.length} 个证据${blankSuffix}${cleanupSuffix}`)
+        mergedImportPlan.value = null
+        resetMergedImportHistory()
+        if (warnings.length) {
+          ElMessage.warning(`已生成 ${outputs.length} 个证据${blankSuffix}${cleanupSuffix}；提示：${warnings[0]}`)
+        } else {
+          ElMessage.success(`已生成 ${outputs.length} 个证据${blankSuffix}${cleanupSuffix}`)
+        }
       }
+      refreshPreview()
     } finally {
       splittingMergedImport.value = false
     }
@@ -546,17 +557,29 @@ export function useEvidencePdfMergedImport({
 
   // 计划表格内直接修改起始页/结束页后，同样走智能无缝调整
   function onMergedRangeStartChanged(index, value) {
+    if (detectingMergedImport.value || splittingMergedImport.value) return
     const items = mergedImportPlan.value?.items
     if (!items || index < 0) return
-    const newIndex = smartSetRangeStart(items, index, value, mergedImportPlan.value.totalPages)
+    let newIndex = index
+    runMergedImportMutation(() => {
+      newIndex = smartSetRangeStart(items, index, value, mergedImportPlan.value.totalPages)
+    })
     selectedMergedImportIndex.value = newIndex
+    truePreview.value = null
+    safeRefreshPreview()
   }
 
   function onMergedRangeEndChanged(index, value) {
+    if (detectingMergedImport.value || splittingMergedImport.value) return
     const items = mergedImportPlan.value?.items
     if (!items || index < 0) return
-    const newIndex = smartSetRangeEnd(items, index, value, mergedImportPlan.value.totalPages)
+    let newIndex = index
+    runMergedImportMutation(() => {
+      newIndex = smartSetRangeEnd(items, index, value, mergedImportPlan.value.totalPages)
+    })
     selectedMergedImportIndex.value = newIndex
+    truePreview.value = null
+    safeRefreshPreview()
   }
 
   function addMergedImportRange() {

@@ -180,14 +180,9 @@ export function useEvidencePdfExistingEditing({
       row.existingPageNumberEdited = false
       row.convertPlainPageNumber = false
       row.removeExistingPageNumber = false
-    } else if (row.existingFooterArtifact && !row.existingFooterText) {
-      row.existingFooterText = next
-      row.existingFooterTargetText = original
-      row.existingFooterEdited = next !== original
+    } else if (row.existingPageNumberArtifact) {
       row.existingPageNumberText = next
-      row.existingPageNumberEdited = false
-      row.convertPlainPageNumber = false
-      row.removeExistingFooter = false
+      row.existingPageNumberEdited = next !== original
       row.removeExistingPageNumber = false
     } else if (next !== original) {
       row.existingPageNumberText = next

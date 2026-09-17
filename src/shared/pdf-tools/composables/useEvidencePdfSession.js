@@ -665,12 +665,24 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         footerTextGroup.enabled !== false &&
         Boolean(footerTextGroup.text || rules.footerTextContent)
       : rules.footerInsertEnabled !== false
+    const isKept = (kind) => {
+      if (file[`keepExisting${kind}`]) return true
+      return (file.existingElements || []).some(
+        (e) =>
+          e.kind === (kind === 'Header' ? 'header' : kind === 'PageNumber' ? 'pageNumber' : 'footerText') &&
+          e.decision === 'keep',
+      )
+    }
+    const keepHeader = isKept('Header')
+    const keepFooter = isKept('Footer')
+    const keepPageNumber = isKept('PageNumber')
+
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const effectiveHeaderGroup = headerGroup
       ? { ...headerGroup, perFileSeqStart: effectiveHeaderNumbering(headerGroup, numberingDefaults).evidenceStart }
       : headerGroup
     const header =
-      headerInsertEnabled && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none'
+      !keepHeader && headerInsertEnabled && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none'
         ? buildHeaderTextForGroup(file, index, { ...effectiveHeaderGroup, mode: headerModeValue }, rules)
         : ''
     const outputPath = buildOverlayOutputPath(file.path, outputDir, {
@@ -692,7 +704,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const existingHeaderReplacement = standardArtifactReplacementConfig(file, 'header', rules)
     const existingFooterReplacement = standardArtifactReplacementConfig(file, 'footer', rules)
     const mainPageNumberOverlays =
-      pageNumberEnabled && pageNumberGroup && pageNumberGroup.enabled !== false
+      !keepPageNumber && pageNumberEnabled && pageNumberGroup && pageNumberGroup.enabled !== false
         ? pageNumberOverlaysForFile(file, {
             enabled: true,
             totalPages: jobTotalPages,
@@ -720,7 +732,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         : []
     const extraOverlays = [...convertedExistingOverlays(file, rules), ...mainPageNumberOverlays]
     // Header groups: every enabled group except the main (selected) one
-    if (headerInsertEnabled) {
+    if (headerInsertEnabled && !keepHeader) {
       for (const g of availableHeaderGroups) {
         if (g.id === headerGroup?.id || g.enabled === false || g.mode === 'none' || !groupAppliesToFile(g, file))
           continue
@@ -741,7 +753,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       }
     }
     // Footer text groups: every enabled group except the main (selected) one
-    if (footerInsertEnabled) {
+    if (footerInsertEnabled && !keepFooter) {
       for (const g of availableFooterGroups) {
         if (g.id === footerTextGroup?.id || g.enabled === false || !groupAppliesToFile(g, file)) continue
         if (g.text) {

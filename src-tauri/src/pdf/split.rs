@@ -349,10 +349,11 @@ fn extract_range(
         .arg(selection)
         .arg("--")
         .arg(&output_path);
-    let status = cmd.status().context("执行 qpdf 页段拆分失败")?;
+    let output = cmd.output().context("执行 qpdf 页段拆分失败")?;
 
-    if !super::qpdf::status_is_success(&status) {
-        anyhow::bail!("qpdf 页段拆分失败");
+    if !super::qpdf::status_is_success(&output.status) {
+        let detail = crate::external::command_failure_detail(&output);
+        anyhow::bail!("qpdf 页段拆分失败: {detail}");
     }
     Ok((
         output_path.to_string_lossy().to_string(),
@@ -360,10 +361,10 @@ fn extract_range(
     ))
 }
 
-/// 检测 PDF 中"无可视内容"的空白页（无文本、无图像绘制）。
+/// 检测 PDF 中"无可视内容"的空白页（无文本、无图像、无矢量路径绘制）。
 ///
-/// 判定规则：页面内容流中没有任何文本算子（Tj/TJ/'/"）、
-/// 图像绘制算子（Do / 内联图像 BI/ID）即视为空白页，覆盖：
+/// 判定规则：页面内容流中没有任何文本算子、图像绘制算子（Do/BI/ID/EI）
+/// 或矢量路径构造与着色算子（re/m/l/c/v/y/h/f/F/f*/S/s/B/B*/b/b*/sh）即视为空白页，覆盖：
 /// 分隔页、双面扫描的背面、仅白色填充的扫描空白页等。
 /// 内容流解析失败时保守视为有内容，避免误删。
 fn detect_blank_pages(input: &str) -> Result<BTreeSet<u32>> {
@@ -384,7 +385,14 @@ fn detect_blank_pages(input: &str) -> Result<BTreeSet<u32>> {
 fn operation_is_visible(operation: &lopdf::content::Operation) -> bool {
     matches!(
         operation.operator.as_str(),
-        "Tj" | "TJ" | "'" | "\"" | "Do" | "BI" | "ID"
+        // 文本输出
+        "Tj" | "TJ" | "'" | "\"" |
+        // XObject 与图像
+        "Do" | "BI" | "ID" | "EI" |
+        // 矢量路径构建（矩形、点线、曲线、闭合）
+        "re" | "m" | "l" | "c" | "v" | "y" | "h" |
+        // 矢量路径绘制（填充、描边、着色、网格）
+        "f" | "F" | "f*" | "S" | "s" | "B" | "B*" | "b" | "b*" | "sh"
     )
 }
 
@@ -447,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn operation_visibility_classifies_text_and_images() {
+    fn operation_visibility_classifies_text_images_and_vectors() {
         use lopdf::content::Operation;
         assert!(operation_is_visible(&Operation::new("Tj", vec![])));
         assert!(operation_is_visible(&Operation::new("TJ", vec![])));
@@ -455,10 +463,13 @@ mod tests {
         assert!(operation_is_visible(&Operation::new("\"", vec![])));
         assert!(operation_is_visible(&Operation::new("Do", vec![])));
         assert!(operation_is_visible(&Operation::new("BI", vec![])));
-        assert!(!operation_is_visible(&Operation::new("re", vec![])));
-        assert!(!operation_is_visible(&Operation::new("f", vec![])));
+        assert!(operation_is_visible(&Operation::new("re", vec![])));
+        assert!(operation_is_visible(&Operation::new("f", vec![])));
+        assert!(operation_is_visible(&Operation::new("S", vec![])));
         assert!(!operation_is_visible(&Operation::new("cm", vec![])));
         assert!(!operation_is_visible(&Operation::new("q", vec![])));
+        assert!(!operation_is_visible(&Operation::new("Q", vec![])));
+        assert!(!operation_is_visible(&Operation::new("BT", vec![])));
         assert!(!operation_is_visible(&Operation::new("ET", vec![])));
     }
 
