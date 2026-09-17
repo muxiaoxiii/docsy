@@ -62,6 +62,12 @@ export function useEvidencePdfMergedImport({
   )
   const mergedImportUndoStack = ref([])
   const mergedImportRedoStack = ref([])
+  /** 待处理的后续合并 PDF（多选导入时的队列，逐份检测/拆分）。 */
+  const pendingMergedImportPaths = ref([])
+  const pendingMergedImportCount = computed(() => pendingMergedImportPaths.value.length)
+  const pendingMergedImportNextName = computed(
+    () => (pendingMergedImportPaths.value[0] ? fileName(pendingMergedImportPaths.value[0]) : ''),
+  )
   const canUndoMergedImport = computed(() => mergedImportUndoStack.value.length > 0)
   const canRedoMergedImport = computed(() => mergedImportRedoStack.value.length > 0)
   const currentMergedImportRangeIndex = computed(() => {
@@ -127,6 +133,55 @@ export function useEvidencePdfMergedImport({
     return restoreMergedImportSnapshot(snapshot)
   }
 
+  async function loadOneMergedImportPath(input) {
+    const outputDir = defaultMergedImportOutputDir(input)
+    const countResult = await tauriCallSafe('get_pdf_page_count', { input })
+    if (!countResult.ok || Number(countResult.data) < 1) {
+      ElMessage.error(countResult.error || '无法读取 PDF 页数，请检查文件后重新导入')
+      return false
+    }
+    const totalPages = Math.max(1, Number(countResult.data) || 1)
+    mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, totalPages)
+    overlayFiles.value = []
+    resetMergedImportHistory()
+    selectedMergedImportIndex.value = 0
+    previewPage.value = 1
+    truePreview.value = null
+    safeRefreshPreview()
+    return true
+  }
+
+  function enqueuePendingMergedImportPaths(paths) {
+    const existing = new Set(pendingMergedImportPaths.value)
+    for (const path of paths) {
+      if (!existing.has(path)) {
+        pendingMergedImportPaths.value.push(path)
+        existing.add(path)
+      }
+    }
+  }
+
+  function clearPendingMergedImport() {
+    pendingMergedImportPaths.value = []
+  }
+
+  /** 拆分成功后：若有队列则自动载入下一份，否则保持空计划。 */
+  async function advancePendingMergedImportIfAny() {
+    if (!pendingMergedImportPaths.value.length) return false
+    const next = pendingMergedImportPaths.value.shift()
+    const ok = await loadOneMergedImportPath(next)
+    if (ok) {
+      const left = pendingMergedImportPaths.value.length
+      ElMessage.success(
+        left > 0
+          ? `已载入下一份合并 PDF：${fileName(next)}（队列中还有 ${left} 份）`
+          : `已载入下一份合并 PDF：${fileName(next)}`,
+      )
+      return true
+    }
+    return false
+  }
+
   async function importMergedPdfAsEvidence(providedPaths) {
     if (importingMergedPdf.value || detectingMergedImport.value || splittingMergedImport.value) return
     importingMergedPdf.value = true
@@ -134,35 +189,41 @@ export function useEvidencePdfMergedImport({
     let input = ''
     let outputDir = ''
     try {
-      const selected = Array.isArray(providedPaths) ? providedPaths : await open({
-        multiple: false,
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
-      })
+      const selected = Array.isArray(providedPaths)
+        ? providedPaths
+        : await open({
+            multiple: true,
+            filters: [{ name: 'PDF', extensions: ['pdf'] }],
+          })
       if (!selected) return
-      const paths = Array.isArray(selected) ? selected : [selected]
+      const paths = (Array.isArray(selected) ? selected : [selected]).filter(Boolean)
       if (!paths.length) return
-      if (paths.length > 1) {
-        ElMessage.warning('请一次导入一个合并证据 PDF，自动检测并确认拆分后再处理下一份')
-        return
-      }
-      input = paths[0]
-      outputDir = defaultMergedImportOutputDir(input)
 
-      const countResult = await tauriCallSafe('get_pdf_page_count', { input })
-      if (!countResult.ok || Number(countResult.data) < 1) {
-        ElMessage.error(countResult.error || '无法读取 PDF 页数，请检查文件后重新导入')
+      // 已有进行中的拆分方案：多选只入队，不打断当前核对。
+      if (mergedImportPlan.value) {
+        enqueuePendingMergedImportPaths(paths)
+        ElMessage.success(
+          `已加入待拆分队列 ${paths.length} 份，当前方案拆分完成后自动载入下一份`,
+        )
         return
       }
-      const totalPages = Number(countResult.data)
-      knownTotalPages = Math.max(1, totalPages || 1)
-      mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages)
-      overlayFiles.value = []
-      resetMergedImportHistory()
-      selectedMergedImportIndex.value = 0
-      previewPage.value = 1
-      truePreview.value = null
-      safeRefreshPreview()
-      ElMessage.success('PDF 已导入，点击“检测证据页段”生成拆分建议；检测耗时取决于文件大小和页数')
+
+      const [first, ...rest] = paths
+      input = first
+      outputDir = defaultMergedImportOutputDir(input)
+      const loaded = await loadOneMergedImportPath(input)
+      if (!loaded) {
+        if (rest.length) enqueuePendingMergedImportPaths(rest)
+        return
+      }
+      if (rest.length) {
+        enqueuePendingMergedImportPaths(rest)
+        ElMessage.success(
+          `PDF 已导入；队列中还有 ${rest.length} 份，本份拆分完成后自动载入下一份`,
+        )
+      } else {
+        ElMessage.success('PDF 已导入，点击“检测证据页段”生成拆分建议；检测耗时取决于文件大小和页数')
+      }
     } catch (err) {
       if (input) {
         mergedImportPlan.value = buildManualMergedImportPlan(input, outputDir, knownTotalPages, [
@@ -361,6 +422,8 @@ export function useEvidencePdfMergedImport({
         } else {
           ElMessage.success(`已生成 ${outputs.length} 个证据${blankSuffix}${cleanupSuffix}`)
         }
+        // 队列：拆完自动进入下一份（仅在无失败时推进，避免失败项被静默跳过）
+        await advancePendingMergedImportIfAny()
       }
       refreshPreview()
     } finally {
@@ -663,6 +726,11 @@ export function useEvidencePdfMergedImport({
 
   return {
     mergedImportWarnings,
+    pendingMergedImportPaths,
+    pendingMergedImportCount,
+    pendingMergedImportNextName,
+    clearPendingMergedImport,
+    advancePendingMergedImportIfAny,
     selectedMergedImportRange,
     canUndoMergedImport,
     canRedoMergedImport,

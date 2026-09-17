@@ -20,8 +20,24 @@
           <el-button v-if="workflowMode !== 'merge'" type="primary" :loading="importingMergedPdf" :disabled="detectingMergedImport || splittingMergedImport" @click="importMergedPdfAsEvidence">{{
             mergedImportButtonText
           }}</el-button>
+          <el-tag v-if="pendingMergedImportCount" type="warning" size="small" closable @close="clearPendingMergedImport">
+            队列 {{ pendingMergedImportCount }} 份
+          </el-tag>
         </div>
       </div>
+
+      <el-alert
+        v-if="pendingMergedImportCount && mergedImportPlan"
+        type="info"
+        :closable="false"
+        show-icon
+        class="import-plan-warning"
+        style="margin-top: 8px"
+      >
+        <template #title>
+          当前：{{ fileName(mergedImportPlan.inputPath) }}；本份拆分完成后自动载入下一份（{{ pendingMergedImportNextName }} 等 {{ pendingMergedImportCount }} 份）。
+        </template>
+      </el-alert>
 
       <div v-if="mergedOperationStatus" class="local-processing" role="status" aria-live="polite" aria-atomic="true">
         <strong>{{ mergedOperationStatus.title }}</strong>
@@ -2510,6 +2526,9 @@ const {
 
 const {
   mergedImportWarnings,
+  pendingMergedImportCount,
+  pendingMergedImportNextName,
+  clearPendingMergedImport,
   selectedMergedImportRange,
   canUndoMergedImport,
   canRedoMergedImport,
