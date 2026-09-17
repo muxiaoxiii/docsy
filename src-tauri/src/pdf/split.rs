@@ -363,26 +363,16 @@ fn extract_range(
 
 /// 检测 PDF 中"无可视内容"的空白页（无文本、无图像、无矢量路径绘制）。
 ///
+/// 流式实现：仅通过 qpdf 拉取页面元数据与内容流，不整档载入扫描件图像对象。
 /// 判定规则：页面内容流中没有任何文本算子、图像绘制算子（Do/BI/ID/EI）
-/// 或矢量路径构造与着色算子（re/m/l/c/v/y/h/f/F/f*/S/s/B/B*/b/b*/sh）即视为空白页，覆盖：
-/// 分隔页、双面扫描的背面、仅白色填充的扫描空白页等。
+/// 或矢量路径构造与着色算子（re/m/l/c/v/y/h/f/F/f*/S/s/B/B*/b/b*/sh）即视为空白页。
 /// 内容流解析失败时保守视为有内容，避免误删。
 fn detect_blank_pages(input: &str) -> Result<BTreeSet<u32>> {
-    let doc = lopdf::Document::load(input).context("读取 PDF 分析空白页失败")?;
-    let mut blank = BTreeSet::new();
-    for (page_number, page_id) in doc.get_pages() {
-        let has_visible_content = match doc.get_and_decode_page_content(page_id) {
-            Ok(content) => content.operations.iter().any(operation_is_visible),
-            Err(_) => true,
-        };
-        if !has_visible_content {
-            blank.insert(page_number);
-        }
-    }
-    Ok(blank)
+    super::qpdf_stream::detect_blank_pages_streaming(Path::new(input))
+        .context("读取 PDF 分析空白页失败")
 }
 
-fn operation_is_visible(operation: &lopdf::content::Operation) -> bool {
+pub(crate) fn operation_is_visible(operation: &lopdf::content::Operation) -> bool {
     matches!(
         operation.operator.as_str(),
         // 文本输出
