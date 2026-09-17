@@ -275,12 +275,16 @@ export function useEvidencePdfMergedImport({
         }
       }
 
+      const headerScanMm = headerFooterDetectionZoneMm(cleanupHeaderHeightMm.value)
+      const footerScanMm = headerFooterDetectionZoneMm(cleanupFooterHeightMm.value)
       const split = await tauriCallSafe('split_merged_evidence_pdf', {
         args: {
           inputPath: mergedImportPlan.value.inputPath,
           outputDir: mergedImportPlan.value.outputDir,
           items,
           removeBlankPages: Boolean(removeBlankPages?.value),
+          headerZoneMm: headerScanMm,
+          footerZoneMm: footerScanMm,
           cleanupTargets: (mergedImportPlan.value.cleanupCandidates || [])
             .filter(candidate => candidate.selected)
             .map(candidate => ({
@@ -340,11 +344,11 @@ export function useEvidencePdfMergedImport({
       const removedBlanks = (outputs || []).reduce((sum, output) => sum + Number(output.removedBlankPages || 0), 0)
       const blankSuffix = removedBlanks > 0 ? `（已删除 ${removedBlanks} 个空白页）` : ''
       const cleanupSuffix = Number(split.data.removedHeaders || 0) + Number(split.data.removedFooters || 0) > 0
-        ? `；清除源副本标准页眉 ${split.data.removedHeaders || 0} 处、页脚 ${split.data.removedFooters || 0} 处` : ''
+        ? `；清除源副本页眉 ${split.data.removedHeaders || 0} 处、页脚 ${split.data.removedFooters || 0} 处` : ''
       if (failed) {
         ElMessage.warning(`已生成 ${outputs.length} 个证据，失败 ${failed} 个${blankSuffix}`)
       } else if (warnings.length) {
-        ElMessage.warning(`已生成 ${outputs.length} 个证据，需核对页段提示${blankSuffix}`)
+        ElMessage.warning(`已生成 ${outputs.length} 个证据${blankSuffix}${cleanupSuffix}；提示：${warnings[0]}`)
       } else {
         ElMessage.success(`已生成 ${outputs.length} 个证据${blankSuffix}${cleanupSuffix}`)
       }

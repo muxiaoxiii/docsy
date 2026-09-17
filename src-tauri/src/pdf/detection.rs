@@ -391,7 +391,7 @@ pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestio
             .chain(detection.footer_candidates)
             .filter(|candidate| {
                 candidate.source == "artifact"
-                    || candidate.repeating
+                    || (candidate.repeating && candidate.confidence >= 0.3)
                     || candidate
                         .labels
                         .iter()

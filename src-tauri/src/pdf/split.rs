@@ -19,6 +19,10 @@ pub struct SplitMergedArgs {
     remove_blank_pages: bool,
     #[serde(default)]
     cleanup_targets: Vec<SplitCleanupTarget>,
+    #[serde(default)]
+    header_zone_mm: Option<f32>,
+    #[serde(default)]
+    footer_zone_mm: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -102,7 +106,7 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
     std::fs::create_dir_all(&args.output_dir).context("创建拆分输出目录失败")?;
 
     let total_pages = super::qpdf::page_count(&args.input_path)?;
-    let warnings = validate_split_layout(&args.items, total_pages);
+    let mut warnings = validate_split_layout(&args.items, total_pages);
     let blank_pages = if args.remove_blank_pages {
         detect_blank_pages(&args.input_path)?
     } else {
@@ -208,20 +212,27 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
     }
 
     if !plain_header_targets.is_empty() || !plain_footer_targets.is_empty() {
+        let header_zone_mm = args.header_zone_mm.unwrap_or(35.0).clamp(10.0, 100.0);
+        let footer_zone_mm = args.footer_zone_mm.unwrap_or(35.0).clamp(10.0, 100.0);
         let plain_plan = super::content_text::PlainTextCleanupPlan {
             header_targets: plain_header_targets,
             footer_targets: plain_footer_targets,
-            header_zone_mm: 35.0,
-            footer_zone_mm: 35.0,
+            header_zone_mm,
+            footer_zone_mm,
         };
+        let mut plain_removed = 0;
         if let Some((path, stats)) = super::content_text::delete_plain_header_footer_to_temp(
             &current_source,
             &plain_plan,
         )? {
+            plain_removed = stats.removed();
             total_removed_headers += stats.removed_header;
             total_removed_footers += stats.removed_footer;
             current_source = path.to_string_lossy().into_owned();
             _temp_guards.push(crate::util::fs::TempPathGuard::new(path));
+        }
+        if plain_removed == 0 {
+            warnings.push("已勾选清除普通文本页眉/页脚，但在对应页段内容流中未匹配到可安全剔除的文字，原文未修改".to_string());
         }
     }
 
@@ -391,7 +402,7 @@ mod tests {
         let mut args: super::SplitMergedArgs = serde_json::from_value(serde_json::json!({
             "inputPath": input, "outputDir": output,
             "items": [{"name": "cleaned", "pageStart": 1, "pageEnd": pages}],
-            "cleanupTargets": [{"region": "footer", "normalizedText": footer.text, "pageStart": footer.page, "pageEnd": footer.page}],
+            "cleanupTargets": [{"region": "footer", "source": "artifact", "normalizedText": footer.text, "pageStart": footer.page, "pageEnd": footer.page}],
         })).unwrap();
         let result = super::split_merged(&args).unwrap();
         assert!(result.failed.is_empty());
@@ -592,6 +603,8 @@ mod tests {
             }],
             remove_blank_pages: true,
             cleanup_targets: vec![],
+            header_zone_mm: None,
+            footer_zone_mm: None,
         })
         .expect("拆分失败");
 
