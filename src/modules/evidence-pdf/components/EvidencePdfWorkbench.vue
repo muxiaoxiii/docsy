@@ -895,6 +895,61 @@
       @jump-to-settings="handleJumpToSettings"
     />
 
+    <el-dialog
+      v-model="keepConflictDialogVisible"
+      title="原件保留与新内容重叠确认"
+      width="820px"
+      append-to-body
+      :close-on-click-modal="false"
+    >
+      <div class="keep-conflict-dialog-body">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px"
+        >
+          <template #title>
+            检测到以下 {{ keepConflictList.length }} 处在保留原件内容的同时配置了新插入。为避免同一区域文字叠放破损版面，请确认各文件的处理方式：
+          </template>
+        </el-alert>
+        <div class="keep-conflict-toolbar" style="margin-bottom: 10px; display: flex; gap: 8px">
+          <el-button size="small" type="success" plain @click="batchSetKeepConflictAction('suppress')">
+            全部跳过新插入（推荐防叠字）
+          </el-button>
+          <el-button size="small" type="warning" plain @click="batchSetKeepConflictAction('overlap')">
+            全部继续重叠插入
+          </el-button>
+          <el-button size="small" type="danger" plain @click="batchSetKeepConflictAction('delete')">
+            全部改为删除原件留新内容
+          </el-button>
+        </div>
+        <el-table :data="keepConflictList" border size="small" max-height="360px">
+          <el-table-column prop="fileName" label="文件" min-width="170" show-overflow-tooltip />
+          <el-table-column prop="regionLabel" label="区域" width="76" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.region === 'header' ? 'primary' : 'warning'">{{ row.regionLabel }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="existingText" label="原件保留文字" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="newText" label="计划新插入" min-width="160" show-overflow-tooltip />
+          <el-table-column label="处理方式" width="210" align="center">
+            <template #default="{ row }">
+              <el-select v-model="row.action" size="small" style="width: 100%">
+                <el-option label="跳过新插入（防叠字）" value="suppress" />
+                <el-option label="继续重叠插入" value="overlap" />
+                <el-option label="删除原件留新内容" value="delete" />
+              </el-select>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="cancelKeepConflictConfirm">取消处理</el-button>
+        <el-button type="primary" @click="confirmKeepConflictDecisions">确认并开始处理</el-button>
+      </template>
+    </el-dialog>
+
     <div
       class="workbench-resizer"
       role="separator"
@@ -1079,6 +1134,7 @@ import {
   createDefaultNumberingDefaults,
   createDefaultPageNumberGroup,
   createEvidenceFile,
+  detectKeepInsertConflicts,
   effectiveHeaderNumbering,
   effectivePageNumbering,
   fileName,
@@ -2883,6 +2939,71 @@ async function resolveSuffixConflicts(payload) {
   return payload
 }
 
+// --- 原件保留与新插入冲突确认 ---
+const keepConflictDialogVisible = ref(false)
+const keepConflictList = ref([])
+let keepConflictResolver = null
+
+function openKeepConflictConfirmDialog(conflicts) {
+  keepConflictList.value = conflicts.map((c) => ({ ...c }))
+  keepConflictDialogVisible.value = true
+  return new Promise((resolve) => {
+    keepConflictResolver = resolve
+  })
+}
+
+function batchSetKeepConflictAction(action) {
+  keepConflictList.value.forEach((c) => {
+    c.action = action
+  })
+}
+
+function cancelKeepConflictConfirm() {
+  keepConflictDialogVisible.value = false
+  if (keepConflictResolver) {
+    keepConflictResolver(false)
+    keepConflictResolver = null
+  }
+}
+
+function confirmKeepConflictDecisions() {
+  keepConflictDialogVisible.value = false
+  keepConflictList.value.forEach((item) => {
+    const file = overlayRows.value.find((f) => f.path === item.filePath)
+    if (!file) return
+
+    const legacyKey = item.region === 'header' ? 'Header' : item.region === 'pageNumber' ? 'PageNumber' : 'Footer'
+    if (item.action === 'suppress') {
+      file[`suppressNew${legacyKey}`] = true
+      file[`allowOverlap${legacyKey}`] = false
+    } else if (item.action === 'overlap') {
+      file[`suppressNew${legacyKey}`] = false
+      file[`allowOverlap${legacyKey}`] = true
+    } else if (item.action === 'delete') {
+      file[`suppressNew${legacyKey}`] = false
+      file[`allowOverlap${legacyKey}`] = false
+      file[`removeExisting${legacyKey}`] = true
+      const elements = file.existingElements || []
+      const matchKind = item.region === 'header' ? 'header' : item.region === 'pageNumber' ? 'pageNumber' : 'footerText'
+      elements.forEach((el) => {
+        if (el.kind === matchKind) el.decision = 'delete'
+      })
+      syncLegacyExistingElementState(file)
+    }
+  })
+
+  if (keepConflictResolver) {
+    keepConflictResolver(true)
+    keepConflictResolver = null
+  }
+}
+
+async function checkAndConfirmKeepInsertConflicts(files, rules) {
+  const conflicts = detectKeepInsertConflicts(files, rules)
+  if (!conflicts.length) return true
+  return await openKeepConflictConfirmDialog(conflicts)
+}
+
 async function applySplitHeaderFooterReplacement() {
   if (!canApplySplitReplacement.value) return
   ensureReplacementPreset()
@@ -2894,6 +3015,12 @@ async function applySplitHeaderFooterReplacement() {
       ...currentRules.value,
       outputMode: 'files_only',
       mergeAfterProcessing: false,
+    }
+    overlayRows.value.forEach((file) => syncLegacyExistingElementState(file))
+    const conflictConfirmed = await checkAndConfirmKeepInsertConflicts(overlayRows.value, rules)
+    if (!conflictConfirmed) {
+      overlaying.value = false
+      return
     }
     let payload = buildEvidencePdfRulePayload(overlayRows.value, rules, outputDir)
     payload = await resolveSuffixConflicts(payload)
@@ -2971,6 +3098,11 @@ async function applyHeaderFooter() {
   try {
     // Sync existingElement decisions back to legacy file properties before building payload
     overlayRows.value.forEach((file) => syncLegacyExistingElementState(file))
+    const conflictConfirmed = await checkAndConfirmKeepInsertConflicts(overlayRows.value, currentRules.value)
+    if (!conflictConfirmed) {
+      overlaying.value = false
+      return
+    }
     let payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
     payload = await resolveSuffixConflicts(payload)
     if (!payload) {

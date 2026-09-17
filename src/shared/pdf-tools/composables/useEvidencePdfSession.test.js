@@ -14,6 +14,7 @@ import {
   createDefaultFooterTextGroup,
   createDefaultPageNumberGroup,
   createEvidenceFile,
+  detectKeepInsertConflicts,
   expandPlaceholders,
   naturalCompare,
   pageRangeText,
@@ -639,17 +640,17 @@ describe('Evidence PDF session helpers', () => {
     expect(buildHeaderText(file, 2, { ...baseRules, headerMode: 'prefix_seq', headerText: '原告' })).toBe('原告证据3')
   })
 
-  it('suppresses new header injection when user marks existing header as keep to prevent double header', () => {
+  it('suppresses new header injection only when suppressNewHeader is explicitly set', () => {
     const files = [
       {
         ...createEvidenceFile('/case/doc1.pdf'),
         pages: 3,
-        keepExistingHeader: true,
+        suppressNewHeader: true, // 用户在确认列表中选择跳过新插入
       },
       {
         ...createEvidenceFile('/case/doc2.pdf'),
         pages: 2,
-        keepExistingHeader: false,
+        suppressNewHeader: false, // 用户选择允许重叠插入，不拒绝用户操作
       },
     ]
     const rules = {
@@ -658,10 +659,36 @@ describe('Evidence PDF session helpers', () => {
       headerMode: 'filename',
     }
     const items = buildHeaderFooterItems(files, rules, '/out')
-    // 第一个文件明确 keep 原页眉，新页眉必须被抑制为 null，不注入 overlay
+    // 第一个文件被抑制为 null
     expect(items[0].header).toBeNull()
-    // 第二个文件未 keep 原页眉，正常生成新页眉配置
+    // 第二个文件即使有原件保留，也尊重用户选择，正常生成新页眉
     expect(items[1].header?.text).toBe('doc2')
+  })
+
+  it('detects potential keep-insert conflicts across files', () => {
+    const files = [
+      {
+        ...createEvidenceFile('/case/doc1.pdf'),
+        pages: 3,
+        keepExistingHeader: true,
+        existingHeaderText: '国家知识产权局',
+      },
+      {
+        ...createEvidenceFile('/case/doc2.pdf'),
+        pages: 2,
+      },
+    ]
+    const rules = {
+      ...baseRules,
+      headerInsertEnabled: true,
+      headerMode: 'filename',
+    }
+    const conflicts = detectKeepInsertConflicts(files, rules)
+    expect(conflicts.length).toBe(1)
+    expect(conflicts[0].region).toBe('header')
+    expect(conflicts[0].existingText).toBe('国家知识产权局')
+    expect(conflicts[0].newText).toBe('doc1')
+    expect(conflicts[0].action).toBe('suppress')
   })
 
   it('expands continuous page number placeholders', () => {

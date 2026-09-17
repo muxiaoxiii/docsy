@@ -665,24 +665,16 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         footerTextGroup.enabled !== false &&
         Boolean(footerTextGroup.text || rules.footerTextContent)
       : rules.footerInsertEnabled !== false
-    const isKept = (kind) => {
-      if (file[`keepExisting${kind}`]) return true
-      return (file.existingElements || []).some(
-        (e) =>
-          e.kind === (kind === 'Header' ? 'header' : kind === 'PageNumber' ? 'pageNumber' : 'footerText') &&
-          e.decision === 'keep',
-      )
-    }
-    const keepHeader = isKept('Header')
-    const keepFooter = isKept('Footer')
-    const keepPageNumber = isKept('PageNumber')
+    const suppressHeader = file.suppressNewHeader === true
+    const suppressFooter = file.suppressNewFooter === true
+    const suppressPageNumber = file.suppressNewPageNumber === true
 
     // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const effectiveHeaderGroup = headerGroup
       ? { ...headerGroup, perFileSeqStart: effectiveHeaderNumbering(headerGroup, numberingDefaults).evidenceStart }
       : headerGroup
     const header =
-      !keepHeader && headerInsertEnabled && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none'
+      !suppressHeader && headerInsertEnabled && headerGroup && headerGroup.enabled !== false && headerModeValue !== 'none'
         ? buildHeaderTextForGroup(file, index, { ...effectiveHeaderGroup, mode: headerModeValue }, rules)
         : ''
     const outputPath = buildOverlayOutputPath(file.path, outputDir, {
@@ -704,7 +696,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const existingHeaderReplacement = standardArtifactReplacementConfig(file, 'header', rules)
     const existingFooterReplacement = standardArtifactReplacementConfig(file, 'footer', rules)
     const mainPageNumberOverlays =
-      !keepPageNumber && pageNumberEnabled && pageNumberGroup && pageNumberGroup.enabled !== false
+      !suppressPageNumber && pageNumberEnabled && pageNumberGroup && pageNumberGroup.enabled !== false
         ? pageNumberOverlaysForFile(file, {
             enabled: true,
             totalPages: jobTotalPages,
@@ -732,7 +724,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         : []
     const extraOverlays = [...convertedExistingOverlays(file, rules), ...mainPageNumberOverlays]
     // Header groups: every enabled group except the main (selected) one
-    if (headerInsertEnabled && !keepHeader) {
+    if (headerInsertEnabled && !suppressHeader) {
       for (const g of availableHeaderGroups) {
         if (g.id === headerGroup?.id || g.enabled === false || g.mode === 'none' || !groupAppliesToFile(g, file))
           continue
@@ -753,7 +745,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       }
     }
     // Footer text groups: every enabled group except the main (selected) one
-    if (footerInsertEnabled && !keepFooter) {
+    if (footerInsertEnabled && !suppressFooter) {
       for (const g of availableFooterGroups) {
         if (g.id === footerTextGroup?.id || g.enabled === false || !groupAppliesToFile(g, file)) continue
         if (g.text) {
@@ -1301,4 +1293,93 @@ export function buildOutputDir(files, outputDir = '') {
 function ensurePdfFileName(name) {
   const value = String(name || '').trim() || 'merged_evidence.pdf'
   return /\.pdf$/i.test(value) ? value : `${value}.pdf`
+}
+
+export function detectKeepInsertConflicts(files, rules) {
+  if (!Array.isArray(files) || !files.length) return []
+  const conflicts = []
+  const rangedFiles = assignPageRanges(files)
+
+  rangedFiles.forEach((file, index) => {
+    const elements = file.existingElements || []
+
+    // 检查页眉冲突：原件保留了旧页眉，但本次配置又启用了新页眉插入
+    const keepHeader =
+      (file.keepExistingHeader || elements.some((e) => e.kind === 'header' && e.decision === 'keep')) &&
+      !file.removeExistingHeader
+    const headerInserting =
+      rules.headerInsertEnabled !== false &&
+      (rules.headerMode ? rules.headerMode !== 'none' : true)
+    if (keepHeader && headerInserting) {
+      const existingText =
+        file.existingHeaderText ||
+        elements.find((e) => e.kind === 'header' && e.decision === 'keep')?.detectedText ||
+        '（原件保留页眉）'
+      const newText = buildHeaderText(file, index, rules)
+      if (newText) {
+        conflicts.push({
+          id: `${file.path}-header`,
+          filePath: file.path,
+          fileName: file.name,
+          region: 'header',
+          regionLabel: '页眉',
+          existingText,
+          newText,
+          action: file.suppressNewHeader ? 'suppress' : file.allowOverlapHeader ? 'overlap' : 'suppress',
+        })
+      }
+    }
+
+    // 检查页脚冲突：原件保留了旧页脚，但本次配置又启用了新页脚插入
+    const keepFooter =
+      (file.keepExistingFooter || elements.some((e) => e.kind === 'footerText' && e.decision === 'keep')) &&
+      !file.removeExistingFooter
+    const footerInserting = Boolean(
+      rules.footerInsertEnabled && (rules.footerTextContent || rules.footerText),
+    )
+    if (keepFooter && footerInserting) {
+      const existingText =
+        file.existingFooterText ||
+        elements.find((e) => e.kind === 'footerText' && e.decision === 'keep')?.detectedText ||
+        '（原件保留页脚）'
+      const newText = rules.footerTextContent || rules.footerText || ''
+      if (newText) {
+        conflicts.push({
+          id: `${file.path}-footer`,
+          filePath: file.path,
+          fileName: file.name,
+          region: 'footer',
+          regionLabel: '页脚',
+          existingText,
+          newText,
+          action: file.suppressNewFooter ? 'suppress' : file.allowOverlapFooter ? 'overlap' : 'suppress',
+        })
+      }
+    }
+
+    // 检查页码冲突：原件保留了旧页码，但本次配置又启用了新页码插入
+    const keepPageNumber =
+      (file.keepExistingPageNumber || elements.some((e) => e.kind === 'pageNumber' && e.decision === 'keep')) &&
+      !file.removeExistingPageNumber
+    const pageNumberInserting = Boolean(rules.pageNumberEnabled ?? rules.footerEnabled ?? false)
+    if (keepPageNumber && pageNumberInserting) {
+      const existingText =
+        file.existingPageNumberText ||
+        elements.find((e) => e.kind === 'pageNumber' && e.decision === 'keep')?.detectedText ||
+        '（原件保留页码）'
+      const newText = rules.pageNumberTemplate || '{page}/{total}'
+      conflicts.push({
+        id: `${file.path}-pageNumber`,
+        filePath: file.path,
+        fileName: file.name,
+        region: 'pageNumber',
+        regionLabel: '页码',
+        existingText,
+        newText,
+        action: file.suppressNewPageNumber ? 'suppress' : file.allowOverlapPageNumber ? 'overlap' : 'suppress',
+      })
+    }
+  })
+
+  return conflicts
 }
