@@ -335,4 +335,39 @@ describe('image paddler state integration', () => {
     expect(badge2.pageNumber).toBe(2)
     expect(badge2.color).toBeDefined()
   })
+
+  it('renders border with robust inset box-shadow and visible white contrast', () => {
+    const state = useImagePaddlerState()
+    expect(state.previewCellStyle.value.boxShadow).toBe('none')
+
+    state.settings.border_enabled = true
+    state.settings.border_color = 'red'
+    expect(state.previewCellStyle.value.boxShadow).toBe('inset 0 0 0 1.5px #dc2626')
+
+    state.settings.border_color = 'white'
+    expect(state.previewCellStyle.value.boxShadow).toContain('#ffffff')
+    expect(state.previewCellStyle.value.boxShadow).toContain('rgba(0, 0, 0, 0.25)')
+  })
+
+  it('supports global scale controls across all pages', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: images.slice(0, 4) }
+    state.settings.layout = '2x1' // 2 per page -> 2 pages
+    expect(state.totalPages.value).toBe(2)
+
+    // Initially 100%
+    expect(state.globalScalePercent.value).toBe(100)
+
+    // Set global scale to 80%
+    state.setGlobalScale(80)
+    expect(state.globalScalePercent.value).toBe(80)
+    expect(state.pageScales.value[0]).toBe(0.8)
+    expect(state.pageScales.value[1]).toBe(0.8)
+
+    // Reset all pages to 100%
+    state.resetAllPageScales()
+    expect(state.globalScalePercent.value).toBe(100)
+    expect(Object.keys(state.pageScales.value).length).toBe(0)
+  })
 })
+

@@ -178,9 +178,19 @@ export function useImagePaddlerState(options = {}) {
     gridTemplateRows: `repeat(${previewLayoutGrid.value.rows}, minmax(0, 1fr))`,
   }))
   const previewCellStyle = computed(() => {
-    if (!settings.border_enabled) return { outlineColor: 'transparent' }
+    if (!settings.border_enabled) {
+      return {
+        boxShadow: 'none',
+      }
+    }
+    const color = borderColorCss(settings.border_color)
+    if (settings.border_color === 'white') {
+      return {
+        boxShadow: 'inset 0 0 0 1.5px #ffffff, inset 0 0 0 2.5px rgba(0, 0, 0, 0.25)',
+      }
+    }
     return {
-      outlineColor: borderColorCss(settings.border_color),
+      boxShadow: `inset 0 0 0 1.5px ${color}`,
     }
   })
   function computeMetricsForGrid(pageGrid, pageImages = []) {
@@ -381,6 +391,73 @@ export function useImagePaddlerState(options = {}) {
     }
   }
 
+  const scaleScope = ref('all')
+  const globalScalePercent = ref(100)
+
+  function setGlobalScale(val) {
+    const percent = Math.round(Number(val) || 100)
+    globalScalePercent.value = percent
+    const targetScale = percent / 100
+    const newScales = {}
+    if (percent !== 100) {
+      for (let i = 0; i < totalPages.value; i += 1) {
+        newScales[i] = targetScale
+      }
+    }
+    pageScales.value = newScales
+    activePageScale.value = percent
+  }
+
+  function autoFitAllPagesScale() {
+    const total = totalPages.value
+    let minOptimal = 140
+    let hasAnyValid = false
+    for (let pageIdx = 0; pageIdx < total; pageIdx += 1) {
+      const count = perPage.value
+      const start = pageIdx * count
+      const pageImgs = includedImages.value.slice(start, start + count)
+      if (!pageImgs.length) continue
+      const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
+      const pageGrid = compactGridForCount(layoutGrid.value, pageImgs.length)
+      const metrics = computeMetricsForGrid(pageGrid, pageImgs)
+      const pageImgsWithAnnotations = pageImgs.map((img) => ({
+        ...img,
+        title: imageTitle(img.path),
+        description:
+          imageDescription(img.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : ''),
+      }))
+      const optimal = computeOptimalPageScale({
+        images: pageImgsWithAnnotations,
+        grid: pageGrid,
+        cellWidth: metrics.cellWidth,
+        imageCellHeight: metrics.imageCellHeight,
+        fixedWidthMm: actualImageWidth.value,
+        scaleMode: settings.scale_mode,
+        dpi: settings.dpi,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        marginMm: Number(settings.margin_mm) || 0,
+        showFilename: settings.show_filename,
+        captionPosition: settings.caption_position,
+        captionReserveMm: metrics.filenameReserve,
+        fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
+        noteFontSizePt: clampNumber(settings.note_font_size_pt, 6, 24, 8),
+        pairMode: settings.pair_mode,
+      })
+      if (optimal !== null) {
+        hasAnyValid = true
+        if (optimal < minOptimal) {
+          minOptimal = optimal
+        }
+      } else {
+        minOptimal = Math.min(minOptimal, 50)
+      }
+    }
+    const finalScale = hasAnyValid ? minOptimal : 50
+    setGlobalScale(finalScale)
+    ElMessage.success(`已自适应推算全部页面最佳比例为 ${finalScale}%，所有页面统一生效`)
+  }
+
   function applyScaleToAllPages(scaleOverride) {
     const targetScale = scaleOverride !== undefined ? scaleOverride : activePageScale.value / 100
     const targetPercent = Math.round(targetScale * 100)
@@ -391,6 +468,7 @@ export function useImagePaddlerState(options = {}) {
       }
     }
     pageScales.value = newScales
+    globalScalePercent.value = targetPercent
     ElMessage.success(`已将当前比例 (${targetPercent}%) 应用到全部 ${totalPages.value} 页`)
   }
 
@@ -412,8 +490,9 @@ export function useImagePaddlerState(options = {}) {
 
   function resetAllPageScales() {
     pageScales.value = {}
+    globalScalePercent.value = 100
     activePageScale.value = 100
-    ElMessage.success('已重置所有已微调页面为默认比例')
+    ElMessage.success('已恢复全部页面为 100% 默认比例')
   }
   function optionLayoutLabel(value) {
     return layoutOptionLabel(value, isFlowLayout.value)
@@ -837,7 +916,8 @@ export function useImagePaddlerState(options = {}) {
       height: `${(drawHeight / metrics.imageCellHeight) * 100}%`,
       maxWidth: 'none',
       maxHeight: 'none',
-      objectFit: 'contain',
+      flexShrink: 0,
+      display: 'block',
     }
   }
 
@@ -1271,6 +1351,9 @@ export function useImagePaddlerState(options = {}) {
     currentPageIndex,
     pageScales,
     activePageScale,
+    scaleScope,
+    globalScalePercent,
+    setGlobalScale,
     hasSavedScale,
     hasAnySavedScales,
     isCurrentPageDirty,
@@ -1278,6 +1361,7 @@ export function useImagePaddlerState(options = {}) {
     cancelCurrentPageScale,
     resetCurrentPageScale,
     autoFitCurrentPageScale,
+    autoFitAllPagesScale,
     applyScaleToAllPages,
     applyScaleToSubsequentPages,
     resetAllPageScales,

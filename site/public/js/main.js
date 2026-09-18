@@ -4,9 +4,42 @@
 
   /* 无 JS 或数据加载失败时的回退数据（与发布产物保持一致） */
   var FALLBACK = {
-    latest: '1.0.3',
+    latest: '1.0.7',
     githubUrl: 'https://github.com/muxiaoxiii/docsy/releases',
     releases: [
+{
+  "version": "1.0.7",
+  "tag": "v1.0.7",
+  "published_at": "2026-09-18T12:49:07Z",
+  "assets": [
+    {
+      "platform": "macos",
+      "name": "Docsy_1.0.7_aarch64.dmg",
+      "size": 19000000,
+      "sha256": "",
+      "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.7/Docsy_1.0.7_aarch64.dmg",
+      "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.7/Docsy_1.0.7_aarch64.dmg"
+    },
+    {
+      "platform": "windows",
+      "name": "Docsy_1.0.7_x64-setup.exe",
+      "size": 15200000,
+      "sha256": "",
+      "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.7/Docsy_1.0.7_x64-setup.exe",
+      "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.7/Docsy_1.0.7_x64-setup.exe"
+    },
+    {
+      "platform": "windows-x86",
+      "name": "Docsy_1.0.7_x86-setup.exe",
+      "size": 14000000,
+      "sha256": "",
+      "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.7/Docsy_1.0.7_x86-setup.exe",
+      "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.7/Docsy_1.0.7_x86-setup.exe"
+    }
+  ],
+  "revision": "4fb44d5",
+  "updated_at": "2026-09-18T12:49:07Z"
+},
 {
   "version": "1.0.3",
   "tag": "v1.0.3",

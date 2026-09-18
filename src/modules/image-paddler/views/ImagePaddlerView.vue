@@ -384,78 +384,129 @@
               </div>
             </div>
 
-            <!-- Single-page scale slider bar -->
+            <!-- Scale slider bar with Global and Single-Page Scope Toggle -->
             <div class="page-scale-bar">
-              <div class="page-scale-label">
-                <span class="scale-title">调整本页图片（共 {{ previewImages.length }} 张统一缩放）</span>
-                <el-tag v-if="hasSavedScale" size="small" type="primary" effect="plain">
-                  已微调 ({{ Math.round((pageScales[currentPageIndex] ?? 1) * 100) }}%)
-                </el-tag>
-              </div>
-              <div class="page-scale-slider-wrap">
-                <el-slider
-                  v-model="activePageScale"
-                  :min="50"
-                  :max="140"
-                  :step="1"
-                  :format-tooltip="(val) => `${val}%`"
-                  class="page-scale-slider"
-                />
-                <span class="scale-percent">{{ activePageScale }}%</span>
-                <el-button
-                  size="small"
-                  type="primary"
-                  plain
-                  title="自动推算本页不发生溢出与重叠的最大比例"
-                  @click="autoFitCurrentPageScale"
-                >
-                  自适应
-                </el-button>
-              </div>
-              <div class="page-scale-actions">
-                <el-dropdown
-                  split-button
-                  size="small"
-                  type="primary"
-                  :disabled="!isCurrentPageDirty && !hasSavedScale"
-                  @click="saveCurrentPageScale"
-                  @command="handleSaveScaleCommand"
-                >
-                  保存
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="all">应用到全部页</el-dropdown-item>
-                      <el-dropdown-item command="subsequent">应用到后续页</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
-                <el-button
-                  size="small"
-                  :disabled="!isCurrentPageDirty"
-                  @click="cancelCurrentPageScale"
-                >
-                  取消
-                </el-button>
-                <el-button
-                  v-if="hasSavedScale"
-                  size="small"
-                  text
-                  type="info"
-                  @click="resetCurrentPageScale"
-                >
-                  恢复本页
-                </el-button>
-                <el-button
-                  v-if="hasAnySavedScales"
-                  size="small"
-                  text
-                  type="danger"
-                  title="重置所有页面的自定义缩放比例"
-                  @click="resetAllPageScales"
-                >
-                  重置所有已微调页
-                </el-button>
-              </div>
+              <el-radio-group v-model="scaleScope" size="small" class="scale-scope-toggle">
+                <el-radio-button label="all">全部页面</el-radio-button>
+                <el-radio-button label="current">当前页</el-radio-button>
+              </el-radio-group>
+
+              <!-- Global mode -->
+              <template v-if="scaleScope === 'all'">
+                <div class="page-scale-label">
+                  <span class="scale-title">全局缩放（共 {{ totalPages }} 页）</span>
+                  <el-tag v-if="hasAnySavedScales" size="small" type="success" effect="plain">
+                    全部统一生效
+                  </el-tag>
+                </div>
+                <div class="page-scale-slider-wrap">
+                  <el-slider
+                    :model-value="globalScalePercent"
+                    :min="50"
+                    :max="140"
+                    :step="1"
+                    :format-tooltip="(val) => `${val}%`"
+                    class="page-scale-slider"
+                    @input="setGlobalScale"
+                  />
+                  <span class="scale-percent">{{ globalScalePercent }}%</span>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    plain
+                    title="自动推算所有页面中不产生重叠与溢出的统一最大比例"
+                    @click="autoFitAllPagesScale"
+                  >
+                    自适应全部
+                  </el-button>
+                </div>
+                <div class="page-scale-actions">
+                  <el-button
+                    v-if="hasAnySavedScales || globalScalePercent !== 100"
+                    size="small"
+                    text
+                    type="danger"
+                    title="重置所有页面的自定义缩放比例为 100%"
+                    @click="resetAllPageScales"
+                  >
+                    恢复 100%
+                  </el-button>
+                </div>
+              </template>
+
+              <!-- Single page mode -->
+              <template v-else>
+                <div class="page-scale-label">
+                  <span class="scale-title">调整第 {{ currentPageIndex + 1 }} 页（共 {{ previewImages.length }} 张）</span>
+                  <el-tag v-if="hasSavedScale" size="small" type="primary" effect="plain">
+                    已微调 ({{ Math.round((pageScales[currentPageIndex] ?? 1) * 100) }}%)
+                  </el-tag>
+                </div>
+                <div class="page-scale-slider-wrap">
+                  <el-slider
+                    v-model="activePageScale"
+                    :min="50"
+                    :max="140"
+                    :step="1"
+                    :format-tooltip="(val) => `${val}%`"
+                    class="page-scale-slider"
+                  />
+                  <span class="scale-percent">{{ activePageScale }}%</span>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    plain
+                    title="自动推算本页不发生溢出与重叠的最大比例"
+                    @click="autoFitCurrentPageScale"
+                  >
+                    自适应
+                  </el-button>
+                </div>
+                <div class="page-scale-actions">
+                  <el-dropdown
+                    split-button
+                    size="small"
+                    type="primary"
+                    :disabled="!isCurrentPageDirty && !hasSavedScale"
+                    @click="saveCurrentPageScale"
+                    @command="handleSaveScaleCommand"
+                  >
+                    保存
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="all">应用到全部页</el-dropdown-item>
+                        <el-dropdown-item command="subsequent">应用到后续页</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                  <el-button
+                    size="small"
+                    :disabled="!isCurrentPageDirty"
+                    @click="cancelCurrentPageScale"
+                  >
+                    取消
+                  </el-button>
+                  <el-button
+                    v-if="hasSavedScale"
+                    size="small"
+                    text
+                    type="info"
+                    @click="resetCurrentPageScale"
+                  >
+                    恢复本页
+                  </el-button>
+                  <el-button
+                    v-if="hasAnySavedScales"
+                    size="small"
+                    text
+                    type="danger"
+                    title="重置所有页面的自定义缩放比例"
+                    @click="resetAllPageScales"
+                  >
+                    重置全部
+                  </el-button>
+                </div>
+              </template>
             </div>
 
             <!-- Doclet layout suggestion tip -->
@@ -481,12 +532,8 @@
                     :key="idx"
                     class="preview-cell"
                     :class="{
-                      'preview-cell-bordered':
-                        (settings.output_format !== 'docx' || settings.use_table) && settings.border_enabled,
-                      'preview-cell-white-border':
-                        (settings.output_format !== 'docx' || settings.use_table) &&
-                        settings.border_enabled &&
-                        settings.border_color === 'white',
+                      'preview-cell-bordered': settings.border_enabled,
+                      'preview-cell-white-border': settings.border_enabled && settings.border_color === 'white',
                       'preview-cell-no-name': !hasCellCaption(img),
                       'preview-cell-flow': settings.output_format === 'docx' && !settings.use_table,
                     }"
@@ -653,6 +700,9 @@ const {
   currentPageIndex,
   pageScales,
   activePageScale,
+  scaleScope,
+  globalScalePercent,
+  setGlobalScale,
   hasSavedScale,
   hasAnySavedScales,
   isCurrentPageDirty,
@@ -660,6 +710,7 @@ const {
   cancelCurrentPageScale,
   resetCurrentPageScale,
   autoFitCurrentPageScale,
+  autoFitAllPagesScale,
   applyScaleToAllPages,
   applyScaleToSubsequentPages,
   resetAllPageScales,
@@ -970,6 +1021,10 @@ function hasCellCaption(img) {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
+.scale-scope-toggle {
+  flex-shrink: 0;
+}
+
 .page-scale-label {
   display: inline-flex;
   align-items: center;
@@ -1099,37 +1154,32 @@ function hasCellCaption(img) {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
 }
 
 .preview-cell-bordered {
-  outline: 1px solid var(--docsy-text-strong);
-  outline-offset: -1px;
+  transition: box-shadow 0.15s ease;
 }
 
 .preview-cell-white-border {
-  border-color: white;
-  box-shadow: inset 0 0 0 1px var(--docsy-border-subtle);
+  /* 由 previewCellStyle 统一提供复合高对比内嵌阴影 */
 }
 
 .preview-image-area {
   box-sizing: border-box;
   width: 100%;
   min-height: 0;
-  flex-shrink: 1;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
 }
 
 .preview-cell img {
   display: block;
-  object-fit: contain;
-}
-
-.preview-cell-no-name img {
-  max-height: 100%;
 }
 
 .note-panel-row {

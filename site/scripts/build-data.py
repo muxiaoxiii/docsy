@@ -5,7 +5,7 @@
 从 GitHub Releases API 数据 + CHANGELOG.md 生成站点数据文件
 （releases.json / changelog.json），并补齐缺失的安装包文件。
 
-GitHub Actions 与 NAS 定时任务共用本脚本，保证两份数据格式一致。
+GitHub Actions 自动构建与部署时调用本脚本生成站点数据。
 
 用法:
     build-data.py --api-json <releases.json> --assets-dir <dir> \
