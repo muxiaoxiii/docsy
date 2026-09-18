@@ -3001,7 +3001,7 @@ mod tests {
     }
 
     #[test]
-    fn test_layout_for_page_clamps_fixed_width_to_safe_column_width() {
+    fn test_layout_for_page_preserves_fixed_width_without_clamping_to_safe_column_width() {
         let config = LayoutConfig {
             page_w_mm: 210.0,
             page_h_mm: 297.0,
