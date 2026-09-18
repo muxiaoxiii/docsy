@@ -6,7 +6,15 @@ import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { fileName as baseFileName, parentDir } from '../../../core/filePath.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
-import { safeImageWidth, effectiveImageWidth, layoutOptionLabel } from './layoutPreview.js'
+import {
+  safeColumnWidth,
+  effectivePageWidth,
+  pairOffsets,
+  detectPageConflicts,
+  safeImageWidth,
+  effectiveImageWidth,
+  layoutOptionLabel,
+} from './layoutPreview.js'
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
 const FILENAME_MAX_LINES = 3
@@ -47,6 +55,9 @@ export function useImagePaddlerState(options = {}) {
   const sourceDecisions = ref({})
   const exclusionByPath = ref({})
   const preferenceRevision = ref(0)
+  const currentPageIndex = ref(0)
+  const pageScales = ref({})
+  const activePageScale = ref(100)
   let analyzeTimer = null
   let analysisRequestId = 0
   let preferencesReady = false
@@ -62,6 +73,10 @@ export function useImagePaddlerState(options = {}) {
     dpi: 300,
     margin_mm: 12,
     show_filename: true,
+    caption_position: 'below',
+    pair_mode: 'cell-center',
+    print_safety_pad_mm: 6,
+    doclet_layout_tips: true,
     filename_font_family: 'sans',
     filename_font_size_pt: 8,
     filename_color: 'dark_gray',
@@ -81,6 +96,7 @@ export function useImagePaddlerState(options = {}) {
     previewPageFraction,
     exclusionByPath,
     preferenceRevision,
+    pageScales,
   })
 
   const isFlowLayout = computed(() => settings.output_format === 'docx' && !settings.use_table)
@@ -99,9 +115,39 @@ export function useImagePaddlerState(options = {}) {
   )
   const includedImages = computed(() => orderedImages.value.filter((image) => !isImageExcluded(image)))
   const excludedCount = computed(() => orderedImages.value.length - includedImages.value.length)
-  const previewImages = computed(() => includedImages.value.slice(0, layoutGrid.value.rows * layoutGrid.value.cols))
+  const perPage = computed(() => Math.max(1, layoutGrid.value.rows * layoutGrid.value.cols))
+  const totalPages = computed(() => Math.max(1, Math.ceil(includedImages.value.length / perPage.value)))
+
+  watch([totalPages, includedImages], () => {
+    if (currentPageIndex.value >= totalPages.value) {
+      currentPageIndex.value = Math.max(0, totalPages.value - 1)
+    }
+  })
+
+  const previewImages = computed(() => {
+    const count = perPage.value
+    const start = currentPageIndex.value * count
+    return includedImages.value.slice(start, start + count)
+  })
   const previewSlots = computed(() => [...previewImages.value])
   const previewLayoutGrid = computed(() => compactGridForCount(layoutGrid.value, previewImages.value.length))
+
+  function nextPage() {
+    if (currentPageIndex.value < totalPages.value - 1) {
+      goToPage(currentPageIndex.value + 1)
+    }
+  }
+
+  function prevPage() {
+    if (currentPageIndex.value > 0) {
+      goToPage(currentPageIndex.value - 1)
+    }
+  }
+
+  function goToPage(index) {
+    const target = Math.max(0, Math.min(totalPages.value - 1, Number(index) || 0))
+    currentPageIndex.value = target
+  }
   const generatedOutputPaths = computed(() => {
     const paths = generatedResult.value?.output_paths || []
     return paths.length ? paths : generatedResult.value?.output_path ? [generatedResult.value.output_path] : []
@@ -189,29 +235,56 @@ export function useImagePaddlerState(options = {}) {
     )
   }
 
-  const maximumImageWidth = computed(() => {
-    const pageWidth = resolvedOrientation.value === 'landscape' ? 297 : 210
-    const pageHeight = resolvedOrientation.value === 'landscape' ? 210 : 297
-    const cellWidth = (pageWidth - settings.margin_mm * 2) / layoutGrid.value.cols
-    const fontSize = clampNumber(settings.filename_font_size_pt, 6, 24, 8)
-    const lines = Math.max(
-      1,
-      ...includedImages.value.map((image) =>
-        requiredFilenameLines(fileName(image.path), cellWidth, fontSize, FILENAME_MAX_LINES),
-      ),
-    )
-    const reserve = settings.show_filename
-      ? layoutMetrics.value.filenameLineHeightMm * lines +
-        (settings.output_format === 'docx' ? DOCX_FILENAME_SAFETY_MM : PDF_FILENAME_SAFETY_MM)
-      : 0
-    const height =
-      (pageHeight - settings.margin_mm * 2 - (settings.output_format === 'docx' ? 2 : 0)) / layoutGrid.value.rows -
-      reserve
-    return safeImageWidth(includedImages.value, cellWidth, height)
+  const safeColumnWidthValue = computed(() => {
+    const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
+    return safeColumnWidth(page.width, settings.margin_mm, previewLayoutGrid.value.cols, settings.print_safety_pad_mm)
   })
-  const currentRecommendedWidth = computed(() => Math.floor(maximumImageWidth.value * 10) / 10)
-  const actualImageWidth = computed(() => effectiveImageWidth(settings.fixed_width_mm, maximumImageWidth.value))
-  const widthIsLimited = computed(() => Number(settings.fixed_width_mm) > maximumImageWidth.value)
+  const maximumImageWidth = computed(() => safeColumnWidthValue.value)
+  const currentRecommendedWidth = computed(() => Math.floor(safeColumnWidthValue.value * 10) / 10)
+  const actualImageWidth = computed(() => effectiveImageWidth(settings.fixed_width_mm, safeColumnWidthValue.value))
+  const widthIsLimited = computed(() => Number(settings.fixed_width_mm) > safeColumnWidthValue.value)
+
+  const currentPageScale = computed(() => (Number(activePageScale.value) || 100) / 100)
+
+  watch(
+    [currentPageIndex, pageScales],
+    () => {
+      const saved = pageScales.value[currentPageIndex.value]
+      activePageScale.value = saved !== undefined ? Math.round(saved * 100) : 100
+    },
+    { flush: 'sync', immediate: true, deep: true },
+  )
+
+  const hasSavedScale = computed(() => pageScales.value[currentPageIndex.value] !== undefined)
+  const isCurrentPageDirty = computed(() => {
+    const saved = pageScales.value[currentPageIndex.value]
+    const savedPercent = saved !== undefined ? Math.round(saved * 100) : 100
+    return activePageScale.value !== savedPercent
+  })
+
+  function saveCurrentPageScale() {
+    const newScales = { ...pageScales.value }
+    if (activePageScale.value === 100) {
+      delete newScales[currentPageIndex.value]
+    } else {
+      newScales[currentPageIndex.value] = activePageScale.value / 100
+    }
+    pageScales.value = newScales
+    ElMessage.success(`第 ${currentPageIndex.value + 1} 页缩放已保存 (${activePageScale.value}%)`)
+  }
+
+  function cancelCurrentPageScale() {
+    const saved = pageScales.value[currentPageIndex.value]
+    activePageScale.value = saved !== undefined ? Math.round(saved * 100) : 100
+  }
+
+  function resetCurrentPageScale() {
+    const newScales = { ...pageScales.value }
+    delete newScales[currentPageIndex.value]
+    pageScales.value = newScales
+    activePageScale.value = 100
+    ElMessage.success(`第 ${currentPageIndex.value + 1} 页已恢复默认比例`)
+  }
   function optionLayoutLabel(value) {
     return layoutOptionLabel(value, isFlowLayout.value)
   }
@@ -320,6 +393,8 @@ export function useImagePaddlerState(options = {}) {
     }
     generating.value = true
     const sourceRevision = analysisRequestId
+    const totalP = totalPages.value
+    const pageScalesArray = Array.from({ length: totalP }, (_, i) => pageScales.value[i] ?? 1.0)
     const result = await tauriCallSafe('run_image_paddler', {
       args: {
         folder: folder.value,
@@ -330,6 +405,10 @@ export function useImagePaddlerState(options = {}) {
         order_mode: 'custom',
         fixed_width_mm: actualImageWidth.value,
         orientation: resolvedOrientation.value,
+        page_scales: pageScalesArray,
+        pair_mode: settings.pair_mode,
+        caption_position: settings.caption_position,
+        print_safety_pad_mm: settings.print_safety_pad_mm,
       },
     })
     generating.value = false
@@ -541,27 +620,44 @@ export function useImagePaddlerState(options = {}) {
     return [...value].reduce((sum, ch) => sum + (ch.charCodeAt(0) < 128 ? 1 : 2), 0)
   }
 
+  function previewImageAreaContainerStyle(index) {
+    const offsets = pairOffsets(
+      previewImages.value.length,
+      previewLayoutGrid.value.rows,
+      previewLayoutGrid.value.cols,
+      settings.pair_mode,
+    )
+    const align = offsets[index] || { x: 'center', y: 'center' }
+    const justifyMap = { left: 'flex-start', center: 'center', right: 'flex-end' }
+    const alignMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' }
+    return {
+      justifyContent: justifyMap[align.x] || 'center',
+      alignItems: alignMap[align.y] || 'center',
+    }
+  }
+
   function previewImageStyle(img) {
     const metrics = layoutMetrics.value
     const nativeWidth = (img.width * 25.4) / settings.dpi
     const nativeHeight = (img.height * 25.4) / settings.dpi
     let drawWidth, drawHeight
+    const scaleFactor = currentPageScale.value
     if (settings.scale_mode === 'fixed_width') {
-      const fixedW = actualImageWidth.value
+      const fixedW = actualImageWidth.value * scaleFactor
       const ratio = img.width > 0 ? img.height / img.width : 1
       drawWidth = fixedW
       drawHeight = fixedW * ratio
     } else {
-      const fitScale = Math.min(metrics.cellWidth / nativeWidth, metrics.imageCellHeight / nativeHeight)
-      const scale = settings.scale_mode === 'original' ? Math.min(fitScale, 1) : fitScale
+      const fitScale = Math.min(metrics.cellWidth / nativeWidth, metrics.imageCellHeight / nativeHeight) * scaleFactor
+      const scale = settings.scale_mode === 'original' ? Math.min(fitScale, scaleFactor) : fitScale
       drawWidth = nativeWidth * scale
       drawHeight = nativeHeight * scale
     }
     return {
       width: `${(drawWidth / metrics.cellWidth) * 100}%`,
       height: `${(drawHeight / metrics.imageCellHeight) * 100}%`,
-      maxWidth: '100%',
-      maxHeight: '100%',
+      maxWidth: 'none',
+      maxHeight: 'none',
       objectFit: 'contain',
     }
   }
@@ -677,7 +773,7 @@ export function useImagePaddlerState(options = {}) {
   }
 
   function adjustPageZoom(delta) {
-    pageZoom.value = clampNumber(pageZoom.value + delta, 50, 180, 100)
+    pageZoom.value = clampNumber(pageZoom.value + delta, 20, 200, 100)
   }
 
   async function preloadVisibleImages() {
@@ -740,6 +836,14 @@ export function useImagePaddlerState(options = {}) {
       }
       preferenceRevision.value = 2
     }
+    if (preferenceRevision.value < 3) {
+      if (!settings.caption_position) settings.caption_position = 'below'
+      if (!settings.pair_mode) settings.pair_mode = 'cell-center'
+      if (settings.print_safety_pad_mm === undefined) settings.print_safety_pad_mm = 6
+      if (settings.doclet_layout_tips === undefined) settings.doclet_layout_tips = true
+      if (pageScales.value === undefined || typeof pageScales.value !== 'object') pageScales.value = {}
+      preferenceRevision.value = 3
+    }
     preferencesReady = true
     consumeIncomingTransfer()
   })
@@ -788,9 +892,77 @@ export function useImagePaddlerState(options = {}) {
     return '适应页面'
   }
 
+  const DOCLET_TIPS = {
+    yellow: '本页图片有重叠，可微调本页比例或调小统一宽度。',
+    green: '图片超出打印安全区，可调小本页比例或页边距。',
+    red: '本页重叠且超界，请优先检查该页布局。',
+    blue: '本页比例差异较大，建议人工核对排版。',
+    ok: '',
+  }
+
+  function getPageConflicts(pageIdx) {
+    const count = perPage.value
+    const start = pageIdx * count
+    const pageImgs = includedImages.value.slice(start, start + count)
+    if (!pageImgs.length) return []
+    const currentScale =
+      pageIdx === currentPageIndex.value
+        ? activePageScale.value / 100
+        : pageScales.value[pageIdx] ?? 1.0
+
+    const result = detectPageConflicts({
+      images: pageImgs,
+      grid: compactGridForCount(layoutGrid.value, pageImgs.length),
+      cellWidth: layoutMetrics.value.cellWidth,
+      imageCellHeight: layoutMetrics.value.imageCellHeight,
+      fixedWidthMm: actualImageWidth.value,
+      pageScale: currentScale,
+      scaleMode: settings.scale_mode,
+      dpi: settings.dpi,
+    })
+    return result?.items || []
+  }
+
+  const currentPageConflicts = computed(() => getPageConflicts(currentPageIndex.value))
+
+  const currentPageConflictState = computed(() => {
+    const conflicts = currentPageConflicts.value
+    const colors = conflicts.map((c) => c.color)
+    const priority = ['red', 'yellow', 'green', 'blue', 'ok']
+    let worstColor = 'ok'
+    for (const p of priority) {
+      if (colors.includes(p)) {
+        worstColor = p
+        break
+      }
+    }
+    return {
+      worstColor,
+      docletTip: DOCLET_TIPS[worstColor] || '',
+    }
+  })
+
+  function imageBadgeResolver(item) {
+    const index = includedImages.value.findIndex((img) => img.path === item.path)
+    if (index === -1) return null
+    const count = perPage.value
+    const pageIdx = Math.floor(index / count)
+    const conflicts = getPageConflicts(pageIdx)
+    const slotIdx = index % count
+    const color = conflicts[slotIdx]?.color || 'ok'
+    const isModified = pageScales.value[pageIdx] !== undefined
+    return {
+      pageNumber: pageIdx + 1,
+      pageIndex: pageIdx,
+      isModified,
+      color,
+    }
+  }
+
   return {
     isFlowLayout,
     optionLayoutLabel,
+    safeColumnWidthValue,
     maximumImageWidth,
     actualImageWidth,
     widthIsLimited,
@@ -812,6 +984,19 @@ export function useImagePaddlerState(options = {}) {
     orderedImages,
     includedImages,
     excludedCount,
+    perPage,
+    totalPages,
+    currentPageIndex,
+    pageScales,
+    activePageScale,
+    hasSavedScale,
+    isCurrentPageDirty,
+    saveCurrentPageScale,
+    cancelCurrentPageScale,
+    resetCurrentPageScale,
+    nextPage,
+    prevPage,
+    goToPage,
     previewImages,
     previewSlots,
     generatedOutputPaths,
@@ -820,6 +1005,7 @@ export function useImagePaddlerState(options = {}) {
     previewCellStyle,
     layoutMetrics,
     previewImageAreaStyle,
+    previewImageAreaContainerStyle,
     previewNameStyle,
     selectFolder,
     addFolders,
@@ -849,5 +1035,8 @@ export function useImagePaddlerState(options = {}) {
     orientationLabel,
     layoutLabel,
     scaleModeLabel,
+    currentPageConflicts,
+    currentPageConflictState,
+    imageBadgeResolver,
   }
 }

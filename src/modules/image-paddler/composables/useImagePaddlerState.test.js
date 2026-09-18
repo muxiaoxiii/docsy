@@ -88,4 +88,102 @@ describe('image paddler state integration', () => {
     expect(state.generating.value).toBe(false)
     expect(state.generatedResult.value).toBeNull()
   })
+
+  it('supports multi-page pagination navigation', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images }
+    state.settings.layout = '2x1' // 2 per page, 6 images => 3 pages
+    expect(state.totalPages.value).toBe(3)
+    expect(state.currentPageIndex.value).toBe(0)
+    expect(state.previewImages.value.length).toBe(2)
+    expect(state.previewImages.value[0].path).toBe('/images/0.png')
+
+    state.nextPage()
+    expect(state.currentPageIndex.value).toBe(1)
+    expect(state.previewImages.value[0].path).toBe('/images/2.png')
+
+    state.goToPage(2)
+    expect(state.currentPageIndex.value).toBe(2)
+    expect(state.previewImages.value[0].path).toBe('/images/4.png')
+
+    state.prevPage()
+    expect(state.currentPageIndex.value).toBe(1)
+  })
+
+  it('handles single page scaling lifecycle (adjust, save, cancel, reset)', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images }
+    state.settings.layout = '2x1'
+    state.settings.scale_mode = 'fixed_width'
+    state.settings.fixed_width_mm = 50
+
+    expect(state.activePageScale.value).toBe(100)
+    expect(state.hasSavedScale.value).toBe(false)
+    expect(state.isCurrentPageDirty.value).toBe(false)
+
+    // Adjust slider on page 0 to 120%
+    state.activePageScale.value = 120
+    expect(state.isCurrentPageDirty.value).toBe(true)
+
+    // Save
+    state.saveCurrentPageScale()
+    expect(state.hasSavedScale.value).toBe(true)
+    expect(state.isCurrentPageDirty.value).toBe(false)
+    expect(state.pageScales.value[0]).toBe(1.2)
+
+    // Switch to page 1
+    state.nextPage()
+    expect(state.currentPageIndex.value).toBe(1)
+    expect(state.activePageScale.value).toBe(100)
+    expect(state.hasSavedScale.value).toBe(false)
+
+    // Switch back to page 0
+    state.prevPage()
+    expect(state.activePageScale.value).toBe(120)
+    expect(state.hasSavedScale.value).toBe(true)
+
+    // Modify but cancel
+    state.activePageScale.value = 80
+    expect(state.isCurrentPageDirty.value).toBe(true)
+    state.cancelCurrentPageScale()
+    expect(state.activePageScale.value).toBe(120)
+    expect(state.isCurrentPageDirty.value).toBe(false)
+
+    // Reset
+    state.resetCurrentPageScale()
+    expect(state.activePageScale.value).toBe(100)
+    expect(state.hasSavedScale.value).toBe(false)
+    expect(state.pageScales.value[0]).toBeUndefined()
+  })
+
+  it('passes 1.0.7 arguments (page_scales, pair_mode, caption_position) to run', async () => {
+    const state = useImagePaddlerState()
+    state.folders.value = ['/images']
+    state.analysis.value = { images }
+    state.settings.layout = '2x1'
+    state.pageScales.value = { 0: 1.15 }
+    state.settings.pair_mode = 'page-gather'
+    state.settings.caption_position = 'above'
+
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { images: 6, pages: 3 } })
+    await state.run()
+
+    const payload = tauriCallSafe.mock.calls[0][1].args
+    expect(payload.page_scales).toEqual([1.15, 1.0, 1.0])
+    expect(payload.pair_mode).toBe('page-gather')
+    expect(payload.caption_position).toBe('above')
+    expect(payload.print_safety_pad_mm).toBe(6)
+  })
+
+  it('detects page conflicts and provides badge resolvers and doclet tips', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images }
+    state.settings.layout = '2x1'
+    const badge = state.imageBadgeResolver(images[0])
+    expect(badge).not.toBeNull()
+    expect(badge.pageNumber).toBe(1)
+    expect(badge.pageIndex).toBe(0)
+    expect(typeof badge.color).toBe('string')
+    expect(typeof state.currentPageConflictState.value.worstColor).toBe('string')
+  })
 })

@@ -68,6 +68,16 @@
             </div>
           </el-form-item>
 
+          <el-form-item v-if="layoutGrid.rows * layoutGrid.cols === 2" label="双图排列">
+            <el-select v-model="settings.pair_mode">
+              <el-option label="格心独立（默认）" value="cell-center" />
+              <el-option label="向中心收拢" value="page-gather" />
+              <el-option label="向边缘展开" value="page-spread" />
+              <el-option label="外缘对齐" value="edge-align" />
+              <el-option label="中间留白最大" value="gap-max" />
+            </el-select>
+          </el-form-item>
+
           <el-form-item v-if="settings.layout === 'custom'" label="行列">
             <div class="inline-controls">
               <el-input-number v-model="settings.custom_rows" :min="1" :max="8" />
@@ -90,7 +100,7 @@
               <el-slider
                 v-model="settings.fixed_width_mm"
                 :min="0.1"
-                :max="currentRecommendedWidth"
+                :max="safeColumnWidthValue"
                 :step="0.1"
                 class="width-slider"
               />
@@ -98,7 +108,7 @@
                 <el-input-number
                   v-model="settings.fixed_width_mm"
                   :min="0.1"
-                  :max="currentRecommendedWidth"
+                  :max="safeColumnWidthValue"
                   :step="0.1"
                   :precision="1"
                   size="small"
@@ -110,10 +120,10 @@
                 </el-button>
               </div>
               <div class="field-hint">
-                实际宽度 {{ actualImageWidth.toFixed(1) }} mm · 当前布局上限 {{ maximumImageWidth.toFixed(1) }} mm
+                实际宽度 {{ actualImageWidth.toFixed(1) }} mm · 打印安全栏宽 {{ safeColumnWidthValue.toFixed(1) }} mm
               </div>
               <div v-if="widthIsLimited" class="field-hint" role="status">
-                设定宽度超过上限，已限制为实际宽度。要放大图片，请减少每页张数、切换横向或减小页边距。
+                设定宽度超过安全栏宽，已限制为实际宽度。要放大图片，请减少每页张数、切换横向或减小页边距。
               </div>
             </div>
           </el-form-item>
@@ -140,6 +150,13 @@
                   active-text="隐藏扩展名"
                   inactive-text="保留扩展名"
                 />
+                <label class="filename-font-control">
+                  <span>位置</span>
+                  <el-select v-model="settings.caption_position" :disabled="!settings.show_filename">
+                    <el-option label="图下方" value="below" />
+                    <el-option label="图上方" value="above" />
+                  </el-select>
+                </label>
                 <label class="filename-font-control">
                   <span>字体</span>
                   <el-select v-model="settings.filename_font_family" :disabled="!settings.show_filename">
@@ -234,6 +251,10 @@
             </div>
           </el-form-item>
 
+          <el-form-item label="智能提示">
+            <el-switch v-model="settings.doclet_layout_tips" active-text="排版建议" inactive-text="静默" />
+          </el-form-item>
+
           <el-form-item class="workspace-action-row">
             <el-button
               class="primary-workspace-action"
@@ -301,15 +322,80 @@
 
           <div class="preview-section">
             <div class="section-head">
-              <h4>第一页布局预览</h4>
+              <div class="page-nav-group">
+                <h4>页面排版预览</h4>
+                <div class="page-nav-controls">
+                  <el-button size="small" :disabled="currentPageIndex <= 0" @click="prevPage">上一页</el-button>
+                  <span class="page-indicator">第 {{ currentPageIndex + 1 }} / {{ totalPages }} 页</span>
+                  <el-button size="small" :disabled="currentPageIndex >= totalPages - 1" @click="nextPage">下一页</el-button>
+                </div>
+              </div>
               <div class="preview-toolbar">
                 <span>当前页 {{ previewImages.length }} 张</span>
                 <el-button size="small" text @click="adjustPageZoom(-10)">-</el-button>
-                <el-slider v-model="pageZoom" :min="50" :max="180" :step="5" class="zoom-slider" />
+                <el-slider v-model="pageZoom" :min="20" :max="200" :step="5" class="zoom-slider" />
                 <el-button size="small" text @click="adjustPageZoom(10)">+</el-button>
                 <span class="zoom-value">{{ pageZoom }}%</span>
               </div>
             </div>
+
+            <!-- Single-page scale slider bar -->
+            <div class="page-scale-bar">
+              <div class="page-scale-label">
+                <span class="scale-title">调整本页图片</span>
+                <el-tag v-if="hasSavedScale" size="small" type="primary" effect="plain">
+                  已微调 ({{ Math.round((pageScales[currentPageIndex] ?? 1) * 100) }}%)
+                </el-tag>
+              </div>
+              <div class="page-scale-slider-wrap">
+                <el-slider
+                  v-model="activePageScale"
+                  :min="50"
+                  :max="140"
+                  :step="1"
+                  :format-tooltip="(val) => `${val}%`"
+                  class="page-scale-slider"
+                />
+                <span class="scale-percent">{{ activePageScale }}%</span>
+              </div>
+              <div class="page-scale-actions">
+                <el-button
+                  size="small"
+                  type="primary"
+                  :disabled="!isCurrentPageDirty"
+                  @click="saveCurrentPageScale"
+                >
+                  保存
+                </el-button>
+                <el-button
+                  size="small"
+                  :disabled="!isCurrentPageDirty"
+                  @click="cancelCurrentPageScale"
+                >
+                  取消
+                </el-button>
+                <el-button
+                  v-if="hasSavedScale"
+                  size="small"
+                  text
+                  type="info"
+                  @click="resetCurrentPageScale"
+                >
+                  恢复默认
+                </el-button>
+              </div>
+            </div>
+
+            <!-- Doclet layout suggestion tip -->
+            <div
+              v-if="settings.doclet_layout_tips && currentPageConflictState.worstColor !== 'ok'"
+              class="doclet-tip-bar"
+              :class="`tip-${currentPageConflictState.worstColor}`"
+            >
+              <DocletSprite :size="28" :motion="currentPageConflictState.worstColor === 'blue' ? 'review' : 'working'" />
+              <span class="doclet-tip-text">{{ currentPageConflictState.docletTip }}</span>
+            </div>
+
             <div class="field-hint">预览按页面比例显示；Word/WPS 的字体替代和分页以打开导出文件后的结果为准。</div>
             <div class="page-preview-shell">
               <div class="page-preview" :class="resolvedOrientation" :style="previewPageStyle">
@@ -335,10 +421,26 @@
                     :style="previewCellStyle"
                   >
                     <template v-if="img">
-                      <div class="preview-image-area" :style="previewImageAreaStyle">
+                      <div
+                        v-if="settings.caption_position === 'above' && settings.show_filename"
+                        class="preview-name preview-name-above"
+                        :style="previewNameStyle"
+                      >
+                        <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
+                          line
+                        }}</span>
+                      </div>
+                      <div
+                        class="preview-image-area"
+                        :style="[previewImageAreaStyle, previewImageAreaContainerStyle(idx)]"
+                      >
                         <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :style="previewImageStyle(img)" />
                       </div>
-                      <div v-if="settings.show_filename" class="preview-name" :style="previewNameStyle">
+                      <div
+                        v-if="settings.caption_position !== 'above' && settings.show_filename"
+                        class="preview-name"
+                        :style="previewNameStyle"
+                      >
                         <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
                           line
                         }}</span>
@@ -360,12 +462,14 @@
               :name-resolver="imageItemName"
               :meta-resolver="imageItemMeta"
               :excluded-resolver="isImageExcluded"
+              :page-badge-resolver="imageBadgeResolver"
               preserve-aspect-ratio
               :initial-zoom="130"
               v-model:page-fraction="previewPageFraction"
               empty-description="暂无图片"
               @reorder="reorderLayoutImages"
               @toggle-excluded="toggleImageExclusion"
+              @select-page="goToPage"
             />
           </div>
         </template>
@@ -385,6 +489,7 @@
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
+import DocletSprite from '../../../shared/components/DocletSprite.vue'
 import imageLayoutIconUrl from '../../../assets/icons/image-layout.svg?url'
 import { useImagePaddlerState } from '../composables/useImagePaddlerState.js'
 import { useWorkspaceStore } from '../../../stores/workspace.js'
@@ -394,6 +499,7 @@ const workspaceStore = useWorkspaceStore()
 const {
   isFlowLayout,
   optionLayoutLabel,
+  safeColumnWidthValue,
   maximumImageWidth,
   actualImageWidth,
   widthIsLimited,
@@ -413,6 +519,19 @@ const {
   orderedImages,
   includedImages,
   excludedCount,
+  perPage,
+  totalPages,
+  currentPageIndex,
+  pageScales,
+  activePageScale,
+  hasSavedScale,
+  isCurrentPageDirty,
+  saveCurrentPageScale,
+  cancelCurrentPageScale,
+  resetCurrentPageScale,
+  nextPage,
+  prevPage,
+  goToPage,
   previewImages,
   previewSlots,
   generatedOutputPaths,
@@ -420,6 +539,7 @@ const {
   previewGridStyle,
   previewCellStyle,
   previewImageAreaStyle,
+  previewImageAreaContainerStyle,
   previewNameStyle,
   addFolders,
   addImages,
@@ -446,6 +566,9 @@ const {
   orientationLabel,
   layoutLabel,
   scaleModeLabel,
+  currentPageConflicts,
+  currentPageConflictState,
+  imageBadgeResolver,
 } = useImagePaddlerState({
   initialTransfer: () => workspaceStore.mediaTransfer,
   onInitialPathsLoaded: () => workspaceStore.clearMediaTransfer(),
@@ -630,6 +753,26 @@ const {
   color: var(--docsy-text-muted);
 }
 
+.page-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-nav-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-indicator {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--docsy-text);
+  min-width: 60px;
+  text-align: center;
+}
+
 .section-head h4 {
   margin: 0;
   font-size: 14px;
@@ -642,6 +785,98 @@ const {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.page-scale-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  background: var(--docsy-surface-elevated);
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.page-scale-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.scale-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--docsy-text-strong);
+}
+
+.page-scale-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 140px;
+  max-width: 320px;
+}
+
+.page-scale-slider {
+  flex: 1;
+}
+
+.scale-percent {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 38px;
+  color: var(--docsy-primary);
+}
+
+.page-scale-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.doclet-tip-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--docsy-radius);
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+
+.doclet-tip-bar.tip-yellow {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.doclet-tip-bar.tip-green {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.doclet-tip-bar.tip-red {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.doclet-tip-bar.tip-blue {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+
+.doclet-tip-text {
+  font-weight: 500;
 }
 
 .zoom-slider {

@@ -112,6 +112,14 @@ pub struct RunArgs {
     pub fixed_width_mm: Option<f64>,
     #[serde(default)]
     pub filename_color: Option<String>,
+    #[serde(default)]
+    pub page_scales: Option<Vec<f64>>,
+    #[serde(default)]
+    pub pair_mode: Option<String>,
+    #[serde(default)]
+    pub caption_position: Option<String>,
+    #[serde(default)]
+    pub print_safety_pad_mm: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -174,6 +182,10 @@ struct LayoutConfig {
     use_table: bool,
     fixed_width_mm: Option<f64>,
     filename_color: String,
+    caption_position: String,
+    pair_mode: String,
+    print_safety_pad_mm: f64,
+    page_scales: Vec<f64>,
 }
 
 fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig {
@@ -745,13 +757,22 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
             .as_deref()
             .unwrap_or("dark_gray")
             .to_string(),
+        caption_position: args
+            .caption_position
+            .as_deref()
+            .unwrap_or("below")
+            .to_string(),
+        pair_mode: args
+            .pair_mode
+            .as_deref()
+            .unwrap_or("cell-center")
+            .to_string(),
+        print_safety_pad_mm: args.print_safety_pad_mm.unwrap_or(6.0).max(0.0),
+        page_scales: args.page_scales.clone().unwrap_or_default(),
     };
 
     if config.scale_mode == "fixed_width" {
-        let safe_width = images.iter().fold(config.cell_w_mm, |width, image| {
-            width.min(config.image_cell_h_mm * image.width as f64 / image.height.max(1) as f64)
-        });
-        config.fixed_width_mm = Some(config.fixed_width_mm.unwrap_or(160.0).clamp(0.1, 500.0).min(safe_width));
+        config.fixed_width_mm = Some(config.fixed_width_mm.unwrap_or(160.0).clamp(0.1, 500.0));
     }
 
     std::fs::create_dir_all(output_dir)?;
@@ -1094,6 +1115,37 @@ fn unique_output_path(dir: &Path, stem: &str, ext: &str) -> std::path::PathBuf {
     candidate
 }
 
+fn pair_offsets(count: usize, rows: usize, cols: usize, mode: &str) -> Vec<&'static str> {
+    let mut aligns = vec!["center"; count];
+    let is_stack_2 = rows == 2 && cols == 1 && count == 2;
+    let is_side_2 = rows == 1 && cols == 2 && count == 2;
+    if !is_stack_2 && !is_side_2 {
+        return aligns;
+    }
+    match mode {
+        "page-gather" => {
+            if is_stack_2 {
+                aligns[0] = "bottom";
+                aligns[1] = "top";
+            } else {
+                aligns[0] = "right";
+                aligns[1] = "left";
+            }
+        }
+        "page-spread" | "edge-align" | "gap-max" => {
+            if is_stack_2 {
+                aligns[0] = "top";
+                aligns[1] = "bottom";
+            } else {
+                aligns[0] = "left";
+                aligns[1] = "right";
+            }
+        }
+        _ => {}
+    }
+    aligns
+}
+
 fn compute_placement(
     img_w: u32,
     img_h: u32,
@@ -1102,6 +1154,7 @@ fn compute_placement(
     scale_mode: &str,
     dpi: u32,
     fixed_width_mm: Option<f64>,
+    page_scale: f64,
 ) -> (f64, f64, f64, f64) {
     let safe_dpi = if dpi == 0 { 300.0 } else { (dpi as f64).clamp(72.0, 1200.0) };
     let native_w_pt = img_w as f64 * 72.0 / safe_dpi;
@@ -1109,20 +1162,20 @@ fn compute_placement(
 
     let (draw_w_pt, draw_h_pt) = match scale_mode {
         "fixed_width" => {
-            let width_mm = fixed_width_mm.unwrap_or(160.0).clamp(0.1, 500.0);
+            let width_mm = (fixed_width_mm.unwrap_or(160.0) * page_scale).clamp(0.1, 500.0);
             let target_w_pt = width_mm * 72.0 / 25.4;
             let ratio = if img_w > 0 { img_h as f64 / img_w as f64 } else { 1.0 };
             (target_w_pt, target_w_pt * ratio)
         }
         "original" => {
             let fit_scale = (cell_w_pt / native_w_pt).min(cell_h_pt / native_h_pt);
-            let scale = fit_scale.min(1.0);
+            let scale = fit_scale.min(1.0) * page_scale;
             (native_w_pt * scale, native_h_pt * scale)
         }
         _ => {
             let scale_x = cell_w_pt / native_w_pt;
             let scale_y = cell_h_pt / native_h_pt;
-            let scale = scale_x.min(scale_y);
+            let scale = scale_x.min(scale_y) * page_scale;
             (native_w_pt * scale, native_h_pt * scale)
         }
     };
@@ -1177,17 +1230,24 @@ fn generate_pdf(
     for (page_idx, chunk) in images.chunks(per_page).enumerate() {
         let page_config = layout_for_page(config, chunk);
         let config = &page_config;
+        let page_scale = config.page_scales.get(page_idx).copied().unwrap_or(1.0);
+        let aligns = pair_offsets(chunk.len(), config.grid.rows, config.grid.cols, &config.pair_mode);
         let mut ops: Vec<Op> = Vec::new();
 
         for (i, img_info) in chunk.iter().enumerate() {
             let row = i / config.grid.cols;
             let col = i % config.grid.cols;
+            let align = aligns.get(i).copied().unwrap_or("center");
 
             let cell_x_mm = config.margin_mm + col as f64 * config.cell_w_mm;
             let cell_y_mm = config.page_h_mm
                 - config.margin_mm
                 - (row as f64 + 1.0) * (config.image_cell_h_mm + config.filename_reserve_mm);
-            let image_area_y_mm = cell_y_mm + config.filename_reserve_mm;
+            let (image_area_y_mm, text_area_y_mm) = if config.caption_position == "above" {
+                (cell_y_mm, cell_y_mm + config.image_cell_h_mm)
+            } else {
+                (cell_y_mm + config.filename_reserve_mm, cell_y_mm)
+            };
             if config.border_enabled {
                 let rect_x_pt = cell_x_mm * 72.0 / 25.4;
                 let rect_y_pt = cell_y_mm * 72.0 / 25.4;
@@ -1218,6 +1278,7 @@ fn generate_pdf(
                 &config.scale_mode,
                 config.dpi,
                 config.fixed_width_mm,
+                page_scale,
             );
             let (target_width_px, target_height_px) =
                 target_pixel_size(draw_w_pt, draw_h_pt, config.dpi);
@@ -1227,8 +1288,16 @@ fn generate_pdf(
                 RawImage::from_dynamic_image(img).map_err(|e| anyhow::anyhow!("{}", e))?;
             let xobj_id = doc.add_image(&raw_image);
 
-            let offset_x_pt = (cell_w_pt - draw_w_pt) / 2.0;
-            let offset_y_pt = (cell_h_pt - draw_h_pt) / 2.0;
+            let offset_x_pt = match align {
+                "left" => 0.0,
+                "right" => (cell_w_pt - draw_w_pt).max(0.0),
+                _ => (cell_w_pt - draw_w_pt) / 2.0,
+            };
+            let offset_y_pt = match align {
+                "bottom" => 0.0,
+                "top" => (cell_h_pt - draw_h_pt).max(0.0),
+                _ => (cell_h_pt - draw_h_pt) / 2.0,
+            };
 
             let base_x_pt = cell_x_mm * 72.0 / 25.4 + offset_x_pt;
             let base_y_pt = image_area_y_mm * 72.0 / 25.4 + offset_y_pt;
@@ -1275,7 +1344,7 @@ fn generate_pdf(
                     let line_w_pt = name_units(line) as f64 * config.filename_font_size_pt * 0.56;
                     let text_x_pt =
                         cell_x_mm * 72.0 / 25.4 + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
-                    let text_y_pt = (cell_y_mm
+                    let text_y_pt = (text_area_y_mm
                         + 0.8
                         + (lines.len() - line_idx - 1) as f64
                             * filename_line_height_mm(config.filename_font_size_pt))
@@ -1526,10 +1595,13 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
         for (chunk_idx, chunk) in images.chunks(per_page).enumerate() {
             let page_config = layout_for_page(config, chunk);
             let cfg = &page_config;
+            let page_scale = cfg.page_scales.get(chunk_idx).copied().unwrap_or(1.0);
+            let aligns = pair_offsets(chunk.len(), cfg.grid.rows, cfg.grid.cols, &cfg.pair_mode);
             let cell_w_pt = cfg.cell_w_mm * 72.0 / 25.4;
             let cell_h_pt = cfg.image_cell_h_mm * 72.0 / 25.4;
 
             for (image_idx, img_info) in chunk.iter().enumerate() {
+                let align = aligns.get(image_idx).copied().unwrap_or("center");
                 let (draw_w_pt, draw_h_pt, _, _) = compute_placement(
                     img_info.width,
                     img_info.height,
@@ -1538,6 +1610,7 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                     &cfg.scale_mode,
                     cfg.dpi,
                     cfg.fixed_width_mm,
+                    page_scale,
                 );
                 let (target_width_px, target_height_px) =
                     target_pixel_size(draw_w_pt, draw_h_pt, cfg.dpi);
@@ -1546,20 +1619,33 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                 let pic = Pic::new_with_dimensions(png_data, width_px, height_px)
                     .size(pt_to_emu(draw_w_pt), pt_to_emu(draw_h_pt));
                 let draw_height_mm = draw_h_pt * 25.4 / 72.0;
-                let image_gap = mm_to_twips(((cfg.image_cell_h_mm - draw_height_mm) / 2.0).max(0.0)) as u32;
+                let total_gap = mm_to_twips(((cfg.image_cell_h_mm - draw_height_mm) / 2.0).max(0.0)) as u32;
+                let (gap_before, gap_after) = match align {
+                    "bottom" => (total_gap * 2, 0),
+                    "top" => (0, total_gap * 2),
+                    _ => (total_gap, total_gap),
+                };
+                let h_align = match align {
+                    "left" => AlignmentType::Left,
+                    "right" => AlignmentType::Right,
+                    _ => AlignmentType::Center,
+                };
 
-                doc = doc.add_paragraph(
-                    Paragraph::new()
-                        .align(AlignmentType::Center)
-                        .page_break_before(chunk_idx > 0 && image_idx == 0)
-                        .keep_next(cfg.show_filename)
-                        .keep_lines(true)
-                        .line_spacing(LineSpacing::new().before(image_gap).after(image_gap)
-                            .line_rule(LineSpacingType::Exact).line(mm_to_twips(draw_height_mm)))
-                        .add_run(Run::new().add_image(pic)),
-                );
+                let img_paragraph = Paragraph::new()
+                    .align(h_align)
+                    .page_break_before(chunk_idx > 0 && image_idx == 0 && cfg.caption_position != "above")
+                    .keep_next(cfg.show_filename && cfg.caption_position == "below")
+                    .keep_lines(true)
+                    .line_spacing(
+                        LineSpacing::new()
+                            .before(gap_before)
+                            .after(gap_after)
+                            .line_rule(LineSpacingType::Exact)
+                            .line(mm_to_twips(draw_height_mm)),
+                    )
+                    .add_run(Run::new().add_image(pic));
 
-                if cfg.show_filename {
+                let filename_paragraph = if cfg.show_filename {
                     let filename_lines = display_filename_lines(
                         &img_info.path,
                         cfg.filename_without_ext,
@@ -1586,30 +1672,50 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         }
                         filename_run = filename_run.add_text(line);
                     }
-                    doc = doc.add_paragraph(
+                    Some(
                         Paragraph::new()
-                            .align(AlignmentType::Center)
+                            .align(h_align)
+                            .page_break_before(chunk_idx > 0 && image_idx == 0 && cfg.caption_position == "above")
+                            .keep_next(cfg.caption_position == "above")
                             .keep_lines(true)
                             .line_spacing(
-                                LineSpacing::new().before(0).after(mm_to_twips(cfg.filename_safety_mm) as u32)
+                                LineSpacing::new()
+                                    .before(if cfg.caption_position == "above" { mm_to_twips(cfg.filename_safety_mm) as u32 } else { 0 })
+                                    .after(if cfg.caption_position == "below" { mm_to_twips(cfg.filename_safety_mm) as u32 } else { 0 })
                                     .line_rule(LineSpacingType::Exact)
                                     .line(mm_to_twips(filename_line_height_mm(cfg.filename_font_size_pt))),
                             )
                             .add_run(filename_run),
-                    );
+                    )
+                } else {
+                    None
+                };
+
+                if cfg.caption_position == "above" {
+                    if let Some(p) = filename_paragraph {
+                        doc = doc.add_paragraph(p);
+                    }
+                    doc = doc.add_paragraph(img_paragraph);
+                } else {
+                    doc = doc.add_paragraph(img_paragraph);
+                    if let Some(p) = filename_paragraph {
+                        doc = doc.add_paragraph(p);
+                    }
                 }
             }
-
         }
 
-        let file = std::fs::File::create(output_path)?;
-        doc.build().pack(file)?;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        doc.build().pack(&mut buf)?;
+        post_process_docx(&buf.into_inner(), output_path)?;
         return Ok(());
     }
 
-    for chunk in images.chunks(per_page) {
+    for (chunk_idx, chunk) in images.chunks(per_page).enumerate() {
         let page_config = layout_for_page(config, chunk);
         let config = &page_config;
+        let page_scale = config.page_scales.get(chunk_idx).copied().unwrap_or(1.0);
+        let aligns = pair_offsets(chunk.len(), config.grid.rows, config.grid.cols, &config.pair_mode);
         let cell_w_twips = (usable_w_twips / config.grid.cols).max(1);
         let cell_h_twips = (docx_usable_h_twips / config.grid.rows).max(1);
         let cell_w_pt = config.cell_w_mm * 72.0 / 25.4;
@@ -1619,9 +1725,15 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
             let mut cells = Vec::with_capacity(config.grid.cols);
             for col_idx in 0..config.grid.cols {
                 let idx = row_idx * config.grid.cols + col_idx;
+                let align = aligns.get(idx).copied().unwrap_or("center");
+                let v_align = match align {
+                    "top" => VAlignType::Top,
+                    "bottom" => VAlignType::Bottom,
+                    _ => VAlignType::Center,
+                };
                 let mut cell = TableCell::new()
                     .width(cell_w_twips, WidthType::Dxa)
-                    .vertical_align(VAlignType::Center);
+                    .vertical_align(v_align);
                 cell = if config.border_enabled {
                     cell.set_borders(cell_borders())
                 } else {
@@ -1629,6 +1741,11 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                 };
 
                 if let Some(img_info) = chunk.get(idx) {
+                    let h_align = match align {
+                        "left" => AlignmentType::Left,
+                        "right" => AlignmentType::Right,
+                        _ => AlignmentType::Center,
+                    };
                     let (draw_w_pt, draw_h_pt, _, _) = compute_placement(
                         img_info.width,
                         img_info.height,
@@ -1637,6 +1754,7 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         &config.scale_mode,
                         config.dpi,
                         config.fixed_width_mm,
+                        page_scale,
                     );
                     let (target_width_px, target_height_px) =
                         target_pixel_size(draw_w_pt, draw_h_pt, config.dpi);
@@ -1644,22 +1762,13 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         image_as_png(&img_info.path, target_width_px, target_height_px)?;
                     let pic = Pic::new_with_dimensions(png_data, width_px, height_px)
                         .size(pt_to_emu(draw_w_pt), pt_to_emu(draw_h_pt));
-                    cell = cell.add_paragraph(
-                        Paragraph::new()
-                            .align(AlignmentType::Center)
-                            .line_spacing(LineSpacing::new().before(0).after(0))
-                            .add_run(Run::new().add_image(pic)),
-                    );
-                    let filename_lines = display_filename_lines(
-                        &img_info.path,
-                        config.filename_without_ext,
-                        &config.filename_remove_text,
-                        &config.filename_rules,
-                        config.cell_w_mm,
-                        config.filename_font_size_pt,
-                        config.filename_max_lines,
-                    );
-                    if config.show_filename {
+
+                    let img_paragraph = Paragraph::new()
+                        .align(h_align)
+                        .line_spacing(LineSpacing::new().before(0).after(0))
+                        .add_run(Run::new().add_image(pic));
+
+                    let filename_paragraph = if config.show_filename {
                         let font_name = docx_font_name(&config.filename_font_family);
                         let mut filename_run = Run::new()
                             .fonts(
@@ -1671,6 +1780,15 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                             )
                             .size((config.filename_font_size_pt * 2.0).round() as usize)
                             .color(docx_text_color(&config.filename_color));
+                        let filename_lines = display_filename_lines(
+                            &img_info.path,
+                            config.filename_without_ext,
+                            &config.filename_remove_text,
+                            &config.filename_rules,
+                            config.cell_w_mm,
+                            config.filename_font_size_pt,
+                            config.filename_max_lines,
+                        );
                         for (line_idx, line) in filename_lines.into_iter().enumerate() {
                             if line_idx > 0 {
                                 filename_run = filename_run.add_break(BreakType::TextWrapping);
@@ -1679,9 +1797,9 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         }
                         let filename_line_twips =
                             mm_to_twips(filename_line_height_mm(config.filename_font_size_pt));
-                        cell = cell.add_paragraph(
+                        Some(
                             Paragraph::new()
-                                .align(AlignmentType::Center)
+                                .align(h_align)
                                 .line_spacing(
                                     LineSpacing::new()
                                         .before(0)
@@ -1690,7 +1808,21 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                                         .line(filename_line_twips),
                                 )
                                 .add_run(filename_run),
-                        );
+                        )
+                    } else {
+                        None
+                    };
+
+                    if config.caption_position == "above" {
+                        if let Some(p) = filename_paragraph {
+                            cell = cell.add_paragraph(p);
+                        }
+                        cell = cell.add_paragraph(img_paragraph);
+                    } else {
+                        cell = cell.add_paragraph(img_paragraph);
+                        if let Some(p) = filename_paragraph {
+                            cell = cell.add_paragraph(p);
+                        }
                     }
                 } else {
                     cell = cell.add_paragraph(Paragraph::new());
@@ -1720,8 +1852,69 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
         doc = doc.add_table(table);
     }
 
-    let file = std::fs::File::create(output_path)?;
-    doc.build().pack(file)?;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    doc.build().pack(&mut buf)?;
+    post_process_docx(&buf.into_inner(), output_path)?;
+    Ok(())
+}
+
+fn post_process_docx(raw_bytes: &[u8], output_path: &Path) -> Result<()> {
+    use std::io::{Cursor, Read, Write};
+    let reader = Cursor::new(raw_bytes);
+    let mut archive = zip::ZipArchive::new(reader)?;
+    let outfile = std::fs::File::create(output_path)?;
+    let mut writer = zip::ZipWriter::new(outfile);
+
+    let docpr_re = Regex::new(r#"<wp:docPr\b[^>]*/>"#).unwrap();
+    let override_re =
+        Regex::new(r#"<Override\b[^>]*PartName="/word/numbering\.xml"[^>]*/>"#).unwrap();
+    let rel_re = Regex::new(r#"<Relationship\b[^>]*Target="numbering\.xml"[^>]*/>"#).unwrap();
+
+    let mut docpr_counter = 1_000_000usize;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let name = file.name().to_string();
+
+        if name == "word/numbering.xml" {
+            // Drop unreferenced numbering.xml component
+            continue;
+        }
+
+        let options = zip::write::FileOptions::default()
+            .compression_method(file.compression())
+            .unix_permissions(file.unix_mode().unwrap_or(0o644));
+
+        writer.start_file(&name, options)?;
+
+        if name == "word/document.xml" {
+            let mut content = String::new();
+            file.read_to_string(&mut content)?;
+            let replaced = docpr_re.replace_all(&content, |_caps: &regex::Captures| {
+                docpr_counter += 1;
+                format!(
+                    r#"<wp:docPr id="{}" name="Picture_{}" />"#,
+                    docpr_counter,
+                    docpr_counter - 1_000_000
+                )
+            });
+            writer.write_all(replaced.as_bytes())?;
+        } else if name == "[Content_Types].xml" {
+            let mut content = String::new();
+            file.read_to_string(&mut content)?;
+            let replaced = override_re.replace_all(&content, "");
+            writer.write_all(replaced.as_bytes())?;
+        } else if name == "word/_rels/document.xml.rels" {
+            let mut content = String::new();
+            file.read_to_string(&mut content)?;
+            let replaced = rel_re.replace_all(&content, "");
+            writer.write_all(replaced.as_bytes())?;
+        } else {
+            std::io::copy(&mut file, &mut writer)?;
+        }
+    }
+
+    writer.finish()?;
     Ok(())
 }
 
@@ -2008,6 +2201,10 @@ mod tests {
             use_table: None,
             fixed_width_mm: None,
             filename_color: None,
+            page_scales: None,
+            pair_mode: None,
+            caption_position: None,
+            print_safety_pad_mm: None,
         };
         assert_eq!(
             explicit_image_paths(&args).unwrap(),
@@ -2060,6 +2257,10 @@ mod tests {
             use_table: None,
             fixed_width_mm: None,
             filename_color: None,
+            page_scales: None,
+            pair_mode: None,
+            caption_position: None,
+            print_safety_pad_mm: None,
         };
 
         let first = run(&args).unwrap();
@@ -2082,6 +2283,8 @@ mod tests {
         archive.by_name("word/styles.xml").unwrap();
         archive.by_name("word/settings.xml").unwrap();
         archive.by_name("word/fontTable.xml").unwrap();
+        // 验证未引用的 numbering.xml 已被移除
+        assert!(archive.by_name("word/numbering.xml").is_err());
         // docx-rs 的图片 rid 来自进程级全局计数器，并行测试下序号不固定，
         // 只断言存在一张 rIdImage*.png
         assert!(archive
@@ -2095,6 +2298,10 @@ mod tests {
             .read_to_string(&mut document_xml)
             .unwrap();
         assert!(document_xml.contains("<wp:docPr"));
+        // 验证 docPr 不包含硬编码的 Figure 且具备唯一 id
+        assert!(!document_xml.contains(r#"name="Figure""#));
+        assert!(document_xml.contains(r#"<wp:docPr id="1000001" name="Picture_1""#));
+        assert!(document_xml.contains(r#"<wp:docPr id="1000002" name="Picture_2""#));
         assert!(document_xml.contains("<w:tblBorders>"));
         assert!(document_xml.contains("<w:insideH"));
         assert!(document_xml.contains("<w:insideV"));
@@ -2116,11 +2323,11 @@ mod tests {
     fn placement_fit_and_original_have_distinct_print_sizes() {
         let cell_w_pt = 180.0 * 72.0 / 25.4;
         let cell_h_pt = 120.0 * 72.0 / 25.4;
-        let (fit_w, fit_h, _, _) = compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "fit", 300, None);
+        let (fit_w, fit_h, _, _) = compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "fit", 300, None, 1.0);
         let (original_w, original_h, _, _) =
-            compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "original", 300, None);
+            compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "original", 300, None, 1.0);
         let (fixed_w, fixed_h, _, _) =
-            compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "fixed_width", 300, Some(160.0));
+            compute_placement(1920, 1080, cell_w_pt, cell_h_pt, "fixed_width", 300, Some(160.0), 1.0);
         assert!(fit_w > original_w);
         assert!(fit_h > original_h);
         assert!((fixed_w - (160.0 * 72.0 / 25.4)).abs() < 0.01);
@@ -2258,6 +2465,10 @@ mod tests {
             use_table: true,
             fixed_width_mm: None,
             filename_color: "dark_gray".into(),
+            caption_position: "below".into(),
+            pair_mode: "cell-center".into(),
+            print_safety_pad_mm: 6.0,
+            page_scales: Vec::new(),
         };
 
         let images = vec![ImageInfo {
@@ -2326,11 +2537,16 @@ mod tests {
             use_table: Some(false),
             fixed_width_mm: Some(160.0),
             filename_color: Some("blue".into()),
+            page_scales: None,
+            pair_mode: None,
+            caption_position: None,
+            print_safety_pad_mm: None,
         };
 
         let result = run(&args).unwrap();
         let file = std::fs::File::open(&result.output_path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
+        assert!(archive.by_name("word/numbering.xml").is_err());
         let mut doc_xml = String::new();
         archive
             .by_name("word/document.xml")
@@ -2341,8 +2557,10 @@ mod tests {
         // 核心验证：段落流式排版中严禁出现表格标签 <w:tbl>
         assert!(!doc_xml.contains("<w:tbl>"));
         assert!(!doc_xml.contains("<w:tbl "));
-        // 包含图片绘图元素
+        // 包含图片绘图元素与唯一 docPr id，不含 Figure
         assert!(doc_xml.contains("<wp:docPr"));
+        assert!(!doc_xml.contains(r#"name="Figure""#));
+        assert!(doc_xml.contains(r#"<wp:docPr id="1000001" name="Picture_1""#));
         // 包含硬分页符
         assert!(doc_xml.contains("<w:pageBreakBefore"));
         assert!(doc_xml.contains("<w:keepNext"));
@@ -2351,5 +2569,30 @@ mod tests {
         assert!(doc_xml.contains("w:color w:val=\"2563EB\""));
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_pair_offsets_and_compute_placement_with_scale() {
+        let offsets_gather_2x1 = pair_offsets(2, 2, 1, "page-gather");
+        assert_eq!(offsets_gather_2x1, vec!["bottom", "top"]);
+
+        let offsets_spread_2x1 = pair_offsets(2, 2, 1, "page-spread");
+        assert_eq!(offsets_spread_2x1, vec!["top", "bottom"]);
+
+        let offsets_gather_1x2 = pair_offsets(2, 1, 2, "page-gather");
+        assert_eq!(offsets_gather_1x2, vec!["right", "left"]);
+
+        let offsets_spread_1x2 = pair_offsets(2, 1, 2, "page-spread");
+        assert_eq!(offsets_spread_1x2, vec!["left", "right"]);
+
+        let offsets_center = pair_offsets(2, 2, 1, "cell-center");
+        assert_eq!(offsets_center, vec!["center", "center"]);
+
+        // 测试 page_scale 对 fixed_width 尺度的等比缩放
+        let cell_w_pt = 200.0 * 72.0 / 25.4;
+        let cell_h_pt = 200.0 * 72.0 / 25.4;
+        let (w_1x, _, _, _) = compute_placement(1000, 1000, cell_w_pt, cell_h_pt, "fixed_width", 300, Some(100.0), 1.0);
+        let (w_1_2x, _, _, _) = compute_placement(1000, 1000, cell_w_pt, cell_h_pt, "fixed_width", 300, Some(100.0), 1.2);
+        assert!((w_1_2x - w_1x * 1.2).abs() < 0.001);
     }
 }

@@ -23,7 +23,10 @@
           v-for="(item, localIndex) in pagedItems"
           :key="itemKey(item, localIndex)"
           class="reorder-image-card"
-          :class="reorder.itemClasses(globalIndex(localIndex))"
+          :class="[
+            reorder.itemClasses(globalIndex(localIndex)),
+            cardConflictClass(item),
+          ]"
           :style="cardStyle(item)"
           :data-reorder-index="globalIndex(localIndex)"
         >
@@ -39,7 +42,23 @@
           >
             <el-icon><Rank /></el-icon>
           </button>
-          <button type="button" class="reorder-image-preview" @click="openPreview(item)">
+          <button
+            v-if="pageBadge(item)"
+            type="button"
+            class="reorder-image-page-badge"
+            :class="[`badge-color-${pageBadge(item).color}`, { 'is-modified': pageBadge(item).isModified }]"
+            :title="`第 ${pageBadge(item).pageNumber} 页 · 点击在上方预览`"
+            @click.stop="onJumpPage(pageBadge(item).pageIndex)"
+          >
+            P.{{ pageBadge(item).pageNumber }}
+            <span v-if="pageBadge(item).isModified" class="badge-dot" title="已微调">●</span>
+          </button>
+          <button
+            type="button"
+            class="reorder-image-preview"
+            @click="handleCardClick(item, $event)"
+            @dblclick="openPreview(item)"
+          >
             <span class="reorder-image-thumb-wrap" :style="thumbWrapStyle(item)">
               <img
                 v-if="imageSrc(item)"
@@ -58,17 +77,27 @@
             <span v-if="itemExcluded(item)" class="reorder-image-status">已排除，不参与排版</span>
             <span v-if="itemMeta(item)" class="reorder-image-meta">{{ itemMeta(item) }}</span>
           </button>
-          <button
-            v-if="excludedResolver"
-            type="button"
-            class="reorder-image-decision"
-            :class="{ excluded: itemExcluded(item) }"
-            :title="itemExcluded(item) ? '恢复到排版结果' : '从排版结果中排除'"
-            @click.stop="toggleExcluded(item, globalIndex(localIndex))"
-          >
-            <el-icon v-if="itemExcluded(item)"><RefreshLeft /></el-icon>
-            <el-icon v-else><Delete /></el-icon>
-          </button>
+          <div class="reorder-image-top-actions">
+            <button
+              type="button"
+              class="reorder-image-action-btn"
+              title="查看大图"
+              @click.stop="openPreview(item)"
+            >
+              <el-icon><ZoomIn /></el-icon>
+            </button>
+            <button
+              v-if="excludedResolver"
+              type="button"
+              class="reorder-image-decision"
+              :class="{ excluded: itemExcluded(item) }"
+              :title="itemExcluded(item) ? '恢复到排版结果' : '从排版结果中排除'"
+              @click.stop="toggleExcluded(item, globalIndex(localIndex))"
+            >
+              <el-icon v-if="itemExcluded(item)"><RefreshLeft /></el-icon>
+              <el-icon v-else><Delete /></el-icon>
+            </button>
+          </div>
         </article>
       </div>
     </div>
@@ -108,7 +137,7 @@
 
 <script setup>
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { Delete, Rank, RefreshLeft } from '@element-plus/icons-vue'
+import { Delete, Rank, RefreshLeft, ZoomIn } from '@element-plus/icons-vue'
 import { tauriCallQuiet } from '../../core/tauriBridge.js'
 import { fileName } from '../../core/filePath.js'
 import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
@@ -119,6 +148,7 @@ const props = defineProps({
   nameResolver: { type: Function, default: null },
   metaResolver: { type: Function, default: null },
   pathResolver: { type: Function, default: null },
+  pageBadgeResolver: { type: Function, default: null },
   emptyDescription: { type: String, default: '暂无图片' },
   pageFraction: { type: Number, default: 0.25 },
   initialZoom: { type: Number, default: 100 },
@@ -128,7 +158,33 @@ const props = defineProps({
   excludedResolver: { type: Function, default: null },
 })
 
-const emit = defineEmits(['reorder', 'toggle-excluded', 'update:page-fraction'])
+const emit = defineEmits(['reorder', 'toggle-excluded', 'update:page-fraction', 'select-page', 'select-item'])
+
+function pageBadge(item) {
+  return props.pageBadgeResolver ? props.pageBadgeResolver(item) : null
+}
+
+function cardConflictClass(item) {
+  const badge = pageBadge(item)
+  if (!badge || !badge.color || badge.color === 'ok') return ''
+  return `card-conflict-${badge.color}`
+}
+
+function onJumpPage(pageIndex) {
+  if (pageIndex !== undefined && pageIndex !== null) {
+    emit('select-page', pageIndex)
+  }
+}
+
+function handleCardClick(item, event) {
+  const badge = pageBadge(item)
+  if (badge && badge.pageIndex !== undefined) {
+    emit('select-page', badge.pageIndex)
+    emit('select-item', { item, pageIndex: badge.pageIndex })
+  } else {
+    openPreview(item)
+  }
+}
 const page = ref(1)
 const zoom = ref(props.initialZoom)
 const scrollContainer = ref(null)
@@ -410,12 +466,17 @@ watch(page, async () => {
   color: var(--docsy-text-muted);
   font-size: 11px;
 }
-.reorder-image-decision {
+.reorder-image-top-actions {
   position: absolute;
   top: 3px;
   right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.reorder-image-action-btn {
   display: inline-grid;
-  width: 28px;
+  width: 24px;
   height: 24px;
   padding: 0;
   place-items: center;
@@ -425,51 +486,85 @@ watch(page, async () => {
   background: transparent;
   cursor: pointer;
 }
-.reorder-image-decision:hover,
-.reorder-image-decision.excluded {
-  color: var(--el-color-danger);
-  background: var(--el-color-danger-light-9);
+.reorder-image-action-btn:hover {
+  color: var(--docsy-primary);
+  background: var(--docsy-primary-soft);
 }
-.reorder-image-status {
-  display: block;
-  max-width: 100%;
-  margin-top: 3px;
-  padding: 3px 6px;
-  box-sizing: border-box;
-  overflow: hidden;
-  border-radius: 5px;
-  color: #fff;
-  background: rgba(126, 70, 61, 0.82);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.reorder-image-pager {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--docsy-text-muted);
-}
-.reorder-image-dialog-body {
-  display: grid;
-  min-height: 320px;
+.reorder-image-decision {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   place-items: center;
-  overflow: auto;
-}
-.reorder-image-dialog-img {
-  max-width: 100%;
-  max-height: 78vh;
-  object-fit: contain;
-}
-.reorder-image-dialog-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 14px;
+  border: 0;
+  border-radius: 6px;
   color: var(--docsy-text-muted);
-  font-size: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+.reorder-image-page-badge {
+  position: absolute;
+  top: 4px;
+  left: 36px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 2;
+}
+.reorder-image-page-badge:hover {
+  background: var(--docsy-primary-soft);
+  color: var(--docsy-primary);
+  border-color: var(--docsy-primary);
+}
+.badge-dot {
+  font-size: 8px;
+  color: var(--docsy-primary);
+}
+.badge-color-yellow {
+  border-color: #f59e0b;
+  color: #d97706;
+  background: #fef3c7;
+}
+.badge-color-green {
+  border-color: #10b981;
+  color: #059669;
+  background: #d1fae5;
+}
+.badge-color-red {
+  border-color: #ef4444;
+  color: #dc2626;
+  background: #fee2e2;
+}
+.badge-color-blue {
+  border-color: #3b82f6;
+  color: #2563eb;
+  background: #dbeafe;
+}
+
+.card-conflict-yellow {
+  border-color: rgba(245, 158, 11, 0.7) !important;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
+}
+.card-conflict-green {
+  border-color: rgba(16, 185, 129, 0.7) !important;
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2);
+}
+.card-conflict-red {
+  border-color: rgba(239, 68, 68, 0.8) !important;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.3);
+}
+.card-conflict-blue {
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
 }
 </style>
