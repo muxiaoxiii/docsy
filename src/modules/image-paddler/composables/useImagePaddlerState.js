@@ -1187,7 +1187,60 @@ export function useImagePaddlerState(options = {}) {
     }
   }
 
+  const conflictDialogVisible = ref(false)
+
+  const conflictSummaryList = computed(() => {
+    const list = []
+    const reports = allPageConflictReports.value || []
+    reports.forEach((report, pageIdx) => {
+      if (!report || !report.items) return
+      report.items.forEach((item, slotIdx) => {
+        if (['red', 'yellow', 'green'].includes(item.color)) {
+          let reason = '存在布局冲突'
+          if (item.overlap && item.overflow) {
+            reason = '图片重叠且超出边距'
+          } else if (item.overlap) {
+            reason = '与其他图片重叠'
+          } else if (item.captionOverlap) {
+            reason = '遮挡或压盖图注'
+          } else if (item.overflow) {
+            reason = '超出单元格或页边距'
+          }
+          const rawName = item.path ? item.path.split(/[/\\]/).pop() : `图片 ${slotIdx + 1}`
+          const customTitle = imageAnnotations.value[item.path]?.title
+          const displayName = customTitle ? `${customTitle} (${rawName})` : rawName
+          list.push({
+            pageNumber: pageIdx + 1,
+            pageIndex: pageIdx,
+            slotNumber: slotIdx + 1,
+            path: item.path,
+            displayName,
+            color: item.color,
+            reason,
+          })
+        }
+      })
+    })
+    return list
+  })
+
+  async function handleStartGenerate() {
+    if (!folders.value.length || analyzing.value || generating.value) return
+    if (!includedImages.value.length) {
+      ElMessage.warning('当前没有参与排版的图片，请先恢复至少一张图片')
+      return
+    }
+    if (conflictSummaryList.value.length > 0) {
+      conflictDialogVisible.value = true
+      return
+    }
+    await run()
+  }
+
   return {
+    conflictDialogVisible,
+    conflictSummaryList,
+    handleStartGenerate,
     isFlowLayout,
     optionLayoutLabel,
     safeColumnWidthValue,

@@ -304,7 +304,7 @@
             <el-button
               class="primary-workspace-action"
               type="success"
-              @click="run"
+              @click="handleStartGenerate"
               :loading="generating"
               :disabled="analyzing || !analysis || !includedImages.length"
             >
@@ -568,6 +568,48 @@
         />
       </div>
     </div>
+
+    <!-- 冲突预检提示对话框 -->
+    <el-dialog
+      v-model="conflictDialogVisible"
+      title="排版冲突检测提示"
+      width="580px"
+      append-to-body
+      destroy-on-close
+    >
+      <div class="conflict-dialog-body">
+        <div class="conflict-dialog-intro">
+          检测到以下 <strong>{{ conflictSummaryList.length }}</strong> 处可能存在图文重叠、遮挡或超出页面边距。
+          Word/WPS 导出后您可以在文档中自由微调；如无需修改，可直接点击<strong>「忽略提示，直接生成」</strong>。
+        </div>
+        <el-table :data="conflictSummaryList" max-height="240" size="small" style="width: 100%">
+          <el-table-column prop="pageNumber" label="页码" width="75" align="center">
+            <template #default="{ row }">第 {{ row.pageNumber }} 页</template>
+          </el-table-column>
+          <el-table-column prop="displayName" label="图片" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="reason" label="冲突情况" min-width="140">
+            <template #default="{ row }">
+              <span :class="`conflict-tag-${row.color}`">{{ row.reason }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="80" align="center">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="goToConflictPage(row.pageIndex)">
+                查看
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="conflictDialogVisible = false">返回调整</el-button>
+          <el-button type="primary" @click="executeForceGenerate">
+            忽略提示，直接生成
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </ToolWorkspaceShell>
 </template>
 
@@ -668,10 +710,23 @@ const {
   currentPageConflicts,
   currentPageConflictState,
   imageBadgeResolver,
+  conflictDialogVisible,
+  conflictSummaryList,
+  handleStartGenerate,
 } = useImagePaddlerState({
   initialTransfer: () => workspaceStore.mediaTransfer,
   onInitialPathsLoaded: () => workspaceStore.clearMediaTransfer(),
 })
+
+function goToConflictPage(pageIndex) {
+  currentPageIndex.value = pageIndex
+  conflictDialogVisible.value = false
+}
+
+async function executeForceGenerate() {
+  conflictDialogVisible.value = false
+  await run()
+}
 
 function handleSaveScaleCommand(command) {
   if (command === 'all') {
@@ -1256,5 +1311,27 @@ function hasCellCaption(img) {
 
 .preview-cell-flow {
   border: none !important;
+}
+
+.conflict-dialog-intro {
+  margin-bottom: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--docsy-text);
+}
+
+.conflict-tag-red {
+  color: #943b35;
+  font-weight: 500;
+}
+
+.conflict-tag-yellow {
+  color: #8a541c;
+  font-weight: 500;
+}
+
+.conflict-tag-green {
+  color: #395c41;
+  font-weight: 500;
 }
 </style>
