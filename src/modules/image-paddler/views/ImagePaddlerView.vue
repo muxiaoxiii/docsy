@@ -68,7 +68,7 @@
             </div>
           </el-form-item>
 
-          <el-form-item v-if="layoutGrid.rows * layoutGrid.cols === 2" label="双图排列">
+          <el-form-item v-if="isPairLayout" label="双图排列">
             <el-select v-model="settings.pair_mode">
               <el-option label="格心独立（默认）" value="cell-center" />
               <el-option label="向中心收拢" value="page-gather" />
@@ -606,6 +606,7 @@ const {
   includedImages,
   excludedCount,
   perPage,
+  isPairLayout,
   totalPages,
   currentPageIndex,
   pageScales,

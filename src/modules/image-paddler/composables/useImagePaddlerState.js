@@ -10,6 +10,7 @@ import {
   safeColumnWidth,
   effectivePageWidth,
   pairOffsets,
+  pairAlignToXY,
   detectPageConflicts,
   computeOptimalPageScale,
   safeImageWidth,
@@ -124,6 +125,7 @@ export function useImagePaddlerState(options = {}) {
   const includedImages = computed(() => orderedImages.value.filter((image) => !isImageExcluded(image)))
   const excludedCount = computed(() => orderedImages.value.length - includedImages.value.length)
   const perPage = computed(() => Math.max(1, layoutGrid.value.rows * layoutGrid.value.cols))
+  const isPairLayout = computed(() => perPage.value === 2)
   const totalPages = computed(() => Math.max(1, Math.ceil(includedImages.value.length / perPage.value)))
 
   watch([totalPages, includedImages], () => {
@@ -180,37 +182,45 @@ export function useImagePaddlerState(options = {}) {
       outlineColor: borderColorCss(settings.border_color),
     }
   })
-  const layoutMetrics = computed(() => {
+  function computeMetricsForGrid(pageGrid, pageImages = []) {
     const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
     const margin = Math.max(0, Number(settings.margin_mm) || 0)
     const usableWidth = Math.max(1, page.width - margin * 2)
     const docxTrailingGap = settings.output_format === 'docx' ? 2 : 0
     const usableHeight = Math.max(1, page.height - margin * 2 - docxTrailingGap)
-    const cellWidth = usableWidth / previewLayoutGrid.value.cols
-    const cellHeight = usableHeight / previewLayoutGrid.value.rows
+    const cellWidth = usableWidth / Math.max(1, pageGrid.cols)
+    const cellHeight = usableHeight / Math.max(1, pageGrid.rows)
     const filenameFontSizePt = clampNumber(settings.filename_font_size_pt, 6, 24, 8)
     const filenameLineHeightMm = ((filenameFontSizePt * 25.4) / 72) * 1.32 + 0.45
-    const filenameMaxLines = settings.show_filename
-      ? Math.max(
-          1,
-          ...previewImages.value.map((image) =>
-            requiredFilenameLines(imageTitle(image.path), cellWidth, filenameFontSizePt, FILENAME_MAX_LINES),
-          ),
-        )
-      : 0
+    const filenameMaxLines =
+      settings.show_filename && pageImages.length
+        ? Math.max(
+            1,
+            ...pageImages.map((image) =>
+              requiredFilenameLines(imageTitle(image.path), cellWidth, filenameFontSizePt, FILENAME_MAX_LINES),
+            ),
+          )
+        : settings.show_filename
+          ? 1
+          : 0
 
     const noteFontSizePt = clampNumber(settings.note_font_size_pt, 6, 24, 8)
     const noteLineHeightMm = ((noteFontSizePt * 25.4) / 72) * 1.32 + 0.45
-    const hasAnyNote = previewImages.value.some((image) => Boolean(imageDescription(image.path)))
-    const noteMaxLines = hasAnyNote
-      ? Math.max(
-          1,
-          ...previewImages.value.map((image) => {
-            const desc = imageDescription(image.path)
-            return desc ? Math.min(3, requiredFilenameLines(desc, cellWidth, noteFontSizePt, 3)) : 0
-          }),
-        )
-      : 0
+    const hasAnyNote =
+      settings.reserve_note_placeholder || pageImages.some((image) => Boolean(imageDescription(image.path)))
+    const noteMaxLines =
+      hasAnyNote && pageImages.length
+        ? Math.max(
+            1,
+            ...pageImages.map((image) => {
+              const desc =
+                imageDescription(image.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : '')
+              return desc ? Math.min(3, requiredFilenameLines(desc, cellWidth, noteFontSizePt, 3)) : 0
+            }),
+          )
+        : hasAnyNote
+          ? 1
+          : 0
 
     const titleReserve = settings.show_filename ? filenameLineHeightMm * filenameMaxLines : 0
     const noteReserve = hasAnyNote ? noteLineHeightMm * noteMaxLines : 0
@@ -231,7 +241,9 @@ export function useImagePaddlerState(options = {}) {
       noteMaxLines,
       imageCellHeight: Math.max(1, cellHeight - filenameReserve),
     }
-  })
+  }
+
+  const layoutMetrics = computed(() => computeMetricsForGrid(previewLayoutGrid.value, previewImages.value))
   const previewImageAreaStyle = computed(() => {
     const metrics = layoutMetrics.value
     const height = `${Math.min(100, (metrics.imageCellHeight / metrics.cellHeight) * 100)}%`
@@ -276,7 +288,7 @@ export function useImagePaddlerState(options = {}) {
 
   const safeColumnWidthValue = computed(() => {
     const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
-    return safeColumnWidth(page.width, settings.margin_mm, previewLayoutGrid.value.cols, settings.print_safety_pad_mm)
+    return safeColumnWidth(page.width, settings.margin_mm, layoutGrid.value.cols, settings.print_safety_pad_mm)
   })
   const maximumImageWidth = computed(() => safeColumnWidthValue.value)
   const currentRecommendedWidth = computed(() => Math.floor(safeColumnWidthValue.value * 10) / 10)
@@ -775,7 +787,7 @@ export function useImagePaddlerState(options = {}) {
       previewLayoutGrid.value.cols,
       settings.pair_mode,
     )
-    const align = offsets[index] || { x: 'center', y: 'center' }
+    const align = pairAlignToXY(offsets[index])
     const justifyMap = { left: 'flex-start', center: 'center', right: 'flex-end' }
     const alignMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' }
     return {
@@ -1068,11 +1080,14 @@ export function useImagePaddlerState(options = {}) {
         ? activePageScale.value / 100
         : pageScales.value[pageIdx] ?? 1.0
 
+    const pageGrid = compactGridForCount(layoutGrid.value, pageImgs.length)
+    const metrics = computeMetricsForGrid(pageGrid, pageImgs)
+
     return detectPageConflicts({
       images: pageImgs,
-      grid: compactGridForCount(layoutGrid.value, pageImgs.length),
-      cellWidth: layoutMetrics.value.cellWidth,
-      imageCellHeight: layoutMetrics.value.imageCellHeight,
+      grid: pageGrid,
+      cellWidth: metrics.cellWidth,
+      imageCellHeight: metrics.imageCellHeight,
       fixedWidthMm: actualImageWidth.value,
       pageScale: currentScale,
       scaleMode: settings.scale_mode,
@@ -1082,7 +1097,7 @@ export function useImagePaddlerState(options = {}) {
       marginMm: Number(settings.margin_mm) || 0,
       showFilename: settings.show_filename,
       captionPosition: settings.caption_position,
-      captionReserveMm: layoutMetrics.value.filenameReserve,
+      captionReserveMm: metrics.filenameReserve,
       fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
       pairMode: settings.pair_mode,
     })
@@ -1090,6 +1105,15 @@ export function useImagePaddlerState(options = {}) {
 
   const currentPageConflictReport = computed(() => getPageConflicts(currentPageIndex.value))
   const currentPageConflicts = computed(() => currentPageConflictReport.value.items || [])
+
+  const allPageConflictReports = computed(() => {
+    const total = totalPages.value
+    const reports = new Array(total)
+    for (let p = 0; p < total; p++) {
+      reports[p] = getPageConflicts(p)
+    }
+    return reports
+  })
 
   const currentPageConflictState = computed(() => {
     const report = currentPageConflictReport.value
@@ -1125,9 +1149,9 @@ export function useImagePaddlerState(options = {}) {
     if (index === -1) return null
     const count = perPage.value
     const pageIdx = Math.floor(index / count)
-    const report = getPageConflicts(pageIdx)
+    const report = allPageConflictReports.value[pageIdx]
     const slotIdx = index % count
-    const color = report.items?.[slotIdx]?.color || 'ok'
+    const color = report?.items?.[slotIdx]?.color || 'ok'
     const isModified = pageScales.value[pageIdx] !== undefined
     return {
       pageNumber: pageIdx + 1,
@@ -1163,6 +1187,7 @@ export function useImagePaddlerState(options = {}) {
     includedImages,
     excludedCount,
     perPage,
+    isPairLayout,
     totalPages,
     currentPageIndex,
     pageScales,

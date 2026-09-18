@@ -58,6 +58,28 @@ export function pairOffsets(count, rows, cols, mode = 'cell-center') {
   return aligns
 }
 
+export function pairAlignToXY(align) {
+  if (!align || align === 'center') return { x: 'center', y: 'center' }
+  if (typeof align === 'object') {
+    return {
+      x: align.x || 'center',
+      y: align.y || 'center',
+    }
+  }
+  switch (align) {
+    case 'top':
+      return { x: 'center', y: 'top' }
+    case 'bottom':
+      return { x: 'center', y: 'bottom' }
+    case 'left':
+      return { x: 'left', y: 'center' }
+    case 'right':
+      return { x: 'right', y: 'center' }
+    default:
+      return { x: 'center', y: 'center' }
+  }
+}
+
 export function estimateTextWidthPt(text, fontSizePt = 8) {
   let width = 0
   for (const ch of String(text || '')) {
@@ -147,9 +169,9 @@ export function detectPageConflicts({
       drawH = nativeH * scale
     }
 
-    const alignVal = offsets[idx] || 'center'
-    const alignX = typeof alignVal === 'object' ? alignVal.x : (alignVal === 'left' || alignVal === 'right' ? alignVal : 'center')
-    const alignY = typeof alignVal === 'object' ? alignVal.y : (alignVal === 'top' || alignVal === 'bottom' ? alignVal : 'center')
+    const align = pairAlignToXY(offsets[idx])
+    const alignX = align.x
+    const alignY = align.y
 
     let imgX = cellX + (cellW - drawW) / 2
     if (alignX === 'left') imgX = cellX
@@ -174,7 +196,9 @@ export function detectPageConflicts({
     imageBoxes.push(rectImg)
 
     if (showFilename && captionH > 0) {
-      const name = img.name || img.path || ''
+      const rawName = img.name || img.path || ''
+      const slashIdx = Math.max(rawName.lastIndexOf('/'), rawName.lastIndexOf('\\'))
+      const name = slashIdx >= 0 ? rawName.slice(slashIdx + 1) : rawName
       const textW = Math.min(cellW, Math.max(10, estimateTextWidthMm(name, fontSizePt)))
       const capX = cellX + (cellW - textW) / 2
       captionBoxes.push({
@@ -196,34 +220,33 @@ export function detectPageConflicts({
 
   const results = imageBoxes.map((box, idx) => {
     const img = images[idx]
+    const exceedsImageArea = box.w > box.cellW + 0.5 || box.h > box.imgAreaH + 0.5
+    const exceedsPageMargin =
+      box.x < margin - 0.5 ||
+      box.y < margin - 0.5 ||
+      box.right > pageW - margin + 0.5 ||
+      box.bottom > pageH - margin + 0.5
 
-    // (a) 图与同页其他任意图相交 (多图网格任意两两相交)
+    // 与其它图片相交
     let overlap = false
-    for (let j = 0; j < imageBoxes.length; j += 1) {
-      if (j !== idx && aabbIntersect(box, imageBoxes[j], 0.2)) {
+    for (let j = 0; j < imageBoxes.length; j++) {
+      if (j === idx) continue
+      if (aabbIntersect(box, imageBoxes[j])) {
         overlap = true
         break
       }
     }
     if (overlap) hasAnyOverlap = true
 
-    // (b) 图探入标题区域（压字）
+    // 与同页图注相交（包括自己或他人的标题）
     let captionOverlap = false
-    for (let k = 0; k < captionBoxes.length; k += 1) {
-      if (aabbIntersect(box, captionBoxes[k], 0.2)) {
+    for (let k = 0; k < captionBoxes.length; k++) {
+      if (aabbIntersect(box, captionBoxes[k], 0.1)) {
         captionOverlap = true
         break
       }
     }
     if (captionOverlap) hasAnyCaptionOverlap = true
-
-    // (c) 超界检测：超出图区、或者超出页面打印版心、或者压字
-    const exceedsImageArea = box.w > box.cellW + 0.5 || box.h > box.imgAreaH + 0.5
-    const exceedsPageMargin =
-      box.x < margin - 0.5 ||
-      box.right > pageW - margin + 0.5 ||
-      box.y < margin - 0.5 ||
-      box.bottom > pageH - margin + 0.5
 
     const overflow = exceedsImageArea || exceedsPageMargin || captionOverlap
     if (overflow) hasAnyOverflow = true
@@ -251,6 +274,8 @@ export function detectPageConflicts({
 
   return {
     items: results,
+    imageBoxes,
+    captionBoxes,
     hasOverflow: hasAnyOverflow,
     hasOverlap: hasAnyOverlap,
     hasCaptionOverlap: hasAnyCaptionOverlap,

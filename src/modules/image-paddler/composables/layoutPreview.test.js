@@ -5,6 +5,7 @@ import {
   effectiveImageWidth,
   effectivePageWidth,
   pairOffsets,
+  pairAlignToXY,
   detectPageConflicts,
   computeOptimalPageScale,
   layoutOptionLabel,
@@ -190,5 +191,86 @@ describe('image layout preview', () => {
       scaleMode: 'fixed_width',
     })
     expect(optimal).toBe(100)
+  })
+
+  it('maps pairAlignToXY and flex styles correctly for pair alignment', () => {
+    expect(pairAlignToXY('bottom')).toEqual({ x: 'center', y: 'bottom' })
+    expect(pairAlignToXY('top')).toEqual({ x: 'center', y: 'top' })
+    expect(pairAlignToXY('left')).toEqual({ x: 'left', y: 'center' })
+    expect(pairAlignToXY('right')).toEqual({ x: 'right', y: 'center' })
+    expect(pairAlignToXY('center')).toEqual({ x: 'center', y: 'center' })
+
+    const justifyMap = { left: 'flex-start', center: 'center', right: 'flex-end' }
+    const alignMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' }
+
+    // 2x1 page-gather
+    const b = pairAlignToXY('bottom')
+    expect(justifyMap[b.x]).toBe('center')
+    expect(alignMap[b.y]).toBe('flex-end')
+
+    const t = pairAlignToXY('top')
+    expect(justifyMap[t.x]).toBe('center')
+    expect(alignMap[t.y]).toBe('flex-start')
+  })
+
+  it('matches Rust backend golden fixture rectangles exactly (<0.05mm tolerance)', () => {
+    const report = detectPageConflicts({
+      images: [
+        { path: 'img0.png', width: 1600, height: 1200 },
+        { path: 'img1.png', width: 1600, height: 1200 },
+      ],
+      grid: { rows: 2, cols: 1 },
+      cellWidth: 186.0,
+      imageCellHeight: 131.3,
+      fixedWidthMm: 160.0,
+      pageScale: 1.0,
+      scaleMode: 'fixed_width',
+      dpi: 300,
+      pageWidth: 210,
+      pageHeight: 297,
+      marginMm: 12.0,
+      showFilename: true,
+      captionPosition: 'below',
+      captionReserveMm: 5.2,
+      pairMode: 'page-gather',
+    })
+
+    const boxes = report.imageBoxes
+    expect(boxes).toHaveLength(2)
+
+    // Image 0: drawW=160, drawH=120, gathered to bottom of cell 0
+    expect(Math.abs(boxes[0].w - 160.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].h - 120.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].x - 25.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].y - 23.3)).toBeLessThan(0.05)
+
+    // Image 1: drawW=160, drawH=120, gathered to top of cell 1
+    expect(Math.abs(boxes[1].w - 160.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].h - 120.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].x - 25.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].y - 148.5)).toBeLessThan(0.05)
+  })
+
+  it('extracts basename for caption width to prevent long directory paths from triggering overlap', () => {
+    const report = detectPageConflicts({
+      images: [
+        {
+          path: '/very/long/nested/directory/path/that/used/to/cause/massive/false/caption/width/overflow/img.png',
+          width: 1000,
+          height: 1000,
+        },
+      ],
+      grid: { rows: 1, cols: 1 },
+      cellWidth: 186.0,
+      imageCellHeight: 150.0,
+      fixedWidthMm: 100.0,
+      pageScale: 1.0,
+      scaleMode: 'fixed_width',
+      marginMm: 12.0,
+      showFilename: true,
+      captionReserveMm: 8.0,
+      fontSizePt: 8,
+    })
+    expect(report.captionBoxes[0].w).toBeLessThan(50)
   })
 })

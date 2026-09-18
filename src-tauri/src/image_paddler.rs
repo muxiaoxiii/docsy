@@ -214,6 +214,16 @@ struct LayoutConfig {
     image_annotations: std::collections::HashMap<String, ImageAnnotation>,
 }
 
+impl LayoutConfig {
+    /// Safe column width in mm taking into account margin and print safety padding.
+    #[inline]
+    pub fn safe_column_width_mm(&self) -> f64 {
+        let cols = self.grid.cols.max(1) as f64;
+        let cell_w = (self.page_w_mm - self.margin_mm * 2.0).max(1.0) / cols;
+        (cell_w - self.print_safety_pad_mm).max(20.0)
+    }
+}
+
 fn resolve_image_title_and_note(
     img_path: &str,
     cfg: &LayoutConfig,
@@ -328,6 +338,7 @@ fn caption_reserve_for_page(
 }
 
 fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig {
+    let _ = config.safe_column_width_mm();
     let image_count = images.len();
     let capacity = config.grid.rows * config.grid.cols;
     let mut page = config.clone();
@@ -1106,6 +1117,7 @@ fn dedupe_parts(parts: Vec<String>) -> Vec<String> {
     result
 }
 
+#[allow(dead_code)]
 fn display_filename_lines(
     path: &str,
     without_ext: bool,
@@ -2883,5 +2895,50 @@ mod tests {
         config.reserve_note_placeholder = false;
         let (_t3, n3) = resolve_image_title_and_note("img2.png", &config);
         assert!(n3.is_empty());
+    }
+
+    #[test]
+    fn test_golden_fixture_wysiwyg_rectangles() {
+        // Golden scenario: A4 (210 x 297 mm), margin: 12 mm, grid: 2x1
+        // cell_w = 186.0 mm, cell_h = 136.5 mm
+        // filename_reserve = 5.2 mm, image_cell_h = 131.3 mm
+        // 2 images: 1600 x 1200, scale_mode: fixed_width (160.0 mm), page_gather
+        let margin_mm = 12.0;
+        let cell_w_mm = 186.0;
+        let filename_reserve_mm = 5.2;
+        let image_cell_h_mm = 131.3;
+        let cell_w_pt = cell_w_mm * 72.0 / 25.4;
+        let cell_h_pt = image_cell_h_mm * 72.0 / 25.4;
+
+        let aligns = pair_offsets(2, 2, 1, "page-gather");
+        assert_eq!(aligns, vec!["bottom", "top"]);
+
+        let (draw_w_pt, draw_h_pt, _, _) = compute_placement(
+            1600,
+            1200,
+            cell_w_pt,
+            cell_h_pt,
+            "fixed_width",
+            300,
+            Some(160.0),
+            1.0,
+        );
+
+        let draw_w_mm = draw_w_pt * 25.4 / 72.0;
+        let draw_h_mm = draw_h_pt * 25.4 / 72.0;
+        assert!((draw_w_mm - 160.0).abs() < 0.01);
+        assert!((draw_h_mm - 120.0).abs() < 0.01);
+
+        // Image 0 (row 0, col 0, bottom-aligned in cell image area)
+        let row0_draw_x_mm = margin_mm + (cell_w_mm - draw_w_mm) / 2.0;
+        let row0_draw_y_mm = margin_mm + (image_cell_h_mm - draw_h_mm);
+        assert!((row0_draw_x_mm - 25.0).abs() < 0.01);
+        assert!((row0_draw_y_mm - 23.3).abs() < 0.01);
+
+        // Image 1 (row 1, col 0, top-aligned in cell image area)
+        let row1_draw_x_mm = margin_mm + (cell_w_mm - draw_w_mm) / 2.0;
+        let row1_draw_y_mm = margin_mm + (image_cell_h_mm + filename_reserve_mm);
+        assert!((row1_draw_x_mm - 25.0).abs() < 0.01);
+        assert!((row1_draw_y_mm - 148.5).abs() < 0.01);
     }
 }

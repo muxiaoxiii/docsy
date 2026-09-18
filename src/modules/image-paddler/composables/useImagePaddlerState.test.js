@@ -266,4 +266,73 @@ describe('image paddler state integration', () => {
     // Verify layoutMetrics reserves height for note
     expect(state.layoutMetrics.value.noteReserve).toBeGreaterThan(0)
   })
+
+  it('P0 regression: previewImageAreaContainerStyle maps pair_mode alignment correctly', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: images.slice(0, 2) } // 2 images, 2x1 grid
+    state.settings.layout = '2x1'
+
+    // page-gather: top image gathers down (flex-end), bottom image gathers up (flex-start)
+    state.settings.pair_mode = 'page-gather'
+    expect(state.previewImageAreaContainerStyle(0)).toEqual({
+      justifyContent: 'center',
+      alignItems: 'flex-end',
+    })
+    expect(state.previewImageAreaContainerStyle(1)).toEqual({
+      justifyContent: 'center',
+      alignItems: 'flex-start',
+    })
+
+    // page-spread: top image spreads up (flex-start), bottom image spreads down (flex-end)
+    state.settings.pair_mode = 'page-spread'
+    expect(state.previewImageAreaContainerStyle(0)).toEqual({
+      justifyContent: 'center',
+      alignItems: 'flex-start',
+    })
+    expect(state.previewImageAreaContainerStyle(1)).toEqual({
+      justifyContent: 'center',
+      alignItems: 'flex-end',
+    })
+
+    // 1x2 grid (side by side)
+    state.settings.layout = '1x2'
+    state.settings.pair_mode = 'page-gather'
+    expect(state.previewImageAreaContainerStyle(0)).toEqual({
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+    })
+    expect(state.previewImageAreaContainerStyle(1)).toEqual({
+      justifyContent: 'flex-start',
+      alignItems: 'center',
+    })
+  })
+
+  it('P1 regression: safeColumnWidthValue does not drift on compacted last page', () => {
+    const state = useImagePaddlerState()
+    // 3 images with 2x1 grid -> 2 pages: page 0 has 2 images, page 1 (last page) has 1 image
+    state.analysis.value = { images: images.slice(0, 3) }
+    state.settings.layout = '2x1'
+    state.settings.margin_mm = 12
+    state.settings.print_safety_pad_mm = 6
+
+    const widthPage0 = state.safeColumnWidthValue.value
+    state.goToPage(1) // Jump to last page, which compacts to 1x1
+    expect(state.previewLayoutGrid.value).toEqual({ rows: 1, cols: 1 })
+    // safeColumnWidthValue must remain bounded by primary layoutGrid (cols=1 in 2x1), not drift
+    expect(state.safeColumnWidthValue.value).toBe(widthPage0)
+  })
+
+  it('P1 & P2 regression: imageBadgeResolver uses per-page metrics and caches results', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: images.slice(0, 3) } // 3 images, 2 pages
+    state.settings.layout = '2x1'
+
+    const badge0 = state.imageBadgeResolver(images[0])
+    expect(badge0.pageNumber).toBe(1)
+    expect(badge0.color).toBeDefined()
+
+    const badge2 = state.imageBadgeResolver(images[2])
+    expect(badge2.pageNumber).toBe(2)
+    expect(badge2.color).toBeDefined()
+  })
 })
