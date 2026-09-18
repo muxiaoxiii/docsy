@@ -188,6 +188,51 @@
                   </el-select>
                 </label>
               </div>
+              <div class="filename-panel-row note-panel-row">
+                <el-switch
+                  v-model="settings.reserve_note_placeholder"
+                  active-text="预留说明栏"
+                  inactive-text="不预留说明"
+                />
+                <label v-if="settings.reserve_note_placeholder" class="filename-font-control">
+                  <span>说明字体</span>
+                  <el-select v-model="settings.note_font_family">
+                    <el-option label="楷体（推荐）" value="kaiti" />
+                    <el-option label="仿宋" value="fangsong" />
+                    <el-option label="宋体" value="serif" />
+                    <el-option label="无衬线" value="sans" />
+                  </el-select>
+                </label>
+                <label v-if="settings.reserve_note_placeholder" class="filename-size-control">
+                  <span>说明字号</span>
+                  <el-input-number
+                    v-model="settings.note_font_size_pt"
+                    :min="6"
+                    :max="18"
+                    :step="1"
+                    controls-position="right"
+                  />
+                  <span>pt</span>
+                </label>
+                <label v-if="settings.reserve_note_placeholder" class="filename-font-control">
+                  <span>说明颜色</span>
+                  <el-select v-model="settings.note_color">
+                    <el-option label="深灰（默认）" value="dark_gray" />
+                    <el-option label="黑色" value="black" />
+                    <el-option label="灰色" value="gray" />
+                    <el-option label="蓝色" value="blue" />
+                  </el-select>
+                </label>
+              </div>
+              <div v-if="settings.reserve_note_placeholder" class="note-placeholder-row">
+                <el-input
+                  v-model="settings.note_placeholder_text"
+                  size="small"
+                  placeholder="未填写说明时的提示占位符"
+                >
+                  <template #prepend>未填写说明时提示：</template>
+                </el-input>
+              </div>
               <div class="filename-rules">
                 <div
                   v-for="(rule, idx) in settings.filename_rules"
@@ -357,16 +402,33 @@
                   class="page-scale-slider"
                 />
                 <span class="scale-percent">{{ activePageScale }}%</span>
-              </div>
-              <div class="page-scale-actions">
                 <el-button
                   size="small"
                   type="primary"
-                  :disabled="!isCurrentPageDirty"
+                  plain
+                  title="自动推算本页不发生溢出与重叠的最大比例"
+                  @click="autoFitCurrentPageScale"
+                >
+                  自适应
+                </el-button>
+              </div>
+              <div class="page-scale-actions">
+                <el-dropdown
+                  split-button
+                  size="small"
+                  type="primary"
+                  :disabled="!isCurrentPageDirty && !hasSavedScale"
                   @click="saveCurrentPageScale"
+                  @command="handleSaveScaleCommand"
                 >
                   保存
-                </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="all">应用到全部页</el-dropdown-item>
+                      <el-dropdown-item command="subsequent">应用到后续页</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
                 <el-button
                   size="small"
                   :disabled="!isCurrentPageDirty"
@@ -381,7 +443,17 @@
                   type="info"
                   @click="resetCurrentPageScale"
                 >
-                  恢复默认
+                  恢复本页
+                </el-button>
+                <el-button
+                  v-if="hasAnySavedScales"
+                  size="small"
+                  text
+                  type="danger"
+                  title="重置所有页面的自定义缩放比例"
+                  @click="resetAllPageScales"
+                >
+                  重置所有已微调页
                 </el-button>
               </div>
             </div>
@@ -415,20 +487,26 @@
                         (settings.output_format !== 'docx' || settings.use_table) &&
                         settings.border_enabled &&
                         settings.border_color === 'white',
-                      'preview-cell-no-name': !settings.show_filename,
+                      'preview-cell-no-name': !hasCellCaption(img),
                       'preview-cell-flow': settings.output_format === 'docx' && !settings.use_table,
                     }"
                     :style="previewCellStyle"
                   >
                     <template v-if="img">
                       <div
-                        v-if="settings.caption_position === 'above' && settings.show_filename"
-                        class="preview-name preview-name-above"
-                        :style="previewNameStyle"
+                        v-if="settings.caption_position === 'above' && hasCellCaption(img)"
+                        class="preview-caption preview-caption-above"
                       >
-                        <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
-                          line
-                        }}</span>
+                        <div v-if="settings.show_filename" class="preview-name preview-name-above" :style="previewNameStyle">
+                          <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
+                            line
+                          }}</span>
+                        </div>
+                        <div v-if="noteLines(img.path).length" class="preview-note" :style="previewNoteStyle">
+                          <span v-for="(line, lineIdx) in noteLines(img.path)" :key="`note-${lineIdx}-${line}`">{{
+                            line
+                          }}</span>
+                        </div>
                       </div>
                       <div
                         class="preview-image-area"
@@ -437,13 +515,19 @@
                         <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :style="previewImageStyle(img)" />
                       </div>
                       <div
-                        v-if="settings.caption_position !== 'above' && settings.show_filename"
-                        class="preview-name"
-                        :style="previewNameStyle"
+                        v-if="settings.caption_position !== 'above' && hasCellCaption(img)"
+                        class="preview-caption"
                       >
-                        <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
-                          line
-                        }}</span>
+                        <div v-if="settings.show_filename" class="preview-name" :style="previewNameStyle">
+                          <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
+                            line
+                          }}</span>
+                        </div>
+                        <div v-if="noteLines(img.path).length" class="preview-note" :style="previewNoteStyle">
+                          <span v-for="(line, lineIdx) in noteLines(img.path)" :key="`note-${lineIdx}-${line}`">{{
+                            line
+                          }}</span>
+                        </div>
                       </div>
                     </template>
                   </div>
@@ -463,6 +547,7 @@
               :meta-resolver="imageItemMeta"
               :excluded-resolver="isImageExcluded"
               :page-badge-resolver="imageBadgeResolver"
+              :annotation-resolver="getImageAnnotation"
               preserve-aspect-ratio
               :initial-zoom="130"
               v-model:page-fraction="previewPageFraction"
@@ -470,6 +555,7 @@
               @reorder="reorderLayoutImages"
               @toggle-excluded="toggleImageExclusion"
               @select-page="goToPage"
+              @update-annotation="handleUpdateAnnotation"
             />
           </div>
         </template>
@@ -525,10 +611,15 @@ const {
   pageScales,
   activePageScale,
   hasSavedScale,
+  hasAnySavedScales,
   isCurrentPageDirty,
   saveCurrentPageScale,
   cancelCurrentPageScale,
   resetCurrentPageScale,
+  autoFitCurrentPageScale,
+  applyScaleToAllPages,
+  applyScaleToSubsequentPages,
+  resetAllPageScales,
   nextPage,
   prevPage,
   goToPage,
@@ -541,6 +632,7 @@ const {
   previewImageAreaStyle,
   previewImageAreaContainerStyle,
   previewNameStyle,
+  previewNoteStyle,
   addFolders,
   addImages,
   removeFolder,
@@ -556,6 +648,12 @@ const {
   previewImageStyle,
   imageItemName,
   imageItemMeta,
+  imageAnnotations,
+  imageTitle,
+  imageDescription,
+  getImageAnnotation,
+  setImageAnnotation,
+  noteLines,
   isImageExcluded,
   toggleImageExclusion,
   addFilenameRule,
@@ -573,6 +671,23 @@ const {
   initialTransfer: () => workspaceStore.mediaTransfer,
   onInitialPathsLoaded: () => workspaceStore.clearMediaTransfer(),
 })
+
+function handleSaveScaleCommand(command) {
+  if (command === 'all') {
+    applyScaleToAllPages(activePageScale.value / 100)
+  } else if (command === 'subsequent') {
+    applyScaleToSubsequentPages(currentPageIndex.value, activePageScale.value / 100)
+  }
+}
+
+function handleUpdateAnnotation({ path, title, description }) {
+  setImageAnnotation(path, { title, description })
+}
+
+function hasCellCaption(img) {
+  if (!img) return false
+  return Boolean(settings.show_filename || noteLines(img.path).length)
+}
 </script>
 
 <style scoped>
@@ -961,6 +1076,27 @@ const {
   max-height: 100%;
 }
 
+.note-panel-row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--docsy-border-subtle);
+}
+
+.note-placeholder-row {
+  margin-top: 6px;
+}
+
+.preview-caption {
+  box-sizing: border-box;
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
 .preview-name {
   box-sizing: border-box;
   width: 100%;
@@ -978,6 +1114,23 @@ const {
 }
 
 .preview-name span {
+  display: block;
+}
+
+.preview-note {
+  box-sizing: border-box;
+  width: 100%;
+  flex-shrink: 0;
+  padding: 0 4px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.preview-note span {
   display: block;
 }
 

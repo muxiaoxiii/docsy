@@ -6,6 +6,7 @@ import {
   effectivePageWidth,
   pairOffsets,
   detectPageConflicts,
+  computeOptimalPageScale,
   layoutOptionLabel,
 } from './layoutPreview.js'
 
@@ -132,5 +133,62 @@ describe('image layout preview', () => {
     // 竖长图 55 * (800/600) = 73.3mm > imgAreaH (65) => 探入标题带并超界
     expect(result.items[0].drawH).toBeCloseTo(73.33, 1)
     expect(result.items[0].overflow).toBe(true)
+  })
+
+  it('computeOptimalPageScale computes safe scale for overflowing tall images', () => {
+    // 竖长图 600x800, fixedWidth 55, cellWidth 60, imageCellHeight 65
+    // 55 * (800/600) = 73.33 > 65 => overflows at 100%
+    // To fit height 65: scale <= 65 / 73.333 = 0.886 -> 88%
+    const nineImages = Array.from({ length: 9 }, (_, i) => ({
+      path: `sample_photo_${i}.jpg`,
+      name: `测试图片名称_${i}.jpg`,
+      width: 600,
+      height: 800,
+    }))
+    const optimal = computeOptimalPageScale({
+      images: nineImages,
+      grid: { rows: 3, cols: 3 },
+      cellWidth: 60,
+      imageCellHeight: 65,
+      fixedWidthMm: 55,
+      scaleMode: 'fixed_width',
+      showFilename: true,
+      captionReserveMm: 14,
+      captionPosition: 'below',
+    })
+    expect(optimal).toBeLessThanOrEqual(89)
+    expect(optimal).toBeGreaterThanOrEqual(87)
+
+    // At the computed optimal scale, there should be no overflow or overlap
+    const verification = detectPageConflicts({
+      images: nineImages,
+      grid: { rows: 3, cols: 3 },
+      cellWidth: 60,
+      imageCellHeight: 65,
+      fixedWidthMm: 55,
+      pageScale: optimal / 100,
+      scaleMode: 'fixed_width',
+      showFilename: true,
+      captionReserveMm: 14,
+      captionPosition: 'below',
+    })
+    expect(verification.hasOverflow).toBe(false)
+    expect(verification.hasOverlap).toBe(false)
+  })
+
+  it('computeOptimalPageScale returns 100 if 100 is already conflict-free', () => {
+    const squareImages = [
+      { path: 'sq1.png', width: 500, height: 500 },
+      { path: 'sq2.png', width: 500, height: 500 },
+    ]
+    const optimal = computeOptimalPageScale({
+      images: squareImages,
+      grid: { rows: 2, cols: 1 },
+      cellWidth: 180,
+      imageCellHeight: 120,
+      fixedWidthMm: 100,
+      scaleMode: 'fixed_width',
+    })
+    expect(optimal).toBe(100)
   })
 })

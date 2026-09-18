@@ -1,8 +1,15 @@
 <template>
   <div class="reorder-image-list">
     <div class="reorder-image-toolbar">
+      <div class="reorder-image-filter">
+        <el-radio-group v-model="filterMode" size="small">
+          <el-radio-button value="all">全部 ({{ items.length }})</el-radio-button>
+          <el-radio-button value="conflict">有冲突 ({{ conflictCount }})</el-radio-button>
+          <el-radio-button value="excluded">已排除 ({{ excludedCount }})</el-radio-button>
+        </el-radio-group>
+      </div>
+      <span class="reorder-image-hint">{{ filterMode === 'all' ? '拖动手柄调整顺序' : '筛选模式下已锁定顺序' }}</span>
       <span>{{ rangeLabel }}</span>
-      <span class="reorder-image-hint">拖动手柄调整顺序</span>
       <el-select v-model="selectedFraction" size="small" class="reorder-image-page-size" aria-label="每页图片数量">
         <el-option
           v-for="option in pageSizeOptions"
@@ -17,7 +24,7 @@
       <span class="reorder-image-zoom-value">{{ zoom }}%</span>
     </div>
 
-    <div v-if="items.length" ref="scrollContainer" class="reorder-image-scroll">
+    <div v-if="filteredItems.length" ref="scrollContainer" class="reorder-image-scroll">
       <div class="reorder-image-grid">
         <article
           v-for="(item, localIndex) in pagedItems"
@@ -33,9 +40,10 @@
           <button
             type="button"
             class="reorder-image-handle"
-            title="拖动调整顺序"
-            aria-label="拖动调整顺序"
-            @pointerdown.stop="reorder.start(globalIndex(localIndex), $event)"
+            :class="{ 'is-disabled': filterMode !== 'all' }"
+            :title="filterMode !== 'all' ? '筛选模式下不可调整顺序，请切换至「全部」' : '拖动调整顺序'"
+            :disabled="filterMode !== 'all'"
+            @pointerdown.stop="filterMode === 'all' && reorder.start(globalIndex(localIndex), $event)"
             @pointermove.stop="reorder.move"
             @pointerup.stop="reorder.finish"
             @pointercancel.stop="reorder.reset"
@@ -81,7 +89,7 @@
             <button
               type="button"
               class="reorder-image-action-btn"
-              title="查看大图"
+              title="查看大图与设置说明"
               @click.stop="openPreview(item)"
             >
               <el-icon><ZoomIn /></el-icon>
@@ -102,9 +110,9 @@
       </div>
     </div>
 
-    <el-empty v-else :description="emptyDescription" :image-size="80" />
+    <el-empty v-else :description="filterMode === 'all' ? emptyDescription : '没有符合条件的图片'" :image-size="80" />
 
-    <div v-if="items.length" class="reorder-image-pager">
+    <div v-if="filteredItems.length" class="reorder-image-pager">
       <el-button size="small" :disabled="page <= 1" @click="page -= 1">上一页</el-button>
       <span>第 {{ page }} / {{ pageCount }} 页</span>
       <el-button size="small" :disabled="page >= pageCount" @click="page += 1">下一页</el-button>
@@ -112,23 +120,56 @@
 
     <el-dialog
       v-model="previewVisible"
-      :title="previewItem ? itemName(previewItem) : '图片预览'"
-      width="92%"
+      :title="previewItem ? (itemName(previewItem) || '图片详情与批注') : '图片预览'"
+      width="860px"
       destroy-on-close
     >
-      <div class="reorder-image-dialog-body">
-        <img v-if="previewSrc" :src="previewSrc" class="reorder-image-dialog-img" />
-        <span v-else class="reorder-image-placeholder">正在载入高清图片</span>
+      <div class="reorder-image-dialog-layout">
+        <div class="reorder-image-dialog-preview">
+          <img v-if="previewSrc" :src="previewSrc" class="reorder-image-dialog-img" />
+          <span v-else class="reorder-image-placeholder">正在载入高清图片</span>
+        </div>
+        <div v-if="previewItem && annotationResolver" class="reorder-image-dialog-form">
+          <div class="form-section-title">图注与说明设置</div>
+          <el-form label-position="top" size="small">
+            <el-form-item label="图片标题">
+              <el-input
+                v-model="editTitle"
+                placeholder="留空则使用默认文件名"
+                @input="saveAnnotation"
+                clearable
+              />
+            </el-form-item>
+            <el-form-item label="详细说明 / 见证记录">
+              <el-input
+                v-model="editDescription"
+                type="textarea"
+                :rows="4"
+                placeholder="如：拍摄时间、见证人、事实说明...（若留空且开启了预留说明栏，将自动生成说明占位符）"
+                @input="saveAnnotation"
+              />
+            </el-form-item>
+          </el-form>
+          <div class="dialog-meta-info">
+            <div><strong>文件：</strong>{{ itemPath(previewItem) }}</div>
+            <div v-if="itemMeta(previewItem)"><strong>尺寸：</strong>{{ itemMeta(previewItem) }}</div>
+            <div v-if="pageBadge(previewItem)"><strong>所在页：</strong>第 {{ pageBadge(previewItem).pageNumber }} 页</div>
+          </div>
+        </div>
       </div>
-      <template v-if="previewItem && excludedResolver" #footer>
+      <template v-if="previewItem" #footer>
         <div class="reorder-image-dialog-actions">
-          <span>{{ itemExcluded(previewItem) ? '当前不参与排版' : '当前参与排版' }}</span>
-          <el-button
-            :type="itemExcluded(previewItem) ? 'success' : 'danger'"
-            @click="toggleExcluded(previewItem, previewIndex)"
-          >
-            {{ itemExcluded(previewItem) ? '恢复保留' : '排除图片' }}
-          </el-button>
+          <span v-if="excludedResolver">{{ itemExcluded(previewItem) ? '当前不参与排版' : '当前参与排版' }}</span>
+          <div class="reorder-image-dialog-buttons">
+            <el-button
+              v-if="excludedResolver"
+              :type="itemExcluded(previewItem) ? 'success' : 'danger'"
+              @click="toggleExcluded(previewItem, previewIndex)"
+            >
+              {{ itemExcluded(previewItem) ? '恢复保留' : '排除图片' }}
+            </el-button>
+            <el-button type="primary" @click="previewVisible = false">确定</el-button>
+          </div>
         </div>
       </template>
     </el-dialog>
@@ -156,9 +197,10 @@ const props = defineProps({
   maxZoom: { type: Number, default: 320 },
   preserveAspectRatio: { type: Boolean, default: false },
   excludedResolver: { type: Function, default: null },
+  annotationResolver: { type: Function, default: null },
 })
 
-const emit = defineEmits(['reorder', 'toggle-excluded', 'update:page-fraction', 'select-page', 'select-item'])
+const emit = defineEmits(['reorder', 'toggle-excluded', 'update:page-fraction', 'select-page', 'select-item', 'update-annotation'])
 
 function pageBadge(item) {
   return props.pageBadgeResolver ? props.pageBadgeResolver(item) : null
@@ -185,6 +227,7 @@ function handleCardClick(item, event) {
     openPreview(item)
   }
 }
+const filterMode = ref('all')
 const page = ref(1)
 const zoom = ref(props.initialZoom)
 const scrollContainer = ref(null)
@@ -198,23 +241,50 @@ const previewVisible = ref(false)
 const previewSrc = ref('')
 const previewItem = ref(null)
 const previewIndex = ref(-1)
+const editTitle = ref('')
+const editDescription = ref('')
+
+const conflictCount = computed(() => {
+  return props.items.filter((item) => {
+    const badge = pageBadge(item)
+    return Boolean(badge && badge.color && badge.color !== 'ok')
+  }).length
+})
+
+const excludedCount = computed(() => {
+  return props.items.filter(itemExcluded).length
+})
+
+const filteredItems = computed(() => {
+  if (filterMode.value === 'conflict') {
+    return props.items.filter((item) => {
+      const badge = pageBadge(item)
+      return Boolean(badge && badge.color && badge.color !== 'ok')
+    })
+  }
+  if (filterMode.value === 'excluded') {
+    return props.items.filter(itemExcluded)
+  }
+  return props.items
+})
+
 const reorder = usePointerReorder({
   itemCount: () => props.items.length,
   onReorder: (payload) => emit('reorder', payload),
 })
 
 const thumbSize = computed(() => Math.round((112 * zoom.value) / 100))
-const pageSizeOptions = computed(() => percentagePageSizeOptions(props.items.length))
+const pageSizeOptions = computed(() => percentagePageSizeOptions(filteredItems.value.length))
 const selectedFraction = computed({
   get: () => props.pageFraction,
   set: (value) => emit('update:page-fraction', value),
 })
-const pageSize = computed(() => pageSizeForFraction(props.items.length, selectedFraction.value))
-const pageRange = computed(() => pageRangeForSize(props.items.length, pageSize.value, page.value))
+const pageSize = computed(() => pageSizeForFraction(filteredItems.value.length, selectedFraction.value))
+const pageRange = computed(() => pageRangeForSize(filteredItems.value.length, pageSize.value, page.value))
 const pageCount = computed(() => pageRange.value.pageCount)
-const pagedItems = computed(() => props.items.slice(pageRange.value.start, pageRange.value.end))
+const pagedItems = computed(() => filteredItems.value.slice(pageRange.value.start, pageRange.value.end))
 const rangeLabel = computed(() =>
-  props.items.length ? `${pageRange.value.start + 1}-${pageRange.value.end} / ${props.items.length}` : '0 / 0',
+  filteredItems.value.length ? `${pageRange.value.start + 1}-${pageRange.value.end} / ${filteredItems.value.length}` : '0 / 0',
 )
 
 function itemGeometry(item) {
@@ -317,6 +387,14 @@ async function openPreview(item) {
   if (!path) return
   previewItem.value = item
   previewIndex.value = props.items.indexOf(item)
+  if (props.annotationResolver) {
+    const ann = props.annotationResolver(path)
+    editTitle.value = ann?.title || ''
+    editDescription.value = ann?.description || ''
+  } else {
+    editTitle.value = ''
+    editDescription.value = ''
+  }
   previewVisible.value = true
   previewSrc.value = largeSources[path] || ''
   if (previewSrc.value || loadingLargePaths.has(path)) return
@@ -329,11 +407,26 @@ async function openPreview(item) {
   previewSrc.value = result.data
 }
 
+function saveAnnotation() {
+  if (!previewItem.value) return
+  const path = itemPath(previewItem.value)
+  if (!path) return
+  emit('update-annotation', {
+    item: previewItem.value,
+    path,
+    title: editTitle.value,
+    description: editDescription.value,
+  })
+}
+
 watch(pagedItems, preloadVisibleImages, { immediate: true })
 watch([pageSize, () => props.items.length], () => {
   page.value = Math.min(pageCount.value, Math.max(1, page.value))
 })
 watch(selectedFraction, () => {
+  page.value = 1
+})
+watch(filterMode, () => {
   page.value = 1
 })
 watch(page, async () => {
@@ -566,5 +659,79 @@ watch(page, async () => {
 .card-conflict-blue {
   border-color: rgba(59, 130, 246, 0.6) !important;
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+}
+
+.reorder-image-handle.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.reorder-image-dialog-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  min-height: 280px;
+}
+
+.reorder-image-dialog-preview {
+  flex: 1 1 55%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--docsy-surface-muted);
+  border-radius: var(--docsy-radius);
+  border: 1px solid var(--docsy-border-subtle);
+  min-height: 260px;
+  max-height: 480px;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.reorder-image-dialog-img {
+  max-width: 100%;
+  max-height: 460px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.reorder-image-dialog-form {
+  flex: 1 1 45%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--docsy-text);
+  border-bottom: 1px solid var(--docsy-border-subtle);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+.dialog-meta-info {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--docsy-surface-muted);
+  border-radius: var(--docsy-radius);
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  word-break: break-all;
+}
+
+.reorder-image-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.reorder-image-dialog-buttons {
+  display: flex;
+  gap: 8px;
 }
 </style>

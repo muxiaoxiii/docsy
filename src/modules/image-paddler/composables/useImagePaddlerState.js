@@ -11,6 +11,7 @@ import {
   effectivePageWidth,
   pairOffsets,
   detectPageConflicts,
+  computeOptimalPageScale,
   safeImageWidth,
   effectiveImageWidth,
   layoutOptionLabel,
@@ -58,6 +59,7 @@ export function useImagePaddlerState(options = {}) {
   const currentPageIndex = ref(0)
   const pageScales = ref({})
   const activePageScale = ref(100)
+  const imageAnnotations = ref({})
   let analyzeTimer = null
   let analysisRequestId = 0
   let preferencesReady = false
@@ -83,6 +85,11 @@ export function useImagePaddlerState(options = {}) {
     filename_without_ext: false,
     filename_remove_text: '',
     filename_rules: [],
+    reserve_note_placeholder: false,
+    note_placeholder_text: '[点击输入说明]',
+    note_font_family: 'kaiti',
+    note_font_size_pt: 8,
+    note_color: 'gray',
     use_source_exclusions: true,
     order_mode: 'z',
     border_enabled: false,
@@ -97,6 +104,7 @@ export function useImagePaddlerState(options = {}) {
     exclusionByPath,
     preferenceRevision,
     pageScales,
+    imageAnnotations,
   })
 
   const isFlowLayout = computed(() => settings.output_format === 'docx' && !settings.use_table)
@@ -186,19 +194,41 @@ export function useImagePaddlerState(options = {}) {
       ? Math.max(
           1,
           ...previewImages.value.map((image) =>
-            requiredFilenameLines(fileName(image.path), cellWidth, filenameFontSizePt, FILENAME_MAX_LINES),
+            requiredFilenameLines(imageTitle(image.path), cellWidth, filenameFontSizePt, FILENAME_MAX_LINES),
           ),
         )
       : 0
+
+    const noteFontSizePt = clampNumber(settings.note_font_size_pt, 6, 24, 8)
+    const noteLineHeightMm = ((noteFontSizePt * 25.4) / 72) * 1.32 + 0.45
+    const hasAnyNote = previewImages.value.some((image) => Boolean(imageDescription(image.path)))
+    const noteMaxLines = hasAnyNote
+      ? Math.max(
+          1,
+          ...previewImages.value.map((image) => {
+            const desc = imageDescription(image.path)
+            return desc ? Math.min(3, requiredFilenameLines(desc, cellWidth, noteFontSizePt, 3)) : 0
+          }),
+        )
+      : 0
+
+    const titleReserve = settings.show_filename ? filenameLineHeightMm * filenameMaxLines : 0
+    const noteReserve = hasAnyNote ? noteLineHeightMm * noteMaxLines : 0
     const filenameSafetyMm = settings.output_format === 'docx' ? DOCX_FILENAME_SAFETY_MM : PDF_FILENAME_SAFETY_MM
-    const filenameReserve = settings.show_filename ? filenameLineHeightMm * filenameMaxLines + filenameSafetyMm : 0
+    const filenameReserve = titleReserve > 0 || noteReserve > 0 ? titleReserve + noteReserve + filenameSafetyMm : 0
+
     return {
       cellWidth,
       cellHeight,
       filenameReserve,
+      titleReserve,
+      noteReserve,
       filenameFontSizePt,
       filenameLineHeightMm,
       filenameMaxLines,
+      noteFontSizePt,
+      noteLineHeightMm,
+      noteMaxLines,
       imageCellHeight: Math.max(1, cellHeight - filenameReserve),
     }
   })
@@ -214,13 +244,22 @@ export function useImagePaddlerState(options = {}) {
     const metrics = layoutMetrics.value
     const height = `${Math.min(100, (metrics.filenameReserve / metrics.cellHeight) * 100)}%`
     return {
-      height,
-      minHeight: height,
-      flexBasis: height,
       fontSize: `${((metrics.filenameFontSizePt * 25.4) / 72 / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}cqw`,
       fontFamily: filenameFontFamilyCss(settings.filename_font_family),
       color: { black: '#000000', gray: '#6B7280', blue: '#2563EB' }[settings.filename_color] || '#4B5563',
       lineHeight: `${(metrics.filenameLineHeightMm / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}cqw`,
+    }
+  })
+  const previewNoteStyle = computed(() => {
+    const metrics = layoutMetrics.value
+    return {
+      fontSize: `${((metrics.noteFontSizePt * 25.4) / 72 / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}cqw`,
+      fontFamily: filenameFontFamilyCss(settings.note_font_family),
+      color:
+        { black: '#000000', gray: '#6B7280', dark_gray: '#4B5563', blue: '#2563EB' }[settings.note_color] || '#6B7280',
+      lineHeight: `${(metrics.noteLineHeightMm / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}cqw`,
+      fontStyle: 'normal',
+      opacity: 0.9,
     }
   })
 
@@ -284,6 +323,66 @@ export function useImagePaddlerState(options = {}) {
     pageScales.value = newScales
     activePageScale.value = 100
     ElMessage.success(`第 ${currentPageIndex.value + 1} 页已恢复默认比例`)
+  }
+
+  const hasAnySavedScales = computed(() => Object.keys(pageScales.value).length > 0)
+
+  function autoFitCurrentPageScale() {
+    const count = perPage.value
+    const start = currentPageIndex.value * count
+    const pageImgs = includedImages.value.slice(start, start + count)
+    const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
+    const optimal = computeOptimalPageScale({
+      images: pageImgs,
+      grid: compactGridForCount(layoutGrid.value, pageImgs.length),
+      cellWidth: layoutMetrics.value.cellWidth,
+      imageCellHeight: layoutMetrics.value.imageCellHeight,
+      fixedWidthMm: actualImageWidth.value,
+      scaleMode: settings.scale_mode,
+      dpi: settings.dpi,
+      pageWidth: page.width,
+      pageHeight: page.height,
+      marginMm: Number(settings.margin_mm) || 0,
+      showFilename: settings.show_filename,
+      captionPosition: settings.caption_position,
+      captionReserveMm: layoutMetrics.value.filenameReserve,
+      fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
+      pairMode: settings.pair_mode,
+    })
+    activePageScale.value = optimal
+    ElMessage.success(`已自适应计算本页比例为 ${optimal}%，点击保存即可生效`)
+  }
+
+  function applyScaleToAllPages() {
+    const scale = activePageScale.value / 100
+    const newScales = {}
+    if (activePageScale.value !== 100) {
+      for (let i = 0; i < totalPages.value; i += 1) {
+        newScales[i] = scale
+      }
+    }
+    pageScales.value = newScales
+    ElMessage.success(`已将当前比例 (${activePageScale.value}%) 应用到全部 ${totalPages.value} 页`)
+  }
+
+  function applyScaleToSubsequentPages() {
+    const scale = activePageScale.value / 100
+    const newScales = { ...pageScales.value }
+    for (let i = currentPageIndex.value; i < totalPages.value; i += 1) {
+      if (activePageScale.value === 100) {
+        delete newScales[i]
+      } else {
+        newScales[i] = scale
+      }
+    }
+    pageScales.value = newScales
+    ElMessage.success(`已将当前比例 (${activePageScale.value}%) 应用到第 ${currentPageIndex.value + 1} 页及后续所有页`)
+  }
+
+  function resetAllPageScales() {
+    pageScales.value = {}
+    activePageScale.value = 100
+    ElMessage.success('已重置所有已微调页面为默认比例')
   }
   function optionLayoutLabel(value) {
     return layoutOptionLabel(value, isFlowLayout.value)
@@ -409,6 +508,12 @@ export function useImagePaddlerState(options = {}) {
         pair_mode: settings.pair_mode,
         caption_position: settings.caption_position,
         print_safety_pad_mm: settings.print_safety_pad_mm,
+        image_annotations: imageAnnotations.value,
+        reserve_note_placeholder: settings.reserve_note_placeholder,
+        note_placeholder_text: settings.note_placeholder_text,
+        note_font_family: settings.note_font_family,
+        note_font_size_pt: settings.note_font_size_pt,
+        note_color: settings.note_color,
       },
     })
     generating.value = false
@@ -504,8 +609,51 @@ export function useImagePaddlerState(options = {}) {
     return applyFilenameRules(name)
   }
 
+  function imageTitle(path) {
+    const custom = imageAnnotations.value[path]?.title
+    if (custom && custom.trim()) return custom.trim()
+    return fileName(path)
+  }
+
+  function imageDescription(path) {
+    const custom = imageAnnotations.value[path]?.description
+    if (custom && custom.trim()) return custom.trim()
+    if (settings.reserve_note_placeholder) {
+      return (settings.note_placeholder_text || '[点击输入说明]').trim()
+    }
+    return ''
+  }
+
+  function getImageAnnotation(path) {
+    return imageAnnotations.value[path] || {}
+  }
+
+  function setImageAnnotation(path, patch) {
+    if (!path) return
+    const current = imageAnnotations.value[path] || {}
+    imageAnnotations.value = {
+      ...imageAnnotations.value,
+      [path]: { ...current, ...patch },
+    }
+    generatedResult.value = null
+  }
+
+  function clearImageAnnotation(path) {
+    if (!path) return
+    const next = { ...imageAnnotations.value }
+    delete next[path]
+    imageAnnotations.value = next
+    generatedResult.value = null
+  }
+
+  function noteLines(path) {
+    const desc = imageDescription(path)
+    if (!desc) return []
+    return wrapFilenameLines(desc, layoutMetrics.value.cellWidth, 3)
+  }
+
   function imageItemName(img) {
-    return fileName(img?.path || '')
+    return imageTitle(img?.path || '')
   }
 
   function imageItemMeta(img) {
@@ -844,6 +992,15 @@ export function useImagePaddlerState(options = {}) {
       if (pageScales.value === undefined || typeof pageScales.value !== 'object') pageScales.value = {}
       preferenceRevision.value = 3
     }
+    if (preferenceRevision.value < 4) {
+      if (settings.reserve_note_placeholder === undefined) settings.reserve_note_placeholder = false
+      if (!settings.note_placeholder_text) settings.note_placeholder_text = '[点击输入说明]'
+      if (!settings.note_font_family) settings.note_font_family = 'kaiti'
+      if (!settings.note_font_size_pt) settings.note_font_size_pt = 8
+      if (!settings.note_color) settings.note_color = 'gray'
+      if (imageAnnotations.value === undefined || typeof imageAnnotations.value !== 'object') imageAnnotations.value = {}
+      preferenceRevision.value = 4
+    }
     preferencesReady = true
     consumeIncomingTransfer()
   })
@@ -1011,10 +1168,15 @@ export function useImagePaddlerState(options = {}) {
     pageScales,
     activePageScale,
     hasSavedScale,
+    hasAnySavedScales,
     isCurrentPageDirty,
     saveCurrentPageScale,
     cancelCurrentPageScale,
     resetCurrentPageScale,
+    autoFitCurrentPageScale,
+    applyScaleToAllPages,
+    applyScaleToSubsequentPages,
+    resetAllPageScales,
     nextPage,
     prevPage,
     goToPage,
@@ -1029,6 +1191,7 @@ export function useImagePaddlerState(options = {}) {
     previewImageAreaStyle,
     previewImageAreaContainerStyle,
     previewNameStyle,
+    previewNoteStyle,
     selectFolder,
     addFolders,
     addImages,
@@ -1047,6 +1210,13 @@ export function useImagePaddlerState(options = {}) {
     previewImageStyle,
     imageItemName,
     imageItemMeta,
+    imageAnnotations,
+    imageTitle,
+    imageDescription,
+    getImageAnnotation,
+    setImageAnnotation,
+    clearImageAnnotation,
+    noteLines,
     isImageExcluded,
     toggleImageExclusion,
     addFilenameRule,

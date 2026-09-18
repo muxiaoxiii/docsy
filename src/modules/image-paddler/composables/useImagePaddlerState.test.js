@@ -207,4 +207,63 @@ describe('image paddler state integration', () => {
     // 1 image on last page should compact to 1x1, without leftover empty slots
     expect(state.previewLayoutGrid.value).toEqual({ rows: 1, cols: 1 })
   })
+
+  it('supports batch scale actions: apply to all pages, subsequent pages, and reset all', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images } // 6 images, layout 2x1 -> 3 pages
+    state.settings.layout = '2x1'
+    expect(state.totalPages.value).toBe(3)
+
+    // Set page 0 to 85% and apply to all pages
+    state.activePageScale.value = 85
+    state.applyScaleToAllPages()
+    expect(state.pageScales.value[0]).toBe(0.85)
+    expect(state.pageScales.value[1]).toBe(0.85)
+    expect(state.pageScales.value[2]).toBe(0.85)
+    expect(state.hasAnySavedScales.value).toBe(true)
+
+    // On page 1, adjust to 90% and apply to subsequent pages (pages 1 and 2)
+    state.goToPage(1)
+    state.activePageScale.value = 90
+    state.applyScaleToSubsequentPages()
+    expect(state.pageScales.value[0]).toBe(0.85)
+    expect(state.pageScales.value[1]).toBe(0.9)
+    expect(state.pageScales.value[2]).toBe(0.9)
+
+    // Reset all pages
+    state.resetAllPageScales()
+    expect(Object.keys(state.pageScales.value).length).toBe(0)
+    expect(state.hasAnySavedScales.value).toBe(false)
+    expect(state.activePageScale.value).toBe(100)
+  })
+
+  it('supports image annotations and reserve note placeholder', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images }
+    state.settings.layout = '2x1'
+
+    const path = images[0].path
+    // Default title is filename
+    expect(state.imageTitle(path)).toBe('0.png')
+    expect(state.imageDescription(path)).toBe('')
+
+    // Set custom annotation
+    state.setImageAnnotation(path, {
+      title: '现场勘查照片 1',
+      description: '拍摄时间：2026-09-18',
+    })
+    expect(state.imageTitle(path)).toBe('现场勘查照片 1')
+    expect(state.imageDescription(path)).toBe('拍摄时间：2026-09-18')
+
+    // Test reserve_note_placeholder
+    state.settings.reserve_note_placeholder = true
+    state.settings.note_placeholder_text = '[点击输入说明]'
+    // Path with annotation keeps custom description
+    expect(state.imageDescription(path)).toBe('拍摄时间：2026-09-18')
+    // Other path gets placeholder
+    expect(state.imageDescription(images[1].path)).toBe('[点击输入说明]')
+
+    // Verify layoutMetrics reserves height for note
+    expect(state.layoutMetrics.value.noteReserve).toBeGreaterThan(0)
+  })
 })

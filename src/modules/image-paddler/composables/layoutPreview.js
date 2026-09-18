@@ -257,6 +257,42 @@ export function detectPageConflicts({
   }
 }
 
+/**
+ * 求解当前页的最佳自适应缩放比例（50% ~ 140%）
+ * 消除图-图重叠、图-文压字及超出安全区冲突
+ */
+export function computeOptimalPageScale(params) {
+  const isConflictFree = (scalePercent) => {
+    const report = detectPageConflicts({
+      ...params,
+      pageScale: scalePercent / 100,
+    })
+    return !report.hasOverflow && !report.hasOverlap && !report.hasCaptionOverlap
+  }
+
+  // 若 100% 本身无冲突，基准即为 100%
+  if (isConflictFree(100)) {
+    return 100
+  }
+
+  // 若 100% 存在冲突（如竖长图、高密度溢出），二分查找 [50, 99] 中最大的无冲突比例
+  let low = 50
+  let high = 99
+  let best = 50
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    if (isConflictFree(mid)) {
+      best = mid
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+
+  return best
+}
+
 export function layoutOptionLabel(value, flow) {
   const options = {
     1: ['1 张', '1 张'],

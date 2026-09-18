@@ -120,6 +120,26 @@ pub struct RunArgs {
     pub caption_position: Option<String>,
     #[serde(default)]
     pub print_safety_pad_mm: Option<f64>,
+    #[serde(default)]
+    pub reserve_note_placeholder: Option<bool>,
+    #[serde(default)]
+    pub note_placeholder_text: Option<String>,
+    #[serde(default)]
+    pub note_font_family: Option<String>,
+    #[serde(default)]
+    pub note_font_size_pt: Option<f64>,
+    #[serde(default)]
+    pub note_color: Option<String>,
+    #[serde(default)]
+    pub image_annotations: Option<std::collections::HashMap<String, ImageAnnotation>>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ImageAnnotation {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -186,6 +206,125 @@ struct LayoutConfig {
     pair_mode: String,
     print_safety_pad_mm: f64,
     page_scales: Vec<f64>,
+    reserve_note_placeholder: bool,
+    note_placeholder_text: String,
+    note_font_family: String,
+    note_font_size_pt: f64,
+    note_color: String,
+    image_annotations: std::collections::HashMap<String, ImageAnnotation>,
+}
+
+fn resolve_image_title_and_note(
+    img_path: &str,
+    cfg: &LayoutConfig,
+) -> (Vec<String>, Vec<String>) {
+    let annotation = cfg.image_annotations.get(img_path);
+    let title_str = annotation
+        .and_then(|a| a.title.as_ref())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            display_filename(
+                img_path,
+                cfg.filename_without_ext,
+                &cfg.filename_remove_text,
+                &cfg.filename_rules,
+            )
+        });
+
+    let title_lines = if cfg.show_filename && !title_str.is_empty() {
+        wrap_filename_lines(
+            &title_str,
+            cfg.cell_w_mm,
+            cfg.filename_max_lines.max(1),
+            cfg.filename_font_size_pt,
+        )
+    } else {
+        Vec::new()
+    };
+
+    let note_str = annotation
+        .and_then(|a| a.description.as_ref())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            if cfg.reserve_note_placeholder {
+                Some(if cfg.note_placeholder_text.trim().is_empty() {
+                    "[点击输入说明]".to_string()
+                } else {
+                    cfg.note_placeholder_text.clone()
+                })
+            } else {
+                None
+            }
+        });
+
+    let note_lines = if let Some(desc) = note_str {
+        wrap_note_lines(&desc, cfg.cell_w_mm, 4, cfg.note_font_size_pt)
+    } else {
+        Vec::new()
+    };
+
+    (title_lines, note_lines)
+}
+
+fn wrap_note_lines(
+    text: &str,
+    cell_w_mm: f64,
+    max_lines: usize,
+    font_size_pt: f64,
+) -> Vec<String> {
+    let mut all_lines = Vec::new();
+    for raw_line in text.lines() {
+        let trimmed = raw_line.trim();
+        if !trimmed.is_empty() {
+            let max_sub = max_lines.saturating_sub(all_lines.len()).max(1);
+            let wrapped = wrap_filename_lines(trimmed, cell_w_mm, max_sub, font_size_pt);
+            for w in wrapped {
+                if !w.is_empty() {
+                    all_lines.push(w);
+                }
+                if all_lines.len() >= max_lines {
+                    return all_lines;
+                }
+            }
+        }
+    }
+    if all_lines.is_empty() {
+        all_lines.push(text.trim().to_string());
+    }
+    all_lines
+}
+
+fn caption_reserve_for_page(
+    images: &[ImageInfo],
+    config: &LayoutConfig,
+) -> (usize, usize, f64) {
+    let mut max_title_lines = 1;
+    let mut max_note_lines = 0;
+    for img in images {
+        let (t_lines, n_lines) = resolve_image_title_and_note(&img.path, config);
+        max_title_lines = max_title_lines.max(t_lines.len());
+        max_note_lines = max_note_lines.max(n_lines.len());
+    }
+    let title_h = if config.show_filename {
+        filename_line_height_mm(config.filename_font_size_pt) * max_title_lines as f64
+    } else {
+        0.0
+    };
+    let note_h = if max_note_lines > 0 {
+        filename_line_height_mm(config.note_font_size_pt) * max_note_lines as f64
+    } else {
+        0.0
+    };
+    let safety = if (config.show_filename && max_title_lines > 0) || max_note_lines > 0 {
+        config.filename_safety_mm
+    } else {
+        0.0
+    };
+    (max_title_lines, max_note_lines, title_h + note_h + safety)
 }
 
 fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig {
@@ -200,20 +339,9 @@ fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig 
     let usable_width = page.cell_w_mm * page.grid.cols as f64;
     let usable_height = (page.image_cell_h_mm + page.filename_reserve_mm) * page.grid.rows as f64;
     page.cell_w_mm = usable_width / compact_grid.cols as f64;
-    page.filename_max_lines = filename_lines_for_images(
-        images,
-        page.filename_without_ext,
-        &page.filename_remove_text,
-        &page.filename_rules,
-        page.cell_w_mm,
-        page.filename_font_size_pt,
-    );
-    page.filename_reserve_mm = if page.show_filename {
-        filename_line_height_mm(page.filename_font_size_pt) * page.filename_max_lines as f64
-            + page.filename_safety_mm
-    } else {
-        0.0
-    };
+    let (max_t_lines, _max_n_lines, caption_reserve) = caption_reserve_for_page(images, &page);
+    page.filename_max_lines = max_t_lines;
+    page.filename_reserve_mm = caption_reserve;
     page.image_cell_h_mm =
         (usable_height / compact_grid.rows as f64 - page.filename_reserve_mm).max(1.0);
     page.grid = compact_grid;
@@ -769,6 +897,21 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
             .to_string(),
         print_safety_pad_mm: args.print_safety_pad_mm.unwrap_or(6.0).max(0.0),
         page_scales: args.page_scales.clone().unwrap_or_default(),
+        reserve_note_placeholder: args.reserve_note_placeholder.unwrap_or(false),
+        note_placeholder_text: args
+            .note_placeholder_text
+            .clone()
+            .unwrap_or_else(|| "[点击输入说明]".to_string()),
+        note_font_family: normalize_filename_font_family(
+            args.note_font_family.as_deref().or(Some("kaiti")),
+        ),
+        note_font_size_pt: args.note_font_size_pt.unwrap_or(8.0).clamp(6.0, 24.0),
+        note_color: args
+            .note_color
+            .as_deref()
+            .unwrap_or("gray")
+            .to_string(),
+        image_annotations: args.image_annotations.clone().unwrap_or_default(),
     };
 
     if config.scale_mode == "fixed_width" {
@@ -1198,17 +1341,13 @@ fn generate_pdf(
     let mut doc = PdfDocument::new("image_paddler");
     let mut result_warnings = Vec::new();
     let per_page = config.grid.rows * config.grid.cols;
-    let has_non_ascii_filename = config.show_filename
-        && images.iter().any(|image| {
-            !display_filename(
-                &image.path,
-                config.filename_without_ext,
-                &config.filename_remove_text,
-                &config.filename_rules,
-            )
-            .is_ascii()
-        });
-    let prefers_external_font = has_non_ascii_filename || config.filename_font_family != "sans";
+    let has_non_ascii_filename = images.iter().any(|image| {
+        let (t, n) = resolve_image_title_and_note(&image.path, config);
+        t.iter().chain(n.iter()).any(|line| !line.is_ascii())
+    });
+    let prefers_external_font = has_non_ascii_filename
+        || config.filename_font_family != "sans"
+        || config.note_font_family != "sans";
     let filename_font = if prefers_external_font {
         load_pdf_filename_font(&mut doc, &config.filename_font_family)
             .map(PdfFontHandle::External)
@@ -1318,48 +1457,83 @@ fn generate_pdf(
             });
             ops.push(Op::RestoreGraphicsState);
 
-            if config.show_filename && !omit_filenames {
-                let lines = display_filename_lines(
-                    &img_info.path,
-                    config.filename_without_ext,
-                    &config.filename_remove_text,
-                    &config.filename_rules,
-                    config.cell_w_mm,
-                    config.filename_font_size_pt,
-                    config.filename_max_lines,
-                );
+            let (title_lines, note_lines) = resolve_image_title_and_note(&img_info.path, config);
+            let has_title = config.show_filename && !omit_filenames && !title_lines.is_empty();
+            let has_note = !omit_filenames && !note_lines.is_empty();
+
+            if (has_title || has_note) && filename_font.is_some() {
+                let font = filename_font.as_ref().unwrap();
+                let total_lines = (if has_title { title_lines.len() } else { 0 })
+                    + (if has_note { note_lines.len() } else { 0 });
+
                 ops.push(Op::StartTextSection);
-                ops.push(Op::SetFont {
-                    font: filename_font
-                        .as_ref()
-                        .expect("未省略文件名时必须存在 PDF 字体")
-                        .clone(),
-                    size: Pt(config.filename_font_size_pt as f32),
-                });
-                let (r, g, b) = text_rgb(&config.filename_color);
-                ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb::new(r, g, b, None)),
-                });
-                for (line_idx, line) in lines.iter().enumerate() {
-                    let line_w_pt = name_units(line) as f64 * config.filename_font_size_pt * 0.56;
-                    let text_x_pt =
-                        cell_x_mm * 72.0 / 25.4 + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
-                    let text_y_pt = (text_area_y_mm
-                        + 0.8
-                        + (lines.len() - line_idx - 1) as f64
-                            * filename_line_height_mm(config.filename_font_size_pt))
-                        * 72.0
-                        / 25.4;
-                    ops.push(Op::SetTextCursor {
-                        pos: Point {
-                            x: Pt(text_x_pt as f32),
-                            y: Pt(text_y_pt as f32),
-                        },
+
+                if has_title {
+                    ops.push(Op::SetFont {
+                        font: font.clone(),
+                        size: Pt(config.filename_font_size_pt as f32),
                     });
-                    ops.push(Op::ShowText {
-                        items: vec![TextItem::Text(line.clone())],
+                    let (r, g, b) = text_rgb(&config.filename_color);
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(r, g, b, None)),
                     });
+                    for (line_idx, line) in title_lines.iter().enumerate() {
+                        let line_w_pt =
+                            name_units(line) as f64 * config.filename_font_size_pt * 0.56;
+                        let text_x_pt = cell_x_mm * 72.0 / 25.4
+                            + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
+                        let line_from_bottom = total_lines - line_idx - 1;
+                        let text_y_pt = (text_area_y_mm
+                            + 0.8
+                            + line_from_bottom as f64
+                                * filename_line_height_mm(config.filename_font_size_pt))
+                            * 72.0
+                            / 25.4;
+                        ops.push(Op::SetTextCursor {
+                            pos: Point {
+                                x: Pt(text_x_pt as f32),
+                                y: Pt(text_y_pt as f32),
+                            },
+                        });
+                        ops.push(Op::ShowText {
+                            items: vec![TextItem::Text(line.clone())],
+                        });
+                    }
                 }
+
+                if has_note {
+                    ops.push(Op::SetFont {
+                        font: font.clone(),
+                        size: Pt(config.note_font_size_pt as f32),
+                    });
+                    let (r, g, b) = text_rgb(&config.note_color);
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(r, g, b, None)),
+                    });
+                    for (line_idx, line) in note_lines.iter().enumerate() {
+                        let line_w_pt =
+                            name_units(line) as f64 * config.note_font_size_pt * 0.56;
+                        let text_x_pt = cell_x_mm * 72.0 / 25.4
+                            + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
+                        let line_from_bottom = note_lines.len() - line_idx - 1;
+                        let text_y_pt = (text_area_y_mm
+                            + 0.8
+                            + line_from_bottom as f64
+                                * filename_line_height_mm(config.note_font_size_pt))
+                            * 72.0
+                            / 25.4;
+                        ops.push(Op::SetTextCursor {
+                            pos: Point {
+                                x: Pt(text_x_pt as f32),
+                                y: Pt(text_y_pt as f32),
+                            },
+                        });
+                        ops.push(Op::ShowText {
+                            items: vec![TextItem::Text(line.clone())],
+                        });
+                    }
+                }
+
                 ops.push(Op::EndTextSection);
             }
         }
@@ -1492,10 +1666,100 @@ fn pdf_border_color(color: &str) -> printpdf::Color {
     printpdf::Color::Rgb(printpdf::Rgb::new(r, g, b, None))
 }
 
+fn create_caption_paragraph(
+    img_path: &str,
+    cfg: &LayoutConfig,
+    h_align: docx_rs::AlignmentType,
+    page_break_before: bool,
+    keep_next: bool,
+    safety_before_twips: u32,
+    safety_after_twips: u32,
+) -> Option<docx_rs::Paragraph> {
+    use docx_rs::{BreakType, LineSpacing, LineSpacingType, Paragraph, Run, RunFonts};
+
+    let (title_lines, note_lines) = resolve_image_title_and_note(img_path, cfg);
+    let has_title = cfg.show_filename && !title_lines.is_empty();
+    let has_note = !note_lines.is_empty();
+    if !has_title && !has_note {
+        return None;
+    }
+
+    let mut para = Paragraph::new()
+        .align(h_align)
+        .page_break_before(page_break_before)
+        .keep_next(keep_next)
+        .keep_lines(true);
+
+    if safety_before_twips > 0 || safety_after_twips > 0 {
+        para = para.line_spacing(
+            LineSpacing::new()
+                .before(safety_before_twips)
+                .after(safety_after_twips)
+                .line_rule(LineSpacingType::Exact)
+                .line(mm_to_twips(filename_line_height_mm(cfg.filename_font_size_pt))),
+        );
+    } else {
+        para = para.line_spacing(
+            LineSpacing::new()
+                .before(0)
+                .after(0)
+                .line_rule(LineSpacingType::Exact)
+                .line(mm_to_twips(filename_line_height_mm(cfg.filename_font_size_pt))),
+        );
+    }
+
+    if has_title {
+        let font_name = docx_font_name(&cfg.filename_font_family);
+        let mut title_run = Run::new()
+            .fonts(
+                RunFonts::new()
+                    .ascii(font_name)
+                    .hi_ansi(font_name)
+                    .east_asia(font_name)
+                    .cs(font_name),
+            )
+            .size((cfg.filename_font_size_pt * 2.0).round() as usize)
+            .color(docx_text_color(&cfg.filename_color));
+        for (idx, line) in title_lines.into_iter().enumerate() {
+            if idx > 0 {
+                title_run = title_run.add_break(BreakType::TextWrapping);
+            }
+            title_run = title_run.add_text(line);
+        }
+        para = para.add_run(title_run);
+    }
+
+    if has_note {
+        let note_font = docx_font_name(&cfg.note_font_family);
+        let mut note_run = Run::new()
+            .fonts(
+                RunFonts::new()
+                    .ascii(note_font)
+                    .hi_ansi(note_font)
+                    .east_asia(note_font)
+                    .cs(note_font),
+            )
+            .size((cfg.note_font_size_pt * 2.0).round() as usize)
+            .color(docx_text_color(&cfg.note_color));
+        if has_title {
+            note_run = note_run.add_break(BreakType::TextWrapping);
+        }
+        for (idx, line) in note_lines.into_iter().enumerate() {
+            if idx > 0 {
+                note_run = note_run.add_break(BreakType::TextWrapping);
+            }
+            note_run = note_run.add_text(line);
+        }
+        para = para.add_run(note_run);
+    }
+
+    Some(para)
+}
+
 fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig) -> Result<()> {
     use docx_rs::{
-        AlignmentType, BreakType, Docx, HeightRule, LineSpacing, LineSpacingType, PageMargin,
-        PageOrientationType, Paragraph, Pic, Run, RunFonts, Table, TableAlignmentType, TableBorder,
+        AlignmentType, Docx, HeightRule, LineSpacing, LineSpacingType, PageMargin,
+        PageOrientationType, Paragraph, Pic, Run, Table, TableAlignmentType, TableBorder,
         TableBorderPosition, TableBorders, TableCell, TableCellBorder, TableCellBorderPosition,
         TableCellBorders, TableCellMargins, TableLayoutType, TableRow, VAlignType, WidthType,
     };
@@ -1645,51 +1909,25 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                     )
                     .add_run(Run::new().add_image(pic));
 
-                let filename_paragraph = if cfg.show_filename {
-                    let filename_lines = display_filename_lines(
-                        &img_info.path,
-                        cfg.filename_without_ext,
-                        &cfg.filename_remove_text,
-                        &cfg.filename_rules,
-                        cfg.cell_w_mm,
-                        cfg.filename_font_size_pt,
-                        cfg.filename_max_lines,
-                    );
-                    let font_name = docx_font_name(&cfg.filename_font_family);
-                    let mut filename_run = Run::new()
-                        .fonts(
-                            RunFonts::new()
-                                .ascii(font_name)
-                                .hi_ansi(font_name)
-                                .east_asia(font_name)
-                                .cs(font_name),
-                        )
-                        .size((cfg.filename_font_size_pt * 2.0).round() as usize)
-                        .color(docx_text_color(&cfg.filename_color));
-                    for (line_idx, line) in filename_lines.into_iter().enumerate() {
-                        if line_idx > 0 {
-                            filename_run = filename_run.add_break(BreakType::TextWrapping);
-                        }
-                        filename_run = filename_run.add_text(line);
-                    }
-                    Some(
-                        Paragraph::new()
-                            .align(h_align)
-                            .page_break_before(chunk_idx > 0 && image_idx == 0 && cfg.caption_position == "above")
-                            .keep_next(cfg.caption_position == "above")
-                            .keep_lines(true)
-                            .line_spacing(
-                                LineSpacing::new()
-                                    .before(if cfg.caption_position == "above" { mm_to_twips(cfg.filename_safety_mm) as u32 } else { 0 })
-                                    .after(if cfg.caption_position == "below" { mm_to_twips(cfg.filename_safety_mm) as u32 } else { 0 })
-                                    .line_rule(LineSpacingType::Exact)
-                                    .line(mm_to_twips(filename_line_height_mm(cfg.filename_font_size_pt))),
-                            )
-                            .add_run(filename_run),
-                    )
+                let before_twips = if cfg.caption_position == "above" {
+                    mm_to_twips(cfg.filename_safety_mm) as u32
                 } else {
-                    None
+                    0
                 };
+                let after_twips = if cfg.caption_position == "below" {
+                    mm_to_twips(cfg.filename_safety_mm) as u32
+                } else {
+                    0
+                };
+                let filename_paragraph = create_caption_paragraph(
+                    &img_info.path,
+                    cfg,
+                    h_align,
+                    chunk_idx > 0 && image_idx == 0 && cfg.caption_position == "above",
+                    cfg.caption_position == "above",
+                    before_twips,
+                    after_twips,
+                );
 
                 if cfg.caption_position == "above" {
                     if let Some(p) = filename_paragraph {
@@ -1768,50 +2006,15 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         .line_spacing(LineSpacing::new().before(0).after(0))
                         .add_run(Run::new().add_image(pic));
 
-                    let filename_paragraph = if config.show_filename {
-                        let font_name = docx_font_name(&config.filename_font_family);
-                        let mut filename_run = Run::new()
-                            .fonts(
-                                RunFonts::new()
-                                    .ascii(font_name)
-                                    .hi_ansi(font_name)
-                                    .east_asia(font_name)
-                                    .cs(font_name),
-                            )
-                            .size((config.filename_font_size_pt * 2.0).round() as usize)
-                            .color(docx_text_color(&config.filename_color));
-                        let filename_lines = display_filename_lines(
-                            &img_info.path,
-                            config.filename_without_ext,
-                            &config.filename_remove_text,
-                            &config.filename_rules,
-                            config.cell_w_mm,
-                            config.filename_font_size_pt,
-                            config.filename_max_lines,
-                        );
-                        for (line_idx, line) in filename_lines.into_iter().enumerate() {
-                            if line_idx > 0 {
-                                filename_run = filename_run.add_break(BreakType::TextWrapping);
-                            }
-                            filename_run = filename_run.add_text(line);
-                        }
-                        let filename_line_twips =
-                            mm_to_twips(filename_line_height_mm(config.filename_font_size_pt));
-                        Some(
-                            Paragraph::new()
-                                .align(h_align)
-                                .line_spacing(
-                                    LineSpacing::new()
-                                        .before(0)
-                                        .after(0)
-                                        .line_rule(LineSpacingType::Exact)
-                                        .line(filename_line_twips),
-                                )
-                                .add_run(filename_run),
-                        )
-                    } else {
-                        None
-                    };
+                    let filename_paragraph = create_caption_paragraph(
+                        &img_info.path,
+                        config,
+                        h_align,
+                        false,
+                        false,
+                        0,
+                        0,
+                    );
 
                     if config.caption_position == "above" {
                         if let Some(p) = filename_paragraph {
@@ -2205,6 +2408,12 @@ mod tests {
             pair_mode: None,
             caption_position: None,
             print_safety_pad_mm: None,
+            reserve_note_placeholder: None,
+            note_placeholder_text: None,
+            note_font_family: None,
+            note_font_size_pt: None,
+            note_color: None,
+            image_annotations: None,
         };
         assert_eq!(
             explicit_image_paths(&args).unwrap(),
@@ -2261,6 +2470,12 @@ mod tests {
             pair_mode: None,
             caption_position: None,
             print_safety_pad_mm: None,
+            reserve_note_placeholder: None,
+            note_placeholder_text: None,
+            note_font_family: None,
+            note_font_size_pt: None,
+            note_color: None,
+            image_annotations: None,
         };
 
         let first = run(&args).unwrap();
@@ -2469,6 +2684,12 @@ mod tests {
             pair_mode: "cell-center".into(),
             print_safety_pad_mm: 6.0,
             page_scales: Vec::new(),
+            reserve_note_placeholder: false,
+            note_placeholder_text: "[点击输入说明]".into(),
+            note_font_family: "kaiti".into(),
+            note_font_size_pt: 8.0,
+            note_color: "gray".into(),
+            image_annotations: std::collections::HashMap::new(),
         };
 
         let images = vec![ImageInfo {
@@ -2541,6 +2762,12 @@ mod tests {
             pair_mode: None,
             caption_position: None,
             print_safety_pad_mm: None,
+            reserve_note_placeholder: None,
+            note_placeholder_text: None,
+            note_font_family: None,
+            note_font_size_pt: None,
+            note_color: None,
+            image_annotations: None,
         };
 
         let result = run(&args).unwrap();
@@ -2594,5 +2821,67 @@ mod tests {
         let (w_1x, _, _, _) = compute_placement(1000, 1000, cell_w_pt, cell_h_pt, "fixed_width", 300, Some(100.0), 1.0);
         let (w_1_2x, _, _, _) = compute_placement(1000, 1000, cell_w_pt, cell_h_pt, "fixed_width", 300, Some(100.0), 1.2);
         assert!((w_1_2x - w_1x * 1.2).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_image_annotations_and_placeholder_resolution() {
+        let mut annotations = std::collections::HashMap::new();
+        annotations.insert(
+            "img1.png".to_string(),
+            ImageAnnotation {
+                title: Some("自定义标题 1".into()),
+                description: Some("拍摄时间：2026-09-18\n见证人：张三".into()),
+            },
+        );
+
+        let mut config = LayoutConfig {
+            page_w_mm: 210.0,
+            page_h_mm: 297.0,
+            margin_mm: 12.0,
+            grid: LayoutGrid { rows: 2, cols: 1 },
+            cell_w_mm: 186.0,
+            image_cell_h_mm: 120.0,
+            filename_reserve_mm: 8.0,
+            show_filename: true,
+            filename_without_ext: false,
+            filename_font_family: "sans".into(),
+            filename_font_size_pt: 8.0,
+            filename_max_lines: 2,
+            filename_safety_mm: 2.0,
+            filename_remove_text: String::new(),
+            filename_rules: Vec::new(),
+            border_enabled: false,
+            border_color: "black".into(),
+            scale_mode: "fit".into(),
+            dpi: 300,
+            use_table: true,
+            fixed_width_mm: None,
+            filename_color: "dark_gray".into(),
+            caption_position: "below".into(),
+            pair_mode: "cell-center".into(),
+            print_safety_pad_mm: 6.0,
+            page_scales: Vec::new(),
+            reserve_note_placeholder: true,
+            note_placeholder_text: "[点击输入说明]".into(),
+            note_font_family: "kaiti".into(),
+            note_font_size_pt: 8.0,
+            note_color: "gray".into(),
+            image_annotations: annotations,
+        };
+
+        // img1 has custom title and multiline description
+        let (t1, n1) = resolve_image_title_and_note("img1.png", &config);
+        assert_eq!(t1, vec!["自定义标题 1"]);
+        assert_eq!(n1, vec!["拍摄时间：2026-09-18", "见证人：张三"]);
+
+        // img2 has no annotation, but reserve_note_placeholder is true -> uses filename and placeholder
+        let (t2, n2) = resolve_image_title_and_note("img2.png", &config);
+        assert_eq!(t2, vec!["img2.png"]);
+        assert_eq!(n2, vec!["[点击输入说明]"]);
+
+        // When reserve_note_placeholder is false and no annotation, note is empty
+        config.reserve_note_placeholder = false;
+        let (_t3, n3) = resolve_image_title_and_note("img2.png", &config);
+        assert!(n3.is_empty());
     }
 }
