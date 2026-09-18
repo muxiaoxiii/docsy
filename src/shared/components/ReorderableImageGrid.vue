@@ -244,11 +244,13 @@ const previewIndex = ref(-1)
 const editTitle = ref('')
 const editDescription = ref('')
 
+function itemHasConflict(item) {
+  const badge = pageBadge(item)
+  return Boolean(badge && ['red', 'yellow', 'green'].includes(badge.color))
+}
+
 const conflictCount = computed(() => {
-  return props.items.filter((item) => {
-    const badge = pageBadge(item)
-    return Boolean(badge && badge.color && badge.color !== 'ok')
-  }).length
+  return props.items.filter(itemHasConflict).length
 })
 
 const excludedCount = computed(() => {
@@ -257,10 +259,7 @@ const excludedCount = computed(() => {
 
 const filteredItems = computed(() => {
   if (filterMode.value === 'conflict') {
-    return props.items.filter((item) => {
-      const badge = pageBadge(item)
-      return Boolean(badge && badge.color && badge.color !== 'ok')
-    })
+    return props.items.filter(itemHasConflict)
   }
   if (filterMode.value === 'excluded') {
     return props.items.filter(itemExcluded)
@@ -311,7 +310,12 @@ function thumbWrapStyle(item) {
 }
 
 function globalIndex(localIndex) {
-  return pageRange.value.start + localIndex
+  if (filterMode.value === 'all') {
+    return pageRange.value.start + localIndex
+  }
+  const item = pagedItems.value[localIndex]
+  const idx = props.items.indexOf(item)
+  return idx >= 0 ? idx : pageRange.value.start + localIndex
 }
 
 function itemPath(item) {

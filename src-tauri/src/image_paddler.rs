@@ -15,6 +15,7 @@ const FILENAME_MAX_LINES: usize = 3;
 const DOCX_TRAILING_GAP_MM: f64 = 2.0;
 const DOCX_FILENAME_SAFETY_MM: f64 = 2.0;
 const PDF_FILENAME_SAFETY_MM: f64 = 0.6;
+const NOTE_MAX_LINES: usize = 3;
 
 static TIME_PART_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\d{1,2}[:：_-]\d{2}(?:[:：_-]\d{2})?|\d+(?:\.\d+)?s|\d+m\d+s").unwrap()
@@ -272,7 +273,7 @@ fn resolve_image_title_and_note(
         });
 
     let note_lines = if let Some(desc) = note_str {
-        wrap_note_lines(&desc, cfg.cell_w_mm, 4, cfg.note_font_size_pt)
+        wrap_note_lines(&desc, cfg.cell_w_mm, NOTE_MAX_LINES, cfg.note_font_size_pt)
     } else {
         Vec::new()
     };
@@ -1357,16 +1358,29 @@ fn generate_pdf(
         let (t, n) = resolve_image_title_and_note(&image.path, config);
         t.iter().chain(n.iter()).any(|line| !line.is_ascii())
     });
-    let prefers_external_font = has_non_ascii_filename
-        || config.filename_font_family != "sans"
-        || config.note_font_family != "sans";
-    let filename_font = if prefers_external_font {
+    let prefers_external_filename_font = has_non_ascii_filename
+        || config.filename_font_family != "sans";
+    let filename_font = if prefers_external_filename_font {
         load_pdf_filename_font(&mut doc, &config.filename_font_family)
             .map(PdfFontHandle::External)
             .or_else(|| {
                 (!has_non_ascii_filename)
                     .then(|| PdfFontHandle::Builtin(pdf_builtin_font(&config.filename_font_family)))
             })
+    } else {
+        Some(PdfFontHandle::Builtin(BuiltinFont::Helvetica))
+    };
+
+    let prefers_external_note_font = has_non_ascii_filename
+        || config.note_font_family != "sans";
+    let note_font = if prefers_external_note_font {
+        load_pdf_filename_font(&mut doc, &config.note_font_family)
+            .map(PdfFontHandle::External)
+            .or_else(|| {
+                (!has_non_ascii_filename)
+                    .then(|| PdfFontHandle::Builtin(pdf_builtin_font(&config.note_font_family)))
+            })
+            .or_else(|| filename_font.clone())
     } else {
         Some(PdfFontHandle::Builtin(BuiltinFont::Helvetica))
     };
@@ -1470,17 +1484,14 @@ fn generate_pdf(
             ops.push(Op::RestoreGraphicsState);
 
             let (title_lines, note_lines) = resolve_image_title_and_note(&img_info.path, config);
-            let has_title = config.show_filename && !omit_filenames && !title_lines.is_empty();
-            let has_note = !omit_filenames && !note_lines.is_empty();
+            let has_title = config.show_filename && !omit_filenames && filename_font.is_some() && !title_lines.is_empty();
+            let has_note = !omit_filenames && note_font.is_some() && !note_lines.is_empty();
 
-            if (has_title || has_note) && filename_font.is_some() {
-                let font = filename_font.as_ref().unwrap();
-                let total_lines = (if has_title { title_lines.len() } else { 0 })
-                    + (if has_note { note_lines.len() } else { 0 });
-
+            if has_title || has_note {
                 ops.push(Op::StartTextSection);
 
                 if has_title {
+                    let font = filename_font.as_ref().unwrap();
                     ops.push(Op::SetFont {
                         font: font.clone(),
                         size: Pt(config.filename_font_size_pt as f32),
@@ -1489,14 +1500,20 @@ fn generate_pdf(
                     ops.push(Op::SetFillColor {
                         col: Color::Rgb(Rgb::new(r, g, b, None)),
                     });
+                    let note_height_offset = if has_note {
+                        note_lines.len() as f64 * filename_line_height_mm(config.note_font_size_pt)
+                    } else {
+                        0.0
+                    };
                     for (line_idx, line) in title_lines.iter().enumerate() {
                         let line_w_pt =
                             name_units(line) as f64 * config.filename_font_size_pt * 0.56;
                         let text_x_pt = cell_x_mm * 72.0 / 25.4
                             + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
-                        let line_from_bottom = total_lines - line_idx - 1;
+                        let line_from_bottom = title_lines.len() - line_idx - 1;
                         let text_y_pt = (text_area_y_mm
                             + 0.8
+                            + note_height_offset
                             + line_from_bottom as f64
                                 * filename_line_height_mm(config.filename_font_size_pt))
                             * 72.0
@@ -1514,6 +1531,7 @@ fn generate_pdf(
                 }
 
                 if has_note {
+                    let font = note_font.as_ref().unwrap();
                     ops.push(Op::SetFont {
                         font: font.clone(),
                         size: Pt(config.note_font_size_pt as f32),
@@ -1702,23 +1720,21 @@ fn create_caption_paragraph(
         .keep_next(keep_next)
         .keep_lines(true);
 
-    if safety_before_twips > 0 || safety_after_twips > 0 {
-        para = para.line_spacing(
-            LineSpacing::new()
-                .before(safety_before_twips)
-                .after(safety_after_twips)
-                .line_rule(LineSpacingType::Exact)
-                .line(mm_to_twips(filename_line_height_mm(cfg.filename_font_size_pt))),
-        );
+    let caption_line_height_mm = if has_title {
+        filename_line_height_mm(cfg.filename_font_size_pt)
+    } else if has_note {
+        filename_line_height_mm(cfg.note_font_size_pt)
     } else {
-        para = para.line_spacing(
-            LineSpacing::new()
-                .before(0)
-                .after(0)
-                .line_rule(LineSpacingType::Exact)
-                .line(mm_to_twips(filename_line_height_mm(cfg.filename_font_size_pt))),
-        );
-    }
+        filename_line_height_mm(cfg.filename_font_size_pt)
+    };
+
+    para = para.line_spacing(
+        LineSpacing::new()
+            .before(safety_before_twips)
+            .after(safety_after_twips)
+            .line_rule(LineSpacingType::Exact)
+            .line(mm_to_twips(caption_line_height_mm)),
+    );
 
     if has_title {
         let font_name = docx_font_name(&cfg.filename_font_family);

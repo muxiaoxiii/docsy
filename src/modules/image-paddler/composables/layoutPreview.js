@@ -126,13 +126,15 @@ export function detectPageConflicts({
   captionPosition = 'below',
   captionReserveMm = 0,
   fontSizePt = 8,
+  noteFontSizePt = 8,
   pairMode = 'cell-center',
 }) {
   const rows = Math.max(1, Number(grid.rows) || 1)
   const cols = Math.max(1, Number(grid.cols) || 1)
   const margin = Math.max(0, Number(marginMm) || 0)
   const cellW = Math.max(1, Number(cellWidth) || 1)
-  const captionH = showFilename ? Math.max(0, Number(captionReserveMm) || 0) : 0
+  const hasAnyCaptionText = showFilename || images.some((img) => Boolean(img?.description || img?.note))
+  const captionH = hasAnyCaptionText ? Math.max(0, Number(captionReserveMm) || 0) : 0
   const cellH = Math.max(1, Number(imageCellHeight) || 1) + captionH
   const pageW = Number(pageWidth) || (cols * cellW + margin * 2)
   const pageH = Number(pageHeight) || (rows * cellH + margin * 2)
@@ -195,11 +197,17 @@ export function detectPageConflicts({
     }
     imageBoxes.push(rectImg)
 
-    if (showFilename && captionH > 0) {
-      const rawName = img.name || img.path || ''
-      const slashIdx = Math.max(rawName.lastIndexOf('/'), rawName.lastIndexOf('\\'))
-      const name = slashIdx >= 0 ? rawName.slice(slashIdx + 1) : rawName
-      const textW = Math.min(cellW, Math.max(10, estimateTextWidthMm(name, fontSizePt)))
+    const hasTitle = showFilename
+    const rawName = img.name || img.path || ''
+    const slashIdx = Math.max(rawName.lastIndexOf('/'), rawName.lastIndexOf('\\'))
+    const baseName = slashIdx >= 0 ? rawName.slice(slashIdx + 1) : rawName
+    const titleText = img.title !== undefined ? img.title : baseName
+    const descText = img.description || ''
+
+    if ((hasTitle || descText) && captionH > 0) {
+      const titleW = hasTitle && titleText ? estimateTextWidthMm(titleText, fontSizePt) : 0
+      const descW = descText ? estimateTextWidthMm(descText, noteFontSizePt || fontSizePt) : 0
+      const textW = Math.min(cellW, Math.max(10, Math.max(titleW, descW)))
       const capX = cellX + (cellW - textW) / 2
       captionBoxes.push({
         index: idx,
@@ -303,7 +311,7 @@ export function computeOptimalPageScale(params) {
   // 若 100% 存在冲突（如竖长图、高密度溢出），二分查找 [50, 99] 中最大的无冲突比例
   let low = 50
   let high = 99
-  let best = 50
+  let best = null
 
   while (low <= high) {
     const mid = Math.floor((low + high) / 2)

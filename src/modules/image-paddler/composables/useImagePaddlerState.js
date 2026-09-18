@@ -20,6 +20,7 @@ import {
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
 const FILENAME_MAX_LINES = 3
+const NOTE_MAX_LINES = 3
 const DOCX_FILENAME_SAFETY_MM = 2
 const PDF_FILENAME_SAFETY_MM = 0.6
 const KNOWN_NON_IMAGE_EXTENSIONS = new Set([
@@ -215,7 +216,7 @@ export function useImagePaddlerState(options = {}) {
             ...pageImages.map((image) => {
               const desc =
                 imageDescription(image.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : '')
-              return desc ? Math.min(3, requiredFilenameLines(desc, cellWidth, noteFontSizePt, 3)) : 0
+              return desc ? Math.min(NOTE_MAX_LINES, requiredFilenameLines(desc, cellWidth, noteFontSizePt, NOTE_MAX_LINES)) : 0
             }),
           )
         : hasAnyNote
@@ -344,11 +345,20 @@ export function useImagePaddlerState(options = {}) {
     const start = currentPageIndex.value * count
     const pageImgs = includedImages.value.slice(start, start + count)
     const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
+    const pageGrid = compactGridForCount(layoutGrid.value, pageImgs.length)
+    const metrics = computeMetricsForGrid(pageGrid, pageImgs)
+    const pageImgsWithAnnotations = pageImgs.map((img) => ({
+      ...img,
+      title: imageTitle(img.path),
+      description:
+        imageDescription(img.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : ''),
+    }))
+
     const optimal = computeOptimalPageScale({
-      images: pageImgs,
-      grid: compactGridForCount(layoutGrid.value, pageImgs.length),
-      cellWidth: layoutMetrics.value.cellWidth,
-      imageCellHeight: layoutMetrics.value.imageCellHeight,
+      images: pageImgsWithAnnotations,
+      grid: pageGrid,
+      cellWidth: metrics.cellWidth,
+      imageCellHeight: metrics.imageCellHeight,
       fixedWidthMm: actualImageWidth.value,
       scaleMode: settings.scale_mode,
       dpi: settings.dpi,
@@ -357,38 +367,47 @@ export function useImagePaddlerState(options = {}) {
       marginMm: Number(settings.margin_mm) || 0,
       showFilename: settings.show_filename,
       captionPosition: settings.caption_position,
-      captionReserveMm: layoutMetrics.value.filenameReserve,
+      captionReserveMm: metrics.filenameReserve,
       fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
+      noteFontSizePt: clampNumber(settings.note_font_size_pt, 6, 24, 8),
       pairMode: settings.pair_mode,
     })
-    activePageScale.value = optimal
-    ElMessage.success(`已自适应计算本页比例为 ${optimal}%，点击保存即可生效`)
+    if (optimal === null) {
+      activePageScale.value = 50
+      ElMessage.warning('本页图片比例过大，缩小至 50% 仍有局部溢出，建议切换横向或减少每页张数')
+    } else {
+      activePageScale.value = optimal
+      ElMessage.success(`已自适应计算本页比例为 ${optimal}%，点击保存即可生效`)
+    }
   }
 
-  function applyScaleToAllPages() {
-    const scale = activePageScale.value / 100
+  function applyScaleToAllPages(scaleOverride) {
+    const targetScale = scaleOverride !== undefined ? scaleOverride : activePageScale.value / 100
+    const targetPercent = Math.round(targetScale * 100)
     const newScales = {}
-    if (activePageScale.value !== 100) {
+    if (targetPercent !== 100) {
       for (let i = 0; i < totalPages.value; i += 1) {
-        newScales[i] = scale
+        newScales[i] = targetScale
       }
     }
     pageScales.value = newScales
-    ElMessage.success(`已将当前比例 (${activePageScale.value}%) 应用到全部 ${totalPages.value} 页`)
+    ElMessage.success(`已将当前比例 (${targetPercent}%) 应用到全部 ${totalPages.value} 页`)
   }
 
-  function applyScaleToSubsequentPages() {
-    const scale = activePageScale.value / 100
+  function applyScaleToSubsequentPages(fromPageIndex, scaleOverride) {
+    const startPage = fromPageIndex !== undefined ? fromPageIndex : currentPageIndex.value
+    const targetScale = scaleOverride !== undefined ? scaleOverride : activePageScale.value / 100
+    const targetPercent = Math.round(targetScale * 100)
     const newScales = { ...pageScales.value }
-    for (let i = currentPageIndex.value; i < totalPages.value; i += 1) {
-      if (activePageScale.value === 100) {
+    for (let i = startPage; i < totalPages.value; i += 1) {
+      if (targetPercent === 100) {
         delete newScales[i]
       } else {
-        newScales[i] = scale
+        newScales[i] = targetScale
       }
     }
     pageScales.value = newScales
-    ElMessage.success(`已将当前比例 (${activePageScale.value}%) 应用到第 ${currentPageIndex.value + 1} 页及后续所有页`)
+    ElMessage.success(`已将当前比例 (${targetPercent}%) 应用到第 ${startPage + 1} 页及后续所有页`)
   }
 
   function resetAllPageScales() {
@@ -1082,9 +1101,15 @@ export function useImagePaddlerState(options = {}) {
 
     const pageGrid = compactGridForCount(layoutGrid.value, pageImgs.length)
     const metrics = computeMetricsForGrid(pageGrid, pageImgs)
+    const pageImgsWithAnnotations = pageImgs.map((img) => ({
+      ...img,
+      title: imageTitle(img.path),
+      description:
+        imageDescription(img.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : ''),
+    }))
 
     return detectPageConflicts({
-      images: pageImgs,
+      images: pageImgsWithAnnotations,
       grid: pageGrid,
       cellWidth: metrics.cellWidth,
       imageCellHeight: metrics.imageCellHeight,
@@ -1099,6 +1124,7 @@ export function useImagePaddlerState(options = {}) {
       captionPosition: settings.caption_position,
       captionReserveMm: metrics.filenameReserve,
       fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
+      noteFontSizePt: clampNumber(settings.note_font_size_pt, 6, 24, 8),
       pairMode: settings.pair_mode,
     })
   }

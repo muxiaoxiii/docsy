@@ -273,4 +273,54 @@ describe('image layout preview', () => {
     })
     expect(report.captionBoxes[0].w).toBeLessThan(50)
   })
+
+  it('detects caption width based on custom title and description annotations', () => {
+    const report = detectPageConflicts({
+      images: [
+        {
+          path: '/path/to/short.png',
+          title: '自定义非常长长长长长长长长的图片标题文字',
+          description: '现场见证人：李四；拍摄地点：北京市海淀区中关村南大街1号',
+          width: 800,
+          height: 600,
+        },
+      ],
+      grid: { rows: 1, cols: 1 },
+      cellWidth: 186.0,
+      imageCellHeight: 150.0,
+      fixedWidthMm: 100.0,
+      pageScale: 1.0,
+      scaleMode: 'fixed_width',
+      marginMm: 12.0,
+      showFilename: true,
+      captionReserveMm: 12.0,
+      fontSizePt: 8,
+      noteFontSizePt: 8,
+    })
+    expect(report.captionBoxes.length).toBe(1)
+    // Custom description and title are substantially wider than short.png
+    expect(report.captionBoxes[0].w).toBeGreaterThan(60)
+  })
+
+  it('returns null when 50% scale still has conflicts due to extreme image dimensions', () => {
+    const optimal = computeOptimalPageScale({
+      images: [{ width: 200, height: 4000 }], // Extreme 1:20 portrait image
+      grid: { rows: 1, cols: 1 },
+      cellWidth: 100,
+      imageCellHeight: 80,
+      fixedWidthMm: 90,
+      scaleMode: 'fixed_width',
+      dpi: 300,
+      pageWidth: 210,
+      pageHeight: 297,
+      marginMm: 12,
+      showFilename: false,
+      captionPosition: 'below',
+      captionReserveMm: 0,
+      fontSizePt: 8,
+      pairMode: 'cell-center',
+    })
+    expect(optimal).toBeNull()
+  })
 })
+
