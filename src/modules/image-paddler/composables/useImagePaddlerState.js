@@ -904,13 +904,14 @@ export function useImagePaddlerState(options = {}) {
     const count = perPage.value
     const start = pageIdx * count
     const pageImgs = includedImages.value.slice(start, start + count)
-    if (!pageImgs.length) return []
+    if (!pageImgs.length) return { items: [], hasOverflow: false, hasOverlap: false, hasCaptionOverlap: false }
+    const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
     const currentScale =
       pageIdx === currentPageIndex.value
         ? activePageScale.value / 100
         : pageScales.value[pageIdx] ?? 1.0
 
-    const result = detectPageConflicts({
+    return detectPageConflicts({
       images: pageImgs,
       grid: compactGridForCount(layoutGrid.value, pageImgs.length),
       cellWidth: layoutMetrics.value.cellWidth,
@@ -919,14 +920,23 @@ export function useImagePaddlerState(options = {}) {
       pageScale: currentScale,
       scaleMode: settings.scale_mode,
       dpi: settings.dpi,
+      pageWidth: page.width,
+      pageHeight: page.height,
+      marginMm: Number(settings.margin_mm) || 0,
+      showFilename: settings.show_filename,
+      captionPosition: settings.caption_position,
+      captionReserveMm: layoutMetrics.value.filenameReserve,
+      fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
+      pairMode: settings.pair_mode,
     })
-    return result?.items || []
   }
 
-  const currentPageConflicts = computed(() => getPageConflicts(currentPageIndex.value))
+  const currentPageConflictReport = computed(() => getPageConflicts(currentPageIndex.value))
+  const currentPageConflicts = computed(() => currentPageConflictReport.value.items || [])
 
   const currentPageConflictState = computed(() => {
-    const conflicts = currentPageConflicts.value
+    const report = currentPageConflictReport.value
+    const conflicts = report.items || []
     const colors = conflicts.map((c) => c.color)
     const priority = ['red', 'yellow', 'green', 'blue', 'ok']
     let worstColor = 'ok'
@@ -936,9 +946,20 @@ export function useImagePaddlerState(options = {}) {
         break
       }
     }
+
+    let tip = DOCLET_TIPS[worstColor] || ''
+    if (worstColor === 'green') {
+      const isHighDensity = layoutGrid.value.rows * layoutGrid.value.cols >= 6
+      if (isHighDensity && settings.show_filename) {
+        tip = '高密度排版图片易超界，可调小统一宽度、缩小字号或关闭文件名。'
+      } else if (report.hasCaptionOverlap) {
+        tip = '图片探入标题区域，可调小本页比例或调小统一宽度。'
+      }
+    }
+
     return {
       worstColor,
-      docletTip: DOCLET_TIPS[worstColor] || '',
+      docletTip: tip,
     }
   })
 
@@ -947,9 +968,9 @@ export function useImagePaddlerState(options = {}) {
     if (index === -1) return null
     const count = perPage.value
     const pageIdx = Math.floor(index / count)
-    const conflicts = getPageConflicts(pageIdx)
+    const report = getPageConflicts(pageIdx)
     const slotIdx = index % count
-    const color = conflicts[slotIdx]?.color || 'ok'
+    const color = report.items?.[slotIdx]?.color || 'ok'
     const isModified = pageScales.value[pageIdx] !== undefined
     return {
       pageNumber: pageIdx + 1,
@@ -999,6 +1020,7 @@ export function useImagePaddlerState(options = {}) {
     goToPage,
     previewImages,
     previewSlots,
+    previewLayoutGrid,
     generatedOutputPaths,
     previewPageStyle,
     previewGridStyle,

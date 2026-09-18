@@ -75,4 +75,62 @@ describe('image layout preview', () => {
     expect(layoutOptionLabel('1x3', true)).toBe('3 张（上下）')
     expect(layoutOptionLabel('custom', true)).toContain('上下')
   })
+
+  it('golden fixture: 2x2 with pageScale 1.2 scales all 4 cells uniformly', () => {
+    const fourImages = Array.from({ length: 4 }, (_, i) => ({
+      path: `img_${i}.png`,
+      width: 800,
+      height: 600,
+    }))
+    const result1x = detectPageConflicts({
+      images: fourImages,
+      grid: { rows: 2, cols: 2 },
+      cellWidth: 90,
+      imageCellHeight: 120,
+      fixedWidthMm: 80,
+      pageScale: 1.0,
+      scaleMode: 'fixed_width',
+    })
+    expect(result1x.items.length).toBe(4)
+    expect(result1x.items[0].drawW).toBe(80)
+
+    const result1_2x = detectPageConflicts({
+      images: fourImages,
+      grid: { rows: 2, cols: 2 },
+      cellWidth: 90,
+      imageCellHeight: 120,
+      fixedWidthMm: 80,
+      pageScale: 1.2,
+      scaleMode: 'fixed_width',
+    })
+    // 80 * 1.2 = 96 > cellWidth 90 => overflow
+    expect(result1_2x.items[0].drawW).toBeCloseTo(96)
+    expect(result1_2x.items[0].overflow).toBe(true)
+    expect(result1_2x.hasOverflow).toBe(true)
+  })
+
+  it('golden fixture: 3x3 with filenames detects caption overlap and density warnings', () => {
+    const nineImages = Array.from({ length: 9 }, (_, i) => ({
+      path: `sample_photo_${i}.jpg`,
+      name: `测试图片名称_${i}.jpg`,
+      width: 600,
+      height: 800, // 竖长图
+    }))
+    const result = detectPageConflicts({
+      images: nineImages,
+      grid: { rows: 3, cols: 3 },
+      cellWidth: 60,
+      imageCellHeight: 65,
+      fixedWidthMm: 55,
+      pageScale: 1.0,
+      scaleMode: 'fixed_width',
+      showFilename: true,
+      captionReserveMm: 14,
+      captionPosition: 'below',
+    })
+    expect(result.items.length).toBe(9)
+    // 竖长图 55 * (800/600) = 73.3mm > imgAreaH (65) => 探入标题带并超界
+    expect(result.items[0].drawH).toBeCloseTo(73.33, 1)
+    expect(result.items[0].overflow).toBe(true)
+  })
 })

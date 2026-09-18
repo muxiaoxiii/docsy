@@ -342,7 +342,7 @@
             <!-- Single-page scale slider bar -->
             <div class="page-scale-bar">
               <div class="page-scale-label">
-                <span class="scale-title">调整本页图片</span>
+                <span class="scale-title">调整本页图片（共 {{ previewImages.length }} 张统一缩放）</span>
                 <el-tag v-if="hasSavedScale" size="small" type="primary" effect="plain">
                   已微调 ({{ Math.round((pageScales[currentPageIndex] ?? 1) * 100) }}%)
                 </el-tag>

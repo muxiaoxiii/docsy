@@ -186,4 +186,25 @@ describe('image paddler state integration', () => {
     expect(typeof badge.color).toBe('string')
     expect(typeof state.currentPageConflictState.value.worstColor).toBe('string')
   })
+
+  it('golden fixture: flow mode last page compacts without empty grid slots', () => {
+    const state = useImagePaddlerState()
+    const fiveImages = images.slice(0, 5)
+    state.analysis.value = { images: fiveImages }
+    state.settings.output_format = 'docx'
+    state.settings.use_table = false
+    state.settings.layout = '2x1' // Flow mode: 2 rows, 1 col per page
+
+    expect(state.totalPages.value).toBe(3)
+    // Page 0 has 2 images -> 2 rows, 1 col
+    expect(state.previewSlots.value.length).toBe(2)
+    expect(state.previewLayoutGrid.value).toEqual({ rows: 2, cols: 1 })
+
+    // Jump to last page (page index 2)
+    state.goToPage(2)
+    expect(state.currentPageIndex.value).toBe(2)
+    expect(state.previewSlots.value.length).toBe(1)
+    // 1 image on last page should compact to 1x1, without leftover empty slots
+    expect(state.previewLayoutGrid.value).toEqual({ rows: 1, cols: 1 })
+  })
 })

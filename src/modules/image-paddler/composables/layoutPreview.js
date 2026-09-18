@@ -58,6 +58,36 @@ export function pairOffsets(count, rows, cols, mode = 'cell-center') {
   return aligns
 }
 
+export function estimateTextWidthPt(text, fontSizePt = 8) {
+  let width = 0
+  for (const ch of String(text || '')) {
+    const code = ch.codePointAt(0)
+    const isCjk =
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x20000 && code <= 0x2a6df) ||
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0xff01 && code <= 0xff60) ||
+      (code >= 0xffe0 && code <= 0xffe6)
+    if (isCjk) {
+      width += fontSizePt * 1.0
+    } else {
+      width += fontSizePt * 0.52
+    }
+  }
+  return width
+}
+
+export function estimateTextWidthMm(text, fontSizePt = 8) {
+  return (estimateTextWidthPt(text, fontSizePt) * 25.4) / 72
+}
+
+function aabbIntersect(a, b, epsilon = 0.2) {
+  const iw = Math.min(a.right, b.right) - Math.max(a.x, b.x)
+  const ih = Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y)
+  return iw > epsilon && ih > epsilon
+}
+
 export function detectPageConflicts({
   images = [],
   grid = { rows: 1, cols: 1 },
@@ -67,13 +97,41 @@ export function detectPageConflicts({
   pageScale = 1.0,
   scaleMode = 'fixed_width',
   dpi = 300,
+  pageWidth,
+  pageHeight,
+  marginMm = 12,
+  showFilename = true,
+  captionPosition = 'below',
+  captionReserveMm = 0,
+  fontSizePt = 8,
+  pairMode = 'cell-center',
 }) {
-  const effectiveW = effectivePageWidth(fixedWidthMm, pageScale, cellWidth)
-  const isSingleColStack = grid.cols === 1 && grid.rows > 1
-  let hasAnyOverflow = false
-  let hasAnyOverlap = false
+  const rows = Math.max(1, Number(grid.rows) || 1)
+  const cols = Math.max(1, Number(grid.cols) || 1)
+  const margin = Math.max(0, Number(marginMm) || 0)
+  const cellW = Math.max(1, Number(cellWidth) || 1)
+  const captionH = showFilename ? Math.max(0, Number(captionReserveMm) || 0) : 0
+  const cellH = Math.max(1, Number(imageCellHeight) || 1) + captionH
+  const pageW = Number(pageWidth) || (cols * cellW + margin * 2)
+  const pageH = Number(pageHeight) || (rows * cellH + margin * 2)
 
-  const results = images.map((img) => {
+  const effectiveW = effectivePageWidth(fixedWidthMm, pageScale, 500)
+  const offsets = pairOffsets(images.length, rows, cols, pairMode)
+
+  // 1. 计算同页每张图和每个标题的几何 AABB（mm 页面坐标系）
+  const imageBoxes = []
+  const captionBoxes = []
+
+  images.forEach((img, idx) => {
+    const r = Math.floor(idx / cols)
+    const c = idx % cols
+    const cellX = margin + c * cellW
+    const cellY = margin + r * cellH
+
+    const imgAreaY = captionPosition === 'above' ? cellY + captionH : cellY
+    const imgAreaH = Math.max(1, cellH - captionH)
+    const capAreaY = captionPosition === 'above' ? cellY : cellY + imgAreaH
+
     let drawW, drawH
     if (scaleMode === 'fixed_width') {
       const ratio = img.width > 0 ? img.height / img.width : 1
@@ -83,21 +141,95 @@ export function detectPageConflicts({
       const safeDpi = dpi === 0 ? 300 : Math.min(1200, Math.max(72, dpi))
       const nativeW = (img.width * 25.4) / safeDpi
       const nativeH = (img.height * 25.4) / safeDpi
-      const fitScale = Math.min(cellWidth / nativeW, imageCellHeight / nativeH) * pageScale
+      const fitScale = Math.min(cellW / nativeW, imgAreaH / nativeH) * pageScale
       const scale = scaleMode === 'original' ? Math.min(fitScale, 1.0) : fitScale
       drawW = nativeW * scale
       drawH = nativeH * scale
     }
 
-    const overflow = drawH > imageCellHeight + 0.5 || drawW > cellWidth + 0.5
-    if (overflow) hasAnyOverflow = true
+    const alignVal = offsets[idx] || 'center'
+    const alignX = typeof alignVal === 'object' ? alignVal.x : (alignVal === 'left' || alignVal === 'right' ? alignVal : 'center')
+    const alignY = typeof alignVal === 'object' ? alignVal.y : (alignVal === 'top' || alignVal === 'bottom' ? alignVal : 'center')
 
-    // 在单列多图（如 2x1）垂直排列时，若图高超过各自格高，可能穿透重叠
-    const overlap = isSingleColStack && drawH > imageCellHeight + 2.0
+    let imgX = cellX + (cellW - drawW) / 2
+    if (alignX === 'left') imgX = cellX
+    else if (alignX === 'right') imgX = cellX + cellW - drawW
+
+    let imgY = imgAreaY + (imgAreaH - drawH) / 2
+    if (alignY === 'top') imgY = imgAreaY
+    else if (alignY === 'bottom') imgY = imgAreaY + imgAreaH - drawH
+
+    const rectImg = {
+      index: idx,
+      path: img.path,
+      x: imgX,
+      y: imgY,
+      w: drawW,
+      h: drawH,
+      right: imgX + drawW,
+      bottom: imgY + drawH,
+      cellW,
+      imgAreaH,
+    }
+    imageBoxes.push(rectImg)
+
+    if (showFilename && captionH > 0) {
+      const name = img.name || img.path || ''
+      const textW = Math.min(cellW, Math.max(10, estimateTextWidthMm(name, fontSizePt)))
+      const capX = cellX + (cellW - textW) / 2
+      captionBoxes.push({
+        index: idx,
+        x: capX,
+        y: capAreaY,
+        w: textW,
+        h: captionH,
+        right: capX + textW,
+        bottom: capAreaY + captionH,
+      })
+    }
+  })
+
+  // 2. 检测图-图重叠与图-文重叠
+  let hasAnyOverflow = false
+  let hasAnyOverlap = false
+  let hasAnyCaptionOverlap = false
+
+  const results = imageBoxes.map((box, idx) => {
+    const img = images[idx]
+
+    // (a) 图与同页其他任意图相交 (多图网格任意两两相交)
+    let overlap = false
+    for (let j = 0; j < imageBoxes.length; j += 1) {
+      if (j !== idx && aabbIntersect(box, imageBoxes[j], 0.2)) {
+        overlap = true
+        break
+      }
+    }
     if (overlap) hasAnyOverlap = true
 
+    // (b) 图探入标题区域（压字）
+    let captionOverlap = false
+    for (let k = 0; k < captionBoxes.length; k += 1) {
+      if (aabbIntersect(box, captionBoxes[k], 0.2)) {
+        captionOverlap = true
+        break
+      }
+    }
+    if (captionOverlap) hasAnyCaptionOverlap = true
+
+    // (c) 超界检测：超出图区、或者超出页面打印版心、或者压字
+    const exceedsImageArea = box.w > box.cellW + 0.5 || box.h > box.imgAreaH + 0.5
+    const exceedsPageMargin =
+      box.x < margin - 0.5 ||
+      box.right > pageW - margin + 0.5 ||
+      box.y < margin - 0.5 ||
+      box.bottom > pageH - margin + 0.5
+
+    const overflow = exceedsImageArea || exceedsPageMargin || captionOverlap
+    if (overflow) hasAnyOverflow = true
+
     const ratio = img.width > 0 ? img.height / img.width : 1
-    const review = !overflow && !overlap && (ratio > 1.55 || ratio < 0.55 || drawW >= cellWidth - 1.0)
+    const review = !overflow && !overlap && (ratio > 1.55 || ratio < 0.55 || box.w >= box.cellW - 1.0)
 
     let color = 'ok'
     if (overlap && overflow) color = 'red'
@@ -107,11 +239,12 @@ export function detectPageConflicts({
 
     return {
       path: img.path,
-      drawW,
-      drawH,
+      drawW: box.w,
+      drawH: box.h,
       color,
       overflow,
       overlap,
+      captionOverlap,
       review,
     }
   })
@@ -120,6 +253,7 @@ export function detectPageConflicts({
     items: results,
     hasOverflow: hasAnyOverflow,
     hasOverlap: hasAnyOverlap,
+    hasCaptionOverlap: hasAnyCaptionOverlap,
   }
 }
 
