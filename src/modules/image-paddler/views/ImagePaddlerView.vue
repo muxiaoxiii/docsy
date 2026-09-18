@@ -100,7 +100,7 @@
               <el-slider
                 v-model="settings.fixed_width_mm"
                 :min="0.1"
-                :max="safeColumnWidthValue"
+                :max="Math.max(safeColumnWidthValue, 300)"
                 :step="0.1"
                 class="width-slider"
               />
@@ -108,7 +108,7 @@
                 <el-input-number
                   v-model="settings.fixed_width_mm"
                   :min="0.1"
-                  :max="safeColumnWidthValue"
+                  :max="500"
                   :step="0.1"
                   :precision="1"
                   size="small"
@@ -120,10 +120,10 @@
                 </el-button>
               </div>
               <div class="field-hint">
-                实际宽度 {{ actualImageWidth.toFixed(1) }} mm · 打印安全栏宽 {{ safeColumnWidthValue.toFixed(1) }} mm
+                设定宽度 {{ actualImageWidth.toFixed(1) }} mm · 打印安全栏宽 {{ safeColumnWidthValue.toFixed(1) }} mm
               </div>
               <div v-if="widthIsLimited" class="field-hint" role="status">
-                设定宽度超过安全栏宽，已限制为实际宽度。要放大图片，请减少每页张数、切换横向或减小页边距。
+                设定宽度超过打印安全栏宽，可能产生页面溢出。系统将原样导出供 Word/WPS 中微调；您也可点击「推荐」恢复安全宽度。
               </div>
             </div>
           </el-form-item>

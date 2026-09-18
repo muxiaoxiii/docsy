@@ -293,7 +293,7 @@ export function useImagePaddlerState(options = {}) {
   })
   const maximumImageWidth = computed(() => safeColumnWidthValue.value)
   const currentRecommendedWidth = computed(() => Math.floor(safeColumnWidthValue.value * 10) / 10)
-  const actualImageWidth = computed(() => effectiveImageWidth(settings.fixed_width_mm, safeColumnWidthValue.value))
+  const actualImageWidth = computed(() => Math.min(Math.max(0.1, Number(settings.fixed_width_mm) || 160), 500))
   const widthIsLimited = computed(() => Number(settings.fixed_width_mm) > safeColumnWidthValue.value)
 
   const currentPageScale = computed(() => (Number(activePageScale.value) || 100) / 100)
