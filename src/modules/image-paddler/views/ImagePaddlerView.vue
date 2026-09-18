@@ -968,27 +968,27 @@ function hasCellCaption(img) {
 }
 
 .doclet-tip-bar.tip-yellow {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: #92400e;
+  background: rgba(253, 246, 236, 0.95);
+  border-color: rgba(183, 121, 52, 0.35);
+  color: #8a541c;
 }
 
 .doclet-tip-bar.tip-green {
-  background: #ecfdf5;
-  border-color: #a7f3d0;
-  color: #065f46;
+  background: rgba(234, 243, 222, 0.95);
+  border-color: rgba(79, 125, 90, 0.35);
+  color: #395c41;
 }
 
 .doclet-tip-bar.tip-red {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #991b1b;
+  background: rgba(252, 235, 235, 0.95);
+  border-color: rgba(181, 82, 75, 0.35);
+  color: #943b35;
 }
 
 .doclet-tip-bar.tip-blue {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #1e40af;
+  background: rgba(237, 244, 248, 0.95);
+  border-color: rgba(82, 121, 153, 0.35);
+  color: #2d5873;
 }
 
 .doclet-tip-text {

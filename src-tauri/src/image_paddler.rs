@@ -357,9 +357,9 @@ fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig 
         (usable_height / compact_grid.rows as f64 - page.filename_reserve_mm).max(1.0);
     page.grid = compact_grid;
 
-    // Enforce print_safety_pad_mm constraint: fixed_width_mm cannot exceed safe column width
+    // Enforce print_safety_pad_mm constraint: fixed_width_mm cannot exceed base grid's safe column width
     if let Some(w) = page.fixed_width_mm {
-        let safe_w = page.safe_column_width_mm();
+        let safe_w = config.safe_column_width_mm();
         if w > safe_w {
             page.fixed_width_mm = Some(safe_w);
         }
@@ -933,8 +933,19 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
         image_annotations: args.image_annotations.clone().unwrap_or_default(),
     };
 
+    let mut initial_warnings = Vec::new();
     if config.scale_mode == "fixed_width" {
-        config.fixed_width_mm = Some(config.fixed_width_mm.unwrap_or(160.0).clamp(0.1, 500.0));
+        let requested = config.fixed_width_mm.unwrap_or(160.0);
+        let safe_w = config.safe_column_width_mm();
+        if requested > safe_w {
+            initial_warnings.push(format!(
+                "指定的图片宽度 ({:.1}mm) 超出打印安全栏宽 ({:.1}mm)，已自动收紧至安全宽度以保证页面排版规范。",
+                requested, safe_w
+            ));
+            config.fixed_width_mm = Some(safe_w);
+        } else {
+            config.fixed_width_mm = Some(requested.clamp(0.1, 500.0));
+        }
     }
 
     std::fs::create_dir_all(output_dir)?;
@@ -952,11 +963,11 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
         .unwrap_or_else(|| output_file_stem(&images));
     let output_path = unique_output_path(output_dir, &format!("{output_stem}_docsy_paddler"), ext);
 
-    let warnings = match args.output_format.as_str() {
-        "pdf" => generate_pdf(&images, &output_path, &config)?,
+    let mut warnings = initial_warnings;
+    match args.output_format.as_str() {
+        "pdf" => warnings.extend(generate_pdf(&images, &output_path, &config)?),
         _ => {
             generate_docx(&images, &output_path, &config)?;
-            Vec::new()
         }
     };
 
@@ -3057,5 +3068,16 @@ mod tests {
         assert_eq!(page.safe_column_width_mm(), 180.0);
         // fixed_width_mm must be clamped from 200mm down to 180mm
         assert_eq!(page.fixed_width_mm, Some(180.0));
+
+        // Test 2: In a 2x2 grid (cols=2), cell_w = 93mm, pad = 6mm -> safe = 87mm.
+        // Even if the final page has only 1 image (compacted to 1x1), the clamp
+        // must use the base grid's safe width (87mm) to maintain document-wide column consistency.
+        let mut config_2x2 = config.clone();
+        config_2x2.grid = LayoutGrid { rows: 2, cols: 2 };
+        config_2x2.cell_w_mm = 93.0;
+        config_2x2.fixed_width_mm = Some(120.0); // 120mm > 87mm
+        let page_compact = layout_for_page(&config_2x2, &images);
+        assert_eq!(page_compact.grid.cols, 1); // Compacted to 1 col
+        assert_eq!(page_compact.fixed_width_mm, Some(87.0)); // Clamped to base grid safe width 87mm
     }
 }

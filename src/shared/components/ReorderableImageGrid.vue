@@ -628,41 +628,41 @@ watch(page, async () => {
   color: var(--docsy-primary);
 }
 .badge-color-yellow {
-  border-color: #f59e0b;
-  color: #d97706;
-  background: #fef3c7;
+  border-color: rgba(183, 121, 52, 0.45);
+  color: #8a541c;
+  background: rgba(253, 246, 236, 0.95);
 }
 .badge-color-green {
-  border-color: #10b981;
-  color: #059669;
-  background: #d1fae5;
+  border-color: rgba(79, 125, 90, 0.45);
+  color: #395c41;
+  background: rgba(234, 243, 222, 0.95);
 }
 .badge-color-red {
-  border-color: #ef4444;
-  color: #dc2626;
-  background: #fee2e2;
+  border-color: rgba(181, 82, 75, 0.45);
+  color: #943b35;
+  background: rgba(252, 235, 235, 0.95);
 }
 .badge-color-blue {
-  border-color: #3b82f6;
-  color: #2563eb;
-  background: #dbeafe;
+  border-color: rgba(82, 121, 153, 0.45);
+  color: #2d5873;
+  background: rgba(237, 244, 248, 0.95);
 }
 
 .card-conflict-yellow {
-  border-color: rgba(245, 158, 11, 0.7) !important;
-  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
+  border-color: rgba(183, 121, 52, 0.65) !important;
+  box-shadow: 0 0 0 1px rgba(183, 121, 52, 0.16);
 }
 .card-conflict-green {
-  border-color: rgba(16, 185, 129, 0.7) !important;
-  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2);
+  border-color: rgba(79, 125, 90, 0.65) !important;
+  box-shadow: 0 0 0 1px rgba(79, 125, 90, 0.16);
 }
 .card-conflict-red {
-  border-color: rgba(239, 68, 68, 0.8) !important;
-  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.3);
+  border-color: rgba(181, 82, 75, 0.7) !important;
+  box-shadow: 0 0 0 1px rgba(181, 82, 75, 0.2);
 }
 .card-conflict-blue {
-  border-color: rgba(59, 130, 246, 0.6) !important;
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+  border-color: rgba(82, 121, 153, 0.55) !important;
+  box-shadow: 0 0 0 1px rgba(82, 121, 153, 0.15);
 }
 
 .reorder-image-handle.is-disabled {
