@@ -339,7 +339,6 @@ fn caption_reserve_for_page(
 }
 
 fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig {
-    let _ = config.safe_column_width_mm();
     let image_count = images.len();
     let capacity = config.grid.rows * config.grid.cols;
     let mut page = config.clone();
@@ -357,6 +356,14 @@ fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig 
     page.image_cell_h_mm =
         (usable_height / compact_grid.rows as f64 - page.filename_reserve_mm).max(1.0);
     page.grid = compact_grid;
+
+    // Enforce print_safety_pad_mm constraint: fixed_width_mm cannot exceed safe column width
+    if let Some(w) = page.fixed_width_mm {
+        let safe_w = page.safe_column_width_mm();
+        if w > safe_w {
+            page.fixed_width_mm = Some(safe_w);
+        }
+    }
     page
 }
 
@@ -1116,24 +1123,6 @@ fn dedupe_parts(parts: Vec<String>) -> Vec<String> {
         }
     }
     result
-}
-
-#[allow(dead_code)]
-fn display_filename_lines(
-    path: &str,
-    without_ext: bool,
-    remove_text: &str,
-    rules: &[FilenameRule],
-    cell_w_mm: f64,
-    font_size_pt: f64,
-    max_lines: usize,
-) -> Vec<String> {
-    wrap_filename_lines(
-        &display_filename(path, without_ext, remove_text, rules),
-        cell_w_mm,
-        max_lines,
-        font_size_pt,
-    )
 }
 
 fn filename_lines_for_images(
@@ -2956,5 +2945,117 @@ mod tests {
         let row1_draw_y_mm = margin_mm + (image_cell_h_mm + filename_reserve_mm);
         assert!((row1_draw_x_mm - 25.0).abs() < 0.01);
         assert!((row1_draw_y_mm - 148.5).abs() < 0.01);
+
+        // Golden Scenario 2: 2x1 page-spread with page_scale 1.25 and fixed_width 120mm
+        let aligns2 = pair_offsets(2, 2, 1, "page-spread");
+        assert_eq!(aligns2, vec!["top", "bottom"]);
+        let (draw_w_pt2, draw_h_pt2, _, _) = compute_placement(
+            1500,
+            1000,
+            cell_w_pt,
+            cell_h_pt,
+            "fixed_width",
+            300,
+            Some(120.0),
+            1.25,
+        );
+        let draw_w_mm2 = draw_w_pt2 * 25.4 / 72.0;
+        let draw_h_mm2 = draw_h_pt2 * 25.4 / 72.0;
+        assert!((draw_w_mm2 - 150.0).abs() < 0.01);
+        assert!((draw_h_mm2 - 100.0).abs() < 0.01);
+        // Image 0 (row 0, top-aligned):
+        let s2_img0_x = margin_mm + (cell_w_mm - draw_w_mm2) / 2.0;
+        let s2_img0_y = margin_mm; // top of cell 0
+        assert!((s2_img0_x - 30.0).abs() < 0.01);
+        assert!((s2_img0_y - 12.0).abs() < 0.01);
+        // Image 1 (row 1, bottom-aligned):
+        let s2_img1_x = margin_mm + (cell_w_mm - draw_w_mm2) / 2.0;
+        let s2_img1_y = margin_mm + (image_cell_h_mm + filename_reserve_mm) + (image_cell_h_mm - draw_h_mm2);
+        assert!((s2_img1_x - 30.0).abs() < 0.01);
+        assert!((s2_img1_y - 179.8).abs() < 0.01);
+
+        // Golden Scenario 3: 1x2 side-by-side with caption above (cell_w = 93mm, img_h = 265mm, reserve = 8mm)
+        let cell_w_s3 = 93.0;
+        let img_h_s3 = 265.0;
+        let reserve_s3 = 8.0;
+        let aligns3 = pair_offsets(2, 1, 2, "page-gather");
+        assert_eq!(aligns3, vec!["right", "left"]);
+        let (draw_w_pt3, draw_h_pt3, _, _) = compute_placement(
+            800,
+            1200,
+            cell_w_s3 * 72.0 / 25.4,
+            img_h_s3 * 72.0 / 25.4,
+            "fixed_width",
+            300,
+            Some(80.0),
+            1.0,
+        );
+        let draw_w_mm3 = draw_w_pt3 * 25.4 / 72.0;
+        let draw_h_mm3 = draw_h_pt3 * 25.4 / 72.0;
+        assert!((draw_w_mm3 - 80.0).abs() < 0.01);
+        assert!((draw_h_mm3 - 120.0).abs() < 0.01);
+        // Image 0 (col 0, right-aligned, caption above):
+        let s3_img0_x = margin_mm + (cell_w_s3 - draw_w_mm3);
+        let s3_img0_y = margin_mm + reserve_s3 + (img_h_s3 - draw_h_mm3) / 2.0;
+        assert!((s3_img0_x - 25.0).abs() < 0.01);
+        assert!((s3_img0_y - 92.5).abs() < 0.01);
+        // Image 1 (col 1, left-aligned, caption above):
+        let s3_img1_x = margin_mm + cell_w_s3;
+        let s3_img1_y = margin_mm + reserve_s3 + (img_h_s3 - draw_h_mm3) / 2.0;
+        assert!((s3_img1_x - 105.0).abs() < 0.01);
+        assert!((s3_img1_y - 92.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_layout_for_page_clamps_fixed_width_to_safe_column_width() {
+        let config = LayoutConfig {
+            page_w_mm: 210.0,
+            page_h_mm: 297.0,
+            margin_mm: 12.0,
+            grid: LayoutGrid { rows: 2, cols: 1 },
+            cell_w_mm: 186.0,
+            image_cell_h_mm: 120.0,
+            filename_reserve_mm: 8.0,
+            show_filename: false,
+            filename_without_ext: false,
+            filename_font_family: "sans".into(),
+            filename_font_size_pt: 8.0,
+            filename_max_lines: 2,
+            filename_safety_mm: 2.0,
+            filename_remove_text: String::new(),
+            filename_rules: Vec::new(),
+            border_enabled: false,
+            border_color: "black".into(),
+            scale_mode: "fixed_width".into(),
+            dpi: 300,
+            use_table: true,
+            fixed_width_mm: Some(200.0), // Requested 200mm > safe width 180mm
+            filename_color: "dark_gray".into(),
+            caption_position: "below".into(),
+            pair_mode: "cell-center".into(),
+            print_safety_pad_mm: 6.0,
+            page_scales: Vec::new(),
+            reserve_note_placeholder: false,
+            note_placeholder_text: String::new(),
+            note_font_family: "sans".into(),
+            note_font_size_pt: 8.0,
+            note_color: "gray".into(),
+            image_annotations: std::collections::HashMap::new(),
+        };
+
+        let images = vec![
+            ImageInfo {
+                path: "img1.png".into(),
+                width: 1000,
+                height: 1000,
+                file_size: 1,
+            },
+        ];
+
+        let page = layout_for_page(&config, &images);
+        // cell_w = 186mm, pad = 6mm -> safe_column_width = 180mm
+        assert_eq!(page.safe_column_width_mm(), 180.0);
+        // fixed_width_mm must be clamped from 200mm down to 180mm
+        assert_eq!(page.fixed_width_mm, Some(180.0));
     }
 }

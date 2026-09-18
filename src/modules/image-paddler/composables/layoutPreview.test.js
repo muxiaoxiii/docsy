@@ -251,6 +251,82 @@ describe('image layout preview', () => {
     expect(Math.abs(boxes[1].y - 148.5)).toBeLessThan(0.05)
   })
 
+  it('matches Rust backend golden fixture: 2x1 page-spread with pageScale 1.25 and annotations (<0.05mm)', () => {
+    const report = detectPageConflicts({
+      images: [
+        { path: 'img0.png', width: 1500, height: 1000, title: '标题 1', description: '说明文字 1' },
+        { path: 'img1.png', width: 1500, height: 1000, title: '标题 2', description: '说明文字 2' },
+      ],
+      grid: { rows: 2, cols: 1 },
+      cellWidth: 186.0,
+      imageCellHeight: 131.3,
+      fixedWidthMm: 120.0,
+      pageScale: 1.25,
+      scaleMode: 'fixed_width',
+      dpi: 300,
+      pageWidth: 210,
+      pageHeight: 297,
+      marginMm: 12.0,
+      showFilename: true,
+      captionPosition: 'below',
+      captionReserveMm: 5.2,
+      pairMode: 'page-spread',
+    })
+
+    const boxes = report.imageBoxes
+    expect(boxes).toHaveLength(2)
+
+    // Image 0: drawW=150, drawH=100, top-aligned in cell 0
+    expect(Math.abs(boxes[0].w - 150.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].h - 100.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].x - 30.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].y - 12.0)).toBeLessThan(0.05)
+
+    // Image 1: drawW=150, drawH=100, bottom-aligned in cell 1
+    expect(Math.abs(boxes[1].w - 150.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].h - 100.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].x - 30.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].y - 179.8)).toBeLessThan(0.05)
+  })
+
+  it('matches Rust backend golden fixture: 1x2 side-by-side with caption above (<0.05mm)', () => {
+    const report = detectPageConflicts({
+      images: [
+        { path: 'left.png', width: 800, height: 1200 },
+        { path: 'right.png', width: 800, height: 1200 },
+      ],
+      grid: { rows: 1, cols: 2 },
+      cellWidth: 93.0,
+      imageCellHeight: 265.0,
+      fixedWidthMm: 80.0,
+      pageScale: 1.0,
+      scaleMode: 'fixed_width',
+      dpi: 300,
+      pageWidth: 210,
+      pageHeight: 297,
+      marginMm: 12.0,
+      showFilename: true,
+      captionPosition: 'above',
+      captionReserveMm: 8.0,
+      pairMode: 'page-gather',
+    })
+
+    const boxes = report.imageBoxes
+    expect(boxes).toHaveLength(2)
+
+    // Image 0: right-aligned in col 0
+    expect(Math.abs(boxes[0].w - 80.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].h - 120.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].x - 25.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[0].y - 92.5)).toBeLessThan(0.05)
+
+    // Image 1: left-aligned in col 1
+    expect(Math.abs(boxes[1].w - 80.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].h - 120.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].x - 105.0)).toBeLessThan(0.05)
+    expect(Math.abs(boxes[1].y - 92.5)).toBeLessThan(0.05)
+  })
+
   it('extracts basename for caption width to prevent long directory paths from triggering overlap', () => {
     const report = detectPageConflicts({
       images: [

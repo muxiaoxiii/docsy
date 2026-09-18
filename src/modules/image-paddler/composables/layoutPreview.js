@@ -81,23 +81,30 @@ export function pairAlignToXY(align) {
 }
 
 export function estimateTextWidthPt(text, fontSizePt = 8) {
-  let width = 0
-  for (const ch of String(text || '')) {
-    const code = ch.codePointAt(0)
-    const isCjk =
-      (code >= 0x4e00 && code <= 0x9fff) ||
-      (code >= 0x3400 && code <= 0x4dbf) ||
-      (code >= 0x20000 && code <= 0x2a6df) ||
-      (code >= 0x3000 && code <= 0x303f) ||
-      (code >= 0xff01 && code <= 0xff60) ||
-      (code >= 0xffe0 && code <= 0xffe6)
-    if (isCjk) {
-      width += fontSizePt * 1.0
-    } else {
-      width += fontSizePt * 0.52
+  const lines = String(text || '').split(/\r?\n/)
+  let maxWidth = 0
+  for (const line of lines) {
+    let width = 0
+    for (const ch of line) {
+      const code = ch.codePointAt(0)
+      const isCjk =
+        (code >= 0x4e00 && code <= 0x9fff) ||
+        (code >= 0x3400 && code <= 0x4dbf) ||
+        (code >= 0x20000 && code <= 0x2a6df) ||
+        (code >= 0x3000 && code <= 0x303f) ||
+        (code >= 0xff01 && code <= 0xff60) ||
+        (code >= 0xffe0 && code <= 0xffe6)
+      if (isCjk) {
+        width += fontSizePt * 1.0
+      } else {
+        width += fontSizePt * 0.52
+      }
+    }
+    if (width > maxWidth) {
+      maxWidth = width
     }
   }
-  return width
+  return maxWidth
 }
 
 export function estimateTextWidthMm(text, fontSizePt = 8) {
