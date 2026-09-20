@@ -9,8 +9,8 @@
       description="Markdown、Office 与 PDF 文本层互转；生成的 Word、Excel 和演示文稿均可继续编辑。"
     >
       <template #toolbar>
-        <el-button type="primary" @click="selectFiles">选择 Markdown / Office / PDF 文件</el-button>
-        <el-button type="success" :disabled="converting || !hasPendingFiles" @click="runQueue"> 开始转换 </el-button>
+        <el-button type="primary" plain :disabled="converting" @click="selectFiles">添加 Markdown / Office / PDF 文件</el-button>
+        <el-button type="success" :loading="converting" :disabled="!hasPendingFiles" @click="runQueue"> 开始转换 </el-button>
       </template>
 
       <div class="convert-workspace">
@@ -25,7 +25,7 @@
           <div class="file-convert-options">
             <span class="option-label">转成 Markdown</span>
             <span class="option-hint">
-              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 拖入即转；暂不支持 HTML 转 Markdown（.html
+              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 添加后点击“开始转换”；暂不支持 HTML 转 Markdown（.html
               文件会被忽略）。
             </span>
           </div>
@@ -40,7 +40,7 @@
             <el-select
               v-if="fileOfficeFormat === 'docx'"
               v-model="docxStyle"
-              :disabled="converting"
+              :disabled="pasteConverting || converting"
               class="style-select"
             >
               <el-option label="通用专业版式" value="professional" />
@@ -76,6 +76,7 @@
           </div>
           <FileQueuePanel
             :items="files"
+            :busy="converting"
             empty-text="选择或拖入 Markdown、Office 或 PDF 文件，转换结果保存在源文件旁"
             @clear="clearFiles"
             @remove="removeFile"
@@ -93,10 +94,10 @@
                 size="small"
                 @click="openOutput(item)"
               >
-                打开
+                打开文件
               </el-button>
-              <el-button v-if="item.status !== 'processing'" link type="danger" size="small" @click="removeFile(index)">
-                删除
+              <el-button v-if="item.status !== 'processing'" :disabled="converting" link type="danger" size="small" @click="removeFile(index)">
+                移除
               </el-button>
             </template>
           </FileQueuePanel>
@@ -112,6 +113,7 @@
           </div>
           <el-input
             v-model="pasteText"
+            :disabled="pasteConverting"
             type="textarea"
             :rows="9"
             resize="vertical"
@@ -127,7 +129,7 @@
             <el-select
               v-if="pasteFormat === 'docx'"
               v-model="docxStyle"
-              :disabled="pasteConverting"
+              :disabled="pasteConverting || converting"
               class="style-select"
             >
               <el-option label="通用专业版式" value="professional" />
@@ -154,7 +156,7 @@
           </div>
           <div v-if="pasteOutputPath" class="result-line output-result">
             <span>已生成：{{ pasteOutputPath }}</span>
-            <el-button link type="primary" size="small" @click="openPasteOutputDir">打开所在文件夹</el-button>
+            <el-button link type="primary" size="small" @click="openPasteOutputDir">打开文件夹</el-button>
           </div>
         </section>
       </div>
@@ -163,7 +165,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
@@ -203,7 +205,7 @@ const preference = useWorkspacePreferences('markdown-convert.workspace', {
 })
 
 const hasPdfInQueue = computed(() => files.value.some((item) => extensionOf(item.path) === 'pdf'))
-const hasPendingFiles = computed(() => files.value.some((item) => item.status === 'pending'))
+const hasPendingFiles = computed(() => files.value.some((item) => ['pending', 'failed', 'cancelled'].includes(item.status)))
 
 const markdownExtensions = ['md', 'markdown', 'mdown', 'mkdn', 'mdwn', 'mdtxt']
 const officeExtensions = [
@@ -277,6 +279,7 @@ async function selectFiles() {
 }
 
 async function loadFiles(paths) {
+  if (converting.value) return
   const busy = new Set(
     files.value.filter((item) => ['pending', 'processing'].includes(item.status)).map((item) => item.path),
   )
@@ -337,13 +340,27 @@ async function loadFiles(paths) {
 }
 
 function clearFiles() {
+  if (converting.value) return
   files.value = files.value.filter((item) => item.status === 'processing')
   summary.value = ''
 }
 
 function removeFile(index) {
+  if (converting.value) return
   if (files.value[index]?.status !== 'processing') files.value.splice(index, 1)
 }
+
+function syncQueuedOptions() {
+  if (converting.value) return
+  for (const item of files.value) {
+    if (item.status === 'done' || !isMarkdownPath(item.path)) continue
+    item.outputFormat = fileOfficeFormat.value
+    item.docxStyle = docxStyle.value
+    item.directionTag = directionTag(item.path, fileOfficeFormat.value)
+  }
+}
+
+watch([fileOfficeFormat, docxStyle], syncQueuedOptions)
 
 async function runQueue() {
   if (converting.value) return
@@ -354,6 +371,10 @@ async function runQueue() {
     ElMessage.error('PDF 结束页不能早于起始页')
     return
   }
+  for (const item of files.value) {
+    if (['failed', 'cancelled'].includes(item.status)) item.status = 'pending'
+  }
+  syncQueuedOptions()
   converting.value = true
   queueCancellation.reset()
   const processed = []
@@ -416,7 +437,7 @@ async function runQueue() {
   const done = processed.filter((item) => item.status === 'done')
   const failed = processed.filter((item) => item.status === 'failed')
   const cancelled = queueCancellation.cancelled.value || processed.some((item) => item.status === 'cancelled')
-  summary.value = `${cancelled ? '转换已取消，已完成' : '转换完成'} ${done.length}/${processed.length}`
+  summary.value = `${cancelled ? '转换已停止，已完成' : '转换完成'} ${done.length}/${processed.length}`
   if (failed.length) summary.value += `；失败：${failed.map((item) => item.name).join('、')}`
   ElNotification({
     type: failed.length ? 'warning' : cancelled ? 'info' : 'success',

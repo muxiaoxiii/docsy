@@ -6,7 +6,7 @@
           <h3>导入标黄 Word</h3>
           <p>在 Word 里把可替换文字或勾选符号标黄，再导入确认字段。</p>
         </div>
-        <el-button type="primary" :loading="scanning" @click="$emit('select-source-docx')">选择 Word</el-button>
+        <el-button type="primary" plain :disabled="saving" :loading="scanning" @click="$emit('select-source-docx')">选择 Word</el-button>
       </div>
 
       <el-descriptions v-if="sourceDocx" :column="2" size="small" border>

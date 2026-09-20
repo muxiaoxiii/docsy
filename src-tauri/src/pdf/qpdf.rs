@@ -5,7 +5,8 @@ use std::process::ExitStatus;
 
 /// Run a command through the SubprocessRegistry if available, otherwise fall back to .output().
 /// `label` is used as a human-readable operation ID prefix for cancellation tracking.
-fn run_cancellable(label: &str, mut cmd: std::process::Command) -> Result<std::process::Output> {
+pub(crate) fn run_cancellable(label: &str, mut cmd: std::process::Command) -> Result<std::process::Output> {
+    crate::operations::check_current_cancelled()?;
     if let Some(registry) = crate::get_subprocess_registry() {
         let op_id = format!("qpdf:{label}:{}", std::process::id());
         registry
@@ -155,30 +156,6 @@ pub fn merge(inputs: &[String], output: &str, duplex_separate: bool) -> Result<S
     Ok(output_path.display().to_string())
 }
 
-/// 无损拼接分段结果（不压平批注、不做图像重编码），供分段处理收尾使用。
-pub fn merge_lossless(inputs: &[String], output: &Path) -> Result<()> {
-    if inputs.is_empty() {
-        anyhow::bail!("没有可合并的分段结果");
-    }
-    let qpdf = crate::external::QpdfTool;
-    let bin = qpdf.binary_path()?;
-    let mut cmd = crate::external::hidden_command(&bin);
-    add_optimization_args(&mut cmd);
-    cmd.arg("--empty").arg("--pages");
-    for input in inputs {
-        cmd.arg(input);
-    }
-    cmd.arg("--").arg(output);
-    let result = run_cancellable("合并分段", cmd)?;
-    if !status_is_success(&result.status) {
-        anyhow::bail!(
-            "合并分段结果失败（{}）：{}",
-            bin.display(),
-            crate::external::command_failure_detail(&result)
-        );
-    }
-    Ok(())
-}
 
 /// 生成与 `input` 最后一页同尺寸的空白页，用于双面打印分隔。
 fn make_blank_page_for(input: &str) -> Result<crate::util::fs::TempPathGuard> {
@@ -210,13 +187,9 @@ where
     // 默认只做无损结构整理。图片解码/重编码必须由用户明确开启，
     // 否则大扫描件会进入很长的图片处理流程，和证据处理的快速无损路径不一致。
     let Some(level) = level else {
-        progress(super::compress::CompressProgress::phase("按页重建 PDF"));
+        progress(super::compress::CompressProgress::phase("无损整理 PDF"));
         let output_path = unique_output_path_in_dir(input_path, output_dir, "_compressed");
-        // Keep the standalone default identical to the evidence workflow.
-        // A plain qpdf rewrite only recompresses reachable streams; rebuilding
-        // the page tree also drops otherwise unreachable objects left by common
-        // scanners and PDF editors, which is where large evidence files often
-        // gain most of their size back.
+        // Retain the original document catalog and recovery metadata.
         rebuild_pages(input_path, &output_path)?;
         let output_size = std::fs::metadata(&output_path)?.len();
         progress(super::compress::CompressProgress::done());
@@ -231,6 +204,7 @@ where
 
     // Step 1: 图片重编码压缩
     let temp_path = unique_output_path_in_dir(input_path, output_dir, "_imgtmp");
+    let _temp_guard = crate::util::fs::TempPathGuard::new(temp_path.clone());
     progress(super::compress::CompressProgress::phase(
         "读取 PDF 并分析图片",
     ));
@@ -239,7 +213,7 @@ where
     // Step 2: qpdf 按页重建 + 结构优化（丢弃不可达对象，收益通常大于单纯重写）
     let output_path = unique_output_path_in_dir(input_path, output_dir, "_compressed");
     progress(super::compress::CompressProgress::phase(
-        "按页重建并整理结构",
+        "保留文档信息并整理结构",
     ));
     rebuild_pages(&temp_path, &output_path)?;
 
@@ -408,19 +382,42 @@ pub fn optimize_in_place(input: &str) -> Result<OptimizeResult> {
     })
 }
 
-/// qpdf 按页重建：--empty --pages <input> 1-z，丢弃页树不可达对象并施加优化参数。
+// Legacy backups used transient object numbers. Refuse to rewrite them until
+// restored, rather than retaining bytes which can no longer restore the fonts.
+pub(crate) fn validate_recovery_backup(input: &Path) -> Result<()> {
+    let trailer = super::chunked::read_qpdf_object(input, "trailer", "trailer")?;
+    let info = match trailer.get("/Info") {
+        Some(serde_json::Value::String(reference)) => {
+            let parts: Vec<_> = reference.split_whitespace().collect();
+            if parts.len() != 3 { anyhow::bail!("PDF Info 引用无效"); }
+            super::chunked::read_qpdf_object(input, &format!("{},{}", parts[0], parts[1]), &format!("obj:{reference}"))?
+        }
+        Some(value) => value.clone(),
+        None => return Ok(()),
+    };
+    if let Some(value) = info.get("/DocsyAntiCopyBackup") {
+        let backup = value.as_str().and_then(|text| text.strip_prefix("u:"))
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+        if backup.as_ref().and_then(|data| data["version"].as_u64()) != Some(2) {
+            anyhow::bail!("此 PDF 含旧版防复制恢复备份，重写会改变字体编号。请先执行“恢复原始文字映射”，再优化或重新防复制；原文件未修改。");
+        }
+    }
+    Ok(())
+}
+
+/// Rewrite the original document, retaining its catalog, Info and recovery data.
 fn rebuild_pages(input_path: &Path, output_path: &Path) -> Result<()> {
+    validate_recovery_backup(input_path)?;
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let mut cmd = crate::external::hidden_command(&bin);
     add_optimization_args(&mut cmd);
-    cmd.arg("--empty")
-        .arg("--pages")
-        .arg(input_path)
-        .arg("1-z")
-        .arg("--")
-        .arg(output_path);
-    let output = run_cancellable("无损优化", cmd)?;
+    cmd.arg(input_path).arg(output_path);
+    let result = run_cancellable("无损优化", cmd);
+    if result.as_ref().map(|out| !status_is_success(&out.status)).unwrap_or(true) {
+        let _ = std::fs::remove_file(output_path);
+    }
+    let output = result?;
     if !status_is_success(&output.status) {
         anyhow::bail!(
             "qpdf 无损优化失败（{}）：{}",

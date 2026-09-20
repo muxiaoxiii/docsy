@@ -326,12 +326,10 @@ pub async fn export_templates(
         } else {
             output.to_path_buf()
         };
-        for path in &template_paths {
+        for (index, path) in template_paths.iter().enumerate() {
             let source = std::path::Path::new(path);
-            let file_name = source
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("无效文件名"))?;
-            std::fs::copy(source, target_dir.join(file_name))?;
+            crate::util::fs::copy_unique(source, &target_dir).map_err(|error|
+                anyhow::anyhow!("导出 {} 失败：{}；已完成 {} 个模板，保存在 {}，已有文件未覆盖。", source.display(), error, index, target_dir.display()))?;
         }
         Ok(target_dir.display().to_string())
     })

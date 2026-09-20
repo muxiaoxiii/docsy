@@ -218,7 +218,7 @@ function onJumpPage(pageIndex) {
   }
 }
 
-function handleCardClick(item, event) {
+function handleCardClick(item) {
   const badge = pageBadge(item)
   if (badge && badge.pageIndex !== undefined) {
     emit('select-page', badge.pageIndex)

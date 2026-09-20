@@ -3,7 +3,10 @@ import { reactive, ref } from 'vue'
 
 vi.mock('../tauriBridge.js', () => ({ tauriCallSafe: vi.fn() }))
 
-import { workspacePreferenceInternals } from './useWorkspacePreferences.js'
+import { useWorkspacePreferences, workspacePreferenceInternals } from './useWorkspacePreferences.js'
+
+import { tauriCallSafe } from '../tauriBridge.js'
+import { migratePaddlerPreferences } from '../../modules/image-paddler/composables/outputPlan.js'
 
 describe('workspace preference bindings', () => {
   it('applies saved refs and nested reactive settings', () => {
@@ -21,4 +24,19 @@ describe('workspace preference bindings', () => {
     const values = workspacePreferenceInternals.readBindings({ tab: ref('merge'), settings: reactive({ margin: 12 }) })
     expect(values).toEqual({ tab: 'merge', settings: { margin: 12 } })
   })
+})
+
+
+it('loads old manual width before defaults and preserves explicit new global scale', async () => {
+  const settings = reactive({ size_mode: 'smart', scale_mode: 'fixed_width', fixed_width_mm: 160 })
+  const pageScales = ref({})
+  const globalScalePercent = ref(100)
+  tauriCallSafe.mockResolvedValue({ ok: true, data: { settings: { fixed_width_mm: 123, scale_mode: 'fixed_width' }, pageScales: { 0: 1.2 }, globalScalePercent: 90 } })
+  const preference = useWorkspacePreferences('image-paddler.workspace', { settings, pageScales, globalScalePercent }, { migrate: migratePaddlerPreferences })
+  await preference.start()
+  expect(settings.size_mode).toBe('manual')
+  expect(settings.fixed_width_mm).toBe(123)
+  expect(pageScales.value).toEqual({})
+  expect(globalScalePercent.value).toBe(90)
+  await preference.stop()
 })

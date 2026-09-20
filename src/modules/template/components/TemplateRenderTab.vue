@@ -1,6 +1,6 @@
 <template>
   <section class="workspace">
-    <div class="panel library-panel" :class="{ 'has-active-template': templateManifest }">
+    <div class="panel library-panel" :inert="rendering || batchProcessing" :class="{ 'has-active-template': templateManifest }">
       <div class="panel-header">
         <div>
           <h3>模板库</h3>
@@ -16,6 +16,9 @@
           v-for="item in templateLibrary"
           :key="item.path"
           class="template-library-card"
+          role="button" tabindex="0"
+          @keydown.enter.self.prevent="$emit('open-template-from-library', item)"
+          @keydown.space.self.prevent="$emit('open-template-from-library', item)"
           :class="{ active: item.path === templatePath }"
           @click="$emit('open-template-from-library', item)"
         >
@@ -28,7 +31,7 @@
           </div>
         </div>
       </div>
-      <el-empty v-else description="模板库为空，请先从“制作模板”保存模板" :image-size="60" />
+      <WorkspaceEmptyState v-else compact :state="templateLibraryLoading ? 'loading' : 'empty'" :title="templateLibraryLoading ? '正在加载模板库' : '等待添加模板'" description="请先在“制作模板”中保存模板，或在“模板设置”中导入模板包。" />
     </div>
 
     <div v-if="templateManifest" class="panel form-panel">
@@ -54,7 +57,7 @@
             {{ fillPreviewVisible ? '收起预览' : '文档预览' }}
           </el-button>
           <el-dropdown trigger="click" @command="$emit('batch-command', $event)">
-            <el-button :loading="batchProcessing">
+            <el-button :loading="batchProcessing" :disabled="rendering">
               批量填写 <el-icon class="el-icon--right"><arrow-down /></el-icon>
             </el-button>
             <template #dropdown>
@@ -64,7 +67,8 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-button type="success" :loading="rendering" @click="$emit('render-template')">生成 Word</el-button>
+          <el-button type="success" :loading="rendering" :disabled="batchProcessing" @click="$emit('render-template')">生成 Word</el-button>
+          <el-button v-if="renderedOutputPath" :title="renderedOutputPath" @click="$emit('open-output')">打开文件</el-button>
         </div>
       </div>
       <div class="fill-progress-track" aria-hidden="true">
@@ -76,7 +80,7 @@
       </div>
 
       <div class="fill-workbench" :class="{ 'with-preview': fillPreviewVisible }">
-        <div class="field-editor-column">
+        <div class="field-editor-column" :inert="rendering || batchProcessing">
           <div class="field-section-heading">
             <div>
               <h3>填写字段</h3>
@@ -528,6 +532,7 @@
 </template>
 
 <script setup>
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { computed } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import DocumentPreview from '@/shared/components/DocumentPreview.vue'
@@ -571,6 +576,7 @@ const props = defineProps({
     default: () => ({ lastValues: {}, fieldSuggestions: {}, semanticSuggestions: {}, associationSuggestions: {} }),
   },
   // UI state
+  renderedOutputPath: { type: String, default: '' },
   rendering: { type: Boolean, default: false },
   batchProcessing: { type: Boolean, default: false },
   fieldSearch: { type: String, default: '' },
@@ -590,6 +596,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'open-output',
   'load-template-library',
   'select-template-package',
   'open-template-from-library',

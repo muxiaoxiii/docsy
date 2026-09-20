@@ -91,6 +91,25 @@
   --el-color-success: var(--docsy-success);
   --el-color-warning: var(--docsy-warning);
   --el-color-danger: var(--docsy-danger);
+  --el-color-success-light-3: color-mix(in srgb, var(--docsy-success) 70%, var(--docsy-surface-elevated));
+  --el-color-success-light-5: color-mix(in srgb, var(--docsy-success) 50%, var(--docsy-surface-elevated));
+  --el-color-success-light-7: color-mix(in srgb, var(--docsy-success) 30%, var(--docsy-surface-elevated));
+  --el-color-success-light-8: color-mix(in srgb, var(--docsy-success) 20%, var(--docsy-surface-elevated));
+  --el-color-success-light-9: color-mix(in srgb, var(--docsy-success) 10%, var(--docsy-surface-elevated));
+  --el-color-warning-light-3: color-mix(in srgb, var(--docsy-warning) 70%, var(--docsy-surface-elevated));
+  --el-color-warning-light-5: color-mix(in srgb, var(--docsy-warning) 50%, var(--docsy-surface-elevated));
+  --el-color-warning-light-7: color-mix(in srgb, var(--docsy-warning) 30%, var(--docsy-surface-elevated));
+  --el-color-warning-light-8: color-mix(in srgb, var(--docsy-warning) 20%, var(--docsy-surface-elevated));
+  --el-color-warning-light-9: color-mix(in srgb, var(--docsy-warning) 10%, var(--docsy-surface-elevated));
+  --el-color-danger-light-3: color-mix(in srgb, var(--docsy-danger) 70%, var(--docsy-surface-elevated));
+  --el-color-danger-light-5: color-mix(in srgb, var(--docsy-danger) 50%, var(--docsy-surface-elevated));
+  --el-color-danger-light-7: color-mix(in srgb, var(--docsy-danger) 30%, var(--docsy-surface-elevated));
+  --el-color-danger-light-8: color-mix(in srgb, var(--docsy-danger) 20%, var(--docsy-surface-elevated));
+  --el-color-danger-light-9: color-mix(in srgb, var(--docsy-danger) 10%, var(--docsy-surface-elevated));
+  --el-color-success-dark-2: color-mix(in srgb, var(--docsy-success) 80%, black);
+  --el-color-warning-dark-2: color-mix(in srgb, var(--docsy-warning) 80%, black);
+  --el-color-danger-dark-2: color-mix(in srgb, var(--docsy-danger) 80%, black);
+
   --el-text-color-primary: var(--docsy-text-strong);
   --el-text-color-regular: var(--docsy-text);
   --el-text-color-secondary: var(--docsy-text-muted);

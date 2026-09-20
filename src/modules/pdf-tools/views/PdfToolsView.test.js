@@ -46,3 +46,57 @@ describe('PDF 防复制界面链路', () => {
     expect(tauriCallSafe).not.toHaveBeenCalled()
   })
 })
+
+describe('PDF 队列的统一执行方式', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('添加加密 PDF 仅检测，确认执行后才解锁，并保留结果入口', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { encrypted: true } })
+    state.addUnlockFiles(['/a.pdf'])
+    for (let i = 0; i < 12; i++) await Promise.resolve()
+    expect(tauriCallSafe.mock.calls.map(([cmd]) => cmd)).toEqual(['inspect_pdf'])
+    expect(state.unlockReadyCount.value).toBe(1)
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { output_path: '/a_unlocked.pdf', skipped: false } })
+    await state.batchUnlock()
+    expect(state.unlockFiles.value[0].outputPath).toBe('/a_unlocked.pdf')
+    expect(tauriCallSafe).toHaveBeenLastCalledWith('unlock_pdf', { input: '/a.pdf' })
+  })
+
+  it('压缩仅在点击执行时运行，完成后更改设置不会自动重跑', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    state.loadCompressFiles(['/a.pdf'])
+    expect(tauriCallSafe).not.toHaveBeenCalled()
+    state.compressImageReencode.value = true
+    state.compressLevel.value = 2
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { output_path: '/a_small.pdf', input_size: 100, output_size: 70 } })
+    await state.runCompressQueue()
+    expect(tauriCallSafe).toHaveBeenCalledWith('compress_pdf', { input: '/a.pdf', outputDir: null, level: 2 })
+    state.compressLevel.value = 3
+    await Promise.resolve()
+    expect(tauriCallSafe).toHaveBeenCalledTimes(1)
+    expect(state.compressFiles.value[0].status).toBe('pending')
+    await state.runCompressQueue()
+    expect(tauriCallSafe).toHaveBeenLastCalledWith('compress_pdf', { input: '/a.pdf', outputDir: null, level: 3 })
+  })
+
+  it('处理中禁止清空、移除或追加；失败后仍可手动重试', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    state.loadCompressFiles(['/a.pdf', '/b.pdf'])
+    let resolve
+    tauriCallSafe.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+      .mockResolvedValue({ ok: true, data: { output_path: '/b_small.pdf' } })
+    const running = state.runCompressQueue()
+    state.clearCompressFiles()
+    state.removeCompressFile(1)
+    state.loadCompressFiles(['/c.pdf'])
+    expect(state.compressFiles.value.map(f => f.path)).toEqual(['/a.pdf', '/b.pdf'])
+    resolve({ ok: false, error: '读取失败' })
+    await running
+    expect(state.compressFiles.value[0].status).toBe('failed')
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { output_path: '/a_small.pdf' } })
+    await state.runCompressQueue()
+    expect(state.compressFiles.value.map(f => f.status)).toEqual(['done', 'done'])
+    expect(tauriCallSafe.mock.calls.filter(([cmd]) => cmd === 'compress_pdf')).toHaveLength(3)
+  })
+})

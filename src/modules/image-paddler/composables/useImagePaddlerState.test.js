@@ -462,3 +462,109 @@ describe('image paddler state integration', () => {
   })
 })
 
+
+describe('停更候选回归', () => {
+  const squares = count => Array.from({ length: count }, (_, i) => ({ path: `/A/${i}.png`, width: 2000, height: 2000 }))
+
+  it('长说明立即使导出汇总与当前页冲突一致', async () => {
+    const state = useImagePaddlerState()
+    state.folders.value = ['/A']
+    state.analysis.value = { images: squares(2) }
+    state.settings.size_mode = 'manual'
+    state.settings.fixed_width_mm = 125
+    expect(state.conflictSummaryList.value).toHaveLength(0)
+    state.imageAnnotations.value = { '/A/0.png': { description: '很长的图片说明'.repeat(50) } }
+    expect(state.conflictSummaryList.value.length).toBeGreaterThan(0)
+    await state.handleStartGenerate()
+    expect(state.conflictDialogVisible.value).toBe(true)
+  })
+
+  it('原图 140% 的预览和预检都报告越界', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: squares(1) }
+    state.setImagesPerPage(1)
+    state.setSizeMode('original')
+    state.setGlobalScale(140)
+    expect(parseFloat(state.previewImageStyle(squares(1)[0]).width)).toBeGreaterThan(100)
+    expect(state.conflictSummaryList.value.length).toBeGreaterThan(0)
+  })
+
+  it('自定义行列与实际图注改变后在 watcher 完成时更新智能宽度', async () => {
+    const { nextTick } = await import('vue')
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: squares(8) }
+    state.setImagesPerPage('custom')
+    await nextTick()
+    const old = state.settings.fixed_width_mm
+    state.activePageScale.value = 120
+    state.settings.custom_cols = 4
+    await nextTick()
+    expect(state.settings.fixed_width_mm).toBeLessThan(old)
+    expect(state.settings.fixed_width_mm).toBe(state.currentRecommendedWidth.value)
+    expect(state.pageScales.value).toEqual({})
+    state.setImagesPerPage(3)
+    state.setArrangeMode('stack')
+    await nextTick()
+    const beforeTitle = state.settings.fixed_width_mm
+    state.settings.filename_font_size_pt = 24
+    await nextTick()
+    expect(state.settings.fixed_width_mm).toBeLessThan(beforeTitle)
+    expect(state.conflictSummaryList.value).toHaveLength(0)
+  })
+
+  it('分文件夹分别分页并传递各页比例，奇数末页不混合', async () => {
+    const { nextTick } = await import('vue')
+    const state = useImagePaddlerState()
+    state.folders.value = ['/A', '/B']
+    state.analysis.value = { images: [...squares(2), { ...squares(1)[0], path: '/B/0.png' }] }
+    state.settings.output_mode = 'per_folder'
+    await nextTick()
+    expect(state.totalPages.value).toBe(2)
+    state.activePageScale.value = 80
+    state.nextPage()
+    expect(state.previewImages.value.map(i => i.path)).toEqual(['/B/0.png'])
+    state.activePageScale.value = 120
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { images: 3, pages: 2 } })
+    await state.run()
+    const payload = tauriCallSafe.mock.calls.findLast(([cmd]) => cmd === 'run_image_paddler')[1].args
+    expect(payload.page_scales).toEqual([0.8, 1.2])
+    state.settings.output_mode = 'merged'
+    expect(state.pageScales.value).toEqual({})
+  })
+
+  it('同数量换素材或排除图片不会继承旧页比例', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: squares(4) }
+    state.activePageScale.value = 120
+    state.analysis.value = { images: squares(4).map(i => ({ ...i, path: i.path.replace('/A/', '/B/') })) }
+    expect(state.pageScales.value).toEqual({})
+    state.activePageScale.value = 80
+    state.toggleImageExclusion({ item: state.analysis.value.images[0], excluded: true })
+    expect(state.pageScales.value).toEqual({})
+  })
+
+  it('细长素材智能宽度允许小于 20mm；说明独立开启时保留间距', async () => {
+    const { nextTick } = await import('vue')
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: [{ path: '/A/tall.png', width: 100, height: 10000 }] }
+    state.settings.show_filename = false
+    state.imageAnnotations.value = { '/A/tall.png': { description: '说明' } }
+    await nextTick()
+    expect(state.settings.fixed_width_mm).toBeLessThan(20)
+    expect(state.previewCaptionGapStyle.value.marginTop).toContain('cqw')
+    expect(parseFloat(state.previewCaptionGapStyle.value.marginTop)).toBeGreaterThan(0)
+  })
+})
+
+
+it('custom title renders in preview and fixed width obeys the native 500mm limit', () => {
+  const state = useImagePaddlerState()
+  state.analysis.value = { images: [{ path: '/A/plain.png', width: 1000, height: 1000 }] }
+  state.imageAnnotations.value = { '/A/plain.png': { title: '自定义标题\n第二行' } }
+  expect(state.fileNameLines('/A/plain.png')).toEqual(['自定义标题', '第二行'])
+  state.setSizeMode('manual')
+  state.settings.fixed_width_mm = 500
+  state.setGlobalScale(140)
+  const drawWidth = parseFloat(state.previewImageStyle(state.analysis.value.images[0]).width) * 186 / 100
+  expect(drawWidth).toBeCloseTo(500)
+})

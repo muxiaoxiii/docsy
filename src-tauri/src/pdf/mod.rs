@@ -35,3 +35,6 @@ pub fn fnv1a_hash(value: &str) -> u64 {
             (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
         })
 }
+
+#[cfg(test)]
+mod freeze_tests;

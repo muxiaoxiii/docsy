@@ -823,8 +823,7 @@ fn fetch_remote_sha256(primary_url: &str, mirrors: &[String]) -> Option<String> 
 fn verify_sha256_file_if_present(path: &Path, expected: &str) -> Result<()> {
     let expected = expected.trim();
     if expected.is_empty() {
-        log::warn!("工具包未提供 SHA256 校验值且未能从远端获取校验文件，跳过哈希校验");
-        return Ok(());
+        anyhow::bail!("无法获得工具包 SHA256，已停止自动安装。请稍后重试，或从官方渠道下载后使用本地工具包安装。");
     }
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
@@ -1215,13 +1214,13 @@ d8e8fca1234567890abcdef1234567890abcdef1234567890abcdef1234567890  other-tool.zi
     }
 
     #[test]
-    fn verify_sha256_file_skips_when_empty_and_validates_when_present() {
+    fn verify_sha256_file_rejects_missing_or_wrong_hash() {
         let temp_file = std::env::temp_dir().join(format!("docsy_sha_test_{}", unique_suffix()));
         fs::write(&temp_file, b"hello docsy integrity test").unwrap();
 
         // 空 SHA256 不应报错阻断用户安装
-        assert!(verify_sha256_file_if_present(&temp_file, "").is_ok());
-        assert!(verify_sha256_file_if_present(&temp_file, "   ").is_ok());
+        assert!(verify_sha256_file_if_present(&temp_file, "").is_err());
+        assert!(verify_sha256_file_if_present(&temp_file, "   ").is_err());
 
         // 计算正确的 hash: echo -n "hello docsy integrity test" | shasum -a 256
         let mut hasher = Sha256::new();

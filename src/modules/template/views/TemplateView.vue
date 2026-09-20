@@ -1,7 +1,8 @@
 <template>
   <div class="template-view">
-    <el-tabs v-model="activeTab" class="template-tabs">
+    <el-tabs v-model="activeTab" tab-position="left" class="template-tabs">
       <el-tab-pane label="制作模板" name="build">
+        <ToolWorkspaceShell title="制作模板" description="导入标黄 Word，确认字段后保存到模板库。">
         <TemplateBuildTab
           ref="buildTabRef"
           :source-docx="sourceDocx"
@@ -47,9 +48,11 @@
           @trigger-preview-selection-add="triggerPreviewSelectionAdd"
           @set-preview-sample-value="setPreviewSampleValue"
         />
+              </ToolWorkspaceShell>
       </el-tab-pane>
 
       <el-tab-pane label="填写模板" name="render">
+        <ToolWorkspaceShell title="填写模板" description="选择模板、填写字段并生成 Word 文档。">
         <TemplateRenderTab
           :template-path="templatePath"
           :template-manifest="templateManifest"
@@ -61,6 +64,7 @@
           :type-overrides="typeOverrides"
           :history-context="historyContext"
           :rendering="rendering"
+          :rendered-output-path="renderedOutputPath"
           :batch-processing="batchProcessing"
           v-model:field-search="fieldSearch"
           :renderable-template-fields="renderableTemplateFields"
@@ -79,6 +83,7 @@
           @edit-template="editTemplateFromLibrary"
           @delete-template="deleteTemplate"
           @render-template="renderTemplate"
+          @open-output="openPath(renderedOutputPath)"
           @batch-command="handleBatchCommand"
           @schedule-history-refresh="scheduleHistoryRefresh"
           @complete-field="completeField"
@@ -95,9 +100,11 @@
           @toggle-fill-preview="toggleFillPreview"
           @reload-fill-preview="reloadFillPreview"
         />
+              </ToolWorkspaceShell>
       </el-tab-pane>
 
       <el-tab-pane label="填写历史" name="history">
+        <ToolWorkspaceShell title="填写历史" description="查看生成记录，将历史内容带入模板继续填写。">
         <TemplateHistoryTab
           :history-runs-loading="historyRunsLoading"
           :grouped-history-runs="groupedHistoryRuns"
@@ -109,8 +116,10 @@
           @expand-history-group="expandHistoryGroup"
           @collapse-history-group="collapseHistoryGroup"
         />
+              </ToolWorkspaceShell>
       </el-tab-pane>
-      <el-tab-pane label="设置" name="settings">
+      <el-tab-pane label="模板设置" name="settings">
+        <ToolWorkspaceShell title="模板设置" description="管理模板导入导出、填写数据与回收站。">
         <TemplateSettingsTab
           v-model:item-separator-setting="itemSeparatorSetting"
           :template-trash="templateTrash"
@@ -134,6 +143,7 @@
           @execute-export="executeExportTemplates"
           @open-export-folder="openExportFolder"
         />
+              </ToolWorkspaceShell>
       </el-tab-pane>
     </el-tabs>
 
@@ -159,7 +169,7 @@
         :sub-title="batchCompleteResult.failed ? `其中 ${batchCompleteResult.failed} 份生成失败` : '全部生成完成'"
       />
       <div v-if="batchCompleteResult.outputDir" class="batch-complete-path">
-        <span>输出目录</span>
+        <span>输出文件夹</span>
         <code>{{ batchCompleteResult.outputDir }}</code>
       </div>
       <p v-if="batchCompleteResult.rows.length" class="hint-text">
@@ -175,7 +185,7 @@
           {{ batchCompleteDataSaved ? '数据已保存' : '保存数据' }}
         </el-button>
         <el-button v-if="batchCompleteResult.outputDir" type="primary" @click="openBatchOutputDir">
-          打开输出目录
+          打开文件夹
         </el-button>
       </template>
     </el-dialog>
@@ -219,6 +229,7 @@
 </template>
 
 <script setup>
+import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import TemplateBuildTab from '../components/TemplateBuildTab.vue'
 import TemplateRenderTab from '../components/TemplateRenderTab.vue'
 import TemplateHistoryTab from '../components/TemplateHistoryTab.vue'
@@ -264,6 +275,7 @@ const {
   typeOverrides,
   historyContext,
   rendering,
+  renderedOutputPath,
   fieldSearch,
   renderableTemplateFields,
   filteredFillPositionEntries,
@@ -386,50 +398,21 @@ const {
 <style scoped>
 .template-view,
 .template-tabs {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .template-view {
-  padding-block: clamp(14px, 2.4dvh, 20px) clamp(24px, 4.5dvh, 36px);
-  padding-inline: 24px;
+  overflow: hidden;
   background: var(--docsy-canvas);
-}
-
-:deep(.template-tabs > .el-tabs__header) {
-  position: sticky;
-  top: 0;
-  z-index: 8;
-  margin: 0 0 clamp(12px, 2.1dvh, 18px);
-  padding: 6px;
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-radius);
-  background: rgba(255, 253, 248, 0.94);
-  box-shadow: var(--docsy-shadow-panel);
-  backdrop-filter: blur(14px);
-}
-
-:deep(.template-tabs > .el-tabs__header .el-tabs__nav-wrap::after),
-:deep(.template-tabs > .el-tabs__header .el-tabs__active-bar) {
-  display: none;
-}
-
-:deep(.template-tabs > .el-tabs__header .el-tabs__item) {
-  height: 38px;
-  padding: 0 18px;
-  border-radius: var(--docsy-radius);
-  font-size: 13px;
-}
-
-:deep(.template-tabs > .el-tabs__header .el-tabs__item.is-active) {
-  color: var(--docsy-primary-hover);
-  background: var(--docsy-primary-soft);
-  font-weight: 650;
 }
 
 :deep(.template-tabs > .el-tabs__content),
 :deep(.template-tabs > .el-tabs__content > .el-tab-pane) {
+  height: 100%;
+  min-height: 0;
   min-width: 0;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .template-view :deep(.workspace) {
@@ -459,7 +442,7 @@ const {
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-radius-sm);
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text-muted);
   font-size: 12px;
@@ -468,7 +451,7 @@ const {
 .batch-complete-path code {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: var(--docsy-text-primary);
+  color: var(--docsy-text-strong);
   white-space: normal;
 }
 

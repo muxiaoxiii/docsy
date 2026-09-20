@@ -73,7 +73,7 @@ export function useWorkspacePreferences(scope, bindings, options = {}) {
     if (stopWatch) stopWatch()
     const result = await tauriCallSafe('get_workspace_preference', { scope })
     if (stopped) return
-    if (result.ok && result.data) applyBindings(bindings, result.data)
+    if (result.ok && result.data) applyBindings(bindings, options.migrate ? options.migrate(result.data) : result.data)
     loaded = true
     stopWatch = watch(() => readBindings(bindings), scheduleSave, { deep: true })
   }

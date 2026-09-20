@@ -313,3 +313,22 @@ describe('useTemplateState 撤销栈', () => {
     expect(state.undoStack.value).toEqual([])
   })
 })
+
+describe('模板生成结果入口', () => {
+  beforeEach(() => vi.clearAllMocks())
+  it('生成后保留打开入口，不自动启动外部程序；取消另存为后恢复按钮', async () => {
+    const state = useTemplateState()
+    state.templatePath.value = '/t/sample.docsytpl'
+    state.templateManifest.value = { template: { name: '测试模板' }, fields: [] }
+    save.mockResolvedValueOnce('/t/out.docx')
+    await state.renderTemplate()
+    expect(state.renderedOutputPath.value).toBe('/t/out.docx')
+    const { openPath } = await import('../../../core/tauriBridge.js')
+    expect(openPath).not.toHaveBeenCalled()
+    expect(state.rendering.value).toBe(false)
+    save.mockResolvedValueOnce(null)
+    await state.renderTemplate()
+    expect(state.rendering.value).toBe(false)
+    expect(state.renderedOutputPath.value).toBe('/t/out.docx')
+  })
+})

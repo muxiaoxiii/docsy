@@ -4,19 +4,21 @@
       <div class="pdf-drop-message">松开以添加 PDF 文件</div>
     </div>
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
-      <el-tab-pane label="PDF解锁" name="unlock" lazy>
+      <el-tab-pane label="PDF 解锁" name="unlock" lazy>
         <ToolWorkspaceShell title="PDF 解锁" description="移除 PDF 文件的密码保护，原文件旁会生成已解锁副本。">
           <template #toolbar>
-            <el-button type="primary" @click="selectUnlockFiles">选择 PDF 文件</el-button>
+            <el-button type="primary" plain :disabled="unlocking || unlockInspecting" @click="selectUnlockFiles">添加 PDF 文件</el-button>
           </template>
           <FileQueuePanel
             :items="unlockFiles"
+            :busy="unlocking || unlockInspecting"
             empty-text="选择一个或多个需要解锁的 PDF 文件"
             @clear="clearUnlockFiles"
             @remove="removeUnlockFile"
           >
             <template #meta="{ item }">
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
+              <el-button v-if="item.outputPath" link type="primary" size="small" @click="openPath(item.outputPath)">打开文件</el-button>
             </template>
           </FileQueuePanel>
           <template #actions>
@@ -32,16 +34,17 @@
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="PDF合并" name="merge" lazy>
+      <el-tab-pane label="PDF 合并" name="merge" lazy>
         <ToolWorkspaceShell
           title="PDF 合并"
           description="按列表顺序合并多个 PDF；合并时会压平页面注释和电子签章外观以便打印，不保留签章证书和交互。"
         >
           <template #toolbar>
-            <el-button type="primary" @click="selectMergeFiles">添加 PDF 文件</el-button>
+            <el-button type="primary" plain :disabled="merging" @click="selectMergeFiles">添加 PDF 文件</el-button>
           </template>
           <FileQueuePanel
             :items="mergeFiles"
+            :busy="merging"
             sortable
             empty-text="添加至少两个需要合并的 PDF 文件"
             @clear="clearMergeFiles"
@@ -50,7 +53,7 @@
           />
           <template #actions>
             <div class="merge-options">
-              <el-checkbox v-model="duplexSeparate">双面打印分隔模式</el-checkbox>
+              <el-checkbox v-model="duplexSeparate" :disabled="merging">双面打印分隔模式</el-checkbox>
               <span class="merge-option-hint"
                 >文件页数为奇数时在末尾补一页空白，让每份文件独立占满双面打印的整张纸</span
               >
@@ -58,26 +61,35 @@
             <el-button type="success" @click="doMerge" :loading="merging" :disabled="mergeFiles.length < 2">
               合并为一个 PDF
             </el-button>
+            <el-button v-if="mergeOutputPath" @click="openPath(mergeOutputPath)">打开文件</el-button>
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="提取PDF页面" name="extract" lazy>
+      <el-tab-pane label="提取 PDF 页面" name="extract" lazy>
         <ToolWorkspaceShell
           title="提取 PDF 页面"
           description="从一个 PDF 中挑选若干页导出，支持输入 3,7,12-15 这样的页码。"
         >
           <template #toolbar>
-            <el-button type="primary" @click="selectExtractFile">选择 PDF</el-button>
-            <el-button :disabled="!extractFile" @click="selectExtractOutputDir">输出文件夹</el-button>
+            <el-button type="primary" plain :disabled="extractingPages" @click="selectExtractFile">选择 PDF 文件</el-button>
+            <el-button :disabled="!extractFile || extractingPages" @click="selectExtractOutputDir">选择输出文件夹</el-button>
           </template>
           <div v-if="extractFile" class="path-line">{{ extractFile }}</div>
           <div v-if="extractOutputDir" class="path-line">{{ extractOutputDir }}</div>
           <div v-if="extractFile" class="simple-tool-form">
-            <el-input v-model="extractPageText" placeholder="例如：3,7,12-15" clearable @keyup.enter="doExtractPages">
+            <el-input v-model="extractPageText" :disabled="extractingPages" placeholder="例如：3,7,12-15" clearable @keyup.enter="doExtractPages">
               <template #prepend>页码</template>
             </el-input>
             <div class="path-hint">共 {{ extractTotalPages || '-' }} 页；重复页会自动忽略。</div>
+
+          </div>
+          <WorkspaceEmptyState
+            v-else
+            title="等待选择 PDF"
+            description="选择文件后，可以输入单页或连续页码范围并导出。"
+          />
+          <template #actions>
             <el-button
               type="success"
               :loading="extractingPages"
@@ -86,31 +98,29 @@
             >
               导出选中页面
             </el-button>
-          </div>
-          <WorkspaceEmptyState
-            v-else
-            title="等待选择 PDF"
-            description="选择文件后，可以输入单页或连续页码范围并导出。"
-          />
+            <el-button v-if="extractResultPath" @click="openPath(extractResultPath)">打开文件</el-button>
+          </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="PDF压缩" name="compress" lazy>
+      <el-tab-pane label="PDF 压缩" name="compress" lazy>
         <ToolWorkspaceShell
           title="PDF 压缩整理"
           description="默认只做无损结构整理；需要进一步压缩图片时再单独开启，扫描件不会被默认重编码。"
         >
           <template #toolbar>
-            <el-button type="primary" @click="selectCompressFiles">选择 PDF 文件</el-button>
+            <el-button type="primary" plain :disabled="compressing" @click="selectCompressFiles">添加 PDF 文件</el-button>
           </template>
           <FileQueuePanel
             :items="compressFiles"
-            empty-text="选择或拖入一个或多个 PDF，立即压缩并保存到源文件夹"
+            :busy="compressing"
+            empty-text="添加或拖入 PDF，调整下方设置后点击“开始压缩”；结果保存在源文件夹"
             @clear="clearCompressFiles"
             @remove="removeCompressFile"
           >
             <template #meta="{ item }">
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
+              <el-button v-if="item.outputPath" link type="primary" size="small" @click="openPath(item.outputPath)">打开文件</el-button>
               <span v-if="item.status === 'done' && item.inputSize > 0">{{
                 sizeSavingText(item.inputSize, item.outputSize)
               }}</span>
@@ -119,32 +129,33 @@
           <div v-if="compressSummary" class="path-line">{{ compressSummary }}</div>
           <template #actions>
             <div class="compress-options">
-              <el-button v-if="!compressing && compressFiles.some(file => file.status === 'pending')" type="primary" @click="runCompressQueue">继续压缩</el-button>
-              <el-checkbox v-model="compressImageReencode"> 进一步压缩图片（可能耗时较长） </el-checkbox>
+
+              <el-checkbox v-model="compressImageReencode" :disabled="compressing"> 进一步压缩图片（可能耗时较长） </el-checkbox>
               <div v-if="compressImageReencode" class="compress-level-row">
                 <span class="compress-level-label">图片压缩级别：</span>
-                <el-radio-group v-model="compressLevel" size="default">
+                <el-radio-group v-model="compressLevel" :disabled="compressing" size="default">
                   <el-radio-button :value="1">清晰优先</el-radio-button>
                   <el-radio-button :value="2">均衡</el-radio-button>
                   <el-radio-button :value="3">体积最小</el-radio-button>
                 </el-radio-group>
               </div>
             </div>
+            <el-button type="success" :loading="compressing" :disabled="!compressFiles.some(file => ['pending', 'failed', 'cancelled'].includes(file.status))" @click="runCompressQueue">开始压缩</el-button>
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="PDF拆分" name="split" lazy>
+      <el-tab-pane label="PDF 拆分" name="split" lazy>
         <ToolWorkspaceShell title="PDF 拆分" description="翻页核对内容，按页码范围生成多个独立 PDF 文件。">
           <template #toolbar>
-            <el-button type="primary" @click="selectSplitFile">选择 PDF</el-button>
-            <el-button :disabled="!splitFile" @click="selectSplitOutputDir">输出文件夹</el-button>
-            <el-button :disabled="!splitFile" @click="addSplitRange">添加页段</el-button>
+            <el-button type="primary" plain :disabled="splittingMerged" @click="selectSplitFile">选择 PDF 文件</el-button>
+            <el-button :disabled="!splitFile || splittingMerged" @click="selectSplitOutputDir">选择输出文件夹</el-button>
+            <el-button :disabled="!splitFile || splittingMerged" @click="addSplitRange">添加页段</el-button>
           </template>
           <div v-if="splitFile" class="path-line">{{ splitFile }}</div>
           <div v-if="splitOutputDir" class="path-line">{{ splitOutputDir }}</div>
 
-          <div v-if="splitFile" ref="splitMainRef" class="split-main" :style="splitGridStyle">
+          <div v-if="splitFile" ref="splitMainRef" :inert="splittingMerged" class="split-main" :style="splitGridStyle">
             <section class="split-list-panel">
               <div class="split-options-row">
                 <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
@@ -225,19 +236,11 @@
                     <el-button link type="primary" size="small" @click.stop="insertSplitRangeAfter($index)"
                       >续段</el-button
                     >
-                    <el-button link type="danger" size="small" @click.stop="removeSplitRange($index)">删除</el-button>
+                    <el-button link type="danger" size="small" @click.stop="removeSplitRange($index)">移除</el-button>
                   </template>
                 </el-table-column>
               </el-table>
-              <el-button
-                v-if="splitRanges.length"
-                type="success"
-                @click="doSplitMerged"
-                :loading="splittingMerged"
-                :disabled="!splitFile || !splitOutputDir || splitWarnings.length > 0"
-              >
-                执行拆分
-              </el-button>
+
             </section>
 
             <div
@@ -323,19 +326,31 @@
             title="等待选择 PDF"
             description="选择文件后，可以翻页预览并设置每个拆分文件的起止页。"
           />
+          <template #actions>
+              <el-button
+                type="success"
+                @click="doSplitMerged"
+                :loading="splittingMerged"
+                :disabled="!splitRanges.length || !splitFile || !splitOutputDir || splitWarnings.length > 0"
+              >
+                执行拆分
+              </el-button>
+            <el-button v-if="splitResultDir" @click="openPath(splitResultDir)">打开文件夹</el-button>
+          </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
 
-      <el-tab-pane label="PDF防复制" name="anti-ocr" lazy>
+      <el-tab-pane label="PDF 防复制" name="anti-ocr" lazy>
         <ToolWorkspaceShell
           title="PDF 防复制"
           description="防止 PDF 文字被复制提取。保留视觉效果，干扰文字选择和复制。"
         >
           <template #toolbar>
-            <el-button type="primary" @click="selectAntiOcrFiles">选择 PDF 文件</el-button>
+            <el-button type="primary" plain :disabled="antiOcrProcessing" @click="selectAntiOcrFiles">添加 PDF 文件</el-button>
           </template>
           <FileQueuePanel
             :items="antiOcrFiles"
+            :busy="antiOcrProcessing"
             empty-text="选择一个或多个 PDF 文件进行防复制检测"
             @clear="clearAntiOcrFiles"
             @remove="removeAntiOcrFile"
@@ -343,7 +358,7 @@
             <template #meta="{ item }">
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
               <el-tag v-if="item.hasAntiOcr" type="warning" size="small">已防护</el-tag>
-              <el-button v-if="item.outputPath" link type="primary" @click="openPath(item.outputPath)">打开结果</el-button>
+              <el-button v-if="item.outputPath" link type="primary" @click="openPath(item.outputPath)">打开文件</el-button>
             </template>
           </FileQueuePanel>
           <template #actions>
@@ -417,12 +432,13 @@ async function selectUnlockFiles() {
   })
   if (selected) {
     const paths = Array.isArray(selected) ? selected : [selected]
-    addUnlockFiles(paths, true)
+    addUnlockFiles(paths)
   }
 }
 
-function addUnlockFiles(paths, replace = false) {
-  const existing = replace ? new Set() : new Set(unlockFiles.value.map((file) => file.path))
+function addUnlockFiles(paths) {
+  if (unlocking.value || unlockInspecting.value) return
+  const existing = new Set(unlockFiles.value.map((file) => file.path))
   const candidates = [...new Set(paths)].filter((path) => !existing.has(path))
   const items = makeQueueItems(candidates).map((item) => ({
     ...item,
@@ -430,15 +446,8 @@ function addUnlockFiles(paths, replace = false) {
     inspecting: true,
     statusText: '检测中',
   }))
-  unlockFiles.value = replace ? items : [...unlockFiles.value, ...items]
-  if (items.length) void inspectUnlockFiles(candidates).then(autoUnlockReadyFiles)
-}
-
-// 检测完成后直接解锁加密文件；队列里没有加密文件时静默跳过
-async function autoUnlockReadyFiles() {
-  if (unlocking.value) return
-  if (!unlockFiles.value.some((file) => file.encrypted === true)) return
-  await batchUnlock()
+  unlockFiles.value = [...unlockFiles.value, ...items]
+  if (items.length) void inspectUnlockFiles(candidates)
 }
 
 async function inspectUnlockFiles(paths) {
@@ -488,15 +497,17 @@ async function inspectUnlockFiles(paths) {
 }
 
 function clearUnlockFiles() {
+  if (unlocking.value || unlockInspecting.value) return
   unlockFiles.value = []
 }
 
 function removeUnlockFile(index) {
+  if (unlocking.value || unlockInspecting.value) return
   unlockFiles.value.splice(index, 1)
 }
 
 async function batchUnlock() {
-  if (unlocking.value) return
+  if (unlocking.value || unlockInspecting.value) return
   const encryptedFiles = unlockFiles.value.filter((file) => file.encrypted === true)
   if (!encryptedFiles.length) {
     ElMessage.info('所选文件均未加密，无需处理')
@@ -512,6 +523,7 @@ async function batchUnlock() {
       file.statusType = 'warning'
       const result = await tauriCallSafe('unlock_pdf', { input: file.path })
       if (result.ok && !result.data.skipped) {
+        file.outputPath = result.data.output_path
         file.statusText = '解锁成功'
         file.statusType = 'success'
         file.encrypted = false
@@ -537,6 +549,9 @@ const compressCancellation = useQueueCancellation()
 const antiCopyCancellation = useQueueCancellation()
 const mergeFiles = ref([])
 const merging = ref(false)
+const mergeOutputPath = ref('')
+const extractResultPath = ref('')
+const splitResultDir = ref('')
 const duplexSeparate = ref(false)
 const extractFile = ref('')
 const extractOutputDir = ref('')
@@ -590,6 +605,7 @@ const antiOcrReadyCount = computed(() => antiOcrFiles.value.filter((f) => f.hasA
 const antiOcrProtectedCount = computed(() => antiOcrFiles.value.filter((f) => f.hasAntiOcr && f.hasBackup).length)
 
 function addAntiOcrFiles(paths) {
+  if (antiOcrProcessing.value) return
   const existing = new Set(antiOcrFiles.value.map((f) => f.path))
   const newItems = paths
     .filter((p) => !existing.has(p))
@@ -658,9 +674,11 @@ async function selectAntiOcrFiles() {
 }
 
 function clearAntiOcrFiles() {
+  if (antiOcrProcessing.value) return
   antiOcrFiles.value = []
 }
 function removeAntiOcrFile(index) {
+  if (antiOcrProcessing.value) return
   antiOcrFiles.value.splice(index, 1)
 }
 
@@ -719,20 +737,27 @@ async function selectMergeFiles() {
 }
 
 function addMergeFiles(paths) {
+  if (merging.value) return
   const existing = new Set(mergeFiles.value.map((file) => file.path))
   const candidates = [...new Set(paths)].filter((path) => !existing.has(path))
+  if (candidates.length) mergeOutputPath.value = ''
   mergeFiles.value.push(...makeQueueItems(candidates))
 }
 
 function clearMergeFiles() {
+  if (merging.value) return
+  mergeOutputPath.value = ''
   mergeFiles.value = []
 }
 
 function removeMergeFile(index) {
+  if (merging.value) return
+  mergeOutputPath.value = ''
   mergeFiles.value.splice(index, 1)
 }
 
 function reorderMergeFiles({ from, to }) {
+  if (merging.value) return
   if (from === to || from < 0 || to < 0 || from >= mergeFiles.value.length || to >= mergeFiles.value.length) return
   const [item] = mergeFiles.value.splice(from, 1)
   mergeFiles.value.splice(to, 0, item)
@@ -750,6 +775,7 @@ async function doMerge() {
       output: outputPath,
       duplexSeparate: duplexSeparate.value,
     })
+    if (result.ok) mergeOutputPath.value = result.data?.output_path || outputPath
     result.ok
       ? ElMessage.success('合并完成')
       : ElMessage.error(userFacingError(result.error, 'PDF 合并失败，请确认文件未损坏且未被其他程序占用'))
@@ -778,6 +804,8 @@ async function selectExtractFile() {
 }
 
 async function loadExtractFile(path) {
+  if (extractingPages.value) return
+  extractResultPath.value = ''
   extractFile.value = path
   extractPageText.value = ''
   extractTotalPages.value = 0
@@ -811,6 +839,7 @@ async function doExtractPages() {
   })
   extractingPages.value = false
   if (result.ok) {
+    extractResultPath.value = result.data.output_path
     ElMessage.success(`已导出：${result.data.output_path}`)
   } else {
     ElMessage.error(userFacingError(result.error, 'PDF 页面提取失败，请确认文件未损坏'))
@@ -826,8 +855,9 @@ async function selectCompressFiles() {
   loadCompressFiles(Array.isArray(selected) ? selected : [selected])
 }
 
-// select 与 drop 共用入口：入队并立即顺序执行；执行中新文件追加到队列尾部
+// 选择与拖入只添加到队列，确认设置后由用户开始执行。
 function loadCompressFiles(paths) {
+  if (compressing.value) return
   const busy = new Set(
     compressFiles.value.filter((f) => f.status === 'pending' || f.status === 'processing').map((f) => f.path),
   )
@@ -845,20 +875,21 @@ function loadCompressFiles(paths) {
   if (!items.length) return
   compressFiles.value = [...compressFiles.value, ...items]
   compressSummary.value = ''
-  void runCompressQueue()
 }
 
 function clearCompressFiles() {
+  if (compressing.value) return
   compressFiles.value = compressFiles.value.filter((f) => f.status === 'processing')
   compressSummary.value = ''
 }
 
 function removeCompressFile(index) {
+  if (compressing.value) return
   const item = compressFiles.value[index]
   if (item && item.status !== 'processing') compressFiles.value.splice(index, 1)
 }
 
-// 队列全部结束后切换级别：重新入队并重跑全部；执行中切换只影响下一批（级别在批次开始时捕获）
+// 已完成后调整设置只重新入队；再次点击开始压缩才会处理。
 watch([compressLevel, compressImageReencode], () => {
   if (compressing.value) return
   const items = compressFiles.value
@@ -871,11 +902,14 @@ watch([compressLevel, compressImageReencode], () => {
     item.outputSize = 0
   }
   compressSummary.value = ''
-  void runCompressQueue()
 })
 
 async function runCompressQueue() {
   if (compressing.value) return
+  for (const item of compressFiles.value) {
+    if (['failed', 'cancelled'].includes(item.status)) item.status = 'pending'
+  }
+  if (!compressFiles.value.some(item => item.status === 'pending')) return
   compressing.value = true
   compressCancellation.reset()
   const level = compressLevel.value
@@ -900,6 +934,7 @@ async function runCompressQueue() {
         item.statusType = 'success'
         item.inputSize = Number(data.input_size) || 0
         item.outputSize = Number(data.output_size) || 0
+        item.outputPath = data.output_path
       } else {
         const cancelled = /操作已取消/.test(String(result.error))
         if (cancelled) compressCancellation.cancel()
@@ -933,6 +968,7 @@ async function selectSplitFile() {
 
 async function loadSplitFile(path) {
   if (splittingMerged.value) return
+  splitResultDir.value = ''
   splitFile.value = path
   splitPreviewPage.value = 1
   splitTotalPages.value = 0
@@ -1137,6 +1173,7 @@ async function doSplitMerged() {
     splitRunWarnings.value = result.data.warnings || []
     const failed = result.data.failed?.length || 0
     const outputs = result.data.outputs?.length || 0
+    if (outputs) splitResultDir.value = splitOutputDir.value
     const removedBlanks = (result.data.outputs || []).reduce(
       (sum, output) => sum + Number(output.removedBlankPages || 0),
       0,

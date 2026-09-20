@@ -98,16 +98,23 @@ pub fn sibling_temp_path(target: &Path, prefix: &str) -> PathBuf {
 /// Windows 不能直接 rename 覆盖已有文件，因此先将旧文件改名为备份；若替换失败，
 /// 会尽力恢复旧文件。调用方应确保 `from` 和 `to` 在同一目录。
 pub fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
-    let backup = sibling_temp_path(to, "docsy-backup");
-    std::fs::rename(to, &backup)?;
-    match std::fs::rename(from, to) {
-        Ok(()) => {
-            let _ = std::fs::remove_file(&backup);
-            Ok(())
-        }
-        Err(error) => {
-            let _ = std::fs::rename(&backup, to);
-            Err(error)
+    #[cfg(unix)]
+    {
+        return std::fs::rename(from, to);
+    }
+    #[cfg(not(unix))]
+    {
+        let backup = sibling_temp_path(to, "docsy-backup");
+        std::fs::rename(to, &backup)?;
+        match std::fs::rename(from, to) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&backup);
+                Ok(())
+            }
+            Err(error) => {
+                let _ = std::fs::rename(&backup, to);
+                Err(error)
+            }
         }
     }
 }
@@ -223,5 +230,87 @@ impl TempPathGuard {
 impl Drop for TempPathGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Owns a private temporary directory, including partial results on failure.
+pub struct TempDirGuard {
+    path: PathBuf,
+}
+impl TempDirGuard {
+    pub fn new(path: PathBuf) -> std::io::Result<Self> {
+        let guard = Self { path };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&guard.path, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(guard)
+    }
+}
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// Copy without ever replacing a pre-existing destination, including races.
+pub fn copy_unique(source: &Path, directory: &Path) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("template");
+    let ext = source.extension().and_then(|s| s.to_str()).unwrap_or("");
+    loop {
+        let path = unique_output_path(directory, stem, ext);
+        let mut output = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        };
+        let result = (|| {
+            let mut input = std::fs::File::open(source)?;
+            std::io::copy(&mut input, &mut output)?;
+            output.flush()?;
+            output.sync_all()
+        })();
+        drop(output);
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&path);
+            return Err(error);
+        }
+        return Ok(path);
+    }
+}
+
+#[cfg(test)]
+mod freeze_tests {
+    use super::*;
+    #[test]
+    fn directory_guard_allows_children_and_cleans_on_failure() {
+        let path = temp_named_path("docsy-guard-test", "dir");
+        std::fs::create_dir(&path).unwrap();
+        {
+            let _guard = TempDirGuard::new(path.clone()).unwrap();
+            std::fs::write(path.join("partial.pdf"), b"partial").unwrap();
+        }
+        assert!(!path.exists());
+    }
+    #[test]
+    fn export_copy_keeps_existing_file() {
+        let path = temp_named_path("docsy-copy-test", "dir");
+        std::fs::create_dir(&path).unwrap();
+        let _guard = TempDirGuard::new(path.clone()).unwrap();
+        let source = path.join("saved.docsytpl");
+        std::fs::write(&source, b"old").unwrap();
+        let copied = copy_unique(&source, &path).unwrap();
+        assert_ne!(copied, source);
+        assert_eq!(std::fs::read(&source).unwrap(), b"old");
+        assert_eq!(std::fs::read(copied).unwrap(), b"old");
     }
 }

@@ -24,14 +24,11 @@ pub async fn analyze_image_paddler_folder(
 
 #[tauri::command]
 pub async fn run_image_paddler(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     args: crate::image_paddler::RunArgs,
-) -> Result<crate::image_paddler::RunResult, DocsyError> {
-    tauri::async_runtime::spawn_blocking(move || crate::image_paddler::run(&args))
-        .await
-        .map_err(|e| DocsyError::Unknown {
-            message: e.to_string(),
-        })?
-        .map_err(|e| DocsyError::Unknown {
-            message: e.to_string(),
-        })
+) -> Result<crate::image_paddler::RunResult, String> {
+    super::run_managed(&manager, "run_image_paddler", None, move |_token| {
+        crate::image_paddler::run(&args)
+    })
+    .await
 }

@@ -55,7 +55,7 @@ where
     let token = manager.begin(&op_id, command);
 
     // 不在 spawn_blocking 上使用 ?，确保 finish() 一定被调用
-    let join_result = tauri::async_runtime::spawn_blocking(move || task(token)).await;
+    let join_result = tauri::async_runtime::spawn_blocking(move || crate::operations::with_current_cancel(token.clone(), || task(token))).await;
     let result = match join_result {
         Ok(inner) => inner.map_err(anyhow_to_json_string),
         Err(join_err) => Err(join_err.to_string()),

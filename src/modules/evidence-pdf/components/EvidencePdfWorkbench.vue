@@ -14,10 +14,10 @@
           <p class="hint">{{ workflowHint }}</p>
         </div>
         <div class="section-actions">
-          <el-button v-if="workflowMode !== 'split'" type="primary" @click="selectOverlayFiles">{{
+          <el-button v-if="workflowMode !== 'split'" type="primary" plain :disabled="overlaying || batchRunning" @click="selectOverlayFiles">{{
             splitImportButtonText
           }}</el-button>
-          <el-button v-if="workflowMode !== 'merge'" type="primary" :loading="importingMergedPdf" :disabled="batchRunning || detectingMergedImport || splittingMergedImport" @click="importMergedPdfAsEvidence">{{
+          <el-button v-if="workflowMode !== 'merge'" type="primary" plain :loading="importingMergedPdf" :disabled="batchRunning || detectingMergedImport || splittingMergedImport" @click="importMergedPdfAsEvidence">{{
             mergedImportButtonText
           }}</el-button>
         </div>
@@ -64,7 +64,7 @@
           <p class="path-text">输出文件夹：{{ overlayOutputDir }}</p>
         </div>
         <div v-if="workflowMode !== 'split'" class="plan-actions">
-          <el-button size="small" @click="selectSplitReplacementOutputDir">输出目录</el-button>
+          <el-button size="small" @click="selectSplitReplacementOutputDir">输出文件夹</el-button>
           <el-button size="small" @click="openHeaderFooterSettings">设置页眉页脚</el-button>
           <el-button
             size="small"
@@ -401,7 +401,7 @@
 
       <div v-if="showProcessingControls" class="toolbar">
         <el-button :disabled="!overlayFiles.length" @click="selectOverlayOutputDir">输出文件夹</el-button>
-        <el-button :disabled="!overlayFiles.length" @click="openPlannedOutputDir">打开输出文件夹</el-button>
+        <el-button :disabled="!overlayFiles.length" @click="openPlannedOutputDir">打开文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages"
           >刷新页数</el-button
         >
@@ -423,7 +423,7 @@
         <span>{{ mergedImportPlans.length }} 份源文件</span>
         <el-button :disabled="mergedBatchBusy || !pendingDetectionCount" @click="detectAllMergedImports">检测未完成文件</el-button>
         <el-button :disabled="mergedBatchBusy || !allSplitCleanupCount" @click="openSplitCleanup('all')">清除标记</el-button>
-        <el-button type="primary" :disabled="mergedBatchBusy || !reviewedPlanCount" @click="splitReviewedMergedImports">拆分已核对（{{ reviewedPlanCount }}）</el-button>
+        <el-button type="success" :disabled="mergedBatchBusy || !reviewedPlanCount" @click="splitReviewedMergedImports">拆分已核对（{{ reviewedPlanCount }}）</el-button>
         <el-button v-if="batchRunning" :disabled="batchStopRequested" @click="requestStopMergedBatch">{{ batchStopRequested ? '当前文件完成后停止' : '停止后续任务' }}</el-button>
       </div>
       <section v-for="filePlan in mergedImportPlans" :key="filePlan.inputPath" class="split-source-group" :class="{ 'is-active': filePlan === mergedImportPlan }">
@@ -461,7 +461,7 @@
               >{{ mergedImportPlan.pagesAnalyzed ? '重新检测' : '检测页段' }}</el-button
             >
             <el-button @click="splitOptionsVisible = true">输出设置</el-button>
-            <el-button type="primary" class="split-confirm" :loading="splittingMergedImport" :disabled="mergedBatchBusy || !mergedImportPlan.detectionAttempted || !mergedImportPlan.totalPages" @click="executeMergedImportPlan">
+            <el-button type="success" class="split-confirm" :loading="splittingMergedImport" :disabled="mergedBatchBusy || !mergedImportPlan.detectionAttempted || !mergedImportPlan.totalPages" @click="executeMergedImportPlan">
               确认拆分
             </el-button>
           </div>
@@ -474,7 +474,7 @@
         </div>
         <el-dialog v-model="splitOptionsVisible" title="输出设置" width="640px" append-to-body>
         <div class="split-name-options">
-          <div class="block-title">输出目录 <el-button size="small" @click="selectMergedImportOutputDir">更改</el-button></div>
+          <div class="block-title">输出文件夹 <el-button size="small" @click="selectMergedImportOutputDir">更改</el-button></div>
           <p class="path-text">{{ mergedImportPlan.outputDir }}</p>
           <div class="block-title">文件命名</div>
           <div class="rule-grid">
@@ -607,7 +607,7 @@
         <div class="block-title-row">
           <DocletSprite v-if="filePlan.splitStatus === 'complete'" :size="48" motion="celebrate" />
           <strong>已输出 {{ filePlan.outputs?.length || 0 }} 个文件</strong>
-          <el-button size="small" @click="openPath(filePlan.outputDir)">打开输出目录</el-button>
+          <el-button size="small" @click="openPath(filePlan.outputDir)">打开文件夹</el-button>
           <el-button v-if="filePlan.splitStatus !== 'complete'" size="small" type="primary" :disabled="mergedBatchBusy" @click="retryMergedPlan(filePlan)">重试未完成页段</el-button>
           <el-button v-if="filePlan.splitStatus !== 'complete' && !filePlan.outputs?.length" size="small" :disabled="mergedBatchBusy" @click="reopenMergedImportPlan(filePlan)">重新核对</el-button>
         </div>
@@ -2871,7 +2871,7 @@ async function openPlannedOutputDir() {
   if (!overlayFiles.value.length) return
   const result = await openPath(plannedOutputDir.value)
   if (!result.ok) {
-    ElMessage.error(userFacingError(result.error, '无法打开输出文件夹'))
+    ElMessage.error(userFacingError(result.error, '无法打开文件夹'))
   }
 }
 
@@ -3402,9 +3402,9 @@ async function finishQuickCleanupPipeline() {
     if (result.data.cancelled) {
       ElMessage.warning(`删除已取消，已完成 ${successCount} 个 PDF；未处理文件保持原样`)
     } else if (failedCount) {
-      ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个。输出目录：${outputDir}`)
+      ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个。输出文件夹：${outputDir}`)
     } else {
-      ElMessage.success(`已完成 ${successCount} 个 PDF，输出目录：${outputDir}`)
+      ElMessage.success(`已完成 ${successCount} 个 PDF，输出文件夹：${outputDir}`)
     }
   } catch (err) {
     ElMessage.error(userFacingError(err?.message || err, '页眉页脚删除失败'))
@@ -3730,9 +3730,9 @@ async function executeImmediateDelete() {
     if (result.data.cancelled) {
       ElMessage.warning(`删除已取消，已完成 ${successCount} 个 PDF；未处理文件保持原样`)
     } else if (failedCount) {
-      ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个。输出目录：${outputDir}`)
+      ElMessage.warning(`已完成 ${successCount} 个，失败 ${failedCount} 个。输出文件夹：${outputDir}`)
     } else {
-      ElMessage.success(`已完成 ${successCount} 个 PDF，输出目录：${outputDir}`)
+      ElMessage.success(`已完成 ${successCount} 个 PDF，输出文件夹：${outputDir}`)
     }
   } catch (err) {
     ElMessage.error(userFacingError(err?.message || err, '页眉页脚删除失败'))

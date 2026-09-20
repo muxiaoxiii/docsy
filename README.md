@@ -3,7 +3,7 @@
 > 一个专为法律人、行政党、文字工作者打造的本地文档处理效率工具 ✨  
 > 所有操作 100% 在本地电脑完成，**断网可用，绝不上传云端** 🔒
 
-[![Version](https://img.shields.io/badge/version-1.0.7-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
+[![Version](https://img.shields.io/badge/version-1.0.8-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/muxiaoxiii/docsy/releases)
 
@@ -17,7 +17,7 @@
 
 还有一只超可爱的桌宠 **Doclet** 🐾，在遇到大批文件处理或外部工具调用时，它会在界面一角安静地陪你等待～
 
-1.0.7 带来图片排版双层智能推荐（导入方案 + 随每页张数/方向变化的布局感知尺寸）、全局缩放独立继承、预览导出同一几何、图文间距滑槽与冲突智能预检；1.0.6 补充大文件分段稳定处理与电子签章风险确认；1.0.5 将 Doclet 的八种动态接入首页互动与完成反馈。
+当前源码为 **1.0.8 停更候选**：功能范围冻结，修复数据保护、图片排版与历史恢复问题。尚未发布；平台验收及已知限制见 [停更候选记录](docs/STOP_RELEASE_1.0.8.md)。
 
 ![Docsy 主页界面](site/public/assets/screenshots/home.png)
 

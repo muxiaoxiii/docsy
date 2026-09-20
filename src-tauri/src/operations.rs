@@ -349,3 +349,28 @@ mod tests {
         assert!(manager.cancel("op-1")); // 第二次也返回 true（entry 还在）
     }
 }
+
+// Scope cancellation to this blocking worker; never leak it into a reused thread.
+thread_local! {
+    static CURRENT_CANCEL: std::cell::RefCell<Option<CancellationToken>> = const { std::cell::RefCell::new(None) };
+}
+pub fn with_current_cancel<T>(token: CancellationToken, task: impl FnOnce() -> T) -> T {
+    struct Restore(Option<CancellationToken>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CURRENT_CANCEL.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(CURRENT_CANCEL.with(|slot| slot.replace(Some(token))));
+    task()
+}
+pub fn check_current_cancelled() -> anyhow::Result<()> {
+    if CURRENT_CANCEL.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|token| token.is_cancelled())
+    }) {
+        anyhow::bail!("操作已取消，未完成的输出已停止写入");
+    }
+    Ok(())
+}

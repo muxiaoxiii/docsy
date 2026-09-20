@@ -172,8 +172,8 @@ export function detectPageConflicts({
       const safeDpi = dpi === 0 ? 300 : Math.min(1200, Math.max(72, dpi))
       const nativeW = (img.width * 25.4) / safeDpi
       const nativeH = (img.height * 25.4) / safeDpi
-      const fitScale = Math.min(cellW / nativeW, imgAreaH / nativeH) * pageScale
-      const scale = scaleMode === 'original' ? Math.min(fitScale, 1.0) : fitScale
+      const fitScale = Math.min(cellW / nativeW, imgAreaH / nativeH)
+      const scale = (scaleMode === 'original' ? Math.min(fitScale, 1.0) : fitScale) * pageScale
       drawW = nativeW * scale
       drawH = nativeH * scale
     }

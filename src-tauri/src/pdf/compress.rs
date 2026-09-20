@@ -115,16 +115,18 @@ fn compress_pdf_whole(
     options: &CompressOptions,
     progress: &mut dyn FnMut(CompressProgress),
 ) -> Result<()> {
+    crate::operations::check_current_cancelled()?;
     let mut doc = Document::load(input).context("读取 PDF 失败")?;
 
     let image_ids = collect_image_xobjects(&doc);
     progress(CompressProgress::item("分析页面图像", 0, image_ids.len()));
-    let effective_dpi = collect_effective_dpi(&doc, &image_ids, progress);
+    let effective_dpi = collect_effective_dpi(&doc, &image_ids, progress)?;
     let mut compressed_count = 0u32;
     let mut saved_bytes: u64 = 0;
 
     let image_total = image_ids.len();
     for (index, obj_id) in image_ids.into_iter().enumerate() {
+        crate::operations::check_current_cancelled()?;
         let original_size = stream_data_size(&doc, obj_id);
         let max_dpi = effective_dpi.get(&obj_id).copied();
         if let Err(e) = recompress_image(&mut doc, obj_id, options, max_dpi) {
@@ -153,8 +155,10 @@ fn compress_pdf_whole(
         saved_bytes as f64 / 1024.0 / 1024.0
     );
 
+    crate::operations::check_current_cancelled()?;
     doc.compress();
     progress(CompressProgress::phase("保存压缩 PDF"));
+    crate::operations::check_current_cancelled()?;
     doc.save(output).context("保存压缩 PDF 失败")?;
     Ok(())
 }
@@ -224,14 +228,15 @@ fn collect_effective_dpi(
     doc: &Document,
     image_ids: &[ObjectId],
     progress: &mut dyn FnMut(CompressProgress),
-) -> HashMap<ObjectId, f64> {
+) -> Result<HashMap<ObjectId, f64>> {
     let mut dpi_map: HashMap<ObjectId, f64> = HashMap::new();
     if image_ids.is_empty() {
-        return dpi_map;
+        return Ok(dpi_map);
     }
     let pages = doc.get_pages();
     let page_total = pages.len();
     for (page_index, (_, page_id)) in pages.into_iter().enumerate() {
+        crate::operations::check_current_cancelled()?;
         progress(CompressProgress::item(
             "分析页面图像",
             page_index + 1,
@@ -256,7 +261,7 @@ fn collect_effective_dpi(
             0,
         );
     }
-    dpi_map
+    Ok(dpi_map)
 }
 
 /// 扫描一段内容流（页面或 Form XObject），depth 控制 Form 递归层数（仅一层）。

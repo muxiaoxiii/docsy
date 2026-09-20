@@ -74,7 +74,7 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-else description="回收站为空" />
+        <WorkspaceEmptyState v-else compact title="回收站为空" />
       </div>
     </div>
 
@@ -114,7 +114,7 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-else description="暂无模板数据" />
+        <WorkspaceEmptyState v-else compact title="暂无模板数据" />
       </div>
     </div>
 
@@ -172,6 +172,7 @@
 </template>
 
 <script setup>
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'

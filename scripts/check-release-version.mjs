@@ -11,17 +11,12 @@ assert.equal(read('src-tauri/Cargo.toml').match(/^version = "([^"]+)"/m)?.[1], v
 assert.equal(read('src-tauri/Cargo.lock').match(/name = "docsy"\r?\nversion = "([^"]+)"/)?.[1], version)
 assert.ok(read('CHANGELOG.md').includes(`## [${version}]`))
 
-// 官网与 README 的静态版本面必须与包版本一致，避免再次出现
-// 「GitHub Release 已发布但站点仍显示旧版本」的脱节。
+// Source candidates and publicly downloadable artifacts have separate provenance.
 const siteIndex = read('site/public/index.html')
-assert.ok(
-  siteIndex.includes(`id="dl-version-static">v${version}<`),
-  `site/public/index.html 静态版本应为 v${version}`,
-)
-assert.ok(
-  siteIndex.includes(`Docsy_${version}_`),
-  `site/public/index.html 安装包文件名应包含 Docsy_${version}_`,
-)
+assert.ok(siteIndex.includes(`name="docsy-source-version" content="${version}"`))
+const publishedVersion = JSON.parse(read('site/public/data/releases.json')).latest
+assert.ok(siteIndex.includes(`id="dl-version-static">v${publishedVersion}<`))
+assert.ok(siteIndex.includes(`Docsy_${publishedVersion}_`))
 const readme = read('README.md')
 assert.ok(
   readme.includes(`version-${version}-blue`),

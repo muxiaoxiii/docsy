@@ -8,6 +8,7 @@ import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.j
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   safeColumnWidth,
+  effectivePageWidth,
   pairOffsets,
   pairAlignToXY,
   detectPageConflicts,
@@ -22,8 +23,9 @@ import {
   isFlowLayoutMode,
   layoutFromControls,
   parseLayoutString,
-  recommendForLayout,
 } from './layoutControls.js'
+
+import { buildOutputPlan, migratePaddlerPreferences } from './outputPlan.js'
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
 const FILENAME_MAX_LINES = 3
@@ -67,6 +69,7 @@ export function useImagePaddlerState(options = {}) {
   const preferenceRevision = ref(0)
   const currentPageIndex = ref(0)
   const pageScales = ref({})
+  const pageScalePlanKey = ref('')
   const activePageScale = ref(100)
   const imageAnnotations = ref({})
   let analyzeTimer = null
@@ -124,10 +127,11 @@ export function useImagePaddlerState(options = {}) {
     exclusionByPath,
     preferenceRevision,
     pageScales,
+    pageScalePlanKey,
     imageAnnotations,
     globalScalePercent,
     settingsPanelWidth,
-  })
+  }, { migrate: migratePaddlerPreferences })
 
   const isFlowLayout = computed(() => isFlowLayoutMode(settings.output_format, settings.use_table))
   const arrangeOptions = computed(() => arrangeOptionsFor(settings.images_per_page, isFlowLayout.value))
@@ -141,33 +145,48 @@ export function useImagePaddlerState(options = {}) {
     return analysis.value?.recommended?.orientation || 'portrait'
   })
   const resolvedOrientationLabel = computed(() => (resolvedOrientation.value === 'landscape' ? '横向' : '竖向'))
-  const orderedImages = computed(() =>
-    reorderImages(analysis.value?.images || [], layoutGrid.value, settings.order_mode),
-  )
+  const orderedImages = computed(() => {
+    const images = analysis.value?.images || []
+    if (settings.output_mode === 'per_folder') {
+      return buildOutputPlan(images, Math.max(1, images.length), 'per_folder')
+        .flatMap(file => reorderImages(file.pages[0].images, layoutGrid.value, settings.order_mode))
+    }
+    return reorderImages(images, layoutGrid.value, settings.order_mode)
+  })
   const includedImages = computed(() => orderedImages.value.filter((image) => !isImageExcluded(image)))
   const excludedCount = computed(() => orderedImages.value.length - includedImages.value.length)
   const perPage = computed(() => Math.max(1, layoutGrid.value.rows * layoutGrid.value.cols))
   const isPairLayout = computed(() => perPage.value === 2 && !isFlowLayout.value)
   const captionGapMm = computed(() =>
-    settings.show_filename || settings.reserve_note_placeholder
+    settings.show_filename || settings.reserve_note_placeholder || includedImages.value.some(image => imageDescription(image.path))
       ? Math.max(0, Math.min(20, Number(settings.caption_gap_mm) || 0))
       : 0,
   )
 
   /** 布局感知推荐：跟随每页张数与页面方向，不是导入时那一套。 */
-  const layoutAwareRecommendation = computed(() =>
-    recommendForLayout({
-      images: analysis.value?.images || [],
-      grid: layoutGrid.value,
-      orientation: resolvedOrientation.value,
-      marginMm: settings.margin_mm,
-      printSafetyPadMm: settings.print_safety_pad_mm,
-      showFilename: settings.show_filename,
-      perPage: perPage.value,
-      captionGapMm: captionGapMm.value,
-      dpi: settings.dpi,
-    }),
-  )
+  const layoutAwareRecommendation = computed(() => {
+    let width = safeColumnWidthValue.value
+    let feasible = true
+    for (const entry of outputPages.value) {
+      const grid = settings.last_page_mode === 'reflow'
+        ? compactGridForCount(layoutGrid.value, entry.images.length) : layoutGrid.value
+      const metrics = computeMetricsForGrid(grid, entry.images)
+      if (metrics.filenameReserve >= metrics.cellHeight) feasible = false
+      for (const image of entry.images) {
+        width = Math.min(width, metrics.imageCellHeight * image.width / Math.max(1, image.height),
+          image.width * 25.4 / clampNumber(settings.dpi, 72, 1200, 300))
+      }
+    }
+    feasible = feasible && width >= 0.1
+    const recommendedWidth = Math.max(0.1, Math.floor(width * 10) / 10)
+    return {
+      recommended_width_mm: recommendedWidth,
+      safe_column_width_mm: safeColumnWidthValue.value,
+      feasible,
+      reason: feasible ? `${layoutGrid.value.rows}×${layoutGrid.value.cols} · 按实际标题和说明计算 ${recommendedWidth} mm`
+        : '标题或说明已占满单元格，请减少每页张数或缩小字号',
+    }
+  })
 
   const importRecommendationDrifted = computed(() =>
     importRecommendationDrifts(analysis.value?.recommended, layoutGrid.value, perPage.value),
@@ -270,52 +289,24 @@ export function useImagePaddlerState(options = {}) {
     () => syncLayoutFromControls(),
   )
 
-  // 布局/方向/边距/图文间距变化：智能尺寸立即重算；布局变化时清理页码局部缩放覆盖
-  let lastLayoutKey = ''
-  watch(
-    [
-      () => settings.layout,
-      resolvedOrientation,
-      () => settings.use_table,
-      () => settings.output_format,
-      () => settings.margin_mm,
-      () => settings.caption_gap_mm,
-      () => settings.show_filename,
-      analysis,
-    ],
-    () => {
-      const key = [
-        settings.layout,
-        resolvedOrientation.value,
-        settings.use_table,
-        settings.output_format,
-        settings.custom_rows,
-        settings.custom_cols,
-      ].join('|')
-      const layoutChanged = lastLayoutKey && lastLayoutKey !== key
-      lastLayoutKey = key
-      if (layoutChanged) {
-        // 重新分页后旧页码覆盖失效；全局缩放保留，新页自动继承
-        pageScales.value = {}
-        activePageScale.value = globalScalePercent.value
-      }
-      if (settings.size_mode === 'smart') {
-        const rec = layoutAwareRecommendation.value
-        if (rec?.recommended_width_mm) {
-          settings.scale_mode = 'fixed_width'
-          settings.fixed_width_mm = rec.recommended_width_mm
-        }
-      } else if (settings.size_mode === 'manual' && settings.scale_mode === 'fixed_width') {
-        const rec = layoutAwareRecommendation.value
-        const current = Number(settings.fixed_width_mm) || 0
-        if (rec && current > rec.safe_column_width_mm + 0.5) {
-          // 超宽时仅静默提示在 UI 字段里，避免弹层打断
-        }
-      }
-    },
-  )
+  const outputPlan = computed(() => buildOutputPlan(includedImages.value, perPage.value, settings.output_mode))
+  const outputPages = computed(() => outputPlan.value.flatMap(file => file.pages))
+  const totalPages = computed(() => Math.max(1, outputPages.value.length))
+  const outputPlanKey = computed(() => JSON.stringify({
+    grid: layoutGrid.value, orientation: resolvedOrientation.value,
+    format: settings.output_format, flow: isFlowLayout.value, last: settings.last_page_mode,
+    files: outputPlan.value,
+  }))
+  // A local page override belongs only to the exact saved content and pagination.
+  watch(outputPlanKey, key => {
+    if (!includedImages.value.length) return
+    if (pageScalePlanKey.value !== key) {
+      pageScales.value = {}
+      activePageScale.value = globalScalePercent.value
+    }
+    pageScalePlanKey.value = key
+  }, { flush: 'sync' })
 
-  const totalPages = computed(() => Math.max(1, Math.ceil(includedImages.value.length / perPage.value)))
 
   watch([totalPages, includedImages], () => {
     if (currentPageIndex.value >= totalPages.value) {
@@ -323,12 +314,16 @@ export function useImagePaddlerState(options = {}) {
     }
   })
 
-  const previewImages = computed(() => {
-    const count = perPage.value
-    const start = currentPageIndex.value * count
-    return includedImages.value.slice(start, start + count)
+  const previewImages = computed(() => outputPages.value[currentPageIndex.value]?.images || [])
+
+  const previewSlots = computed(() => {
+    const slots = [...previewImages.value]
+    if (settings.border_enabled && !isFlowLayout.value && slots.length) {
+      const capacity = previewLayoutGrid.value.rows * previewLayoutGrid.value.cols
+      while (slots.length < capacity) slots.push(null)
+    }
+    return slots
   })
-  const previewSlots = computed(() => [...previewImages.value])
   const previewLayoutGrid = computed(() => {
     const base = layoutGrid.value
     if (settings.last_page_mode !== 'reflow') return base
@@ -370,7 +365,7 @@ export function useImagePaddlerState(options = {}) {
     gridTemplateRows: `repeat(${previewLayoutGrid.value.rows}, minmax(0, 1fr))`,
   }))
   const previewCellStyle = computed(() => {
-    if (!settings.border_enabled) {
+    if (!settings.border_enabled || isFlowLayout.value) {
       return {
         boxShadow: 'none',
       }
@@ -460,12 +455,12 @@ export function useImagePaddlerState(options = {}) {
   })
   const previewCaptionGapStyle = computed(() => {
     const metrics = layoutMetrics.value
-    const pageH = resolvedOrientation.value === 'landscape' ? 210 : 297
+    const pageW = resolvedOrientation.value === 'landscape' ? 297 : 210
     const gap = metrics.captionGapMm || 0
-    const pct = (gap / pageH) * 100
+    const gapCqw = (gap / pageW) * 100
     return settings.caption_position === 'above'
-      ? { marginBottom: `${pct}%` }
-      : { marginTop: `${pct}%` }
+      ? { marginBottom: `${gapCqw}cqw` }
+      : { marginTop: `${gapCqw}cqw` }
   })
   const previewNameStyle = computed(() => {
     const metrics = layoutMetrics.value
@@ -511,6 +506,13 @@ export function useImagePaddlerState(options = {}) {
   )
   const actualImageWidth = computed(() => Math.min(Math.max(0.1, Number(settings.fixed_width_mm) || 160), 500))
   const widthIsLimited = computed(() => Number(settings.fixed_width_mm) > safeColumnWidthValue.value + 0.5)
+
+  watch(layoutAwareRecommendation, rec => {
+    if (settings.size_mode === 'smart') {
+      settings.scale_mode = 'fixed_width'
+      settings.fixed_width_mm = rec.recommended_width_mm
+    }
+  })
 
   function effectiveScaleForPage(pageIdx) {
     const idx = Number(pageIdx)
@@ -584,9 +586,7 @@ export function useImagePaddlerState(options = {}) {
   const hasAnySavedScales = computed(() => Object.keys(pageScales.value).length > 0)
 
   function pageGeometryFor(pageIdx) {
-    const count = perPage.value
-    const start = pageIdx * count
-    const pageImgs = includedImages.value.slice(start, start + count)
+    const pageImgs = outputPages.value[pageIdx]?.images || []
     const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
     const pageGrid =
       settings.last_page_mode === 'reflow'
@@ -811,7 +811,6 @@ export function useImagePaddlerState(options = {}) {
       if (requestId !== analysisRequestId) return
       if (result.ok) {
         analysis.value = result.data
-        if (isFrameSequence.value) applyRecommendedSettings(false)
         await preloadVisibleImages()
       } else {
         ElMessage.error(userFacingError(result.error, '图片文件夹分析失败，请确认文件夹路径正确'))
@@ -840,11 +839,12 @@ export function useImagePaddlerState(options = {}) {
       args: {
         folder: folder.value,
         folders: folders.value,
-        image_paths: includedImages.value.map((image) => image.path),
+        image_paths: outputPages.value.flatMap(page => page.images.map(image => image.path)),
         output_stem: inputContext.value.sourceStem || undefined,
         ...settings,
         // 路径已按前端 order_mode 预排，后端保持 custom 避免二次重排
         order_mode: 'custom',
+        border_enabled: settings.border_enabled && !isFlowLayout.value,
         fixed_width_mm: actualImageWidth.value,
         orientation: resolvedOrientation.value,
         page_scales: pageScalesArray,
@@ -933,6 +933,7 @@ export function useImagePaddlerState(options = {}) {
     if (settings.filename_without_ext) {
       name = name.replace(/\.[^.]+$/, '')
     }
+    if (settings.filename_remove_text) name = name.split(settings.filename_remove_text).join('')
     return applyFilenameRules(name)
   }
 
@@ -976,7 +977,7 @@ export function useImagePaddlerState(options = {}) {
   function noteLines(path) {
     const desc = imageDescription(path)
     if (!desc) return []
-    return wrapFilenameLines(desc, layoutMetrics.value.cellWidth, 3)
+    return wrapFilenameLines(desc, layoutMetrics.value.cellWidth, 3, settings.note_font_size_pt)
   }
 
   function imageItemName(img) {
@@ -1056,16 +1057,25 @@ export function useImagePaddlerState(options = {}) {
   }
 
   function fileNameLines(path) {
-    return wrapFilenameLines(fileName(path), layoutMetrics.value.cellWidth, layoutMetrics.value.filenameMaxLines)
+    return wrapFilenameLines(imageTitle(path), layoutMetrics.value.cellWidth, layoutMetrics.value.filenameMaxLines)
   }
 
   function requiredFilenameLines(name, cellWidthMm, fontSizePt, maxLines) {
-    const maxUnits = Math.max(6, Math.floor((cellWidthMm * 72) / 25.4 / (fontSizePt * 0.56)))
-    return Math.min(maxLines, Math.max(1, Math.ceil(nameUnits(name) / maxUnits)))
+    return wrapFilenameLines(name, cellWidthMm, maxLines, fontSizePt).length
   }
 
-  function wrapFilenameLines(name, cellWidthMm, maxLines) {
-    const fontSize = clampNumber(settings.filename_font_size_pt, 6, 24, 8)
+  function wrapFilenameLines(name, cellWidthMm, maxLines, font = settings.filename_font_size_pt) {
+    const rawLines = String(name || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    if (rawLines.length > 1) {
+      const lines = []
+      for (const line of rawLines) {
+        if (lines.length >= maxLines) break
+        lines.push(...wrapFilenameLines(line, cellWidthMm, maxLines - lines.length, font))
+      }
+      return lines
+    }
+    name = rawLines[0] || ''
+    const fontSize = clampNumber(font, 6, 24, 8)
     const maxUnits = Math.max(6, Math.floor((cellWidthMm * 72) / 25.4 / (fontSize * 0.56)))
     const lines = []
     let current = ''
@@ -1113,12 +1123,13 @@ export function useImagePaddlerState(options = {}) {
 
   function previewImageStyle(img) {
     const metrics = layoutMetrics.value
-    const nativeWidth = (img.width * 25.4) / settings.dpi
-    const nativeHeight = (img.height * 25.4) / settings.dpi
+    const dpi = settings.dpi === 0 ? 300 : Math.min(1200, Math.max(72, settings.dpi))
+    const nativeWidth = (img.width * 25.4) / dpi
+    const nativeHeight = (img.height * 25.4) / dpi
     let drawWidth, drawHeight
     const scaleFactor = currentPageScale.value
     if (settings.scale_mode === 'fixed_width') {
-      const fixedW = actualImageWidth.value * scaleFactor
+      const fixedW = effectivePageWidth(actualImageWidth.value, scaleFactor)
       const ratio = img.width > 0 ? img.height / img.width : 1
       drawWidth = fixedW
       drawHeight = fixedW * ratio
@@ -1377,13 +1388,9 @@ export function useImagePaddlerState(options = {}) {
         settings.size_mode = settings.scale_mode === 'fixed_width' ? 'manual' : settings.scale_mode === 'fit' || settings.scale_mode === 'original' ? settings.scale_mode : 'smart'
       }
       if (globalScalePercent.value === undefined || globalScalePercent.value === null) globalScalePercent.value = 100
-      const scaleValues = Object.values(pageScales.value || {})
-      if (scaleValues.length && scaleValues.every((v) => Math.abs(v - scaleValues[0]) < 0.001)) {
-        globalScalePercent.value = Math.round(scaleValues[0] * 100)
-        pageScales.value = {}
-      }
       preferenceRevision.value = 5
     }
+    preferenceRevision.value = 6
     settingsPanelWidth.value = clampNumber(settingsPanelWidth.value, 280, 520, 340)
     syncLayoutFromControls()
     preferencesReady = true
@@ -1443,9 +1450,7 @@ export function useImagePaddlerState(options = {}) {
   }
 
   function getPageConflicts(pageIdx) {
-    const count = perPage.value
-    const start = pageIdx * count
-    const pageImgs = includedImages.value.slice(start, start + count)
+    const pageImgs = outputPages.value[pageIdx]?.images || []
     if (!pageImgs.length) return { items: [], hasOverflow: false, hasOverlap: false, hasCaptionOverlap: false }
     const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
     const currentScale = effectiveScaleForPage(pageIdx)
@@ -1486,54 +1491,13 @@ export function useImagePaddlerState(options = {}) {
   const currentPageConflictReport = computed(() => getPageConflicts(currentPageIndex.value))
   const currentPageConflicts = computed(() => currentPageConflictReport.value.items || [])
 
-  // 冲突报告按页缓存：避免导入后任意设置微调都重扫全部页，导致大图集卡顿
-  const pageConflictCache = ref(new Map())
-  const conflictCacheKey = ref('')
-  function conflictScanKey() {
-    return [
-      includedImages.value.length,
-      perPage.value,
-      layoutGrid.value.rows,
-      layoutGrid.value.cols,
-      settings.last_page_mode,
-      settings.scale_mode,
-      settings.fixed_width_mm,
-      settings.margin_mm,
-      settings.show_filename,
-      settings.caption_position,
-      settings.caption_gap_mm,
-      settings.filename_font_size_pt,
-      settings.note_font_size_pt,
-      settings.pair_mode,
-      settings.dpi,
-      resolvedOrientation.value,
-      globalScalePercent.value,
-      JSON.stringify(pageScales.value),
-      settings.output_format,
-    ].join('|')
-  }
-
+  // Vue tracks the actual geometry inputs; do not maintain a second, incomplete cache key.
+  const allPageConflictReports = computed(() =>
+    outputPages.value.map((_, index) => getPageConflicts(index)),
+  )
   function getConflictReportForPage(pageIdx) {
-    const key = conflictScanKey()
-    if (conflictCacheKey.value !== key) {
-      pageConflictCache.value = new Map()
-      conflictCacheKey.value = key
-    }
-    if (!pageConflictCache.value.has(pageIdx)) {
-      pageConflictCache.value.set(pageIdx, getPageConflicts(pageIdx))
-    }
-    return pageConflictCache.value.get(pageIdx)
+    return allPageConflictReports.value[pageIdx]
   }
-
-  const allPageConflictReports = computed(() => {
-    // 只为徽章/冲突表需要时再扫；computed 本身仍会因依赖变化失效
-    const total = totalPages.value
-    const reports = new Array(total)
-    for (let p = 0; p < total; p++) {
-      reports[p] = getConflictReportForPage(p)
-    }
-    return reports
-  })
 
   const currentPageConflictState = computed(() => {
     const report = currentPageConflictReport.value
@@ -1565,12 +1529,10 @@ export function useImagePaddlerState(options = {}) {
   })
 
   function imageBadgeResolver(item) {
-    const index = includedImages.value.findIndex((img) => img.path === item.path)
-    if (index === -1) return null
-    const count = perPage.value
-    const pageIdx = Math.floor(index / count)
+    const pageIdx = outputPages.value.findIndex(page => page.images.some(image => image.path === item.path))
+    if (pageIdx < 0) return null
+    const slotIdx = outputPages.value[pageIdx].images.findIndex(image => image.path === item.path)
     const report = getConflictReportForPage(pageIdx)
-    const slotIdx = index % count
     const color = report?.items?.[slotIdx]?.color || 'ok'
     const isModified = pageScales.value[pageIdx] !== undefined
     return {
@@ -1624,7 +1586,11 @@ export function useImagePaddlerState(options = {}) {
       ElMessage.warning('当前没有参与排版的图片，请先恢复至少一张图片')
       return
     }
-    if (conflictSummaryList.value.length > 0) {
+    // Export preflight always scans the current snapshot, independently of display caching.
+    if (outputPages.value.some((_, i) => {
+      const report = getPageConflicts(i)
+      return report.hasOverflow || report.hasOverlap || report.hasCaptionOverlap
+    })) {
       conflictDialogVisible.value = true
       return
     }
@@ -1632,6 +1598,8 @@ export function useImagePaddlerState(options = {}) {
   }
 
   return {
+    outputPlan,
+    outputPages,
     conflictDialogVisible,
     conflictSummaryList,
     handleStartGenerate,

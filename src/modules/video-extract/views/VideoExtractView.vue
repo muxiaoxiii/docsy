@@ -1,5 +1,8 @@
 <template>
   <ToolWorkspaceShell title="视频抽帧" description="从视频中按频率或间隔提取帧图片">
+    <template #header-actions>
+      <el-button type="success" :loading="extracting" :disabled="analyzingSelection || !videoPath || !ffmpegStatus.available || (settings.timestamp.enabled && !ffmpegStatus.has_drawtext)" @click="extractFrames">开始抽帧</el-button>
+    </template>
     <div class="extract-layout" :class="{ 'settings-collapsed': settingsCollapsed }">
       <!-- Left: Settings -->
       <div class="extract-settings">
@@ -35,12 +38,12 @@
         <!-- File Selection -->
         <div class="section-block">
           <div class="section-title">选择视频</div>
-          <div class="drop-zone" :class="{ 'drop-zone-active': dragging }" @click="selectFile">
+          <div class="drop-zone" :class="{ 'drop-zone-active': dragging }" role="button" :tabindex="extracting || analyzingSelection ? -1 : 0" :aria-disabled="extracting || analyzingSelection" aria-label="选择视频文件" @keydown.enter.self.prevent="selectFile" @keydown.space.self.prevent="selectFile" @click="selectFile">
             <template v-if="videoPath">
               <div class="selected-file">
                 <el-icon><VideoCamera /></el-icon>
                 <span class="file-name">{{ fileName(videoPath) }}</span>
-                <el-button text type="danger" size="small" @click.stop="clearVideo">清除</el-button>
+                <el-button text type="danger" size="small" :disabled="extracting || analyzingSelection" @click.stop="clearVideo">移除</el-button>
               </div>
             </template>
             <template v-else>
@@ -80,8 +83,8 @@
         <!-- Extraction Settings -->
         <div class="section-block">
           <div class="section-title">抽帧设置</div>
-          <el-form label-width="90px" size="default">
-            <el-form-item label="输出目录">
+          <el-form label-width="90px" size="default" :disabled="extracting || analyzingSelection">
+            <el-form-item label="输出文件夹">
               <div class="path-picker">
                 <el-button @click="selectOutputDir">选择</el-button>
                 <el-button v-if="settings.outputDir" text type="danger" @click="settings.outputDir = ''"
@@ -170,7 +173,7 @@
 
         <div class="section-block">
           <div class="section-title">智能筛选</div>
-          <el-form label-width="90px" size="default">
+          <el-form label-width="90px" size="default" :disabled="extracting || analyzingSelection">
             <el-form-item label="完成后分析">
               <el-switch v-model="analysisSettings.autoAnalyze" />
             </el-form-item>
@@ -212,7 +215,7 @@
             @click="extractFrames"
             :loading="extracting"
             :disabled="
-              !videoPath || !ffmpegStatus.available || (settings.timestamp.enabled && !ffmpegStatus.has_drawtext)
+              analyzingSelection || !videoPath || !ffmpegStatus.available || (settings.timestamp.enabled && !ffmpegStatus.has_drawtext)
             "
           >
             开始抽帧
@@ -235,7 +238,7 @@
           <el-button v-if="resultImages.length" size="small" @click="settingsCollapsed = !settingsCollapsed">
             {{ settingsCollapsed ? '显示抽帧设置' : '收起抽帧设置' }}
           </el-button>
-          <el-button size="small" :disabled="extracting || analyzingSelection" @click="selectExistingResultDirectory">打开已有图片目录</el-button>
+          <el-button size="small" :disabled="extracting || analyzingSelection" @click="selectExistingResultDirectory">导入已有图片文件夹</el-button>
         </div>
 
         <WorkspaceEmptyState
@@ -350,6 +353,9 @@ let dynamicAnalysisTimer = null
 let analysisRerunRequested = false
 let analysisRequestSequence = 0
 let mediaReadyToSave = false
+let mediaSourceRevision = 0
+let mediaSaveInFlight = null
+let mediaSaveQueued = false
 let unlistenAnalysisProgress = null
 const VIDEO_EXTENSIONS = new Set(['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'ts', 'm4v'])
 
@@ -390,6 +396,7 @@ async function openFfmpegDownload() {
 }
 
 async function selectFile() {
+  if (extracting.value || analyzingSelection.value) return
   try {
     const file = await open({
       multiple: false,
@@ -420,13 +427,14 @@ async function handleDroppedPaths(paths) {
 }
 
 async function loadVideo(path) {
-  if (extracting.value) {
-    ElMessage.warning('请等待当前抽帧结束后再切换视频')
+  if (extracting.value || analyzingSelection.value) {
+    ElMessage.warning('请等待当前抽帧或分析结束后再切换视频')
     return
   }
   settingsCollapsed.value = false
   videoPath.value = path
   clearFrameDraftSafely()
+  mediaSourceRevision += 1
   videoInfo.value = null
   extractResult.value = null
   resultImages.value = []
@@ -451,6 +459,7 @@ function clearVideo() {
   settingsCollapsed.value = false
   clearFrameDraftSafely()
   videoPath.value = ''
+  mediaSourceRevision += 1
   videoInfo.value = null
   extractResult.value = null
   resultImages.value = []
@@ -463,7 +472,7 @@ function clearVideo() {
 }
 
 async function extractFrames() {
-  if (!videoPath.value || extracting.value) return
+  if (!videoPath.value || extracting.value || analyzingSelection.value) return
   if (settings.timestamp.enabled && !ffmpegStatus.has_drawtext) {
     ElMessage.error('当前 FFmpeg 不支持 drawtext。请关闭水印或安装支持 drawtext 的 FFmpeg。')
     return
@@ -554,6 +563,10 @@ function emptyFrame(path) {
 }
 
 async function initializeResultImages(paths, dir) {
+  const revision = ++mediaSourceRevision
+  mediaReadyToSave = false
+  if (mediaSaveTimer) window.clearTimeout(mediaSaveTimer)
+  mediaSaveTimer = null
   clearFrameDraftSafely()
   resultImages.value = [...new Set(paths || [])].map(emptyFrame)
   algorithmVersion.value = ''
@@ -561,13 +574,15 @@ async function initializeResultImages(paths, dir) {
   decisionHistory.value = []
   sourceDirectory.value = dir || parentDir(resultImages.value[0]?.path || '')
   mediaSessionId.value = null
-  mediaReadyToSave = true
   if (!resultImages.value.length) return
   settingsCollapsed.value = true
-  syncFrameDraft()
-  scheduleMediaSave()
+  if (mediaSaveInFlight) await mediaSaveInFlight
+  if (revision !== mediaSourceRevision) return
+  await offerSessionRestore(revision)
+  if (revision !== mediaSourceRevision) return
   if (analysisSettings.autoAnalyze) await runFrameAnalysis({ saveAfter: false })
-  await offerSessionRestore()
+  if (revision !== mediaSourceRevision) return
+  mediaReadyToSave = true
   syncFrameDraft()
   scheduleMediaSave()
 }
@@ -674,7 +689,7 @@ function rerunFrameAnalysisIfNeeded() {
   scheduleDynamicAnalysis()
 }
 
-async function offerSessionRestore() {
+async function offerSessionRestore(revision = mediaSourceRevision) {
   const result = await tauriCallSafe('find_media_workspace_session', {
     args: {
       module_id: 'video-extract',
@@ -682,7 +697,7 @@ async function offerSessionRestore() {
       paths: resultImages.value.map((item) => item.path),
     },
   })
-  if (!result.ok || !result.data?.found) return
+  if (revision !== mediaSourceRevision || !result.ok || !result.data?.found) return
   const saved = result.data
   const exact = saved.match_kind === 'exact' || saved.match_kind === 'content_exact'
   const summary = exact
@@ -697,6 +712,7 @@ async function offerSessionRestore() {
   } catch {
     return
   }
+  if (revision !== mediaSourceRevision) return
   const freshByPath = new Map(resultImages.value.map((item) => [item.path, item]))
   const restored = []
   for (const item of saved.items || []) {
@@ -840,6 +856,7 @@ function clearFrameDraftSafely() {
 function restoreFrameDraft() {
   const draft = workspaceStore.frameSelectionDraft
   if (!Array.isArray(draft?.items) || !draft.items.length) return false
+  mediaSourceRevision += 1
   resultImages.value = draft.items
   sourceDirectory.value = draft.sourceDirectory || parentDir(draft.items[0]?.path || '')
   mediaSessionId.value = draft.sessionId || null
@@ -853,9 +870,23 @@ function restoreFrameDraft() {
 }
 
 async function saveMediaSession() {
+  if (mediaSaveInFlight) {
+    mediaSaveQueued = true
+    return mediaSaveInFlight
+  }
+  mediaSaveInFlight = saveMediaSnapshot()
+  try { return await mediaSaveInFlight } finally {
+    mediaSaveInFlight = null
+    if (mediaSaveQueued) { mediaSaveQueued = false; scheduleMediaSave() }
+  }
+}
+
+async function saveMediaSnapshot() {
   if (mediaSaveTimer) window.clearTimeout(mediaSaveTimer)
   mediaSaveTimer = null
   if (!mediaReadyToSave || !sourceDirectory.value || !resultImages.value.length) return false
+  const revision = mediaSourceRevision
+  const source = sourceDirectory.value
   const result = await tauriCallSafe('save_media_workspace_session', {
     args: {
       id: mediaSessionId.value,
@@ -876,7 +907,7 @@ async function saveMediaSession() {
       })),
     },
   })
-  if (result.ok) mediaSessionId.value = result.data.id
+  if (result.ok && revision === mediaSourceRevision && source === sourceDirectory.value) mediaSessionId.value = result.data.id
   return result.ok
 }
 
@@ -976,7 +1007,7 @@ useWindowFileDrop({
 
 .extract-layout {
   display: grid;
-  grid-template-columns: 382px minmax(0, 1fr);
+  grid-template-columns: minmax(340px, 382px) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -997,7 +1028,7 @@ useWindowFileDrop({
   min-width: 0;
   overflow-y: auto;
   padding-block: clamp(16px, 3.1dvh, 22px) clamp(20px, 3.9dvh, 28px);
-  padding-inline: 24px;
+  padding-inline: 18px;
   border-right: 1px solid var(--docsy-border-subtle);
   background: var(--docsy-surface-elevated);
 }
@@ -1019,6 +1050,7 @@ useWindowFileDrop({
 }
 
 .results-header {
+  flex-wrap: wrap;
   padding-block: clamp(12px, 1.8dvh, 14px);
   padding-inline: 18px;
   min-height: clamp(48px, 6.2dvh, 56px);
@@ -1214,7 +1246,7 @@ useWindowFileDrop({
   line-height: 1.55;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 980px) {
   :deep(.workspace-content) {
     overflow: auto;
   }

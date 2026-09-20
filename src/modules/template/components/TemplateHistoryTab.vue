@@ -48,7 +48,7 @@
               </div>
               <div class="history-run-actions">
                 <el-button size="small" type="primary" @click.stop="$emit('apply-history-run', run)">填入</el-button>
-                <el-button size="small" text @click.stop="$emit('open-path', run.outputPath)">打开文档</el-button>
+                <el-button size="small" text @click.stop="$emit('open-path', run.outputPath)">打开文件</el-button>
               </div>
             </article>
             <div
@@ -65,12 +65,13 @@
           </div>
         </section>
       </div>
-      <el-empty v-else description="还没有生成记录" />
+      <WorkspaceEmptyState v-else compact :state="historyRunsLoading ? 'loading' : 'empty'" :title="historyRunsLoading ? '正在加载填写历史' : '还没有生成记录'" description="生成文档后，可在这里查看和复用填写内容。" />
     </div>
   </section>
 </template>
 
 <script setup>
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { fileName } from '../../../core/filePath.js'
 import { historyTime, historyRunSummary } from '../composables/fieldRowUtils.js'
 

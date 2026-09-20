@@ -2,7 +2,7 @@
   <section class="file-queue-panel">
     <div class="queue-summary">
       <span>{{ items.length }} 个文件</span>
-      <el-button v-if="items.length && clearable" link size="small" type="danger" @click="$emit('clear')">
+      <el-button v-if="items.length && clearable" :disabled="busy" link size="small" type="danger" @click="$emit('clear')">
         清空列表
       </el-button>
     </div>
@@ -18,11 +18,12 @@
         >
           <button
             v-if="sortable"
+            :disabled="busy"
             type="button"
             class="queue-drag-handle"
             title="拖动调整顺序"
             aria-label="拖动调整顺序"
-            @pointerdown.stop="start(index, $event)"
+            @pointerdown.stop="!busy && start(index, $event)"
             @pointermove.stop="move"
             @pointerup.stop="finish"
             @pointercancel.stop="reset"
@@ -38,8 +39,8 @@
           </div>
           <div class="queue-item-actions">
             <slot name="item-actions" :item="item" :index="index">
-              <el-button v-if="removable" link size="small" type="danger" @click="$emit('remove', index)">
-                删除
+              <el-button v-if="removable" :disabled="busy" link size="small" type="danger" @click="$emit('remove', index)">
+                移除
               </el-button>
             </slot>
           </div>
@@ -59,6 +60,7 @@ import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
 import WorkspaceEmptyState from './WorkspaceEmptyState.vue'
 
 const props = defineProps({
+  busy: { type: Boolean, default: false },
   items: {
     type: Array,
     default: () => [],
@@ -88,7 +90,7 @@ const props = defineProps({
 const emit = defineEmits(['clear', 'remove', 'reorder'])
 const { start, move, finish, reset, itemClasses } = usePointerReorder({
   itemCount: () => props.items.length,
-  onReorder: (payload) => emit('reorder', payload),
+  onReorder: (payload) => { if (!props.busy) emit('reorder', payload) },
 })
 
 function itemLabel(item) {
@@ -187,6 +189,8 @@ function itemKey(item, index) {
 }
 
 .queue-item-meta {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
   display: flex;
   align-items: center;
   gap: 6px;

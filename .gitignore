@@ -56,3 +56,9 @@ site/scripts/check-lucky-config.sh
 site/scripts/test-deployment.sh
 site/scripts/validate-config.sh
 site/scripts/verify-structure.sh
+
+# Local prototypes, business outputs and stop-version build artifacts
+/image-paddler-prototype/
+/output/
+/release-candidate/
+!docs/STOP_RELEASE_1.0.8.md

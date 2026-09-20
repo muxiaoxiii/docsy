@@ -322,6 +322,7 @@ export function useTemplateState() {
     manifestField.type = type
   }
   const rendering = ref(false)
+  const renderedOutputPath = ref('')
   const historyContext = ref({
     lastValues: {},
     fieldSuggestions: {},
@@ -1991,6 +1992,7 @@ export function useTemplateState() {
       ElMessage.error(userFacingError(result.error, '读取模板失败，文件可能已被移动或删除'))
       return false
     }
+    renderedOutputPath.value = ''
     templatePath.value = path
     templateManifest.value = result.data
     loadFilenameTokens(result.data)
@@ -2333,7 +2335,7 @@ export function useTemplateState() {
     exportResultDir = result.data
     const count = exportSelectedPaths.value.length
     exportResult.value = count > 1 ? `已导出 ${count} 个模板到 Docsy模板 文件夹` : `已导出 1 个模板`
-    ElMessage.success('模板导出成功')
+    ElMessage.success('模板导出成功；同名文件已自动另存')
   }
 
   async function openExportFolder() {
@@ -2348,49 +2350,51 @@ export function useTemplateState() {
   }
 
   async function renderTemplate() {
-    if (!templatePath.value || !templateManifest.value) return
+    if (rendering.value || batchProcessing.value || !templatePath.value || !templateManifest.value) return
     const missing = requiredMissingFields()
     if (missing.length) {
       ElMessage.warning(`请先填写必填字段：${missing.join('、')}`)
       return
     }
-    const previewName = filenamePreviewText(filenameTokens.value, {
-      formValues,
-      fields: renderableTemplateFields.value,
-      manifestName: templateManifest.value?.template?.name || templateManifest.value?.name || '',
-    })
-    const defaultName = previewName || `${stripExtension(fileName(templatePath.value), /\.docsytpl$/i)}-output.docx`
-    const outputPath = await save({
-      defaultPath: `${parentDir(templatePath.value)}/${defaultName}`,
-      filters: [{ name: 'Word 文档', extensions: ['docx'] }],
-    })
-    if (!outputPath) return
-    const finalOutputPath = ensureExtension(outputPath, 'docx')
-
     rendering.value = true
-    const result = await tauriCallSafe('render_docx_template', {
-      args: {
-        templatePath: templatePath.value,
-        outputPath: finalOutputPath,
-        values: normalizeValues(),
-        // History records the pre-normalization form values so a refill gets
-        // back what the user entered (e.g. 2026-08-05, not 二零二六年八月五日).
-        historyValues: rawValuesForHistory(),
-        structureOverrides: normalizeStructureOverrides(),
-        itemSeparator: itemSeparatorSetting.value || '、',
-      },
-    })
-    rendering.value = false
-    if (!result.ok) {
-      ElMessage.error(userFacingError(result.error, 'Word 文书生成失败，请检查模板字段是否完整'))
-      return
-    }
-    ElMessage.success('Word 文书已生成')
-    await loadHistoryContext(false)
-    await loadTemplateHistoryRuns()
-    const openResult = await openPath(result.data)
-    if (!openResult.ok) {
-      ElMessage.warning('文书已生成但无法自动打开，请到保存目录查看')
+    try {
+      const previewName = filenamePreviewText(filenameTokens.value, {
+        formValues,
+        fields: renderableTemplateFields.value,
+        manifestName: templateManifest.value?.template?.name || templateManifest.value?.name || '',
+      })
+      const defaultName = previewName || `${stripExtension(fileName(templatePath.value), /\.docsytpl$/i)}-output.docx`
+      const outputPath = await save({
+        defaultPath: `${parentDir(templatePath.value)}/${defaultName}`,
+        filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+      })
+      if (!outputPath) return
+      const finalOutputPath = ensureExtension(outputPath, 'docx')
+
+      const result = await tauriCallSafe('render_docx_template', {
+        args: {
+          templatePath: templatePath.value,
+          outputPath: finalOutputPath,
+          values: normalizeValues(),
+          // History records the pre-normalization form values so a refill gets
+          // back what the user entered (e.g. 2026-08-05, not 二零二六年八月五日).
+          historyValues: rawValuesForHistory(),
+          structureOverrides: normalizeStructureOverrides(),
+          itemSeparator: itemSeparatorSetting.value || '、',
+        },
+      })
+      if (!result.ok) {
+        ElMessage.error(userFacingError(result.error, 'Word 文书生成失败，请检查模板字段是否完整'))
+        return
+      }
+      renderedOutputPath.value = result.data || finalOutputPath
+      ElMessage.success('Word 文书已生成')
+      await loadHistoryContext(false)
+      await loadTemplateHistoryRuns()
+    } catch (error) {
+      ElMessage.error(userFacingError(error, '生成 Word 失败'))
+    } finally {
+      rendering.value = false
     }
   }
 
@@ -2905,6 +2909,7 @@ export function useTemplateState() {
     typeOverrides,
     historyContext,
     rendering,
+    renderedOutputPath,
     fieldSearch,
     renderableTemplateFields,
     filteredFillPositionEntries,

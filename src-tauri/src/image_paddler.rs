@@ -64,7 +64,7 @@ pub struct RecommendedSettings {
     pub recommended_width_mm: Option<f64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RunArgs {
     pub folder: String,
     #[serde(default)]
@@ -254,10 +254,10 @@ fn resolve_image_title_and_note(
         });
 
     let title_lines = if cfg.show_filename && !title_str.is_empty() {
-        wrap_filename_lines(
+        wrap_note_lines(
             &title_str,
             cfg.cell_w_mm,
-            cfg.filename_max_lines.max(1),
+            FILENAME_MAX_LINES,
             cfg.filename_font_size_pt,
         )
     } else {
@@ -767,8 +767,17 @@ fn run_explicit_images_per_folder(args: &RunArgs, paths: Vec<String>) -> Result<
     let mut pages = 0_u32;
     let mut image_count = 0_u32;
     let mut warnings = Vec::new();
+    let grid = parse_layout(&args.layout, args.custom_rows, args.custom_cols);
+    let capacity = (grid.rows * grid.cols).max(1);
+    let mut page_offset = 0;
     for (folder, images) in groups {
-        let result = run_images(args, images, &folder.join("_docsy_image_out"))?;
+        crate::operations::check_current_cancelled()?;
+        let count = images.len().div_ceil(capacity);
+        let mut file_args = args.clone();
+        file_args.page_scales = args.page_scales.as_ref().map(|scales|
+            scales.iter().skip(page_offset).take(count).copied().collect());
+        page_offset += count;
+        let result = run_images(&file_args, images, &folder.join("_docsy_image_out"))?;
         pages = pages.saturating_add(result.pages);
         image_count = image_count.saturating_add(result.images);
         warnings.extend(result.warnings);
@@ -836,7 +845,8 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
     let filename_remove_text = args.filename_remove_text.clone().unwrap_or_default();
     let filename_rules = args.filename_rules.clone().unwrap_or_default();
     let order_mode = args.order_mode.as_deref().unwrap_or("z");
-    let border_enabled = args.border_enabled.unwrap_or(false);
+    let border_enabled = args.border_enabled.unwrap_or(false)
+        && !(args.output_format == "docx" && args.use_table == Some(false));
     let border_color = args.border_color.as_deref().unwrap_or("black");
     let resolved_orientation = if args.orientation == "auto" {
         recommend_settings(&images).orientation
@@ -966,14 +976,18 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
         .unwrap_or_else(|| output_file_stem(&images));
     let output_path = unique_output_path(output_dir, &format!("{output_stem}_docsy_paddler"), ext);
 
+    let staging = crate::util::fs::sibling_temp_path(&output_path, "paddler");
+    let _guard = crate::util::fs::TempPathGuard::new(staging.clone());
     let warnings = match args.output_format.as_str() {
-        "pdf" => generate_pdf(&images, &output_path, &config)?,
+        "pdf" => generate_pdf(&images, &staging, &config)?,
         _ => {
-            generate_docx(&images, &output_path, &config)?;
+            generate_docx(&images, &staging, &config)?;
             Vec::new()
         }
     };
 
+    crate::operations::check_current_cancelled()?;
+    std::fs::rename(&staging, &output_path)?;
     Ok(RunResult {
         output_path: output_path.display().to_string(),
         output_paths: Vec::new(),
@@ -1402,21 +1416,12 @@ fn generate_pdf(
         let aligns = pair_offsets(chunk.len(), config.grid.rows, config.grid.cols, &config.pair_mode);
         let mut ops: Vec<Op> = Vec::new();
 
-        for (i, img_info) in chunk.iter().enumerate() {
-            let row = i / config.grid.cols;
-            let col = i % config.grid.cols;
-            let align = aligns.get(i).copied().unwrap_or("center");
+        if config.border_enabled {
+            for slot in 0..config.grid.rows * config.grid.cols {
+                let cell_x_mm = config.margin_mm + (slot % config.grid.cols) as f64 * config.cell_w_mm;
+                let cell_y_mm = config.page_h_mm - config.margin_mm
+                    - ((slot / config.grid.cols) as f64 + 1.0) * (config.image_cell_h_mm + config.filename_reserve_mm);
 
-            let cell_x_mm = config.margin_mm + col as f64 * config.cell_w_mm;
-            let cell_y_mm = config.page_h_mm
-                - config.margin_mm
-                - (row as f64 + 1.0) * (config.image_cell_h_mm + config.filename_reserve_mm);
-            let (image_area_y_mm, text_area_y_mm) = if config.caption_position == "above" {
-                (cell_y_mm, cell_y_mm + config.image_cell_h_mm)
-            } else {
-                (cell_y_mm + config.filename_reserve_mm, cell_y_mm)
-            };
-            if config.border_enabled {
                 let rect_x_pt = cell_x_mm * 72.0 / 25.4;
                 let rect_y_pt = cell_y_mm * 72.0 / 25.4;
                 let rect_w_pt = config.cell_w_mm * 72.0 / 25.4;
@@ -1434,6 +1439,24 @@ fn generate_pdf(
                     ),
                 });
             }
+        }
+
+        for (i, img_info) in chunk.iter().enumerate() {
+            crate::operations::check_current_cancelled()?;
+            let row = i / config.grid.cols;
+            let col = i % config.grid.cols;
+            let align = aligns.get(i).copied().unwrap_or("center");
+
+            let cell_x_mm = config.margin_mm + col as f64 * config.cell_w_mm;
+            let cell_y_mm = config.page_h_mm
+                - config.margin_mm
+                - (row as f64 + 1.0) * (config.image_cell_h_mm + config.filename_reserve_mm);
+            let (image_area_y_mm, text_area_y_mm) = if config.caption_position == "above" {
+                (cell_y_mm, cell_y_mm + config.image_cell_h_mm + config.caption_gap_mm)
+            } else {
+                (cell_y_mm + config.filename_reserve_mm, cell_y_mm)
+            };
+
 
             let cell_w_pt = config.cell_w_mm * 72.0 / 25.4;
             let cell_h_pt = config.image_cell_h_mm * 72.0 / 25.4;
@@ -1699,8 +1722,32 @@ fn pdf_border_color(color: &str) -> printpdf::Color {
     printpdf::Color::Rgb(printpdf::Rgb::new(r, g, b, None))
 }
 
-fn create_caption_paragraph(
-    img_path: &str,
+fn create_caption_paragraphs(
+    path: &str, cfg: &LayoutConfig, align: docx_rs::AlignmentType,
+    page_break: bool, keep_next: bool, before: u32, after: u32,
+) -> Vec<docx_rs::Paragraph> {
+    let (title, note) = resolve_image_title_and_note(path, cfg);
+    let has_title = cfg.show_filename && !title.is_empty();
+    let has_note = !note.is_empty();
+    let mut parts = Vec::new();
+    if has_title {
+        let mut title_cfg = cfg.clone();
+        if has_note && cfg.caption_position == "above" { title_cfg.caption_gap_mm = 0.0; }
+        if let Some(p) = create_caption_part(title, vec![], &title_cfg, align, page_break,
+            has_note || keep_next, before, if has_note { 0 } else { after }) { parts.push(p); }
+    }
+    if has_note {
+        let mut note_cfg = cfg.clone();
+        if has_title && cfg.caption_position != "above" { note_cfg.caption_gap_mm = 0.0; }
+        if let Some(p) = create_caption_part(vec![], note, &note_cfg, align, page_break && !has_title,
+            keep_next, if has_title { 0 } else { before }, after) { parts.push(p); }
+    }
+    parts
+}
+
+fn create_caption_part(
+    title_lines: Vec<String>,
+    note_lines: Vec<String>,
     cfg: &LayoutConfig,
     h_align: docx_rs::AlignmentType,
     page_break_before: bool,
@@ -1710,7 +1757,6 @@ fn create_caption_paragraph(
 ) -> Option<docx_rs::Paragraph> {
     use docx_rs::{BreakType, LineSpacing, LineSpacingType, Paragraph, Run, RunFonts};
 
-    let (title_lines, note_lines) = resolve_image_title_and_note(img_path, cfg);
     let has_title = cfg.show_filename && !title_lines.is_empty();
     let has_note = !note_lines.is_empty();
     if !has_title && !has_note {
@@ -1904,6 +1950,7 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
             let cell_h_pt = cfg.image_cell_h_mm * 72.0 / 25.4;
 
             for (image_idx, img_info) in chunk.iter().enumerate() {
+                crate::operations::check_current_cancelled()?;
                 let align = aligns.get(image_idx).copied().unwrap_or("center");
                 let (draw_w_pt, draw_h_pt, _, _) = compute_placement(
                     img_info.width,
@@ -1934,10 +1981,12 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                     _ => AlignmentType::Center,
                 };
 
+                let (title, note) = resolve_image_title_and_note(&img_info.path, cfg);
+                let has_caption = (cfg.show_filename && !title.is_empty()) || !note.is_empty();
                 let img_paragraph = Paragraph::new()
                     .align(h_align)
-                    .page_break_before(chunk_idx > 0 && image_idx == 0 && cfg.caption_position != "above")
-                    .keep_next(cfg.show_filename && cfg.caption_position == "below")
+                    .page_break_before(chunk_idx > 0 && image_idx == 0 && (cfg.caption_position != "above" || !has_caption))
+                    .keep_next(has_caption && cfg.caption_position == "below")
                     .keep_lines(true)
                     .line_spacing(
                         LineSpacing::new()
@@ -1958,7 +2007,7 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                 } else {
                     0
                 };
-                let filename_paragraph = create_caption_paragraph(
+                let filename_paragraph = create_caption_paragraphs(
                     &img_info.path,
                     cfg,
                     h_align,
@@ -1969,13 +2018,13 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                 );
 
                 if cfg.caption_position == "above" {
-                    if let Some(p) = filename_paragraph {
+                    for p in filename_paragraph {
                         doc = doc.add_paragraph(p);
                     }
                     doc = doc.add_paragraph(img_paragraph);
                 } else {
                     doc = doc.add_paragraph(img_paragraph);
-                    if let Some(p) = filename_paragraph {
+                    for p in filename_paragraph {
                         doc = doc.add_paragraph(p);
                     }
                 }
@@ -2001,6 +2050,7 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
         for row_idx in 0..config.grid.rows {
             let mut cells = Vec::with_capacity(config.grid.cols);
             for col_idx in 0..config.grid.cols {
+                crate::operations::check_current_cancelled()?;
                 let idx = row_idx * config.grid.cols + col_idx;
                 let align = aligns.get(idx).copied().unwrap_or("center");
                 let v_align = match align {
@@ -2045,7 +2095,7 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                         .line_spacing(LineSpacing::new().before(0).after(0))
                         .add_run(Run::new().add_image(pic));
 
-                    let filename_paragraph = create_caption_paragraph(
+                    let filename_paragraph = create_caption_paragraphs(
                         &img_info.path,
                         config,
                         h_align,
@@ -2056,13 +2106,13 @@ fn generate_docx(images: &[ImageInfo], output_path: &Path, config: &LayoutConfig
                     );
 
                     if config.caption_position == "above" {
-                        if let Some(p) = filename_paragraph {
+                        for p in filename_paragraph {
                             cell = cell.add_paragraph(p);
                         }
                         cell = cell.add_paragraph(img_paragraph);
                     } else {
                         cell = cell.add_paragraph(img_paragraph);
-                        if let Some(p) = filename_paragraph {
+                        for p in filename_paragraph {
                             cell = cell.add_paragraph(p);
                         }
                     }
@@ -3108,5 +3158,62 @@ mod tests {
         assert_eq!(config_2x2.safe_column_width_mm(), 87.0);
         // User width is preserved
         assert_eq!(page_compact.fixed_width_mm, Some(120.0));
+    }
+}
+
+#[cfg(test)]
+mod freeze_layout_tests {
+    use super::*;
+    use std::io::Read;
+
+    fn read_xml(path: &str) -> String {
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+        let mut xml = String::new();
+        zip.by_name("word/document.xml").unwrap().read_to_string(&mut xml).unwrap();
+        xml
+    }
+
+    #[test]
+    fn folder_scales_and_separate_caption_line_heights_reach_docx() {
+        let dir = crate::util::fs::temp_named_path("docsy-folder-scale-test", "dir");
+        std::fs::create_dir(&dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
+        let mut paths = Vec::new();
+        for folder in ["A", "B"] {
+            std::fs::create_dir(dir.join(folder)).unwrap();
+            for name in ["1.png", "2.png"] {
+                let path = dir.join(folder).join(name);
+                image::RgbImage::new(100,100).save(&path).unwrap();
+                paths.push(path.to_string_lossy().into_owned());
+            }
+        }
+        let mut args: RunArgs = serde_json::from_value(serde_json::json!({
+            "folder": dir, "image_paths": paths, "output_format": "docx",
+            "layout": "2x1", "orientation": "portrait", "dpi": 300,
+            "scale_mode": "fixed_width", "fixed_width_mm": 20,
+            "output_mode": "per_folder", "order_mode": "custom", "page_scales": [0.8,1.2],
+            "show_filename": true, "filename_font_size_pt": 8, "note_font_size_pt": 24,
+            "image_annotations": { paths[0].clone(): { "title": "TITLE\nSECOND\nTHIRD", "description": "NOTE" } }
+        })).unwrap();
+        for table in [true,false] {
+            args.use_table=Some(table);
+            args.border_enabled=Some(true);
+            let result=run(&args).unwrap();
+            assert_eq!(result.pages,2);
+            assert_eq!(result.output_paths.len(),2);
+            let a=read_xml(&result.output_paths[0]);
+            let b=read_xml(&result.output_paths[1]);
+            let extent=regex::Regex::new(r#"<wp:extent cx="(\d+)""#).unwrap();
+            let width_a: f64=extent.captures(&a).unwrap()[1].parse().unwrap();
+            let width_b: f64=extent.captures(&b).unwrap()[1].parse().unwrap();
+            assert!((width_b / width_a - 1.5).abs()<0.001);
+            let paragraphs=regex::Regex::new(r"(?s)<w:p[ >].*?</w:p>").unwrap();
+            let title=paragraphs.find_iter(&a).find(|p| p.as_str().contains(">TITLE<")).unwrap();
+            let note=paragraphs.find_iter(&a).find(|p| p.as_str().contains(">NOTE<")).unwrap();
+            assert!(!title.as_str().contains(">NOTE<"));
+            assert!(title.as_str().contains(">SECOND<"));
+            assert!(title.as_str().contains(">THIRD<"));
+            assert!(note.as_str().contains(&format!("w:line=\"{}\"",mm_to_twips(filename_line_height_mm(24.0)))));
+        }
     }
 }

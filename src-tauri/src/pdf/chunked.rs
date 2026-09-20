@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::temp_named_path;
 use crate::external::ExternalTool;
-use crate::util::fs::TempPathGuard;
+use crate::util::fs::TempDirGuard;
 
 /// 超过该页数改走分段（用户约定约 300 页）。
 pub const CHUNK_PAGE_THRESHOLD: u32 = 300;
@@ -45,14 +45,18 @@ where
         }
     }
 
+    super::qpdf::validate_recovery_backup(input)?;
+    validate_chunk_catalog(input)?;
+    crate::operations::check_current_cancelled()?;
     let work_dir = temp_named_path("docsy_chunk_work", "dir");
     std::fs::create_dir_all(&work_dir).context("创建分段工作目录失败")?;
-    let _work_guard = TempPathGuard::new(work_dir.clone());
+    let _work_guard = TempDirGuard::new(work_dir.clone())?;
 
     let mut processed: Vec<PathBuf> = Vec::new();
     let mut chunk_index = 0_usize;
     let mut start = 1_u32;
     while start <= page_count {
+        crate::operations::check_current_cancelled()?;
         let end = (start + CHUNK_SIZE_PAGES - 1).min(page_count);
         let chunk_input = work_dir.join(format!("chunk-{chunk_index:04}-in.pdf"));
         let chunk_output = work_dir.join(format!("chunk-{chunk_index:04}-out.pdf"));
@@ -70,17 +74,26 @@ where
         start = end + 1;
     }
 
-    if processed.len() == 1 {
-        std::fs::copy(&processed[0], final_output).context("写入分段处理结果失败")?;
-        return Ok(());
+    crate::operations::check_current_cancelled()?;
+    // Keep original Info (including anti-copy backup) and supported catalog metadata.
+    let stage = crate::util::fs::sibling_temp_path(final_output, "chunk-final");
+    let _stage_guard = crate::util::fs::TempPathGuard::new(stage.clone());
+    let bin = crate::external::QpdfTool.binary_path()?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    cmd.arg(input).arg("--pages");
+    for path in &processed {
+        cmd.arg(path).arg("1-z");
     }
-
-    let inputs: Vec<String> = processed
-        .iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect();
-    super::qpdf::merge_lossless(&inputs, final_output)
-        .context("合并分段处理结果失败")?;
+    cmd.arg("--").arg(&stage);
+    let result = super::qpdf::run_cancellable("合并分段", cmd)?;
+    if !super::qpdf::status_is_success(&result.status) {
+        anyhow::bail!(
+            "合并分段处理结果失败：{}",
+            crate::external::command_failure_detail(&result)
+        );
+    }
+    crate::operations::check_current_cancelled()?;
+    std::fs::rename(&stage, final_output).context("写入分段处理结果失败")?;
     Ok(())
 }
 
@@ -92,20 +105,79 @@ fn extract_page_range(input: &Path, output: &Path, start: u32, end: u32) -> Resu
     } else {
         format!("{start}-{end}")
     };
-    let result = crate::external::hidden_command(&bin)
-        .arg("--empty")
+    let mut cmd = crate::external::hidden_command(&bin);
+    cmd.arg("--empty")
         .arg("--pages")
         .arg(input)
         .arg(selection)
         .arg("--")
-        .arg(output)
-        .output()
-        .context("执行 qpdf 分段提取失败")?;
+        .arg(output);
+    let result = super::qpdf::run_cancellable("分段提取", cmd)?;
     if !super::qpdf::status_is_success(&result.status) {
         anyhow::bail!(
             "qpdf 分段提取失败：{}",
             crate::external::command_failure_detail(&result)
         );
+    }
+    Ok(())
+}
+
+// A stop-version deliberately refuses page-referencing catalog features until
+// their remapping has been verified. Inspect only two objects, not image streams.
+pub(crate) fn read_qpdf_object(
+    input: &Path,
+    selector: &str,
+    key: &str,
+) -> Result<serde_json::Value> {
+    let bin = crate::external::QpdfTool.binary_path()?;
+    let mut cmd = crate::external::hidden_command(&bin);
+    cmd.args(["--json", "--json-key=qpdf", "--json-stream-data=none"])
+        .arg(format!("--json-object={selector}"))
+        .arg(input);
+    let output = super::qpdf::run_cancellable("检查分段文档信息", cmd)?;
+    if !super::qpdf::status_is_success(&output.status) {
+        anyhow::bail!("无法检查 PDF 文档信息，已停止分段处理");
+    }
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    json["qpdf"]
+        .as_array()
+        .and_then(|entries| entries.iter().find_map(|entry| entry.get(key)))
+        .and_then(|object| object.get("value"))
+        .cloned()
+        .context("qpdf 未返回文档信息")
+}
+
+fn validate_chunk_catalog(input: &Path) -> Result<()> {
+    let trailer = read_qpdf_object(input, "trailer", "trailer")?;
+    let root = trailer["/Root"].as_str().context("PDF 缺少根目录")?;
+    let fields: Vec<_> = root.split_whitespace().collect();
+    if fields.len() != 3 {
+        anyhow::bail!("PDF 根目录引用无效");
+    }
+    let catalog = read_qpdf_object(
+        input,
+        &format!("{},{}", fields[0], fields[1]),
+        &format!("obj:{root}"),
+    )?;
+    let unsupported: Vec<_> = catalog
+        .as_object()
+        .context("PDF 根目录无效")?
+        .keys()
+        .filter(|key| {
+            ![
+                "/Type",
+                "/Pages",
+                "/Metadata",
+                "/Version",
+                "/Lang",
+                "/ViewerPreferences",
+            ]
+            .contains(&key.as_str())
+        })
+        .cloned()
+        .collect();
+    if !unsupported.is_empty() {
+        anyhow::bail!("此大 PDF 含尚未支持安全分段保留的文档结构（{}，可能为书签、表单、附件或签名），已停止处理并保留原文件。可使用无损优化，或先在专业 PDF 工具中处理文档结构。", unsupported.join("、"));
     }
     Ok(())
 }

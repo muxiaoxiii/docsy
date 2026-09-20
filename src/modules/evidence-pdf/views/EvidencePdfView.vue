@@ -13,7 +13,7 @@
           description="扫描文件夹并按子文件夹自动整理、合并证据 PDF；合并时压平签章外观以便打印。"
         >
           <template #toolbar>
-            <el-button type="primary" :disabled="scanning || building" @click="selectEvidenceFolder">选择证据文件夹</el-button>
+            <el-button type="primary" plain :disabled="scanning || building" @click="selectEvidenceFolder">选择证据文件夹</el-button>
             <el-button v-if="evidenceFolder" :loading="scanning" :disabled="building" @click="scanEvidence">重新扫描</el-button>
           </template>
           <div v-if="evidenceFolder" class="evidence-info">
@@ -38,8 +38,9 @@
           </div>
           <WorkspaceEmptyState
             v-else
+            :state="scanning ? 'loading' : 'empty'"
             :icon-url="evidenceIconUrl"
-            :title="evidenceFolder ? '尚未发现证据分组' : '等待选择证据文件夹'"
+            :title="scanning ? '正在扫描证据文件夹' : evidenceFolder ? '尚未发现证据分组' : '等待选择证据文件夹'"
             :description="
               evidenceFolder
                 ? '当前文件夹中还没有可整理的证据文件。'
@@ -63,7 +64,8 @@
             </div>
           </el-alert>
           <template #actions>
-            <span v-if="evidenceOutputDir">输出目录：{{ evidenceOutputDir }}</span>
+            <span v-if="evidenceOutputDir" class="output-path">输出文件夹：{{ evidenceOutputDir }}</span>
+            <el-button v-if="evidenceOutputDir" @click="openPath(evidenceOutputDir)">打开文件夹</el-button>
             <el-button type="success" :disabled="!evidenceGroups.length || scanning" :loading="building" @click="buildEvidence">
               生成合并 PDF
             </el-button>
@@ -75,6 +77,7 @@
 </template>
 
 <script setup>
+import { openPath } from '../../../core/tauriBridge.js'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
@@ -129,6 +132,11 @@ onBeforeUnmount(() => void preference.stop())
 .evidence-info p {
   margin: 4px 0 0;
   word-break: break-all;
+}
+
+.output-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .path-label {

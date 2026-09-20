@@ -98,7 +98,7 @@
             <div class="field-hint">{{ layoutGrid.rows }}×{{ layoutGrid.cols }} · {{ perPage }} 张/页</div>
           </el-form-item>
 
-          <el-form-item v-if="settings.images_per_page === 'custom' && !isFlowLayout" label="行列">
+          <el-form-item v-if="settings.images_per_page === 'custom'" label="行列">
             <div class="inline-controls">
               <el-input-number
                 :model-value="settings.custom_rows"
@@ -120,6 +120,7 @@
             </div>
           </el-form-item>
 
+          <div v-if="settings.images_per_page === 'custom' && isFlowLayout" class="field-hint">行 × 列 = 每页 {{ perPage }} 张；段落按上下一列输出。</div>
           <el-form-item label="顺序">
             <el-select v-model="settings.order_mode" size="small" :disabled="isFlowLayout || perPage <= 1">
               <el-option label="Z 字" value="z" />
@@ -132,7 +133,7 @@
           <el-form-item label="末页">
             <el-radio-group v-model="settings.last_page_mode" size="small">
               <el-radio-button label="keep">原网格</el-radio-button>
-              <el-radio-button label="reflow">铺满</el-radio-button>
+              <el-radio-button label="reflow">重排网格</el-radio-button>
             </el-radio-group>
           </el-form-item>
 
@@ -165,8 +166,7 @@
 
           <el-form-item v-if="settings.scale_mode === 'fixed_width'" label="宽度">
             <div class="fixed-width-control">
-              <div class="width-input-row">
-                <el-slider
+              <el-slider
                   v-model="settings.fixed_width_mm"
                   :min="0.1"
                   :max="Math.max(safeColumnWidthValue, 300)"
@@ -174,6 +174,7 @@
                   class="width-slider"
                   @input="markManualWidth"
                 />
+              <div class="width-input-row">
                 <el-input-number
                   v-model="settings.fixed_width_mm"
                   size="small"
@@ -192,13 +193,13 @@
                 <el-button size="small" text @click="restoreSmartSize">智能</el-button>
               </div>
               <div class="field-hint">
-                {{ actualImageWidth.toFixed(0) }} / 栏宽 {{ safeColumnWidthValue.toFixed(0) }} mm
+                {{ actualImageWidth.toFixed(1) }} × {{ activePageScale }}% = {{ (actualImageWidth * activePageScale / 100).toFixed(1) }} mm；栏宽 {{ safeColumnWidthValue.toFixed(0) }} mm
                 <template v-if="widthIsLimited"> · 超宽</template>
               </div>
             </div>
           </el-form-item>
 
-          <el-form-item label="边框">
+          <el-form-item v-if="!isFlowLayout" label="边框">
             <div class="inline-controls">
               <el-switch v-model="settings.border_enabled" size="small" />
               <el-select v-model="settings.border_color" size="small" :disabled="!settings.border_enabled" class="border-select">
@@ -213,6 +214,7 @@
             </div>
           </el-form-item>
 
+          <div v-if="isFlowLayout" class="field-hint">段落模式不支持边框；复杂分页请在 Word/WPS 中核对。</div>
           <div class="settings-group-title">标题说明</div>
 
           <el-form-item label="标题">
@@ -299,6 +301,8 @@
                 size="small"
                 placeholder="未填说明时的占位文字"
               />
+              <details class="filename-rules-details">
+                <summary>文件名处理规则</summary>
               <div class="filename-rules">
                 <div
                   v-for="(rule, idx) in settings.filename_rules"
@@ -335,6 +339,7 @@
                 </div>
               </div>
               <el-button size="small" text @click="addFilenameRule">+ 规则</el-button>
+              </details>
             </div>
           </el-form-item>
 
@@ -372,7 +377,7 @@
               <div v-for="path in generatedOutputPaths" :key="path" class="output-path">{{ path }}</div>
               <div v-for="warning in generatedResult.warnings || []" :key="warning" role="alert" class="field-hint">{{ warning }}</div>
             </div>
-            <el-button size="small" type="primary" text @click="openGeneratedOutput">打开</el-button>
+            <el-button size="small" type="primary" text @click="openGeneratedOutput">打开文件</el-button>
           </div>
 
           <div v-if="isFrameSequence" class="sequence-mode-note">
@@ -414,6 +419,7 @@
                 </div>
               </div>
               <div class="preview-toolbar">
+                <el-button size="small" type="success" :loading="generating" :disabled="analyzing || !includedImages.length" @click="handleStartGenerate">生成文档</el-button>
                 <span>{{ previewImages.length }} 图</span>
                 <el-button size="small" text @click="adjustPageZoom(-10)">−</el-button>
                 <el-slider v-model="pageZoom" :min="20" :max="200" :step="5" class="zoom-slider" />
@@ -424,7 +430,7 @@
 
             <div class="page-scale-bar">
               <el-radio-group v-model="scaleScope" size="small">
-                <el-radio-button label="all">全局</el-radio-button>
+                <el-radio-button label="all" title="修改全局比例会清除所有本页覆盖">全局（重置局部）</el-radio-button>
                 <el-radio-button label="current">本页</el-radio-button>
               </el-radio-group>
 
@@ -479,8 +485,8 @@
                     :key="idx"
                     class="preview-cell"
                     :class="{
-                      'preview-cell-bordered': settings.border_enabled,
-                      'preview-cell-white-border': settings.border_enabled && settings.border_color === 'white',
+                      'preview-cell-bordered': settings.border_enabled && !isFlowLayout,
+                      'preview-cell-white-border': settings.border_enabled && !isFlowLayout && settings.border_color === 'white',
                       'preview-cell-no-name': !hasCellCaption(img),
                       'preview-cell-flow': settings.output_format === 'docx' && !settings.use_table,
                     }"
@@ -920,19 +926,21 @@ function hasCellCaption(img) {
 
 .width-input-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   width: 100%;
 }
 
 .width-slider {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   margin: 0;
 }
 
 .width-num {
-  width: 78px;
+  flex: 0 0 88px;
+  width: 88px;
 }
 
 .action-row {
@@ -1123,6 +1131,7 @@ function hasCellCaption(img) {
 .page-nav-group,
 .page-nav-controls,
 .preview-toolbar {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1343,9 +1352,10 @@ function hasCellCaption(img) {
   }
 
   .paddler-layout {
-    display: block;
-    height: auto;
-    overflow: visible;
+    display: grid;
+    grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
+    height: 100%;
+    overflow: hidden;
   }
 
   .settings-panel,
@@ -1353,7 +1363,8 @@ function hasCellCaption(img) {
     width: 100% !important;
     max-width: none;
     flex: none !important;
-    overflow: visible;
+    min-height: 0;
+    overflow: auto;
   }
 
   .settings-panel {

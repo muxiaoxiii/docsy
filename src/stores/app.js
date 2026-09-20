@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { tauriCallSafe } from '../core/tauriBridge.js'
 import { logError } from '../services/appLogger.js'
 
@@ -12,9 +13,14 @@ export const useAppStore = defineStore('app', () => {
     onboarding_completed: false,
   })
 
+  let recoveryNoticeShown = false
   async function loadSettings() {
     const result = await tauriCallSafe('get_app_settings')
     if (result.ok) {
+      if (result.data?.recovery_warning && !recoveryNoticeShown) {
+        recoveryNoticeShown = true
+        ElMessage.warning({ message: result.data.recovery_warning, duration: 10000, showClose: true })
+      }
       settings.value = {
         ...settings.value,
         ...result.data,

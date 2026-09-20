@@ -3,6 +3,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
+const FONT_BACKUP_KEY: &[u8] = b"DocsyOriginalCMap";
 const BACKUP_KEY: &[u8] = b"DocsyAntiCopyBackup";
 const MARKER: &str = "% Docsy anti-copy protection";
 
@@ -107,6 +108,17 @@ pub fn apply_anti_copy(input: &Path, output: &Path, method: AntiCopyMethod) -> R
 
     // Build backup data before modifying
     let backup = build_backup(&doc);
+    // Object numbers change during qpdf rewrites and chunk merging. Carry each
+    // original mapping on its font object as well as the document-level backup.
+    for (key, cmap) in &backup.cmaps {
+        let numbers: Vec<u32> = key.trim_matches(['(', ')']).split(',')
+            .filter_map(|part| part.trim().parse().ok()).collect();
+        if numbers.len() == 2 {
+            if let Ok(font) = doc.get_object_mut((numbers[0], numbers[1] as u16)).and_then(Object::as_dict_mut) {
+                font.set(FONT_BACKUP_KEY.to_vec(), Object::string_literal(cmap.as_bytes().to_vec()));
+            }
+        }
+    }
 
     let page_ids = doc.get_pages();
     let mut modified = 0;
@@ -165,6 +177,15 @@ pub fn remove_anti_copy(input: &Path, output: &Path) -> Result<usize> {
                 continue;
             }
 
+            let attached = doc.get_dictionary(font_id).ok()
+                .and_then(|font| font.get(FONT_BACKUP_KEY).ok())
+                .and_then(|value| value.as_str().ok()).map(|bytes| bytes.to_vec());
+            if let Some(original) = attached {
+                set_tounicode_cmap(&mut doc, font_id, &original);
+                if let Ok(font) = doc.get_object_mut(font_id).and_then(Object::as_dict_mut) { font.remove(FONT_BACKUP_KEY); }
+                restored += 1;
+                continue;
+            }
             // Try to restore from backup first
             if let Some(ref backup_data) = backup {
                 let font_key = format!("{:?}", font_id);
@@ -200,6 +221,8 @@ pub fn remove_anti_copy(input: &Path, output: &Path) -> Result<usize> {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct BackupData {
+    #[serde(default)]
+    version: u32,
     cmaps: BTreeMap<String, String>, // "font_id:obj_num:gen_num" → original CMap text
 }
 
@@ -221,7 +244,7 @@ fn build_backup(doc: &Document) -> BackupData {
         }
     }
 
-    BackupData { cmaps }
+    BackupData { version: 2, cmaps }
 }
 
 fn store_backup_meta(doc: &mut Document, backup: &BackupData) {

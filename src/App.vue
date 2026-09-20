@@ -81,8 +81,8 @@
         <div v-if="operationVisible" class="doclet-operation-panel">
           <DocletWorkingPet :message="operationMessage" :elapsed="operationElapsed">
             <template v-if="showCancel" #actions>
-              <button class="doclet-cancel-btn" @click="cancelCurrentOperation" title="取消当前操作">
-                取消
+              <button class="doclet-cancel-btn" @click="cancelCurrentOperation" title="请求停止；支持中断的任务会取消，其他任务完成当前步骤后停止后续">
+                请求停止
               </button>
             </template>
           </DocletWorkingPet>
@@ -228,14 +228,10 @@ async function cancelCurrentOperation() {
   } catch {
     // Ignore errors — the operation may have already finished
   }
-  // 清除 UI 状态（pendingOperations 是前端动画追踪，与 Rust 操作管理独立）
-  pendingOperations.clear()
-  clearTimeout(operationTimer)
-  window.clearInterval(elapsedTimer)
-  clearTimeout(cancelTimer)
-  operationVisible.value = false
-  operationElapsed.value = ''
+  // Keep tracking until the actual worker finishes; a request is not completion.
+  operationMessage.value = '已请求停止，正在等待当前步骤结束…'
   showCancel.value = false
+
 }
 
 let unlistenConversionTimeout = null

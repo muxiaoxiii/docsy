@@ -1,6 +1,5 @@
 <template>
-  <div class="settings-view">
-    <h2>设置</h2>
+  <ToolWorkspaceShell class="settings-view" title="设置" description="管理外部工具、下载方式、工作空间偏好与诊断日志。">
 
     <!-- External Tools Status -->
     <el-card class="settings-section" shadow="never">
@@ -285,10 +284,11 @@
         将创建发往 oonlyxin@outlook.com 的邮件草稿，并仅附加已隐藏本地路径和文件名的脱敏日志。
       </p>
     </el-card>
-  </div>
+  </ToolWorkspaceShell>
 </template>
 
 <script setup>
+import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import { computed, ref, reactive, onMounted, onUnmounted } from 'vue'
 import { openExternalUrl, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { DOCSY_TOOLS_URL } from '../../../core/siteConfig.js'
@@ -779,27 +779,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.settings-view {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding-block: clamp(22px, 3.8dvh, 34px) clamp(32px, 5.3dvh, 48px);
-  padding-inline: 32px;
-}
-
-.settings-view h2 {
-  margin: 0 0 clamp(14px, 2.2dvh, 18px);
-  color: var(--docsy-text-strong);
-  font-family:
-    ui-rounded,
-    'SF Pro Rounded',
-    -apple-system,
-    'PingFang SC',
-    sans-serif;
-  font-size: 22px;
-  font-weight: 720;
-  letter-spacing: -0.025em;
-}
-
 .settings-section {
   margin-bottom: clamp(14px, 2dvh, 18px);
   border-color: var(--docsy-border-subtle);
