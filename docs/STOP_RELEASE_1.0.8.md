@@ -132,7 +132,7 @@
 - DOCX 超链接与 HTML 共用 `safe_export_url`：拒绝 javascript/file/data/vbscript，并解码 `%2e%2e` 穿越。
 - `rendered.json` 绑定真实 sourceHash，测试不再改写；xlsx/pptx 在 resource_root 下嵌入沙箱内的本地图片。
 - FFmpeg 安装依次尝试 `homebrew-ffmpeg/ffmpeg/ffmpeg-full`、`ffmpeg-full`、`ffmpeg`，以 drawtext 实测为准。
-- 删除死代码 `recommendForLayout`；Windows CI 测试设置 `CARGO_BUILD_TARGET`；CI 工具 ZIP SHA256 仍不纳入（下载源不提供校验文件）。
+- 删除死代码 `recommendForLayout`；Windows freeze/markdown 测试在宿主 x64 运行（i686 与 x64 qpdf DLL 不兼容）；CI 工具 ZIP SHA256 仍不纳入（下载源不提供校验文件）。
 
 ## 交付前多轮检查（本分支 fix/1.0.8-review-p1）
 
