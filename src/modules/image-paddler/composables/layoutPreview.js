@@ -298,8 +298,9 @@ export function detectPageConflicts({
 }
 
 /**
- * 求解当前页的最佳自适应缩放比例（50% ~ 140%）
- * 消除图-图重叠、图-文压字及超出安全区冲突
+ * 求解当前页的最佳自适应缩放比例（30% ~ 140%）
+ * 消除图-图重叠、图-文压字及超出安全区冲突。
+ * 返回 { ok, scale, reason }；不再把仍有冲突的 50% 伪称最佳结果。
  */
 export function computeOptimalPageScale(params) {
   const isConflictFree = (scalePercent) => {
@@ -312,11 +313,11 @@ export function computeOptimalPageScale(params) {
 
   // 若 100% 本身无冲突，基准即为 100%
   if (isConflictFree(100)) {
-    return 100
+    return { ok: true, scale: 100, reason: '' }
   }
 
-  // 若 100% 存在冲突（如竖长图、高密度溢出），二分查找 [50, 99] 中最大的无冲突比例
-  let low = 50
+  // 二分查找 [30, 99] 中最大的无冲突比例
+  let low = 30
   let high = 99
   let best = null
 
@@ -330,7 +331,14 @@ export function computeOptimalPageScale(params) {
     }
   }
 
-  return best
+  if (best === null) {
+    return {
+      ok: false,
+      scale: null,
+      reason: '即使缩小到 30% 仍无法消除重叠/溢出，请减少每页张数、切换横向或改用适应页面',
+    }
+  }
+  return { ok: true, scale: best, reason: '' }
 }
 
 export function layoutOptionLabel(value, flow) {

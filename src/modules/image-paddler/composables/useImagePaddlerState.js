@@ -8,15 +8,22 @@ import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.j
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   safeColumnWidth,
-  effectivePageWidth,
   pairOffsets,
   pairAlignToXY,
   detectPageConflicts,
   computeOptimalPageScale,
-  safeImageWidth,
-  effectiveImageWidth,
   layoutOptionLabel,
 } from './layoutPreview.js'
+import {
+  PER_PAGE_CHOICES,
+  arrangeOptionsFor,
+  controlsFromLayout,
+  importRecommendationDrifts,
+  isFlowLayoutMode,
+  layoutFromControls,
+  parseLayoutString,
+  recommendForLayout,
+} from './layoutControls.js'
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'])
 const FILENAME_MAX_LINES = 3
@@ -72,12 +79,19 @@ export function useImagePaddlerState(options = {}) {
     layout: '2x1',
     custom_rows: 2,
     custom_cols: 2,
-    scale_mode: 'fit',
+    // 布局控件：每页张数 + 排列方式（与 layout 双向同步）
+    images_per_page: 2,
+    arrange_mode: 'stack',
+    last_page_mode: 'keep', // keep=末页保留原网格；reflow=末页重新铺满
+    // smart=跟随当前布局智能统一宽度；manual=手动宽度；fit/original=缩放模式
+    size_mode: 'smart',
+    scale_mode: 'fixed_width',
     orientation: 'auto',
     dpi: 300,
     margin_mm: 12,
     show_filename: true,
     caption_position: 'below',
+    caption_gap_mm: 2,
     pair_mode: 'cell-center',
     print_safety_pad_mm: 6,
     doclet_layout_tips: true,
@@ -99,6 +113,10 @@ export function useImagePaddlerState(options = {}) {
     use_table: true,
     fixed_width_mm: 160,
   })
+  // 全局缩放独立存储；pageScales 仅保存「显式局部覆盖」
+  const globalScalePercent = ref(100)
+  // 设置区宽度（px），与证据模块一样可拖拽；写入工作区偏好
+  const settingsPanelWidth = ref(340)
   const preference = useWorkspacePreferences('image-paddler.workspace', {
     settings,
     pageZoom,
@@ -107,12 +125,15 @@ export function useImagePaddlerState(options = {}) {
     preferenceRevision,
     pageScales,
     imageAnnotations,
+    globalScalePercent,
+    settingsPanelWidth,
   })
 
-  const isFlowLayout = computed(() => settings.output_format === 'docx' && !settings.use_table)
+  const isFlowLayout = computed(() => isFlowLayoutMode(settings.output_format, settings.use_table))
+  const arrangeOptions = computed(() => arrangeOptionsFor(settings.images_per_page, isFlowLayout.value))
   const layoutGrid = computed(() => {
-    const grid = parseLayout(settings.layout, settings.custom_rows, settings.custom_cols)
-    return settings.output_format === 'docx' && !settings.use_table ? { rows: grid.rows * grid.cols, cols: 1 } : grid
+    const grid = parseLayoutString(settings.layout, settings.custom_rows, settings.custom_cols)
+    return isFlowLayout.value ? { rows: grid.rows * grid.cols, cols: 1 } : grid
   })
   const isFrameSequence = computed(() => inputContext.value.sourceKind === 'video-frames')
   const resolvedOrientation = computed(() => {
@@ -126,7 +147,174 @@ export function useImagePaddlerState(options = {}) {
   const includedImages = computed(() => orderedImages.value.filter((image) => !isImageExcluded(image)))
   const excludedCount = computed(() => orderedImages.value.length - includedImages.value.length)
   const perPage = computed(() => Math.max(1, layoutGrid.value.rows * layoutGrid.value.cols))
-  const isPairLayout = computed(() => perPage.value === 2)
+  const isPairLayout = computed(() => perPage.value === 2 && !isFlowLayout.value)
+  const captionGapMm = computed(() =>
+    settings.show_filename || settings.reserve_note_placeholder
+      ? Math.max(0, Math.min(20, Number(settings.caption_gap_mm) || 0))
+      : 0,
+  )
+
+  /** 布局感知推荐：跟随每页张数与页面方向，不是导入时那一套。 */
+  const layoutAwareRecommendation = computed(() =>
+    recommendForLayout({
+      images: analysis.value?.images || [],
+      grid: layoutGrid.value,
+      orientation: resolvedOrientation.value,
+      marginMm: settings.margin_mm,
+      printSafetyPadMm: settings.print_safety_pad_mm,
+      showFilename: settings.show_filename,
+      perPage: perPage.value,
+      captionGapMm: captionGapMm.value,
+      dpi: settings.dpi,
+    }),
+  )
+
+  const importRecommendationDrifted = computed(() =>
+    importRecommendationDrifts(analysis.value?.recommended, layoutGrid.value, perPage.value),
+  )
+
+  function syncLayoutFromControls() {
+    const flow = isFlowLayout.value
+    const next = layoutFromControls({
+      imagesPerPage: settings.images_per_page,
+      arrangeMode: settings.arrange_mode,
+      customRows: settings.custom_rows,
+      customCols: settings.custom_cols,
+      flow,
+    })
+    settings.layout = next.layout
+    if (next.customRows != null) settings.custom_rows = next.customRows
+    if (next.customCols != null) settings.custom_cols = next.customCols
+    if (flow && settings.arrange_mode !== 'stack') settings.arrange_mode = 'stack'
+  }
+
+  function setImagesPerPage(value) {
+    settings.images_per_page = value
+    if (value !== 'custom') {
+      const options = arrangeOptionsFor(value, isFlowLayout.value)
+      if (!options.some((option) => option.value === settings.arrange_mode)) {
+        settings.arrange_mode = options[0]?.value || 'stack'
+      }
+    }
+    syncLayoutFromControls()
+    if (settings.size_mode === 'smart') applyLayoutAwareSize({ silent: true })
+  }
+
+  function setArrangeMode(value) {
+    settings.arrange_mode = value
+    syncLayoutFromControls()
+    if (settings.size_mode === 'smart') applyLayoutAwareSize({ silent: true })
+  }
+
+  function setSizeMode(mode) {
+    settings.size_mode = mode
+    if (mode === 'smart') {
+      settings.scale_mode = 'fixed_width'
+      applyLayoutAwareSize({ silent: false })
+    } else if (mode === 'fit' || mode === 'original') {
+      settings.scale_mode = mode
+    } else if (mode === 'manual') {
+      settings.scale_mode = 'fixed_width'
+    }
+  }
+
+  function applyLayoutAwareSize({ silent = true } = {}) {
+    const rec = layoutAwareRecommendation.value
+    if (!rec) return
+    settings.size_mode = 'smart'
+    settings.scale_mode = 'fixed_width'
+    settings.fixed_width_mm = rec.recommended_width_mm
+    if (!silent) ElMessage.success(`智能宽度 ${rec.recommended_width_mm} mm`)
+  }
+
+  function clampSettingsPanelWidth(value) {
+    return clampNumber(Number(value), 280, 520, 340)
+  }
+
+  function setSettingsPanelWidth(value) {
+    settingsPanelWidth.value = clampSettingsPanelWidth(value)
+  }
+
+  function startSettingsPanelResize(event, layoutEl) {
+    if (event.button !== 0 || !layoutEl) return
+    event.preventDefault()
+    const rect = layoutEl.getBoundingClientRect()
+    const update = (pointerEvent) => {
+      setSettingsPanelWidth(pointerEvent.clientX - rect.left)
+    }
+    const finish = () => {
+      window.removeEventListener('pointermove', update)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+    }
+    window.addEventListener('pointermove', update)
+    window.addEventListener('pointerup', finish, { once: true })
+    window.addEventListener('pointercancel', finish, { once: true })
+    update(event)
+  }
+
+  function applyLayoutAwareRecommendation(showMessage = true) {
+    applyLayoutAwareSize({ silent: !showMessage })
+  }
+
+  // 控件 → layout 字符串
+  watch(
+    [
+      () => settings.images_per_page,
+      () => settings.arrange_mode,
+      () => settings.use_table,
+      () => settings.output_format,
+      () => settings.custom_rows,
+      () => settings.custom_cols,
+    ],
+    () => syncLayoutFromControls(),
+  )
+
+  // 布局/方向/边距/图文间距变化：智能尺寸立即重算；布局变化时清理页码局部缩放覆盖
+  let lastLayoutKey = ''
+  watch(
+    [
+      () => settings.layout,
+      resolvedOrientation,
+      () => settings.use_table,
+      () => settings.output_format,
+      () => settings.margin_mm,
+      () => settings.caption_gap_mm,
+      () => settings.show_filename,
+      analysis,
+    ],
+    () => {
+      const key = [
+        settings.layout,
+        resolvedOrientation.value,
+        settings.use_table,
+        settings.output_format,
+        settings.custom_rows,
+        settings.custom_cols,
+      ].join('|')
+      const layoutChanged = lastLayoutKey && lastLayoutKey !== key
+      lastLayoutKey = key
+      if (layoutChanged) {
+        // 重新分页后旧页码覆盖失效；全局缩放保留，新页自动继承
+        pageScales.value = {}
+        activePageScale.value = globalScalePercent.value
+      }
+      if (settings.size_mode === 'smart') {
+        const rec = layoutAwareRecommendation.value
+        if (rec?.recommended_width_mm) {
+          settings.scale_mode = 'fixed_width'
+          settings.fixed_width_mm = rec.recommended_width_mm
+        }
+      } else if (settings.size_mode === 'manual' && settings.scale_mode === 'fixed_width') {
+        const rec = layoutAwareRecommendation.value
+        const current = Number(settings.fixed_width_mm) || 0
+        if (rec && current > rec.safe_column_width_mm + 0.5) {
+          // 超宽时仅静默提示在 UI 字段里，避免弹层打断
+        }
+      }
+    },
+  )
+
   const totalPages = computed(() => Math.max(1, Math.ceil(includedImages.value.length / perPage.value)))
 
   watch([totalPages, includedImages], () => {
@@ -141,7 +329,11 @@ export function useImagePaddlerState(options = {}) {
     return includedImages.value.slice(start, start + count)
   })
   const previewSlots = computed(() => [...previewImages.value])
-  const previewLayoutGrid = computed(() => compactGridForCount(layoutGrid.value, previewImages.value.length))
+  const previewLayoutGrid = computed(() => {
+    const base = layoutGrid.value
+    if (settings.last_page_mode !== 'reflow') return base
+    return compactGridForCount(base, previewImages.value.length)
+  })
 
   function nextPage() {
     if (currentPageIndex.value < totalPages.value - 1) {
@@ -236,7 +428,9 @@ export function useImagePaddlerState(options = {}) {
     const titleReserve = settings.show_filename ? filenameLineHeightMm * filenameMaxLines : 0
     const noteReserve = hasAnyNote ? noteLineHeightMm * noteMaxLines : 0
     const filenameSafetyMm = settings.output_format === 'docx' ? DOCX_FILENAME_SAFETY_MM : PDF_FILENAME_SAFETY_MM
-    const filenameReserve = titleReserve > 0 || noteReserve > 0 ? titleReserve + noteReserve + filenameSafetyMm : 0
+    const gapMm = titleReserve > 0 || noteReserve > 0 ? captionGapMm.value : 0
+    const filenameReserve =
+      titleReserve > 0 || noteReserve > 0 ? titleReserve + noteReserve + filenameSafetyMm + gapMm : 0
 
     return {
       cellWidth,
@@ -244,6 +438,7 @@ export function useImagePaddlerState(options = {}) {
       filenameReserve,
       titleReserve,
       noteReserve,
+      captionGapMm: gapMm,
       filenameFontSizePt,
       filenameLineHeightMm,
       filenameMaxLines,
@@ -263,9 +458,17 @@ export function useImagePaddlerState(options = {}) {
       flexBasis: height,
     }
   })
+  const previewCaptionGapStyle = computed(() => {
+    const metrics = layoutMetrics.value
+    const pageH = resolvedOrientation.value === 'landscape' ? 210 : 297
+    const gap = metrics.captionGapMm || 0
+    const pct = (gap / pageH) * 100
+    return settings.caption_position === 'above'
+      ? { marginBottom: `${pct}%` }
+      : { marginTop: `${pct}%` }
+  })
   const previewNameStyle = computed(() => {
     const metrics = layoutMetrics.value
-    const height = `${Math.min(100, (metrics.filenameReserve / metrics.cellHeight) * 100)}%`
     return {
       fontSize: `${((metrics.filenameFontSizePt * 25.4) / 72 / (resolvedOrientation.value === 'landscape' ? 297 : 210)) * 100}cqw`,
       fontFamily: filenameFontFamilyCss(settings.filename_font_family),
@@ -302,69 +505,107 @@ export function useImagePaddlerState(options = {}) {
     return safeColumnWidth(page.width, settings.margin_mm, layoutGrid.value.cols, settings.print_safety_pad_mm)
   })
   const maximumImageWidth = computed(() => safeColumnWidthValue.value)
-  const currentRecommendedWidth = computed(() => Math.floor(safeColumnWidthValue.value * 10) / 10)
+  /** 布局感知推荐宽度（同时受栏宽与格高约束），不再是“只按列数”的旧推荐。 */
+  const currentRecommendedWidth = computed(
+    () => layoutAwareRecommendation.value?.recommended_width_mm ?? Math.floor(safeColumnWidthValue.value * 10) / 10,
+  )
   const actualImageWidth = computed(() => Math.min(Math.max(0.1, Number(settings.fixed_width_mm) || 160), 500))
-  const widthIsLimited = computed(() => Number(settings.fixed_width_mm) > safeColumnWidthValue.value)
+  const widthIsLimited = computed(() => Number(settings.fixed_width_mm) > safeColumnWidthValue.value + 0.5)
 
-  const currentPageScale = computed(() => (Number(activePageScale.value) || 100) / 100)
+  function effectiveScaleForPage(pageIdx) {
+    const idx = Number(pageIdx)
+    if (idx === currentPageIndex.value) {
+      return (Number(activePageScale.value) || 100) / 100
+    }
+    const local = pageScales.value[idx]
+    if (local !== undefined) return Number(local) || 1
+    return (Number(globalScalePercent.value) || 100) / 100
+  }
+
+  const currentPageScale = computed(() => effectiveScaleForPage(currentPageIndex.value))
 
   watch(
-    [currentPageIndex, pageScales],
+    [currentPageIndex, pageScales, globalScalePercent],
     () => {
-      const saved = pageScales.value[currentPageIndex.value]
-      activePageScale.value = saved !== undefined ? Math.round(saved * 100) : 100
+      const local = pageScales.value[currentPageIndex.value]
+      if (local !== undefined) {
+        activePageScale.value = Math.round(local * 100)
+      } else {
+        activePageScale.value = Math.round(Number(globalScalePercent.value) || 100)
+      }
     },
     { flush: 'sync', immediate: true, deep: true },
   )
 
   const hasSavedScale = computed(() => pageScales.value[currentPageIndex.value] !== undefined)
+  /** 相对全局是否已局部偏离（即时生效；取消=回到全局） */
   const isCurrentPageDirty = computed(() => {
-    const saved = pageScales.value[currentPageIndex.value]
-    const savedPercent = saved !== undefined ? Math.round(saved * 100) : 100
-    return activePageScale.value !== savedPercent
+    return activePageScale.value !== Math.round(Number(globalScalePercent.value) || 100)
   })
 
-  function saveCurrentPageScale() {
-    const newScales = { ...pageScales.value }
-    if (activePageScale.value === 100) {
-      delete newScales[currentPageIndex.value]
+  /** 即时生效：预览改动直接写入局部覆盖，导出与预览/冲突检测同一状态。 */
+  function commitActivePageScaleToState() {
+    const percent = Math.round(Number(activePageScale.value) || 100)
+    const globalPercent = Math.round(Number(globalScalePercent.value) || 100)
+    const next = { ...pageScales.value }
+    if (percent === globalPercent) {
+      delete next[currentPageIndex.value]
     } else {
-      newScales[currentPageIndex.value] = activePageScale.value / 100
+      next[currentPageIndex.value] = percent / 100
     }
-    pageScales.value = newScales
-    ElMessage.success(`第 ${currentPageIndex.value + 1} 页缩放已保存 (${activePageScale.value}%)`)
+    pageScales.value = next
+  }
+
+  watch(activePageScale, () => {
+    commitActivePageScaleToState()
+  }, { flush: 'sync' })
+
+  function saveCurrentPageScale() {
+    commitActivePageScaleToState()
+    ElMessage.success(`第 ${currentPageIndex.value + 1} 页比例已生效 (${activePageScale.value}%)`)
   }
 
   function cancelCurrentPageScale() {
-    const saved = pageScales.value[currentPageIndex.value]
-    activePageScale.value = saved !== undefined ? Math.round(saved * 100) : 100
+    // 即时生效模型下，取消 = 清除本页局部覆盖，回到全局比例
+    const next = { ...pageScales.value }
+    delete next[currentPageIndex.value]
+    pageScales.value = next
+    activePageScale.value = Math.round(Number(globalScalePercent.value) || 100)
   }
 
   function resetCurrentPageScale() {
-    const newScales = { ...pageScales.value }
-    delete newScales[currentPageIndex.value]
-    pageScales.value = newScales
-    activePageScale.value = 100
-    ElMessage.success(`第 ${currentPageIndex.value + 1} 页已恢复默认比例`)
+    const next = { ...pageScales.value }
+    delete next[currentPageIndex.value]
+    pageScales.value = next
+    activePageScale.value = Math.round(Number(globalScalePercent.value) || 100)
+    ElMessage.success(`第 ${currentPageIndex.value + 1} 页已恢复继承全局 ${globalScalePercent.value}%`)
   }
 
   const hasAnySavedScales = computed(() => Object.keys(pageScales.value).length > 0)
 
-  function autoFitCurrentPageScale() {
+  function pageGeometryFor(pageIdx) {
     const count = perPage.value
-    const start = currentPageIndex.value * count
+    const start = pageIdx * count
     const pageImgs = includedImages.value.slice(start, start + count)
     const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
-    const pageGrid = compactGridForCount(layoutGrid.value, pageImgs.length)
+    const pageGrid =
+      settings.last_page_mode === 'reflow'
+        ? compactGridForCount(layoutGrid.value, pageImgs.length)
+        : layoutGrid.value
     const metrics = computeMetricsForGrid(pageGrid, pageImgs)
+    return { pageImgs, page, pageGrid, metrics }
+  }
+
+  function computePageOptimalScale(pageIdx) {
+    const { pageImgs, page, pageGrid, metrics } = pageGeometryFor(pageIdx)
+    if (!pageImgs.length) return { ok: false, scale: null, reason: '本页没有图片' }
     const pageImgsWithAnnotations = pageImgs.map((img) => ({
       ...img,
       title: imageTitle(img.path),
       description:
         imageDescription(img.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : ''),
     }))
-
-    const optimal = computeOptimalPageScale({
+    return computeOptimalPageScale({
       images: pageImgsWithAnnotations,
       grid: pageGrid,
       cellWidth: metrics.cellWidth,
@@ -382,117 +623,97 @@ export function useImagePaddlerState(options = {}) {
       noteFontSizePt: clampNumber(settings.note_font_size_pt, 6, 24, 8),
       pairMode: settings.pair_mode,
     })
-    if (optimal === null) {
-      activePageScale.value = 50
-      ElMessage.warning('本页图片比例过大，缩小至 50% 仍有局部溢出，建议切换横向或减少每页张数')
+  }
+
+  function autoFitCurrentPageScale() {
+    // 智能尺寸模式下，优先重算统一宽度，而不是叠加一层百分比
+    if (settings.size_mode === 'smart') {
+      applyLayoutAwareSize({ silent: true })
+    }
+    const result = computePageOptimalScale(currentPageIndex.value)
+    if (result.ok) {
+      activePageScale.value = result.scale
+      commitActivePageScaleToState()
+      ElMessage.success(`本页比例已设为 ${result.scale}%（与导出一致）`)
     } else {
-      activePageScale.value = optimal
-      ElMessage.success(`已自适应计算本页比例为 ${optimal}%，点击保存即可生效`)
+      ElMessage.warning(result.reason || '无法在 30%~140% 内消除冲突，请减少每页张数、切换横向或改用适应页面')
     }
   }
 
   const scaleScope = ref('all')
-  const globalScalePercent = ref(100)
 
   function setGlobalScale(val) {
     const percent = Math.round(Number(val) || 100)
     globalScalePercent.value = percent
-    const targetScale = percent / 100
-    const newScales = {}
-    if (percent !== 100) {
-      for (let i = 0; i < totalPages.value; i += 1) {
-        newScales[i] = targetScale
-      }
-    }
-    pageScales.value = newScales
+    // 全局缩放独立存储：不把旧页码写死；无局部覆盖的页（含新增页）自动继承
+    pageScales.value = {}
     activePageScale.value = percent
   }
 
   function autoFitAllPagesScale() {
+    // 与「当前布局智能推荐」同一套几何：优先修正统一宽度
+    if (settings.size_mode === 'smart' || settings.scale_mode === 'fixed_width') {
+      applyLayoutAwareSize({ silent: true })
+    }
     const total = totalPages.value
     let minOptimal = 140
     let hasAnyValid = false
+    const failures = []
     for (let pageIdx = 0; pageIdx < total; pageIdx += 1) {
-      const count = perPage.value
-      const start = pageIdx * count
-      const pageImgs = includedImages.value.slice(start, start + count)
-      if (!pageImgs.length) continue
-      const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
-      const pageGrid = compactGridForCount(layoutGrid.value, pageImgs.length)
-      const metrics = computeMetricsForGrid(pageGrid, pageImgs)
-      const pageImgsWithAnnotations = pageImgs.map((img) => ({
-        ...img,
-        title: imageTitle(img.path),
-        description:
-          imageDescription(img.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : ''),
-      }))
-      const optimal = computeOptimalPageScale({
-        images: pageImgsWithAnnotations,
-        grid: pageGrid,
-        cellWidth: metrics.cellWidth,
-        imageCellHeight: metrics.imageCellHeight,
-        fixedWidthMm: actualImageWidth.value,
-        scaleMode: settings.scale_mode,
-        dpi: settings.dpi,
-        pageWidth: page.width,
-        pageHeight: page.height,
-        marginMm: Number(settings.margin_mm) || 0,
-        showFilename: settings.show_filename,
-        captionPosition: settings.caption_position,
-        captionReserveMm: metrics.filenameReserve,
-        fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
-        noteFontSizePt: clampNumber(settings.note_font_size_pt, 6, 24, 8),
-        pairMode: settings.pair_mode,
-      })
-      if (optimal !== null) {
+      const result = computePageOptimalScale(pageIdx)
+      if (result.ok) {
         hasAnyValid = true
-        if (optimal < minOptimal) {
-          minOptimal = optimal
-        }
+        if (result.scale < minOptimal) minOptimal = result.scale
       } else {
-        minOptimal = Math.min(minOptimal, 50)
+        failures.push(pageIdx + 1)
       }
     }
-    const finalScale = hasAnyValid ? minOptimal : 50
-    setGlobalScale(finalScale)
-    ElMessage.success(`已自适应推算全部页面最佳比例为 ${finalScale}%，所有页面统一生效`)
+    if (!hasAnyValid) {
+      ElMessage.warning(
+        failures.length
+          ? `智能尺寸后第 ${failures.join('、')} 页仍有冲突：请减少每页张数、切换横向，或改用「适应页面」`
+          : '无法计算全局比例，请检查每页张数与图片尺寸',
+      )
+      return
+    }
+    setGlobalScale(minOptimal)
+    if (failures.length) {
+      ElMessage.warning(
+        `全局比例已设为 ${minOptimal}%，但第 ${failures.join('、')} 页仍可能冲突，建议减少每页张数或改用适应页面`,
+      )
+    } else {
+      ElMessage.success(`已按当前布局智能计算全局比例 ${minOptimal}%（新页面将自动继承）`)
+    }
   }
 
   function applyScaleToAllPages(scaleOverride) {
     const targetScale = scaleOverride !== undefined ? scaleOverride : activePageScale.value / 100
-    const targetPercent = Math.round(targetScale * 100)
-    const newScales = {}
-    if (targetPercent !== 100) {
-      for (let i = 0; i < totalPages.value; i += 1) {
-        newScales[i] = targetScale
-      }
-    }
-    pageScales.value = newScales
-    globalScalePercent.value = targetPercent
-    ElMessage.success(`已将当前比例 (${targetPercent}%) 应用到全部 ${totalPages.value} 页`)
+    setGlobalScale(Math.round(targetScale * 100))
+    ElMessage.success(`已将全局比例设为 ${globalScalePercent.value}%（全部页与后续新页继承）`)
   }
 
   function applyScaleToSubsequentPages(fromPageIndex, scaleOverride) {
     const startPage = fromPageIndex !== undefined ? fromPageIndex : currentPageIndex.value
     const targetScale = scaleOverride !== undefined ? scaleOverride : activePageScale.value / 100
     const targetPercent = Math.round(targetScale * 100)
+    const globalPercent = Math.round(Number(globalScalePercent.value) || 100)
     const newScales = { ...pageScales.value }
     for (let i = startPage; i < totalPages.value; i += 1) {
-      if (targetPercent === 100) {
+      if (targetPercent === globalPercent) {
         delete newScales[i]
       } else {
         newScales[i] = targetScale
       }
     }
     pageScales.value = newScales
-    ElMessage.success(`已将当前比例 (${targetPercent}%) 应用到第 ${startPage + 1} 页及后续所有页`)
+    ElMessage.success(`已将第 ${startPage + 1} 页及后续页设为 ${targetPercent}%（其余页仍继承全局）`)
   }
 
   function resetAllPageScales() {
     pageScales.value = {}
     globalScalePercent.value = 100
     activePageScale.value = 100
-    ElMessage.success('已恢复全部页面为 100% 默认比例')
+    ElMessage.success('已恢复全局 100%，并清除全部页面局部比例')
   }
   function optionLayoutLabel(value) {
     return layoutOptionLabel(value, isFlowLayout.value)
@@ -575,23 +796,33 @@ export function useImagePaddlerState(options = {}) {
   }
 
   async function analyze() {
-    if (!folders.value.length) return
+    if (!folders.value.length) {
+      analyzing.value = false
+      return
+    }
     const requestId = ++analysisRequestId
     analyzing.value = true
-    const result = await tauriCallSafe('analyze_image_paddler_folder', {
-      folder: folder.value,
-      folders: folders.value,
-      imagePaths: explicitPaths.value.length ? explicitPaths.value : undefined,
-    })
-    if (requestId !== analysisRequestId) return
-    if (result.ok) {
-      analysis.value = result.data
-      if (isFrameSequence.value) applyRecommendedSettings(false)
-      await preloadVisibleImages()
-    } else {
-      ElMessage.error(userFacingError(result.error, '图片文件夹分析失败，请确认文件夹路径正确'))
+    try {
+      const result = await tauriCallSafe('analyze_image_paddler_folder', {
+        folder: folder.value,
+        folders: folders.value,
+        imagePaths: explicitPaths.value.length ? explicitPaths.value : undefined,
+      })
+      if (requestId !== analysisRequestId) return
+      if (result.ok) {
+        analysis.value = result.data
+        if (isFrameSequence.value) applyRecommendedSettings(false)
+        await preloadVisibleImages()
+      } else {
+        ElMessage.error(userFacingError(result.error, '图片文件夹分析失败，请确认文件夹路径正确'))
+      }
+    } catch (error) {
+      if (requestId === analysisRequestId) {
+        ElMessage.error(userFacingError(error, '图片分析失败，请重试或检查文件是否可读'))
+      }
+    } finally {
+      if (requestId === analysisRequestId) analyzing.value = false
     }
-    if (requestId === analysisRequestId) analyzing.value = false
   }
 
   async function run() {
@@ -603,7 +834,8 @@ export function useImagePaddlerState(options = {}) {
     generating.value = true
     const sourceRevision = analysisRequestId
     const totalP = totalPages.value
-    const pageScalesArray = Array.from({ length: totalP }, (_, i) => pageScales.value[i] ?? 1.0)
+    // 预览/冲突/导出共用 effectiveScaleForPage：当前页未点保存的调整也会进入导出
+    const pageScalesArray = Array.from({ length: totalP }, (_, i) => effectiveScaleForPage(i))
     const result = await tauriCallSafe('run_image_paddler', {
       args: {
         folder: folder.value,
@@ -611,12 +843,15 @@ export function useImagePaddlerState(options = {}) {
         image_paths: includedImages.value.map((image) => image.path),
         output_stem: inputContext.value.sourceStem || undefined,
         ...settings,
+        // 路径已按前端 order_mode 预排，后端保持 custom 避免二次重排
         order_mode: 'custom',
         fixed_width_mm: actualImageWidth.value,
         orientation: resolvedOrientation.value,
         page_scales: pageScalesArray,
         pair_mode: settings.pair_mode,
         caption_position: settings.caption_position,
+        caption_gap_mm: captionGapMm.value,
+        last_page_mode: settings.last_page_mode,
         print_safety_pad_mm: settings.print_safety_pad_mm,
         image_annotations: imageAnnotations.value,
         reserve_note_placeholder: settings.reserve_note_placeholder,
@@ -661,29 +896,11 @@ export function useImagePaddlerState(options = {}) {
   }
 
   function parseLayout(layout, customRows, customCols) {
-    if (layout === 'custom') {
-      return {
-        rows: clampNumber(customRows, 1, 8, 2),
-        cols: clampNumber(customCols, 1, 8, 2),
-      }
-    }
-    if (String(layout).includes('x')) {
-      const [rows, cols] = String(layout).split('x').map(Number)
-      return {
-        rows: clampNumber(rows, 1, 8, 2),
-        cols: clampNumber(cols, 1, 8, 2),
-      }
-    }
-    const count = clampNumber(Number(layout), 1, 64, 4)
-    if (count === 1) return { rows: 1, cols: 1 }
-    if (count === 2) return { rows: 2, cols: 1 }
-    if (count === 3) return { rows: 1, cols: 3 }
-    if (count === 4) return { rows: 2, cols: 2 }
-    const cols = Math.ceil(Math.sqrt(count))
-    return { rows: Math.ceil(count / cols), cols }
+    return parseLayoutString(layout, customRows, customCols)
   }
 
   function compactGridForCount(baseGrid, count) {
+    if (settings.last_page_mode !== 'reflow') return baseGrid
     const capacity = baseGrid.rows * baseGrid.cols
     if (!count || count >= capacity) return baseGrid
     const targetRatio = baseGrid.cols / baseGrid.rows
@@ -1015,20 +1232,50 @@ export function useImagePaddlerState(options = {}) {
     return order
   }
 
-  function applyRecommendedSettings(showMessage = true) {
+  /** 导入推荐：根据素材整体给出方向/张数/网格/初始尺寸，仅在用户明确应用时整体采用。 */
+  function applyImportRecommendation(showMessage = true) {
     const recommended = analysis.value?.recommended
     if (!recommended) return
     settings.orientation = recommended.orientation || 'auto'
-    settings.layout = recommended.layout || '2x1'
-    if (recommended.recommended_width_mm) {
-      settings.fixed_width_mm = Number(recommended.recommended_width_mm)
-      settings.scale_mode = 'fixed_width'
-    } else {
-      settings.scale_mode = recommended.scale_mode || 'fit'
-    }
+    const controls = controlsFromLayout(recommended.layout || '2x1', settings.custom_rows, settings.custom_cols, isFlowLayout.value)
+    settings.images_per_page = controls.imagesPerPage
+    settings.arrange_mode = controls.arrangeMode
+    if (controls.customRows) settings.custom_rows = controls.customRows
+    if (controls.customCols) settings.custom_cols = controls.customCols
+    syncLayoutFromControls()
     settings.margin_mm = Number(recommended.margin_mm || 12)
     settings.show_filename = recommended.show_filename !== false
-    if (showMessage) ElMessage.success('已应用推荐参数')
+    if (recommended.recommended_width_mm) {
+      settings.size_mode = 'manual'
+      settings.scale_mode = 'fixed_width'
+      settings.fixed_width_mm = Number(recommended.recommended_width_mm)
+    } else {
+      settings.size_mode = 'manual'
+      settings.scale_mode = recommended.scale_mode || 'fit'
+    }
+    // 应用导入方案后，按当前（刚被导入推荐改过的）布局再算一遍智能宽度提示
+    if (showMessage) {
+      ElMessage.success('已应用导入推荐方案（方向/每页张数/网格）。可再点「应用当前布局智能尺寸」按当前布局精调宽度')
+    }
+  }
+
+  /** 兼容旧名：默认指向导入推荐。 */
+  function applyRecommendedSettings(showMessage = true) {
+    applyImportRecommendation(showMessage)
+  }
+
+  /** 当前布局智能推荐：尊重已选张数/方向/网格，只重算安全尺寸，不改回导入布局。 */
+  function applyCurrentLayoutRecommendation(showMessage = true) {
+    applyLayoutAwareRecommendation(showMessage)
+  }
+
+  function restoreSmartSize() {
+    settings.size_mode = 'smart'
+    applyLayoutAwareSize({ silent: false })
+  }
+
+  function markManualWidth() {
+    if (settings.scale_mode === 'fixed_width') settings.size_mode = 'manual'
   }
 
   function adjustPageZoom(delta) {
@@ -1112,6 +1359,33 @@ export function useImagePaddlerState(options = {}) {
       if (imageAnnotations.value === undefined || typeof imageAnnotations.value !== 'object') imageAnnotations.value = {}
       preferenceRevision.value = 4
     }
+    if (preferenceRevision.value < 5) {
+      // 1.0.7 布局/缩放状态迁移：解析旧 layout → 每页张数+排列；全局缩放独立；智能宽度覆盖失效固定宽度
+      const controls = controlsFromLayout(
+        settings.layout || '2x1',
+        settings.custom_rows,
+        settings.custom_cols,
+        isFlowLayoutMode(settings.output_format, settings.use_table),
+      )
+      settings.images_per_page = controls.imagesPerPage ?? 2
+      settings.arrange_mode = controls.arrangeMode || 'stack'
+      if (controls.customRows) settings.custom_rows = controls.customRows
+      if (controls.customCols) settings.custom_cols = controls.customCols
+      if (settings.caption_gap_mm === undefined) settings.caption_gap_mm = 2
+      if (settings.last_page_mode === undefined) settings.last_page_mode = 'keep'
+      if (!settings.size_mode) {
+        settings.size_mode = settings.scale_mode === 'fixed_width' ? 'manual' : settings.scale_mode === 'fit' || settings.scale_mode === 'original' ? settings.scale_mode : 'smart'
+      }
+      if (globalScalePercent.value === undefined || globalScalePercent.value === null) globalScalePercent.value = 100
+      const scaleValues = Object.values(pageScales.value || {})
+      if (scaleValues.length && scaleValues.every((v) => Math.abs(v - scaleValues[0]) < 0.001)) {
+        globalScalePercent.value = Math.round(scaleValues[0] * 100)
+        pageScales.value = {}
+      }
+      preferenceRevision.value = 5
+    }
+    settingsPanelWidth.value = clampNumber(settingsPanelWidth.value, 280, 520, 340)
+    syncLayoutFromControls()
     preferencesReady = true
     consumeIncomingTransfer()
   })
@@ -1174,12 +1448,12 @@ export function useImagePaddlerState(options = {}) {
     const pageImgs = includedImages.value.slice(start, start + count)
     if (!pageImgs.length) return { items: [], hasOverflow: false, hasOverlap: false, hasCaptionOverlap: false }
     const page = resolvedOrientation.value === 'landscape' ? { width: 297, height: 210 } : { width: 210, height: 297 }
-    const currentScale =
-      pageIdx === currentPageIndex.value
-        ? activePageScale.value / 100
-        : pageScales.value[pageIdx] ?? 1.0
+    const currentScale = effectiveScaleForPage(pageIdx)
 
-    const pageGrid = compactGridForCount(layoutGrid.value, pageImgs.length)
+    const pageGrid =
+      settings.last_page_mode === 'reflow'
+        ? compactGridForCount(layoutGrid.value, pageImgs.length)
+        : layoutGrid.value
     const metrics = computeMetricsForGrid(pageGrid, pageImgs)
     const pageImgsWithAnnotations = pageImgs.map((img) => ({
       ...img,
@@ -1212,11 +1486,51 @@ export function useImagePaddlerState(options = {}) {
   const currentPageConflictReport = computed(() => getPageConflicts(currentPageIndex.value))
   const currentPageConflicts = computed(() => currentPageConflictReport.value.items || [])
 
+  // 冲突报告按页缓存：避免导入后任意设置微调都重扫全部页，导致大图集卡顿
+  const pageConflictCache = ref(new Map())
+  const conflictCacheKey = ref('')
+  function conflictScanKey() {
+    return [
+      includedImages.value.length,
+      perPage.value,
+      layoutGrid.value.rows,
+      layoutGrid.value.cols,
+      settings.last_page_mode,
+      settings.scale_mode,
+      settings.fixed_width_mm,
+      settings.margin_mm,
+      settings.show_filename,
+      settings.caption_position,
+      settings.caption_gap_mm,
+      settings.filename_font_size_pt,
+      settings.note_font_size_pt,
+      settings.pair_mode,
+      settings.dpi,
+      resolvedOrientation.value,
+      globalScalePercent.value,
+      JSON.stringify(pageScales.value),
+      settings.output_format,
+    ].join('|')
+  }
+
+  function getConflictReportForPage(pageIdx) {
+    const key = conflictScanKey()
+    if (conflictCacheKey.value !== key) {
+      pageConflictCache.value = new Map()
+      conflictCacheKey.value = key
+    }
+    if (!pageConflictCache.value.has(pageIdx)) {
+      pageConflictCache.value.set(pageIdx, getPageConflicts(pageIdx))
+    }
+    return pageConflictCache.value.get(pageIdx)
+  }
+
   const allPageConflictReports = computed(() => {
+    // 只为徽章/冲突表需要时再扫；computed 本身仍会因依赖变化失效
     const total = totalPages.value
     const reports = new Array(total)
     for (let p = 0; p < total; p++) {
-      reports[p] = getPageConflicts(p)
+      reports[p] = getConflictReportForPage(p)
     }
     return reports
   })
@@ -1255,7 +1569,7 @@ export function useImagePaddlerState(options = {}) {
     if (index === -1) return null
     const count = perPage.value
     const pageIdx = Math.floor(index / count)
-    const report = allPageConflictReports.value[pageIdx]
+    const report = getConflictReportForPage(pageIdx)
     const slotIdx = index % count
     const color = report?.items?.[slotIdx]?.color || 'ok'
     const isModified = pageScales.value[pageIdx] !== undefined
@@ -1322,6 +1636,8 @@ export function useImagePaddlerState(options = {}) {
     conflictSummaryList,
     handleStartGenerate,
     isFlowLayout,
+    arrangeOptions,
+    PER_PAGE_CHOICES,
     optionLayoutLabel,
     safeColumnWidthValue,
     maximumImageWidth,
@@ -1365,6 +1681,19 @@ export function useImagePaddlerState(options = {}) {
     applyScaleToAllPages,
     applyScaleToSubsequentPages,
     resetAllPageScales,
+    layoutAwareRecommendation,
+    importRecommendationDrifted,
+    applyImportRecommendation,
+    applyCurrentLayoutRecommendation,
+    restoreSmartSize,
+    markManualWidth,
+    setImagesPerPage,
+    setArrangeMode,
+    setSizeMode,
+    settingsPanelWidth,
+    setSettingsPanelWidth,
+    startSettingsPanelResize,
+    captionGapMm,
     nextPage,
     prevPage,
     goToPage,
@@ -1378,6 +1707,7 @@ export function useImagePaddlerState(options = {}) {
     layoutMetrics,
     previewImageAreaStyle,
     previewImageAreaContainerStyle,
+    previewCaptionGapStyle,
     previewNameStyle,
     previewNoteStyle,
     selectFolder,

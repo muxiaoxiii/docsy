@@ -33,6 +33,9 @@ describe('image paddler state integration', () => {
     state.analysis.value = { images }
     state.settings.layout = '2x3'
     state.settings.order_mode = 'n'
+    state.settings.size_mode = 'manual'
+    state.settings.scale_mode = 'fixed_width'
+    state.settings.fixed_width_mm = 40
     tauriCallSafe.mockResolvedValue({ ok: true, data: { images: 6, pages: 1 } })
     await state.run()
     const payload = tauriCallSafe.mock.calls[0][1].args
@@ -110,7 +113,7 @@ describe('image paddler state integration', () => {
     expect(state.currentPageIndex.value).toBe(1)
   })
 
-  it('handles single page scaling lifecycle (adjust, save, cancel, reset)', () => {
+  it('handles single page scaling lifecycle with instant apply + cancel to global', () => {
     const state = useImagePaddlerState()
     state.analysis.value = { images }
     state.settings.layout = '2x1'
@@ -121,39 +124,38 @@ describe('image paddler state integration', () => {
     expect(state.hasSavedScale.value).toBe(false)
     expect(state.isCurrentPageDirty.value).toBe(false)
 
-    // Adjust slider on page 0 to 120%
+    // Adjust slider on page 0 to 120% — 立即进入导出状态
     state.activePageScale.value = 120
     expect(state.isCurrentPageDirty.value).toBe(true)
-
-    // Save
-    state.saveCurrentPageScale()
+    expect(state.pageScales.value[0]).toBeCloseTo(1.2)
     expect(state.hasSavedScale.value).toBe(true)
-    expect(state.isCurrentPageDirty.value).toBe(false)
-    expect(state.pageScales.value[0]).toBe(1.2)
 
-    // Switch to page 1
+    // Switch to page 1 — 继承全局 100%
     state.nextPage()
     expect(state.currentPageIndex.value).toBe(1)
     expect(state.activePageScale.value).toBe(100)
     expect(state.hasSavedScale.value).toBe(false)
+    expect(state.pageScales.value[0]).toBeCloseTo(1.2)
 
     // Switch back to page 0
     state.prevPage()
+    expect(state.currentPageIndex.value).toBe(0)
     expect(state.activePageScale.value).toBe(120)
     expect(state.hasSavedScale.value).toBe(true)
 
-    // Modify but cancel
+    // Modify then cancel = 回到全局，清除局部覆盖
     state.activePageScale.value = 80
     expect(state.isCurrentPageDirty.value).toBe(true)
     state.cancelCurrentPageScale()
-    expect(state.activePageScale.value).toBe(120)
+    expect(state.activePageScale.value).toBe(100)
+    expect(state.pageScales.value[0]).toBeUndefined()
     expect(state.isCurrentPageDirty.value).toBe(false)
 
-    // Reset
+    // Local override then reset
+    state.activePageScale.value = 130
     state.resetCurrentPageScale()
     expect(state.activePageScale.value).toBe(100)
     expect(state.hasSavedScale.value).toBe(false)
-    expect(state.pageScales.value[0]).toBeUndefined()
   })
 
   it('passes 1.0.7 arguments (page_scales, pair_mode, caption_position) to run', async () => {
@@ -187,7 +189,7 @@ describe('image paddler state integration', () => {
     expect(typeof state.currentPageConflictState.value.worstColor).toBe('string')
   })
 
-  it('golden fixture: flow mode last page compacts without empty grid slots', () => {
+  it('golden fixture: flow mode last page keeps grid by default, reflow only when opted in', () => {
     const state = useImagePaddlerState()
     const fiveImages = images.slice(0, 5)
     state.analysis.value = { images: fiveImages }
@@ -200,40 +202,41 @@ describe('image paddler state integration', () => {
     expect(state.previewSlots.value.length).toBe(2)
     expect(state.previewLayoutGrid.value).toEqual({ rows: 2, cols: 1 })
 
-    // Jump to last page (page index 2)
+    // Jump to last page (page index 2) — 默认保留原网格，避免末页栏宽静默变化
     state.goToPage(2)
     expect(state.currentPageIndex.value).toBe(2)
     expect(state.previewSlots.value.length).toBe(1)
-    // 1 image on last page should compact to 1x1, without leftover empty slots
+    expect(state.previewLayoutGrid.value).toEqual({ rows: 2, cols: 1 })
+
+    // 显式选择末页重新铺满后才 compact
+    state.settings.last_page_mode = 'reflow'
     expect(state.previewLayoutGrid.value).toEqual({ rows: 1, cols: 1 })
   })
 
-  it('supports batch scale actions: apply to all pages, subsequent pages, and reset all', () => {
+  it('supports batch scale actions: global scale is independent, local overrides optional', () => {
     const state = useImagePaddlerState()
     state.analysis.value = { images } // 6 images, layout 2x1 -> 3 pages
     state.settings.layout = '2x1'
     expect(state.totalPages.value).toBe(3)
 
-    // Set page 0 to 85% and apply to all pages
+    // Set global scale to 85% — 不写死每页，新页自动继承
     state.activePageScale.value = 85
     state.applyScaleToAllPages()
-    expect(state.pageScales.value[0]).toBe(0.85)
-    expect(state.pageScales.value[1]).toBe(0.85)
-    expect(state.pageScales.value[2]).toBe(0.85)
-    expect(state.hasAnySavedScales.value).toBe(true)
+    expect(state.globalScalePercent.value).toBe(85)
+    expect(state.pageScales.value[0]).toBeUndefined()
+    expect(state.pageScales.value[1]).toBeUndefined()
 
-    // On page 1, adjust to 90% and apply to subsequent pages (pages 1 and 2)
+    // On page 1, adjust to 90% as local override
     state.goToPage(1)
     state.activePageScale.value = 90
-    state.applyScaleToSubsequentPages()
-    expect(state.pageScales.value[0]).toBe(0.85)
-    expect(state.pageScales.value[1]).toBe(0.9)
-    expect(state.pageScales.value[2]).toBe(0.9)
+    expect(state.pageScales.value[1]).toBeCloseTo(0.9)
+    expect(state.pageScales.value[0]).toBeUndefined()
+    expect(state.pageScales.value[2]).toBeUndefined()
 
-    // Reset all pages
+    // Reset all
     state.resetAllPageScales()
     expect(Object.keys(state.pageScales.value).length).toBe(0)
-    expect(state.hasAnySavedScales.value).toBe(false)
+    expect(state.globalScalePercent.value).toBe(100)
     expect(state.activePageScale.value).toBe(100)
   })
 
@@ -307,7 +310,7 @@ describe('image paddler state integration', () => {
     })
   })
 
-  it('P1 regression: safeColumnWidthValue does not drift on compacted last page', () => {
+  it('P1 regression: safeColumnWidthValue does not drift on incomplete last page', () => {
     const state = useImagePaddlerState()
     // 3 images with 2x1 grid -> 2 pages: page 0 has 2 images, page 1 (last page) has 1 image
     state.analysis.value = { images: images.slice(0, 3) }
@@ -316,9 +319,8 @@ describe('image paddler state integration', () => {
     state.settings.print_safety_pad_mm = 6
 
     const widthPage0 = state.safeColumnWidthValue.value
-    state.goToPage(1) // Jump to last page, which compacts to 1x1
-    expect(state.previewLayoutGrid.value).toEqual({ rows: 1, cols: 1 })
-    // safeColumnWidthValue must remain bounded by primary layoutGrid (cols=1 in 2x1), not drift
+    state.goToPage(1) // 末页默认保留原网格
+    expect(state.previewLayoutGrid.value).toEqual({ rows: 2, cols: 1 })
     expect(state.safeColumnWidthValue.value).toBe(widthPage0)
   })
 
@@ -358,16 +360,105 @@ describe('image paddler state integration', () => {
     // Initially 100%
     expect(state.globalScalePercent.value).toBe(100)
 
-    // Set global scale to 80%
+    // Set global scale to 80% — 独立存储，导出按 effectiveScaleForPage 继承
     state.setGlobalScale(80)
     expect(state.globalScalePercent.value).toBe(80)
-    expect(state.pageScales.value[0]).toBe(0.8)
-    expect(state.pageScales.value[1]).toBe(0.8)
+    expect(state.pageScales.value[0]).toBeUndefined()
+    expect(state.pageScales.value[1]).toBeUndefined()
 
-    // Reset all pages to 100%
+    // 重新分页后全局比例仍保留
+    state.settings.layout = '1'
+    expect(state.totalPages.value).toBe(4)
+    expect(state.globalScalePercent.value).toBe(80)
+
+    // Reset
     state.resetAllPageScales()
     expect(state.globalScalePercent.value).toBe(100)
     expect(Object.keys(state.pageScales.value).length).toBe(0)
+  })
+
+  it('layout-aware recommendation updates with per-page count and does not overwrite layout on import apply', () => {
+    const state = useImagePaddlerState()
+    const wideImages = Array.from({ length: 9 }, (_, index) => ({
+      path: `/images/wide_${index}.png`,
+      width: 1920,
+      height: 1080,
+    }))
+    state.analysis.value = {
+      images: wideImages,
+      recommended: {
+        orientation: 'portrait',
+        layout: '2x1',
+        scale_mode: 'fixed_width',
+        recommended_width_mm: 165,
+        margin_mm: 12,
+        show_filename: true,
+        reason: '导入推荐：竖页上下 2 张',
+      },
+    }
+    state.settings.size_mode = 'smart'
+    state.settings.images_per_page = 2
+    state.settings.arrange_mode = 'stack'
+    state.settings.scale_mode = 'fixed_width'
+    state.settings.fixed_width_mm = 165
+    state.settings.layout = '2x1'
+
+    const widthTwo = state.layoutAwareRecommendation.value.recommended_width_mm
+    expect(widthTwo).toBeGreaterThan(80)
+
+    // 切到 9 张：智能宽度必须跟着变小，而不是仍用 165
+    state.setImagesPerPage(9)
+    expect(state.perPage.value).toBe(9)
+    const recNine = state.layoutAwareRecommendation.value
+    expect(recNine.recommended_width_mm).toBeLessThan(widthTwo)
+    expect(recNine.recommended_width_mm).toBeLessThanOrEqual(recNine.safe_column_width_mm + 1)
+    // smart 模式自动收敛固定宽度
+    expect(state.settings.fixed_width_mm).toBe(recNine.recommended_width_mm)
+    expect(state.settings.layout).toBe('3x3')
+
+    // 应用导入推荐会改回导入方案的布局
+    state.applyImportRecommendation(false)
+    expect(state.perPage.value).toBe(2)
+    expect(state.settings.layout).toBe('2x1')
+    expect(state.settings.fixed_width_mm).toBe(165)
+
+    // 应用当前布局智能尺寸不改张数
+    state.setImagesPerPage(4)
+    const beforeLayout = state.settings.layout
+    state.applyCurrentLayoutRecommendation(false)
+    expect(state.settings.layout).toBe(beforeLayout)
+    expect(state.settings.fixed_width_mm).toBe(state.layoutAwareRecommendation.value.recommended_width_mm)
+    expect(state.settings.fixed_width_mm).toBeLessThan(165)
+  })
+
+  it('exports current page scale immediately (preview == export) and inherits global on new pages', async () => {
+    const state = useImagePaddlerState()
+    state.folders.value = ['/images']
+    state.analysis.value = { images }
+    state.settings.layout = '2x1'
+    state.setGlobalScale(80)
+
+    // 当前页调到 75%，无需点保存即进入导出参数
+    state.activePageScale.value = 75
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { images: 6, pages: 3 } })
+    await state.run()
+    const payload = tauriCallSafe.mock.calls[0][1].args
+    expect(payload.page_scales[0]).toBeCloseTo(0.75)
+    expect(payload.page_scales[1]).toBeCloseTo(0.8)
+    expect(payload.page_scales[2]).toBeCloseTo(0.8)
+  })
+
+  it('caption gap participates in layout metrics', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: images.slice(0, 2) }
+    state.settings.layout = '2x1'
+    state.settings.show_filename = true
+    state.settings.caption_gap_mm = 0
+    const reserve0 = state.layoutMetrics.value.filenameReserve
+    state.settings.caption_gap_mm = 8
+    expect(state.layoutMetrics.value.captionGapMm).toBe(8)
+    expect(state.layoutMetrics.value.filenameReserve).toBeGreaterThan(reserve0)
+    expect(state.layoutMetrics.value.imageCellHeight).toBeLessThan(state.layoutMetrics.value.cellHeight)
   })
 })
 

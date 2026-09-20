@@ -157,8 +157,9 @@ describe('image layout preview', () => {
       captionReserveMm: 14,
       captionPosition: 'below',
     })
-    expect(optimal).toBeLessThanOrEqual(89)
-    expect(optimal).toBeGreaterThanOrEqual(87)
+    expect(optimal.ok).toBe(true)
+    expect(optimal.scale).toBeLessThanOrEqual(89)
+    expect(optimal.scale).toBeGreaterThanOrEqual(87)
 
     // At the computed optimal scale, there should be no overflow or overlap
     const verification = detectPageConflicts({
@@ -167,7 +168,7 @@ describe('image layout preview', () => {
       cellWidth: 60,
       imageCellHeight: 65,
       fixedWidthMm: 55,
-      pageScale: optimal / 100,
+      pageScale: optimal.scale / 100,
       scaleMode: 'fixed_width',
       showFilename: true,
       captionReserveMm: 14,
@@ -190,7 +191,8 @@ describe('image layout preview', () => {
       fixedWidthMm: 100,
       scaleMode: 'fixed_width',
     })
-    expect(optimal).toBe(100)
+    expect(optimal.ok).toBe(true)
+    expect(optimal.scale).toBe(100)
   })
 
   it('maps pairAlignToXY and flex styles correctly for pair alignment', () => {
@@ -378,7 +380,7 @@ describe('image layout preview', () => {
     expect(report.captionBoxes[0].w).toBeGreaterThan(60)
   })
 
-  it('returns null when 50% scale still has conflicts due to extreme image dimensions', () => {
+  it('returns failed result when 30% scale still has conflicts due to extreme image dimensions', () => {
     const optimal = computeOptimalPageScale({
       images: [{ width: 200, height: 4000 }], // Extreme 1:20 portrait image
       grid: { rows: 1, cols: 1 },
@@ -396,7 +398,9 @@ describe('image layout preview', () => {
       fontSizePt: 8,
       pairMode: 'cell-center',
     })
-    expect(optimal).toBeNull()
+    expect(optimal.ok).toBe(false)
+    expect(optimal.scale).toBeNull()
+    expect(optimal.reason).toContain('30%')
   })
 })
 

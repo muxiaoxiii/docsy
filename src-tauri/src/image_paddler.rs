@@ -122,6 +122,11 @@ pub struct RunArgs {
     #[serde(default)]
     pub print_safety_pad_mm: Option<f64>,
     #[serde(default)]
+    pub caption_gap_mm: Option<f64>,
+    /// keep = 末页保留原网格；reflow = 末页按实际张数重新铺满
+    #[serde(default)]
+    pub last_page_mode: Option<String>,
+    #[serde(default)]
     pub reserve_note_placeholder: Option<bool>,
     #[serde(default)]
     pub note_placeholder_text: Option<String>,
@@ -207,6 +212,8 @@ struct LayoutConfig {
     pair_mode: String,
     #[allow(dead_code)]
     print_safety_pad_mm: f64,
+    caption_gap_mm: f64,
+    last_page_mode: String,
     page_scales: Vec<f64>,
     reserve_note_placeholder: bool,
     note_placeholder_text: String,
@@ -337,14 +344,22 @@ fn caption_reserve_for_page(
     } else {
         0.0
     };
-    (max_title_lines, max_note_lines, title_h + note_h + safety)
+    let gap = if (config.show_filename && max_title_lines > 0) || max_note_lines > 0 {
+        config.caption_gap_mm.max(0.0)
+    } else {
+        0.0
+    };
+    (max_title_lines, max_note_lines, title_h + note_h + safety + gap)
 }
 
 fn layout_for_page(config: &LayoutConfig, images: &[ImageInfo]) -> LayoutConfig {
     let image_count = images.len();
     let capacity = config.grid.rows * config.grid.cols;
     let mut page = config.clone();
-    let compact_grid = if image_count == 0 || image_count >= capacity {
+    let compact_grid = if image_count == 0
+        || image_count >= capacity
+        || page.last_page_mode != "reflow"
+    {
         page.grid.clone()
     } else {
         compact_grid_for_count(&page.grid, image_count)
@@ -909,6 +924,11 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, output_dir: &Path) -> 
             .unwrap_or("cell-center")
             .to_string(),
         print_safety_pad_mm: args.print_safety_pad_mm.unwrap_or(6.0).max(0.0),
+        caption_gap_mm: args.caption_gap_mm.unwrap_or(2.0).clamp(0.0, 20.0),
+        last_page_mode: args
+            .last_page_mode
+            .clone()
+            .unwrap_or_else(|| "keep".to_string()),
         page_scales: args.page_scales.clone().unwrap_or_default(),
         reserve_note_placeholder: args.reserve_note_placeholder.unwrap_or(false),
         note_placeholder_text: args
@@ -1711,10 +1731,18 @@ fn create_caption_paragraph(
         filename_line_height_mm(cfg.filename_font_size_pt)
     };
 
+    // 图文间距：标题在图下时加在段前，在图上时加在段后，与预览共用 caption_gap_mm
+    let gap_twips = mm_to_twips(cfg.caption_gap_mm.max(0.0)).max(0) as u32;
+    let (before_twips, after_twips) = if cfg.caption_position == "above" {
+        (safety_before_twips, safety_after_twips.saturating_add(gap_twips))
+    } else {
+        (safety_before_twips.saturating_add(gap_twips), safety_after_twips)
+    };
+
     para = para.line_spacing(
         LineSpacing::new()
-            .before(safety_before_twips)
-            .after(safety_after_twips)
+            .before(before_twips)
+            .after(after_twips)
             .line_rule(LineSpacingType::Exact)
             .line(mm_to_twips(caption_line_height_mm)),
     );
@@ -2419,6 +2447,8 @@ mod tests {
             pair_mode: None,
             caption_position: None,
             print_safety_pad_mm: None,
+            caption_gap_mm: None,
+            last_page_mode: None,
             reserve_note_placeholder: None,
             note_placeholder_text: None,
             note_font_family: None,
@@ -2481,6 +2511,8 @@ mod tests {
             pair_mode: None,
             caption_position: None,
             print_safety_pad_mm: None,
+            caption_gap_mm: None,
+            last_page_mode: None,
             reserve_note_placeholder: None,
             note_placeholder_text: None,
             note_font_family: None,
@@ -2694,6 +2726,8 @@ mod tests {
             caption_position: "below".into(),
             pair_mode: "cell-center".into(),
             print_safety_pad_mm: 6.0,
+            caption_gap_mm: 2.0,
+            last_page_mode: "reflow".into(),
             page_scales: Vec::new(),
             reserve_note_placeholder: false,
             note_placeholder_text: "[点击输入说明]".into(),
@@ -2773,6 +2807,8 @@ mod tests {
             pair_mode: None,
             caption_position: None,
             print_safety_pad_mm: None,
+            caption_gap_mm: None,
+            last_page_mode: None,
             reserve_note_placeholder: None,
             note_placeholder_text: None,
             note_font_family: None,
@@ -2871,6 +2907,8 @@ mod tests {
             caption_position: "below".into(),
             pair_mode: "cell-center".into(),
             print_safety_pad_mm: 6.0,
+            caption_gap_mm: 2.0,
+            last_page_mode: "keep".into(),
             page_scales: Vec::new(),
             reserve_note_placeholder: true,
             note_placeholder_text: "[点击输入说明]".into(),
@@ -3028,6 +3066,8 @@ mod tests {
             caption_position: "below".into(),
             pair_mode: "cell-center".into(),
             print_safety_pad_mm: 6.0,
+            caption_gap_mm: 2.0,
+            last_page_mode: "keep".into(),
             page_scales: Vec::new(),
             reserve_note_placeholder: false,
             note_placeholder_text: String::new(),
@@ -3057,8 +3097,13 @@ mod tests {
         config_2x2.grid = LayoutGrid { rows: 2, cols: 2 };
         config_2x2.cell_w_mm = 93.0;
         config_2x2.fixed_width_mm = Some(120.0);
+        config_2x2.last_page_mode = "keep".into();
+        let page_keep = layout_for_page(&config_2x2, &images);
+        assert_eq!(page_keep.grid.cols, 2); // 默认保留原网格
+        assert_eq!(page_keep.fixed_width_mm, Some(120.0));
+        config_2x2.last_page_mode = "reflow".into();
         let page_compact = layout_for_page(&config_2x2, &images);
-        assert_eq!(page_compact.grid.cols, 1); // Compacted to 1 col
+        assert_eq!(page_compact.grid.cols, 1); // reflow 时才压缩到 1 列
         // Safe column width of base grid is 87mm
         assert_eq!(config_2x2.safe_column_width_mm(), 87.0);
         // User width is preserved

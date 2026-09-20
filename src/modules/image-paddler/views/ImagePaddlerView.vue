@@ -1,17 +1,18 @@
 <template>
   <ToolWorkspaceShell title="图片排版" description="将图片批量排版为 A4 文档">
-    <div class="paddler-layout">
-      <!-- Settings Panel -->
-      <div class="settings-panel">
-        <el-form label-width="80px" size="small">
-          <el-form-item :label="isFrameSequence ? '来源' : '素材来源'">
+    <div ref="layoutRef" class="paddler-layout">
+      <div class="settings-panel" :style="settingsPanelStyle">
+        <el-form label-width="72px" size="small">
+          <div class="settings-group-title">页面</div>
+
+          <el-form-item :label="isFrameSequence ? '来源' : '素材'">
             <div class="source-actions">
-              <el-button @click="addFolders">添加文件夹</el-button>
-              <el-button @click="addImages">添加图片</el-button>
-              <el-button v-if="folders.length" text type="danger" size="small" @click="clearAllSources">清空</el-button>
+              <el-button size="small" @click="addFolders">文件夹</el-button>
+              <el-button size="small" @click="addImages">图片</el-button>
+              <el-button v-if="folders.length" size="small" text type="danger" @click="clearAllSources">清空</el-button>
             </div>
-            <div v-if="isFrameSequence" class="folder-path transfer-source">
-              {{ inputContext.sourceLabel || '视频抽帧筛选结果' }}
+            <div v-if="isFrameSequence" class="folder-path">
+              {{ inputContext.sourceLabel || '抽帧结果' }}
               <template v-if="analysis"> · {{ analysis.images.length }} 张</template>
             </div>
             <div v-else-if="folders.length" class="source-tags">
@@ -29,210 +30,275 @@
             </div>
           </el-form-item>
 
-          <el-form-item label="输出格式">
-            <el-select v-model="settings.output_format">
-              <el-option label="DOCX" value="docx" />
-              <el-option label="PDF" value="pdf" />
-            </el-select>
+          <el-form-item label="输出">
+            <el-radio-group v-model="settings.output_format" size="small">
+              <el-radio-button label="pdf">PDF</el-radio-button>
+              <el-radio-button label="docx">DOCX</el-radio-button>
+            </el-radio-group>
           </el-form-item>
 
-          <el-form-item v-if="settings.output_format === 'docx'" label="排版方式">
-            <el-checkbox v-model="settings.use_table">使用表格排版</el-checkbox>
-            <div class="field-hint">
-              {{
-                settings.use_table
-                  ? '多列并排推荐；保持单元格网格对齐'
-                  : '无表格模式按每页张数上下排列，便于在 Word 中自由插入文字'
-              }}
-            </div>
-          </el-form-item>
-
-          <el-form-item v-if="!isFrameSequence && folders.length > 1" label="多文件夹">
-            <el-select v-model="settings.output_mode">
-              <el-option label="合并为一个文档" value="merged" />
-              <el-option label="每个文件夹单独生成" value="per_folder" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="每页最多">
-            <el-select v-model="settings.layout">
-              <el-option
-                v-for="value in ['1', '1x2', '2x1', '1x3', '4', '2x3', '3x3', 'custom']"
-                :key="value"
-                :label="optionLayoutLabel(value)"
-                :value="value"
-              />
-            </el-select>
-            <div v-if="isFlowLayout" class="field-hint">
-              无表格模式仅支持上下排列；需要三张左右并排，请勾选「使用表格排版」。
-            </div>
-          </el-form-item>
-
-          <el-form-item v-if="isPairLayout" label="双图排列">
-            <el-select v-model="settings.pair_mode">
-              <el-option label="格心独立（默认）" value="cell-center" />
-              <el-option label="向中心收拢" value="page-gather" />
-              <el-option label="向边缘展开" value="page-spread" />
-              <el-option label="外缘对齐" value="edge-align" />
-              <el-option label="中间留白最大" value="gap-max" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item v-if="settings.layout === 'custom'" label="行列">
-            <div class="inline-controls">
-              <el-input-number v-model="settings.custom_rows" :min="1" :max="8" />
-              <span>行</span>
-              <el-input-number v-model="settings.custom_cols" :min="1" :max="8" />
-              <span>列</span>
-            </div>
-          </el-form-item>
-
-          <el-form-item label="缩放模式">
-            <el-select v-model="settings.scale_mode">
-              <el-option label="统一图片宽度（推荐）" value="fixed_width" />
-              <el-option label="适应页面" value="fit" />
-              <el-option label="不缩放" value="original" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item v-if="settings.scale_mode === 'fixed_width'" label="图片宽度">
-            <div class="fixed-width-control">
-              <el-slider
-                v-model="settings.fixed_width_mm"
-                :min="0.1"
-                :max="Math.max(safeColumnWidthValue, 300)"
-                :step="0.1"
-                class="width-slider"
-              />
-              <div class="width-input-row">
-                <el-input-number
-                  v-model="settings.fixed_width_mm"
-                  :min="0.1"
-                  :max="500"
-                  :step="0.1"
-                  :precision="1"
-                  size="small"
-                  controls-position="right"
-                />
-                <span class="unit-label">mm</span>
-                <el-button size="small" text type="primary" @click="settings.fixed_width_mm = currentRecommendedWidth">
-                  推荐({{ currentRecommendedWidth }}mm)
-                </el-button>
-              </div>
-              <div class="field-hint">
-                设定宽度 {{ actualImageWidth.toFixed(1) }} mm · 打印安全栏宽 {{ safeColumnWidthValue.toFixed(1) }} mm
-              </div>
-              <div v-if="widthIsLimited" class="field-hint" role="status">
-                设定宽度超过打印安全栏宽，可能产生页面溢出。系统将原样导出供 Word/WPS 中微调；您也可点击「推荐」恢复安全宽度。
-              </div>
-            </div>
+          <el-form-item v-if="settings.output_format === 'docx'" label="排版">
+            <el-radio-group v-model="settings.use_table" size="small">
+              <el-radio-button :label="true">表格</el-radio-button>
+              <el-radio-button :label="false">段落</el-radio-button>
+            </el-radio-group>
+            <div class="field-hint">{{ settings.use_table ? '可并排' : '仅上下' }}</div>
           </el-form-item>
 
           <el-form-item label="方向">
-            <el-select v-model="settings.orientation">
+            <el-select v-model="settings.orientation" size="small">
               <el-option label="自动" value="auto" />
               <el-option label="竖向" value="portrait" />
               <el-option label="横向" value="landscape" />
             </el-select>
           </el-form-item>
 
-          <el-form-item label="页边距">
-            <el-input-number v-model="settings.margin_mm" :min="0" :max="30" :step="1" />
+          <el-form-item label="边距">
+            <el-input-number v-model="settings.margin_mm" size="small" :min="0" :max="30" :step="1" controls-position="right" />
             <span class="unit-label">mm</span>
           </el-form-item>
 
-          <el-form-item label="标题 / 文件名">
+          <div class="settings-group-title">每页布局</div>
+
+          <el-form-item label="张数">
+            <el-radio-group
+              :model-value="settings.images_per_page"
+              size="small"
+              class="per-page-group"
+              @update:model-value="setImagesPerPage"
+            >
+              <el-radio-button
+                v-for="option in PER_PAGE_CHOICES"
+                :key="String(option.value)"
+                :label="option.value"
+              >{{ option.value === 'custom' ? '自定' : option.value }}</el-radio-button>
+            </el-radio-group>
+            <div class="field-hint">末页可不足</div>
+          </el-form-item>
+
+          <el-form-item label="网格">
+            <div class="arrange-row">
+              <el-select
+                :model-value="settings.arrange_mode"
+                size="small"
+                :disabled="isFlowLayout"
+                @update:model-value="setArrangeMode"
+              >
+                <el-option
+                  v-for="option in arrangeOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+              <span class="grid-chip">
+                <i v-for="n in Math.min(perPage, 9)" :key="n">{{ n }}</i>
+              </span>
+            </div>
+            <div class="field-hint">{{ layoutGrid.rows }}×{{ layoutGrid.cols }} · {{ perPage }} 张/页</div>
+          </el-form-item>
+
+          <el-form-item v-if="settings.images_per_page === 'custom' && !isFlowLayout" label="行列">
+            <div class="inline-controls">
+              <el-input-number
+                :model-value="settings.custom_rows"
+                size="small"
+                :min="1"
+                :max="8"
+                controls-position="right"
+                @update:model-value="(v) => { settings.custom_rows = v }"
+              />
+              <span>×</span>
+              <el-input-number
+                :model-value="settings.custom_cols"
+                size="small"
+                :min="1"
+                :max="8"
+                controls-position="right"
+                @update:model-value="(v) => { settings.custom_cols = v }"
+              />
+            </div>
+          </el-form-item>
+
+          <el-form-item label="顺序">
+            <el-select v-model="settings.order_mode" size="small" :disabled="isFlowLayout || perPage <= 1">
+              <el-option label="Z 字" value="z" />
+              <el-option v-if="!isFlowLayout" label="N 字" value="n" />
+              <el-option v-if="!isFlowLayout" label="倒 N" value="reverse_n" />
+              <el-option label="自定义" value="custom" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="末页">
+            <el-radio-group v-model="settings.last_page_mode" size="small">
+              <el-radio-button label="keep">原网格</el-radio-button>
+              <el-radio-button label="reflow">铺满</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-form-item v-if="isPairLayout" label="双图">
+            <el-select v-model="settings.pair_mode" size="small">
+              <el-option label="居中" value="cell-center" />
+              <el-option label="靠拢" value="page-gather" />
+              <el-option label="分散" value="page-spread" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item v-if="!isFrameSequence && folders.length > 1" label="多文件夹">
+            <el-select v-model="settings.output_mode" size="small">
+              <el-option label="合并" value="merged" />
+              <el-option label="分文件夹" value="per_folder" />
+            </el-select>
+          </el-form-item>
+
+          <div class="settings-group-title">图片尺寸</div>
+
+          <el-form-item label="模式">
+            <el-radio-group :model-value="settings.size_mode" size="small" @update:model-value="setSizeMode">
+              <el-radio-button label="smart">智能</el-radio-button>
+              <el-radio-button label="manual">手动</el-radio-button>
+              <el-radio-button label="fit">适应</el-radio-button>
+              <el-radio-button label="original">原图</el-radio-button>
+            </el-radio-group>
+            <div class="field-hint">{{ layoutAwareRecommendation?.reason }}</div>
+          </el-form-item>
+
+          <el-form-item v-if="settings.scale_mode === 'fixed_width'" label="宽度">
+            <div class="fixed-width-control">
+              <div class="width-input-row">
+                <el-slider
+                  v-model="settings.fixed_width_mm"
+                  :min="0.1"
+                  :max="Math.max(safeColumnWidthValue, 300)"
+                  :step="0.1"
+                  class="width-slider"
+                  @input="markManualWidth"
+                />
+                <el-input-number
+                  v-model="settings.fixed_width_mm"
+                  size="small"
+                  :min="0.1"
+                  :max="500"
+                  :step="0.1"
+                  :precision="1"
+                  controls-position="right"
+                  class="width-num"
+                  @change="markManualWidth"
+                />
+                <span class="unit-label">mm</span>
+                <el-button size="small" text type="primary" @click="applyCurrentLayoutRecommendation">
+                  {{ currentRecommendedWidth }}
+                </el-button>
+                <el-button size="small" text @click="restoreSmartSize">智能</el-button>
+              </div>
+              <div class="field-hint">
+                {{ actualImageWidth.toFixed(0) }} / 栏宽 {{ safeColumnWidthValue.toFixed(0) }} mm
+                <template v-if="widthIsLimited"> · 超宽</template>
+              </div>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="边框">
+            <div class="inline-controls">
+              <el-switch v-model="settings.border_enabled" size="small" />
+              <el-select v-model="settings.border_color" size="small" :disabled="!settings.border_enabled" class="border-select">
+                <el-option label="黑" value="black" />
+                <el-option label="白" value="white" />
+                <el-option label="深灰" value="dark_gray" />
+                <el-option label="浅灰" value="light_gray" />
+                <el-option label="红" value="red" />
+                <el-option label="黄" value="yellow" />
+                <el-option label="蓝" value="blue" />
+              </el-select>
+            </div>
+          </el-form-item>
+
+          <div class="settings-group-title">标题说明</div>
+
+          <el-form-item label="标题">
             <div class="filename-panel">
               <div class="filename-panel-row">
-                <el-switch v-model="settings.show_filename" active-text="显示" inactive-text="隐藏" />
-                <el-switch
-                  v-model="settings.filename_without_ext"
-                  active-text="隐藏扩展名"
-                  inactive-text="保留扩展名"
+                <el-switch v-model="settings.show_filename" size="small" active-text="显示" />
+                <el-switch v-model="settings.filename_without_ext" size="small" active-text="无扩展名" />
+                <el-select v-model="settings.caption_position" size="small" :disabled="!settings.show_filename" class="cap-select">
+                  <el-option label="图下" value="below" />
+                  <el-option label="图上" value="above" />
+                </el-select>
+              </div>
+              <div class="filename-panel-row">
+                <label class="mini-label">间距</label>
+                <el-slider
+                  v-model="settings.caption_gap_mm"
+                  :min="0"
+                  :max="20"
+                  :step="0.5"
+                  :disabled="!settings.show_filename && !settings.reserve_note_placeholder"
+                  class="gap-slider"
                 />
-                <label class="filename-font-control">
-                  <span>位置</span>
-                  <el-select v-model="settings.caption_position" :disabled="!settings.show_filename">
-                    <el-option label="图下方" value="below" />
-                    <el-option label="图上方" value="above" />
-                  </el-select>
-                </label>
-                <label class="filename-font-control">
-                  <span>字体</span>
-                  <el-select v-model="settings.filename_font_family" :disabled="!settings.show_filename">
-                    <el-option label="无衬线" value="sans" />
-                    <el-option label="宋体" value="serif" />
+                <el-input-number
+                  v-model="settings.caption_gap_mm"
+                  size="small"
+                  :min="0"
+                  :max="20"
+                  :step="0.5"
+                  :precision="1"
+                  controls-position="right"
+                  class="gap-num"
+                  :disabled="!settings.show_filename && !settings.reserve_note_placeholder"
+                />
+                <span class="unit-label">mm</span>
+              </div>
+              <div class="filename-panel-row">
+                <el-select v-model="settings.filename_font_family" size="small" :disabled="!settings.show_filename" class="font-select">
+                  <el-option label="无衬线" value="sans" />
+                  <el-option label="宋体" value="serif" />
+                  <el-option label="楷体" value="kaiti" />
+                  <el-option label="仿宋" value="fangsong" />
+                </el-select>
+                <el-input-number
+                  v-model="settings.filename_font_size_pt"
+                  size="small"
+                  :min="6"
+                  :max="24"
+                  :step="1"
+                  controls-position="right"
+                  :disabled="!settings.show_filename"
+                  class="font-size"
+                />
+                <span class="unit-label">pt</span>
+                <el-select v-model="settings.filename_color" size="small" :disabled="!settings.show_filename" class="color-select">
+                  <el-option label="深灰" value="dark_gray" />
+                  <el-option label="黑" value="black" />
+                  <el-option label="灰" value="gray" />
+                  <el-option label="蓝" value="blue" />
+                </el-select>
+              </div>
+              <div class="filename-panel-row">
+                <el-switch v-model="settings.reserve_note_placeholder" size="small" active-text="说明栏" />
+                <template v-if="settings.reserve_note_placeholder">
+                  <el-select v-model="settings.note_font_family" size="small" class="font-select">
                     <el-option label="楷体" value="kaiti" />
                     <el-option label="仿宋" value="fangsong" />
-                  </el-select>
-                </label>
-                <label class="filename-size-control">
-                  <span>字号</span>
-                  <el-input-number
-                    v-model="settings.filename_font_size_pt"
-                    :min="6"
-                    :max="24"
-                    :step="1"
-                    :disabled="!settings.show_filename"
-                    controls-position="right"
-                  />
-                  <span>pt</span>
-                </label>
-                <label class="filename-font-control">
-                  <span>颜色</span>
-                  <el-select v-model="settings.filename_color" :disabled="!settings.show_filename">
-                    <el-option label="深灰（默认）" value="dark_gray" />
-                    <el-option label="黑色" value="black" />
-                    <el-option label="灰色" value="gray" />
-                    <el-option label="蓝色" value="blue" />
-                  </el-select>
-                </label>
-              </div>
-              <div class="filename-panel-row note-panel-row">
-                <el-switch
-                  v-model="settings.reserve_note_placeholder"
-                  active-text="预留说明栏"
-                  inactive-text="不预留说明"
-                />
-                <label v-if="settings.reserve_note_placeholder" class="filename-font-control">
-                  <span>说明字体</span>
-                  <el-select v-model="settings.note_font_family">
-                    <el-option label="楷体（推荐）" value="kaiti" />
-                    <el-option label="仿宋" value="fangsong" />
                     <el-option label="宋体" value="serif" />
                     <el-option label="无衬线" value="sans" />
                   </el-select>
-                </label>
-                <label v-if="settings.reserve_note_placeholder" class="filename-size-control">
-                  <span>说明字号</span>
                   <el-input-number
                     v-model="settings.note_font_size_pt"
+                    size="small"
                     :min="6"
                     :max="18"
-                    :step="1"
                     controls-position="right"
+                    class="font-size"
                   />
-                  <span>pt</span>
-                </label>
-                <label v-if="settings.reserve_note_placeholder" class="filename-font-control">
-                  <span>说明颜色</span>
-                  <el-select v-model="settings.note_color">
-                    <el-option label="深灰（默认）" value="dark_gray" />
-                    <el-option label="黑色" value="black" />
-                    <el-option label="灰色" value="gray" />
-                    <el-option label="蓝色" value="blue" />
-                  </el-select>
-                </label>
+                  <span class="unit-label">pt</span>
+                </template>
               </div>
-              <div v-if="settings.reserve_note_placeholder" class="note-placeholder-row">
-                <el-input
-                  v-model="settings.note_placeholder_text"
-                  size="small"
-                  placeholder="未填写说明时的提示占位符"
-                >
-                  <template #prepend>未填写说明时提示：</template>
-                </el-input>
-              </div>
+              <el-input
+                v-if="settings.reserve_note_placeholder"
+                v-model="settings.note_placeholder_text"
+                size="small"
+                placeholder="未填说明时的占位文字"
+              />
               <div class="filename-rules">
                 <div
                   v-for="(rule, idx) in settings.filename_rules"
@@ -243,19 +309,19 @@
                   <el-select v-model="rule.kind" size="small" class="rule-kind">
                     <el-option label="删除" value="remove" />
                     <el-option label="替换" value="replace" />
-                    <el-option label="加前缀" value="prefix" />
-                    <el-option label="加后缀" value="suffix" />
-                    <el-option label="保留成分" value="keep" />
+                    <el-option label="前缀" value="prefix" />
+                    <el-option label="后缀" value="suffix" />
+                    <el-option label="保留" value="keep" />
                   </el-select>
                   <template v-if="rule.kind === 'replace'">
-                    <el-input v-model="rule.value" size="small" placeholder="原文字" />
+                    <el-input v-model="rule.value" size="small" placeholder="原文" />
                     <el-input v-model="rule.replacement" size="small" placeholder="替换为" />
                   </template>
                   <template v-else-if="rule.kind === 'keep'">
-                    <el-checkbox v-model="rule.keep_time" size="small">时间</el-checkbox>
-                    <el-checkbox v-model="rule.keep_number" size="small">编号</el-checkbox>
-                    <el-checkbox v-model="rule.keep_text" size="small">文本</el-checkbox>
-                    <el-input v-model="rule.replacement" size="small" placeholder="自定义名称" />
+                    <el-checkbox v-model="rule.keep_time" size="small">时</el-checkbox>
+                    <el-checkbox v-model="rule.keep_number" size="small">号</el-checkbox>
+                    <el-checkbox v-model="rule.keep_text" size="small">文</el-checkbox>
+                    <el-input v-model="rule.replacement" size="small" placeholder="名称" />
                     <el-select v-model="rule.separator" size="small" class="separator-select">
                       <el-option label="_" value="_" />
                       <el-option label="-" value="-" />
@@ -268,258 +334,139 @@
                   <el-button size="small" text type="danger" @click="removeFilenameRule(idx)">-</el-button>
                 </div>
               </div>
-              <el-button size="small" plain @click="addFilenameRule">+ 添加规则</el-button>
+              <el-button size="small" text @click="addFilenameRule">+ 规则</el-button>
             </div>
-          </el-form-item>
-
-          <el-form-item label="排列">
-            <el-select v-model="settings.order_mode">
-              <el-option label="Z 字" value="z" />
-              <el-option label="N 字" value="n" />
-              <el-option label="倒 N 字" value="reverse_n" />
-              <el-option label="自定义顺序" value="custom" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="边框">
-            <div class="inline-controls">
-              <el-switch v-model="settings.border_enabled" />
-              <el-select v-model="settings.border_color" :disabled="!settings.border_enabled">
-                <el-option label="黑色" value="black" />
-                <el-option label="白色" value="white" />
-                <el-option label="深灰" value="dark_gray" />
-                <el-option label="浅灰" value="light_gray" />
-                <el-option label="红色" value="red" />
-                <el-option label="黄色" value="yellow" />
-                <el-option label="蓝色" value="blue" />
-              </el-select>
-            </div>
-          </el-form-item>
-
-          <el-form-item label="智能提示">
-            <el-switch v-model="settings.doclet_layout_tips" active-text="排版建议" inactive-text="静默" />
           </el-form-item>
 
           <el-form-item class="workspace-action-row">
-            <el-button
-              class="primary-workspace-action"
-              type="success"
-              @click="handleStartGenerate"
-              :loading="generating"
-              :disabled="analyzing || !analysis || !includedImages.length"
-            >
-              生成文档
-            </el-button>
-            <span v-if="analyzing" class="analyze-hint">正在分析...</span>
+            <div class="action-row">
+              <el-button
+                type="success"
+                size="small"
+                @click="handleStartGenerate"
+                :loading="generating"
+                :disabled="analyzing || !analysis || !includedImages.length"
+              >
+                生成文档
+              </el-button>
+              <el-switch v-model="settings.doclet_layout_tips" size="small" active-text="提示" />
+              <span v-if="analyzing" class="analyze-hint">分析中…</span>
+            </div>
           </el-form-item>
         </el-form>
       </div>
 
-      <!-- Analysis Result -->
+      <div
+        class="panel-resizer"
+        role="separator"
+        aria-label="调整设置区宽度"
+        aria-orientation="vertical"
+        @pointerdown="onPanelResize"
+      />
+
       <div class="result-panel">
         <template v-if="analysis">
           <div v-if="generatedResult" class="generated-result">
-            <div>
+            <div class="generated-meta">
               <strong>已生成</strong>
               <div v-for="path in generatedOutputPaths" :key="path" class="output-path">{{ path }}</div>
-              <div v-for="warning in generatedResult.warnings || []" :key="warning" role="alert">{{ warning }}</div>
+              <div v-for="warning in generatedResult.warnings || []" :key="warning" role="alert" class="field-hint">{{ warning }}</div>
             </div>
-            <el-button size="small" type="primary" @click="openGeneratedOutput">打开文件</el-button>
+            <el-button size="small" type="primary" text @click="openGeneratedOutput">打开</el-button>
           </div>
 
           <div v-if="isFrameSequence" class="sequence-mode-note">
-            <strong>抽帧序列模式</strong>
-            <span>保持原顺序和原图比例；当前排版 {{ includedImages.length }} 张，排除 {{ excludedCount }} 张。</span>
+            <strong>抽帧</strong>
+            <span>{{ includedImages.length }} 张 / 排除 {{ excludedCount }}</span>
             <el-switch
               v-model="settings.use_source_exclusions"
+              size="small"
               inline-prompt
-              active-text="沿用抽帧排除"
-              inactive-text="全部载入"
+              active-text="沿用排除"
+              inactive-text="全载入"
             />
           </div>
 
-          <div class="analysis-summary">
-            <el-descriptions :column="2" border size="small">
-              <el-descriptions-item label="图片数量">
-                {{ includedImages.length }} 张参与排版
-                <template v-if="excludedCount">，{{ excludedCount }} 张排除</template>
-              </el-descriptions-item>
-              <el-descriptions-item label="推荐方向">{{
-                orientationLabel(analysis.recommended.orientation)
-              }}</el-descriptions-item>
-              <el-descriptions-item label="推荐布局">{{
-                layoutLabel(analysis.recommended.layout)
-              }}</el-descriptions-item>
-              <el-descriptions-item label="推荐缩放">{{
-                scaleModeLabel(analysis.recommended.scale_mode)
-              }}</el-descriptions-item>
-              <el-descriptions-item label="推荐边距">{{ analysis.recommended.margin_mm }} mm</el-descriptions-item>
-              <el-descriptions-item label="当前方向">{{ resolvedOrientationLabel }}</el-descriptions-item>
-              <el-descriptions-item label="当前布局"
-                >{{ layoutGrid.rows }} 行 × {{ layoutGrid.cols }} 列</el-descriptions-item
-              >
-            </el-descriptions>
-            <div class="recommendation-bar">
-              <span>{{ analysis.recommended.reason }}</span>
-              <el-button size="small" type="primary" @click="applyRecommendedSettings">应用推荐参数</el-button>
+          <div class="recommendation-bar">
+            <div class="recommendation-block">
+              <span class="recommendation-title">导入</span>
+              <span class="recommendation-text">{{ analysis.recommended.reason }}</span>
+              <el-button size="small" text @click="applyImportRecommendation">应用</el-button>
+            </div>
+            <div class="recommendation-block is-current">
+              <span class="recommendation-title">当前</span>
+              <span class="recommendation-text">
+                {{ layoutAwareRecommendation?.reason }}
+                <template v-if="importRecommendationDrifted"> · 已偏离导入方案</template>
+              </span>
+              <el-button size="small" text type="primary" @click="applyCurrentLayoutRecommendation">应用</el-button>
             </div>
           </div>
 
           <div class="preview-section">
             <div class="section-head">
               <div class="page-nav-group">
-                <h4>页面排版预览</h4>
+                <h4>预览</h4>
                 <div class="page-nav-controls">
-                  <el-button size="small" :disabled="currentPageIndex <= 0" @click="prevPage">上一页</el-button>
-                  <span class="page-indicator">第 {{ currentPageIndex + 1 }} / {{ totalPages }} 页</span>
-                  <el-button size="small" :disabled="currentPageIndex >= totalPages - 1" @click="nextPage">下一页</el-button>
+                  <el-button size="small" text :disabled="currentPageIndex <= 0" @click="prevPage">‹</el-button>
+                  <span class="page-indicator">{{ currentPageIndex + 1 }}/{{ totalPages }}</span>
+                  <el-button size="small" text :disabled="currentPageIndex >= totalPages - 1" @click="nextPage">›</el-button>
                 </div>
               </div>
               <div class="preview-toolbar">
-                <span>当前页 {{ previewImages.length }} 张</span>
-                <el-button size="small" text @click="adjustPageZoom(-10)">-</el-button>
+                <span>{{ previewImages.length }} 图</span>
+                <el-button size="small" text @click="adjustPageZoom(-10)">−</el-button>
                 <el-slider v-model="pageZoom" :min="20" :max="200" :step="5" class="zoom-slider" />
                 <el-button size="small" text @click="adjustPageZoom(10)">+</el-button>
                 <span class="zoom-value">{{ pageZoom }}%</span>
               </div>
             </div>
 
-            <!-- Scale slider bar with Global and Single-Page Scope Toggle -->
             <div class="page-scale-bar">
-              <el-radio-group v-model="scaleScope" size="small" class="scale-scope-toggle">
-                <el-radio-button label="all">全部页面</el-radio-button>
-                <el-radio-button label="current">当前页</el-radio-button>
+              <el-radio-group v-model="scaleScope" size="small">
+                <el-radio-button label="all">全局</el-radio-button>
+                <el-radio-button label="current">本页</el-radio-button>
               </el-radio-group>
 
-              <!-- Global mode -->
               <template v-if="scaleScope === 'all'">
-                <div class="page-scale-label">
-                  <span class="scale-title">全局缩放（共 {{ totalPages }} 页）</span>
-                  <el-tag v-if="hasAnySavedScales" size="small" type="success" effect="plain">
-                    全部统一生效
-                  </el-tag>
-                </div>
-                <div class="page-scale-slider-wrap">
-                  <el-slider
-                    :model-value="globalScalePercent"
-                    :min="50"
-                    :max="140"
-                    :step="1"
-                    :format-tooltip="(val) => `${val}%`"
-                    class="page-scale-slider"
-                    @input="setGlobalScale"
-                  />
-                  <span class="scale-percent">{{ globalScalePercent }}%</span>
-                  <el-button
-                    size="small"
-                    type="primary"
-                    plain
-                    title="自动推算所有页面中不产生重叠与溢出的统一最大比例"
-                    @click="autoFitAllPagesScale"
-                  >
-                    自适应全部
-                  </el-button>
-                </div>
-                <div class="page-scale-actions">
-                  <el-button
-                    v-if="hasAnySavedScales || globalScalePercent !== 100"
-                    size="small"
-                    text
-                    type="danger"
-                    title="重置所有页面的自定义缩放比例为 100%"
-                    @click="resetAllPageScales"
-                  >
-                    恢复 100%
-                  </el-button>
-                </div>
+                <el-slider
+                  :model-value="globalScalePercent"
+                  :min="30"
+                  :max="140"
+                  :step="1"
+                  class="page-scale-slider"
+                  @input="setGlobalScale"
+                />
+                <span class="scale-percent">{{ globalScalePercent }}%</span>
+                <el-button size="small" text type="primary" @click="autoFitAllPagesScale">智能</el-button>
+                <el-button v-if="hasAnySavedScales || globalScalePercent !== 100" size="small" text type="danger" @click="resetAllPageScales">重置</el-button>
               </template>
 
-              <!-- Single page mode -->
               <template v-else>
-                <div class="page-scale-label">
-                  <span class="scale-title">调整第 {{ currentPageIndex + 1 }} 页（共 {{ previewImages.length }} 张）</span>
-                  <el-tag v-if="hasSavedScale" size="small" type="primary" effect="plain">
-                    已微调 ({{ Math.round((pageScales[currentPageIndex] ?? 1) * 100) }}%)
-                  </el-tag>
-                </div>
-                <div class="page-scale-slider-wrap">
-                  <el-slider
-                    v-model="activePageScale"
-                    :min="50"
-                    :max="140"
-                    :step="1"
-                    :format-tooltip="(val) => `${val}%`"
-                    class="page-scale-slider"
-                  />
-                  <span class="scale-percent">{{ activePageScale }}%</span>
-                  <el-button
-                    size="small"
-                    type="primary"
-                    plain
-                    title="自动推算本页不发生溢出与重叠的最大比例"
-                    @click="autoFitCurrentPageScale"
-                  >
-                    自适应
-                  </el-button>
-                </div>
-                <div class="page-scale-actions">
-                  <el-dropdown
-                    split-button
-                    size="small"
-                    type="primary"
-                    :disabled="!isCurrentPageDirty && !hasSavedScale"
-                    @click="saveCurrentPageScale"
-                    @command="handleSaveScaleCommand"
-                  >
-                    保存
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item command="all">应用到全部页</el-dropdown-item>
-                        <el-dropdown-item command="subsequent">应用到后续页</el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
-                  <el-button
-                    size="small"
-                    :disabled="!isCurrentPageDirty"
-                    @click="cancelCurrentPageScale"
-                  >
-                    取消
-                  </el-button>
-                  <el-button
-                    v-if="hasSavedScale"
-                    size="small"
-                    text
-                    type="info"
-                    @click="resetCurrentPageScale"
-                  >
-                    恢复本页
-                  </el-button>
-                  <el-button
-                    v-if="hasAnySavedScales"
-                    size="small"
-                    text
-                    type="danger"
-                    title="重置所有页面的自定义缩放比例"
-                    @click="resetAllPageScales"
-                  >
-                    重置全部
-                  </el-button>
-                </div>
+                <el-slider
+                  v-model="activePageScale"
+                  :min="30"
+                  :max="140"
+                  :step="1"
+                  class="page-scale-slider"
+                />
+                <span class="scale-percent">{{ activePageScale }}%</span>
+                <el-button size="small" text type="primary" @click="autoFitCurrentPageScale">智能</el-button>
+                <el-button size="small" text :disabled="!isCurrentPageDirty && !hasSavedScale" @click="saveCurrentPageScale">应用</el-button>
+                <el-button size="small" text @click="cancelCurrentPageScale">取消</el-button>
+                <el-button v-if="hasSavedScale" size="small" text type="info" @click="resetCurrentPageScale">恢复</el-button>
               </template>
             </div>
 
-            <!-- Doclet layout suggestion tip -->
             <div
               v-if="settings.doclet_layout_tips && currentPageConflictState.worstColor !== 'ok'"
               class="doclet-tip-bar"
               :class="`tip-${currentPageConflictState.worstColor}`"
             >
-              <DocletSprite :size="28" :motion="currentPageConflictState.worstColor === 'blue' ? 'review' : 'working'" />
+              <DocletSprite :size="22" :motion="currentPageConflictState.worstColor === 'blue' ? 'review' : 'working'" />
               <span class="doclet-tip-text">{{ currentPageConflictState.docletTip }}</span>
             </div>
 
-            <div class="field-hint">预览按页面比例显示；Word/WPS 的字体替代和分页以打开导出文件后的结果为准。</div>
             <div class="page-preview-shell">
               <div class="page-preview" :class="resolvedOrientation" :style="previewPageStyle">
                 <div
@@ -543,6 +490,7 @@
                       <div
                         v-if="settings.caption_position === 'above' && hasCellCaption(img)"
                         class="preview-caption preview-caption-above"
+                        :style="previewCaptionGapStyle"
                       >
                         <div v-if="settings.show_filename" class="preview-name preview-name-above" :style="previewNameStyle">
                           <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
@@ -564,6 +512,7 @@
                       <div
                         v-if="settings.caption_position !== 'above' && hasCellCaption(img)"
                         class="preview-caption"
+                        :style="previewCaptionGapStyle"
                       >
                         <div v-if="settings.show_filename" class="preview-name" :style="previewNameStyle">
                           <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
@@ -583,10 +532,9 @@
             </div>
           </div>
 
-          <!-- Image List -->
           <div class="image-list">
             <div class="section-head">
-              <h4>图片预览</h4>
+              <h4>图片</h4>
             </div>
             <ReorderableImageGrid
               :items="orderedImages"
@@ -610,57 +558,49 @@
           v-else
           class="result-empty-state"
           :icon-url="imageLayoutIconUrl"
-          :title="analyzing ? '正在分析图片' : '等待选择图片文件夹'"
-          :description="analyzing ? '正在读取图片尺寸。' : '选择文件夹后，Docsy 会自动分析并生成第一页排版预览。'"
+          :title="analyzing ? '正在分析图片' : '等待选择图片'"
+          :description="analyzing ? '读取尺寸中…' : '选择文件夹或图片后自动分析'"
         />
       </div>
     </div>
 
-    <!-- 冲突预检提示对话框 -->
     <el-dialog
       v-model="conflictDialogVisible"
-      title="排版冲突检测提示"
-      width="580px"
+      title="排版冲突"
+      width="520px"
       append-to-body
       destroy-on-close
     >
-      <div class="conflict-dialog-body">
-        <div class="conflict-dialog-intro">
-          检测到以下 <strong>{{ conflictSummaryList.length }}</strong> 处可能存在图文重叠、遮挡或超出页面边距。
-          Word/WPS 导出后您可以在文档中自由微调；如无需修改，可直接点击<strong>「忽略提示，直接生成」</strong>。
-        </div>
-        <el-table :data="conflictSummaryList" max-height="240" size="small" style="width: 100%">
-          <el-table-column prop="pageNumber" label="页码" width="75" align="center">
-            <template #default="{ row }">第 {{ row.pageNumber }} 页</template>
-          </el-table-column>
-          <el-table-column prop="displayName" label="图片" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="reason" label="冲突情况" min-width="140">
-            <template #default="{ row }">
-              <span :class="`conflict-tag-${row.color}`">{{ row.reason }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="80" align="center">
-            <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="goToConflictPage(row.pageIndex)">
-                查看
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+      <div class="conflict-dialog-intro">
+        {{ conflictSummaryList.length }} 处可能重叠/超界，可直接生成或返回调整。
       </div>
+      <el-table :data="conflictSummaryList" max-height="220" size="small" style="width: 100%">
+        <el-table-column prop="pageNumber" label="页" width="56" align="center">
+          <template #default="{ row }">P{{ row.pageNumber }}</template>
+        </el-table-column>
+        <el-table-column prop="displayName" label="图片" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="reason" label="情况" min-width="120">
+          <template #default="{ row }">
+            <span :class="`conflict-tag-${row.color}`">{{ row.reason }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="" width="56" align="center">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="goToConflictPage(row.pageIndex)">查看</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="conflictDialogVisible = false">返回调整</el-button>
-          <el-button type="primary" @click="executeForceGenerate">
-            忽略提示，直接生成
-          </el-button>
+          <el-button size="small" @click="conflictDialogVisible = false">返回</el-button>
+          <el-button size="small" type="primary" @click="executeForceGenerate">直接生成</el-button>
         </span>
       </template>
     </el-dialog>
   </ToolWorkspaceShell>
 </template>
-
 <script setup>
+import { computed, ref } from 'vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
@@ -670,12 +610,13 @@ import { useImagePaddlerState } from '../composables/useImagePaddlerState.js'
 import { useWorkspaceStore } from '../../../stores/workspace.js'
 
 const workspaceStore = useWorkspaceStore()
+const layoutRef = ref(null)
 
 const {
   isFlowLayout,
-  optionLayoutLabel,
+  arrangeOptions,
+  PER_PAGE_CHOICES,
   safeColumnWidthValue,
-  maximumImageWidth,
   actualImageWidth,
   widthIsLimited,
   folders,
@@ -690,7 +631,6 @@ const {
   settings,
   layoutGrid,
   resolvedOrientation,
-  resolvedOrientationLabel,
   orderedImages,
   includedImages,
   excludedCount,
@@ -698,7 +638,6 @@ const {
   isPairLayout,
   totalPages,
   currentPageIndex,
-  pageScales,
   activePageScale,
   scaleScope,
   globalScalePercent,
@@ -711,9 +650,18 @@ const {
   resetCurrentPageScale,
   autoFitCurrentPageScale,
   autoFitAllPagesScale,
-  applyScaleToAllPages,
-  applyScaleToSubsequentPages,
   resetAllPageScales,
+  layoutAwareRecommendation,
+  importRecommendationDrifted,
+  applyImportRecommendation,
+  applyCurrentLayoutRecommendation,
+  restoreSmartSize,
+  markManualWidth,
+  setImagesPerPage,
+  setArrangeMode,
+  setSizeMode,
+  settingsPanelWidth,
+  startSettingsPanelResize,
   nextPage,
   prevPage,
   goToPage,
@@ -725,6 +673,7 @@ const {
   previewCellStyle,
   previewImageAreaStyle,
   previewImageAreaContainerStyle,
+  previewCaptionGapStyle,
   previewNameStyle,
   previewNoteStyle,
   addFolders,
@@ -733,7 +682,6 @@ const {
   clearAllSources,
   currentRecommendedWidth,
   baseFileName,
-  run,
   reorderLayoutImages,
   openGeneratedOutput,
   imageSrc,
@@ -742,9 +690,6 @@ const {
   previewImageStyle,
   imageItemName,
   imageItemMeta,
-  imageAnnotations,
-  imageTitle,
-  imageDescription,
   getImageAnnotation,
   setImageAnnotation,
   noteLines,
@@ -753,21 +698,26 @@ const {
   addFilenameRule,
   removeFilenameRule,
   rulePlaceholder,
-  applyRecommendedSettings,
   adjustPageZoom,
-  orientationLabel,
-  layoutLabel,
-  scaleModeLabel,
-  currentPageConflicts,
-  currentPageConflictState,
   imageBadgeResolver,
+  currentPageConflictState,
   conflictDialogVisible,
   conflictSummaryList,
   handleStartGenerate,
+  run,
 } = useImagePaddlerState({
   initialTransfer: () => workspaceStore.mediaTransfer,
   onInitialPathsLoaded: () => workspaceStore.clearMediaTransfer(),
 })
+
+const settingsPanelStyle = computed(() => ({
+  flex: `0 0 ${settingsPanelWidth.value}px`,
+  width: `${settingsPanelWidth.value}px`,
+}))
+
+function onPanelResize(event) {
+  startSettingsPanelResize(event, layoutRef.value)
+}
 
 function goToConflictPage(pageIndex) {
   currentPageIndex.value = pageIndex
@@ -777,14 +727,6 @@ function goToConflictPage(pageIndex) {
 async function executeForceGenerate() {
   conflictDialogVisible.value = false
   await run()
-}
-
-function handleSaveScaleCommand(command) {
-  if (command === 'all') {
-    applyScaleToAllPages(activePageScale.value / 100)
-  } else if (command === 'subsequent') {
-    applyScaleToSubsequentPages(currentPageIndex.value, activePageScale.value / 100)
-  }
 }
 
 function handleUpdateAnnotation({ path, title, description }) {
@@ -803,8 +745,7 @@ function hasCellCaption(img) {
 }
 
 .paddler-layout {
-  display: grid;
-  grid-template-columns: 382px minmax(0, 1fr);
+  display: flex;
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -814,175 +755,375 @@ function hasCellCaption(img) {
 }
 
 .settings-panel {
-  min-width: 0;
+  min-width: 280px;
+  max-width: 520px;
   overflow-y: auto;
-  padding-block: clamp(16px, 3.1dvh, 22px) clamp(20px, 3.9dvh, 28px);
-  padding-inline: 24px;
-  border-right: 1px solid var(--docsy-border-subtle);
+  overflow-x: hidden;
+  padding: 12px 14px 16px;
   background: var(--docsy-surface-elevated);
+  flex-shrink: 0;
+}
+
+.panel-resizer {
+  flex: 0 0 8px;
+  align-self: stretch;
+  cursor: col-resize;
+  touch-action: none;
+  background: linear-gradient(
+    90deg,
+    transparent 2px,
+    var(--docsy-border-subtle) 2px,
+    var(--docsy-border-subtle) 6px,
+    transparent 6px
+  );
+}
+
+.panel-resizer:hover {
+  background: linear-gradient(
+    90deg,
+    transparent 2px,
+    var(--docsy-primary) 2px,
+    var(--docsy-primary) 6px,
+    transparent 6px
+  );
+}
+
+.result-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--docsy-surface-muted) 82%, var(--docsy-canvas));
+}
+
+.settings-group-title {
+  margin: 10px 0 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--docsy-border-subtle);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--docsy-text-strong);
+}
+
+.settings-group-title:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.settings-panel :deep(.el-form-item) {
+  margin-bottom: 10px;
+}
+
+.settings-panel :deep(.el-form-item__content) {
+  line-height: 1.4;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+  line-height: 1.3;
+  margin-top: 2px;
+  width: 100%;
+}
+
+.unit-label {
+  margin-left: 4px;
+  color: var(--docsy-text-muted);
+  font-size: 11px;
 }
 
 .folder-path {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--docsy-text-muted);
   word-break: break-all;
-  display: block;
+}
+
+.source-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.source-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   margin-top: 4px;
+  max-height: 64px;
+  overflow-y: auto;
+}
+
+.source-tag {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inline-controls {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .inline-controls :deep(.el-input-number) {
-  width: 82px;
+  width: 72px;
+}
+
+.per-page-group {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.arrange-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.arrange-row :deep(.el-select) {
+  flex: 1;
+  min-width: 0;
+}
+
+.grid-chip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 88px;
+}
+
+.grid-chip i {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid var(--docsy-border-subtle);
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-strong);
+  font-size: 10px;
+  font-style: normal;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.border-select {
+  width: 78px;
+}
+
+.fixed-width-control {
+  width: 100%;
+}
+
+.width-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.width-slider {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.width-num {
+  width: 78px;
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.analyze-hint {
+  color: var(--docsy-text-muted);
+  font-size: 11px;
 }
 
 .filename-panel {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .filename-panel-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.filename-font-control,
-.filename-size-control {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
+  align-items: center;
+}
+
+.mini-label {
+  font-size: 11px;
   color: var(--docsy-text-muted);
-  font-size: 12px;
+  flex: 0 0 auto;
 }
 
-.filename-font-control :deep(.el-select) {
-  width: 104px;
+.gap-slider {
+  flex: 1;
+  min-width: 60px;
+  margin: 0;
 }
 
-.filename-size-control :deep(.el-input-number) {
-  width: 82px;
+.gap-num {
+  width: 72px;
+}
+
+.cap-select {
+  width: 72px;
+}
+
+.font-select {
+  width: 88px;
+}
+
+.font-size {
+  width: 68px;
+}
+
+.color-select {
+  width: 72px;
 }
 
 .filename-rules {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .filename-rule {
   display: grid;
-  grid-template-columns: 78px minmax(0, 1fr) auto;
-  gap: 6px;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 4px;
   align-items: center;
 }
 
 .filename-rule-keep {
-  grid-template-columns: 78px auto auto auto minmax(0, 1fr) 64px auto;
+  grid-template-columns: 64px auto auto auto minmax(0, 1fr) 56px auto;
 }
 
 .rule-kind {
-  width: 78px;
-}
-
-.separator-select {
   width: 64px;
 }
 
-.result-panel {
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: clamp(18px, 3.4dvh, 24px);
-  background: color-mix(in srgb, var(--docsy-surface-muted) 82%, var(--docsy-canvas));
-}
-
-.result-empty-state {
-  height: 100%;
-  min-height: clamp(280px, 40dvh, 420px);
-  box-sizing: border-box;
+.separator-select {
+  width: 56px;
 }
 
 .workspace-action-row {
-  margin-top: clamp(14px, 2.8dvh, 20px);
-  padding-top: clamp(14px, 2.5dvh, 18px);
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--docsy-border-subtle);
 }
 
-.primary-workspace-action {
-  width: 100%;
+.generated-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+  font-size: 12px;
 }
 
-.analysis-summary {
-  margin-bottom: 16px;
+.output-path {
+  margin-top: 2px;
+  color: var(--docsy-text);
+  word-break: break-all;
+  font-size: 11px;
 }
 
 .sequence-mode-note {
   display: flex;
-  margin-bottom: 14px;
-  padding: 11px 13px;
-  align-items: baseline;
-  gap: 10px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  align-items: center;
+  gap: 8px;
   border: 1px solid color-mix(in srgb, var(--docsy-primary) 28%, var(--docsy-border-subtle));
   border-radius: var(--docsy-radius);
   color: var(--docsy-text-muted);
   background: var(--docsy-primary-soft);
   font-size: 12px;
-  line-height: 1.55;
 }
 
 .sequence-mode-note :deep(.el-switch) {
   margin-left: auto;
-  flex: 0 0 auto;
-}
-
-.sequence-mode-note strong {
-  flex: 0 0 auto;
-  color: var(--docsy-text-strong);
 }
 
 .recommendation-bar {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.recommendation-block {
+  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
-  padding: 12px 14px;
+  gap: 8px;
+  padding: 6px 10px;
   border: 1px solid var(--docsy-border-subtle);
-  background: var(--docsy-primary-soft);
+  background: var(--docsy-surface-elevated);
   border-radius: var(--docsy-radius);
-  color: var(--docsy-text);
   font-size: 12px;
 }
 
+.recommendation-block.is-current {
+  background: var(--docsy-primary-soft);
+  border-color: color-mix(in srgb, var(--docsy-primary) 28%, var(--docsy-border-subtle));
+}
+
+.recommendation-title {
+  font-weight: 650;
+  color: var(--docsy-text-strong);
+  flex: 0 0 auto;
+}
+
+.recommendation-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--docsy-text);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .preview-section {
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 
 .section-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   font-size: 12px;
   color: var(--docsy-text-muted);
 }
 
-.page-nav-group {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.section-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 680;
+  color: var(--docsy-text-strong);
 }
 
-.page-nav-controls {
-  display: inline-flex;
+.page-nav-group,
+.page-nav-controls,
+.preview-toolbar {
+  display: flex;
   align-items: center;
   gap: 6px;
 }
@@ -991,89 +1132,51 @@ function hasCellCaption(img) {
   font-size: 12px;
   font-weight: 600;
   color: var(--docsy-text);
-  min-width: 60px;
+  min-width: 36px;
   text-align: center;
 }
 
-.section-head h4 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 680;
-  color: var(--docsy-text-strong);
+.zoom-slider {
+  width: 90px;
 }
 
-.preview-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+.zoom-value {
+  width: 36px;
+  text-align: right;
+  font-size: 11px;
 }
 
 .page-scale-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
-  margin-bottom: 10px;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
   background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.scale-scope-toggle {
-  flex-shrink: 0;
-}
-
-.page-scale-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.scale-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--docsy-text-strong);
-}
-
-.page-scale-slider-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 140px;
-  max-width: 320px;
 }
 
 .page-scale-slider {
   flex: 1;
+  min-width: 80px;
 }
 
 .scale-percent {
   font-size: 12px;
   font-weight: 600;
-  min-width: 38px;
+  min-width: 36px;
   color: var(--docsy-primary);
-}
-
-.page-scale-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
 }
 
 .doclet-tip-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
-  margin-bottom: 10px;
+  gap: 8px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
   border-radius: var(--docsy-radius);
   font-size: 12px;
-  line-height: 1.4;
   border: 1px solid transparent;
 }
 
@@ -1101,27 +1204,9 @@ function hasCellCaption(img) {
   color: #2d5873;
 }
 
-.doclet-tip-text {
-  font-weight: 500;
-}
-
-.zoom-slider {
-  width: 130px;
-}
-
-.zoom-value {
-  width: 42px;
-  text-align: right;
-  color: var(--docsy-text);
-}
-
-.page-size-select {
-  width: 82px;
-}
-
 .page-preview-shell {
   display: block;
-  padding: 20px;
+  padding: 14px;
   background: #deddd8;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
@@ -1134,7 +1219,7 @@ function hasCellCaption(img) {
   box-sizing: border-box;
   background: #fff;
   border: 1px solid var(--docsy-border-strong);
-  box-shadow: 0 16px 38px rgba(42, 39, 34, 0.14);
+  box-shadow: 0 10px 24px rgba(42, 39, 34, 0.12);
   margin: 0 auto;
 }
 
@@ -1144,11 +1229,14 @@ function hasCellCaption(img) {
   gap: 0;
 }
 
+.preview-grid-flow {
+  row-gap: 0;
+}
+
 .preview-cell {
   box-sizing: border-box;
   min-width: 0;
   min-height: 0;
-  border: none;
   background: var(--docsy-surface-elevated);
   display: flex;
   flex-direction: column;
@@ -1158,12 +1246,8 @@ function hasCellCaption(img) {
   position: relative;
 }
 
-.preview-cell-bordered {
-  transition: box-shadow 0.15s ease;
-}
-
-.preview-cell-white-border {
-  /* 由 previewCellStyle 统一提供复合高对比内嵌阴影 */
+.preview-cell-flow {
+  border: none !important;
 }
 
 .preview-image-area {
@@ -1180,16 +1264,6 @@ function hasCellCaption(img) {
 
 .preview-cell img {
   display: block;
-}
-
-.note-panel-row {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--docsy-border-subtle);
-}
-
-.note-placeholder-row {
-  margin-top: 6px;
 }
 
 .preview-caption {
@@ -1219,7 +1293,8 @@ function hasCellCaption(img) {
   overflow-wrap: anywhere;
 }
 
-.preview-name span {
+.preview-name span,
+.preview-note span {
   display: block;
 }
 
@@ -1229,53 +1304,37 @@ function hasCellCaption(img) {
   flex-shrink: 0;
   padding: 0 4px;
   text-align: center;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   overflow: hidden;
   overflow-wrap: anywhere;
 }
 
-.preview-note span {
-  display: block;
+.result-empty-state {
+  height: 100%;
+  min-height: clamp(240px, 36dvh, 360px);
+  box-sizing: border-box;
 }
 
-.generated-result {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-radius);
-  background: var(--docsy-surface-elevated);
-  box-shadow: 0 8px 24px rgba(48, 41, 32, 0.05);
-  font-size: 13px;
-}
-
-.output-path {
-  margin-top: 4px;
-  color: var(--docsy-text);
-  word-break: break-all;
+.conflict-dialog-intro {
+  margin-bottom: 8px;
   font-size: 12px;
+  color: var(--docsy-text);
+}
+
+.conflict-tag-red {
+  color: #943b35;
+}
+
+.conflict-tag-yellow {
+  color: #8a541c;
+}
+
+.conflict-tag-green {
+  color: #395c41;
 }
 
 .image-list h4 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 13px;
-}
-
-.unit-label {
-  margin-left: 8px;
-  color: var(--docsy-text-muted);
-  font-size: 12px;
-}
-
-.analyze-hint {
-  margin-left: 8px;
-  color: var(--docsy-text-muted);
-  font-size: 12px;
 }
 
 @media (max-width: 1180px) {
@@ -1291,97 +1350,22 @@ function hasCellCaption(img) {
 
   .settings-panel,
   .result-panel {
+    width: 100% !important;
+    max-width: none;
+    flex: none !important;
     overflow: visible;
   }
 
   .settings-panel {
-    border-right: 0;
     border-bottom: 1px solid var(--docsy-border-subtle);
   }
 
-  .filename-rule-keep {
-    grid-template-columns: 78px minmax(0, 1fr) auto;
+  .panel-resizer {
+    display: none;
   }
-}
 
-.source-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.source-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-  max-height: 90px;
-  overflow-y: auto;
-}
-
-.source-tag {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.field-hint {
-  font-size: 11px;
-  color: var(--docsy-text-muted);
-  line-height: 1.35;
-  margin-top: 4px;
-}
-
-.fixed-width-control {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.width-slider {
-  margin-bottom: 2px;
-}
-
-.width-input-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.width-input-row :deep(.el-input-number) {
-  width: 96px;
-}
-
-.preview-grid-flow {
-  row-gap: 0;
-}
-
-.preview-cell-flow {
-  border: none !important;
-}
-
-.conflict-dialog-intro {
-  margin-bottom: 12px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--docsy-text);
-}
-
-.conflict-tag-red {
-  color: #943b35;
-  font-weight: 500;
-}
-
-.conflict-tag-yellow {
-  color: #8a541c;
-  font-weight: 500;
-}
-
-.conflict-tag-green {
-  color: #395c41;
-  font-weight: 500;
+  .filename-rule-keep {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+  }
 }
 </style>
