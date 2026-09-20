@@ -1,8 +1,39 @@
 {
-  "generated_at": "2026-09-18T12:49:07Z",
+  "generated_at": "2026-09-20T09:18:45Z",
   "github_url": "https://github.com/muxiaoxiii/docsy/releases",
-  "latest": "1.0.7",
+  "latest": "1.0.8",
   "releases": [
+    {
+      "version": "1.0.8",
+      "tag": "v1.0.8",
+      "published_at": "2026-09-20T09:17:39Z",
+      "assets": [
+        {
+          "platform": "macos",
+          "name": "Docsy_1.0.8_aarch64.dmg",
+          "size": 19962204,
+          "sha256": "886e5f096e4d714336a73813b6b97284b541c1eb38caea01f24e8026aeb90bd7",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.8/Docsy_1.0.8_aarch64.dmg",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.8/Docsy_1.0.8_aarch64.dmg"
+        },
+        {
+          "platform": "windows",
+          "name": "Docsy_1.0.8_x64-setup.exe",
+          "size": 16175619,
+          "sha256": "ba6f07ca170cbc5505e7e4efcce9eb1e5d8c40f339dfae22be0cf5f0364aa385",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.8/Docsy_1.0.8_x64-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.8/Docsy_1.0.8_x64-setup.exe"
+        },
+        {
+          "platform": "windows-x86",
+          "name": "Docsy_1.0.8_x86-setup.exe",
+          "size": 14986672,
+          "sha256": "3a5663edcca8a8ae810a8bb44b9da3e101fea08ab0352a95680b0ed39400b506",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.8/Docsy_1.0.8_x86-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.0.8/Docsy_1.0.8_x86-setup.exe"
+        }
+      ]
+    },
     {
       "version": "1.0.7",
       "tag": "v1.0.7",
