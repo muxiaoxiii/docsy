@@ -1961,20 +1961,31 @@ fn docx_cell_paragraphs(
         }
     };
     if above {
-        spacer(&mut parts, text_top, true);
+        // Recompute spacers from final coordinates so clamped captions still sum to cell_h.
+        let top_gap = text_top.max(0.0);
+        let mid_gap = (image_top - text_top - text_h).max(0.0);
+        let bottom_gap = (cell_h - image_top - draw_h_mm).max(0.0);
+        spacer(&mut parts, top_gap, true);
         parts.extend(captions);
-        spacer(&mut parts, cfg.caption_gap_mm, true);
+        spacer(&mut parts, mid_gap, true);
         parts.push(image);
-        spacer(&mut parts, cell_h - image_top - draw_h_mm, false);
+        spacer(&mut parts, bottom_gap, false);
     } else {
-        spacer(&mut parts, image_top, true);
+        let top_gap = image_top.max(0.0);
+        let mid_gap = if has_caption { (text_top - image_top - draw_h_mm).max(0.0) } else { 0.0 };
+        let bottom_gap = if has_caption {
+            (cell_h - text_top - text_h).max(0.0)
+        } else {
+            (cell_h - image_top - draw_h_mm).max(0.0)
+        };
+        spacer(&mut parts, top_gap, true);
         parts.push(image);
         if has_caption {
-            spacer(&mut parts, cfg.caption_gap_mm, true);
+            spacer(&mut parts, mid_gap, true);
             parts.extend(captions);
-            spacer(&mut parts, cell_h - text_top - text_h, false);
+            spacer(&mut parts, bottom_gap, false);
         } else {
-            spacer(&mut parts, cell_h - image_top - draw_h_mm, false);
+            spacer(&mut parts, bottom_gap, false);
         }
     }
     if page_break {
@@ -3414,6 +3425,40 @@ mod caption_and_destination_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn docx_clamped_caption_spacers_stay_inside_cell() {
+        let dir = crate::util::fs::temp_named_path("docsy-clamp-spacer", "dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        let img_path = dir.join("tall.png");
+        image::RgbaImage::from_pixel(40, 200, image::Rgba([10, 20, 30, 255])).save(&img_path).unwrap();
+        let args: RunArgs = serde_json::from_value(serde_json::json!({
+            "folder": dir,
+            "image_paths": [img_path.display().to_string()],
+            "output_dir": dir,
+            "output_format": "docx",
+            "layout": "1",
+            "orientation": "portrait",
+            "dpi": 72,
+            "scale_mode": "fit",
+            "use_table": true,
+            "caption_position": "below",
+            "caption_gap_mm": 12,
+            "show_filename": true,
+            "filename_font_size_pt": 8,
+            "image_annotations": {
+                img_path.display().to_string(): {"title": "CAPTION LINE", "description": "NOTE"}
+            }
+        })).unwrap();
+        let result = run(&args).unwrap();
+        assert!(result.output_path.ends_with(".docx"));
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&result.output_path).unwrap()).unwrap();
+        let mut xml = String::new();
+        archive.by_name("word/document.xml").unwrap().read_to_string(&mut xml).unwrap();
+        assert!(xml.contains("CAPTION LINE"));
+        // Exact-height rows still produced; clamping must not prevent export.
+        assert!(xml.contains("w:lineRule"));
     }
 
     #[test]
