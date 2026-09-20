@@ -583,7 +583,12 @@ async function installTool(name) {
     const timer = setInterval(async () => {
       checks++
       if (tool) await checkTool(tool)
-      if (tool?.status?.available || checks > 150) {
+      let ready = Boolean(tool?.status?.available)
+      if (ready && name === 'ffmpeg') {
+        const capability = await tauriCallSafe('check_ffmpeg')
+        ready = capability.ok && capability.data?.has_drawtext
+      }
+      if (ready || checks > 150) {
         clearInterval(timer)
         activeInstallTimers.delete(timer)
         if (tool) tool.installing = false

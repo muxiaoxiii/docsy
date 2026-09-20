@@ -24,6 +24,7 @@
             <el-tag size="small" :type="ffmpegStatus.has_drawtext ? 'success' : 'warning'">
               {{ ffmpegStatus.has_drawtext ? 'drawtext 可用' : 'drawtext 不可用' }}
             </el-tag>
+            <el-button v-if="isMac && !ffmpegStatus.has_drawtext" size="small" :loading="installing" @click="installFfmpeg">安装完整 FFmpeg</el-button>
           </div>
           <div v-else class="status-row status-warn">
             <el-icon><WarningFilled /></el-icon>
@@ -33,6 +34,7 @@
             </el-button>
             <el-button size="small" @click="openFfmpegDownload"> 下载页 </el-button>
           </div>
+          <el-button size="small" text :loading="ffmpegLoading" :disabled="extracting || analyzingSelection" @click="checkFfmpeg">重新检测</el-button>
         </div>
 
         <!-- File Selection -->
@@ -279,7 +281,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
+import { ref, reactive, onBeforeUnmount, onDeactivated, onActivated, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -302,7 +304,7 @@ const workspaceStore = useWorkspaceStore()
 const EXTRACT_OPERATION_ID = 'extract_frames:video-view'
 const ANALYZE_OPERATION_ID = 'analyze_frame_selection:auto'
 
-const ffmpegLoading = ref(true)
+const ffmpegLoading = ref(false)
 const ffmpegStatus = reactive({ available: false, path: null, version: null, has_drawtext: false })
 const installing = ref(false)
 
@@ -367,6 +369,7 @@ function shortFfmpegVersion(value) {
 }
 
 async function checkFfmpeg() {
+  if (ffmpegLoading.value || extracting.value || analyzingSelection.value) return
   ffmpegLoading.value = true
   const res = await tauriCallSafe('check_ffmpeg')
   if (res.ok) {
@@ -952,7 +955,10 @@ watch(
   { deep: true },
 )
 
+onActivated(checkFfmpeg)
+
 onMounted(async () => {
+  window.addEventListener('focus', checkFfmpeg)
   await preference.start()
   restoreFrameDraft()
   unlistenAnalysisProgress = await listen('docsy-operation-progress', (event) => {
@@ -965,6 +971,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', checkFfmpeg)
   cancelViewOperations()
   if (mediaSaveTimer) window.clearTimeout(mediaSaveTimer)
   if (dynamicAnalysisTimer) window.clearTimeout(dynamicAnalysisTimer)

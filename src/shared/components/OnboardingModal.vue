@@ -288,7 +288,12 @@ async function startSetup() {
       for (const item of toInstall) {
         if (item.status === 'ready') continue
         const res = await tauriCallSafe('check_external_tool', { toolName: item.tool })
-        if (res.ok && res.data?.available) {
+        let ready = Boolean(res.ok && res.data?.available)
+        if (ready && item.tool === 'ffmpeg') {
+          const capability = await tauriCallSafe('check_ffmpeg')
+          ready = capability.ok && capability.data?.has_drawtext
+        }
+        if (ready) {
           item.ready = true
           item.status = 'ready'
         } else {

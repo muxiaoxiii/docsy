@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-vi.mock('vue', async original => ({ ...(await original()), onMounted: vi.fn(), onBeforeUnmount: vi.fn(), onDeactivated: vi.fn(), useSSRContext: () => ({ modules: new Set() }) }))
+vi.mock('vue', async original => ({ ...(await original()), onMounted: vi.fn(), onBeforeUnmount: vi.fn(), onDeactivated: vi.fn(), onActivated: vi.fn(), useSSRContext: () => ({ modules: new Set() }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('../../../core/composables/useWindowFileDrop.js', () => ({ useWindowFileDrop: vi.fn() }))
 vi.mock('../../../core/composables/useWorkspacePreferences.js', () => ({ useWorkspacePreferences: () => ({ start: vi.fn(), stop: vi.fn() }) }))
@@ -15,6 +15,16 @@ const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() 
 describe('视频历史恢复时序', () => {
   beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers(); vi.stubGlobal('window', globalThis) })
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+  it('rechecking detects newly installed drawtext instead of keeping stale status', async () => {
+    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: { available: true, has_drawtext: false, path: '/opt/homebrew/bin/ffmpeg' } })
+      .mockResolvedValueOnce({ ok: true, data: { available: true, has_drawtext: true, path: '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg' } })
+    const state = View.setup({}, { expose: vi.fn() })
+    await state.checkFfmpeg()
+    expect(state.ffmpegStatus.has_drawtext).toBe(false)
+    await state.checkFfmpeg()
+    expect(state.ffmpegStatus.has_drawtext).toBe(true)
+    expect(state.ffmpegStatus.path).toContain('ffmpeg-full')
+  })
   it('分析超过 650ms 仍先恢复人工决定，之后才允许保存', async () => {
     const analysis = deferred()
     tauriCallSafe.mockImplementation((cmd) => {

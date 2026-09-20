@@ -78,6 +78,25 @@ pub fn check_by_name(name: &str) -> ToolStatus {
     }
 }
 
+fn homebrew_package(name: &str) -> Option<&'static str> {
+    match name {
+        "ffmpeg" => Some("ffmpeg-full"),
+        "poppler" => Some("poppler"),
+        "qpdf" => Some("qpdf"),
+        _ => None,
+    }
+}
+
+fn homebrew_install_command(packages: &[&str]) -> String {
+    let install = format!("brew install {}", packages.join(" "));
+    if packages.contains(&"ffmpeg-full") {
+        format!(r#"{install} && {{
+    DOCSY_FFMPEG_PREFIX="$(brew --prefix ffmpeg-full)" &&
+    "$DOCSY_FFMPEG_PREFIX/bin/ffmpeg" -hide_banner -f lavfi -i 'color=c=white:s=320x100:d=0.1' -vf 'drawtext=text=Docsy' -frames:v 1 -f null -
+}}"#)
+    } else { install }
+}
+
 #[cfg(target_os = "macos")]
 fn install_via_homebrew_background(name: &str) -> anyhow::Result<String> {
     let brew_bin = if std::path::Path::new("/opt/homebrew/bin/brew").exists() {
@@ -88,16 +107,11 @@ fn install_via_homebrew_background(name: &str) -> anyhow::Result<String> {
         "brew"
     };
 
-    let packages: Vec<&str> = match name {
-        "ffmpeg" => vec!["ffmpeg"],
-        "poppler" => vec!["poppler"],
-        "qpdf" => vec!["qpdf"],
-        _ => anyhow::bail!("未知工具: {}", name),
-    };
+    let package = homebrew_package(name).ok_or_else(|| anyhow::anyhow!("未知工具: {name}"))?;
 
     let mut cmd = hidden_command(brew_bin);
     cmd.arg("install");
-    cmd.args(&packages);
+    cmd.arg(package);
     cmd.env("HOMEBREW_API_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles/api");
     cmd.env("HOMEBREW_BOTTLE_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles");
     cmd.env("HOMEBREW_NO_AUTO_UPDATE", "1");
@@ -108,6 +122,7 @@ fn install_via_homebrew_background(name: &str) -> anyhow::Result<String> {
         anyhow::bail!(command_failure_detail(&output));
     }
     validate_tool(name)?;
+    if name == "ffmpeg" { FfmpegTool.binary_path_with_drawtext()?; }
     Ok(format!("{} 安装成功", name))
 }
 
@@ -534,15 +549,15 @@ pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
     for t in tools {
         match t.as_str() {
             "ffmpeg" => {
-                packages.push("ffmpeg");
-                names.push("FFmpeg");
+                packages.push(homebrew_package(t).unwrap());
+                names.push("FFmpeg 完整版");
             }
             "poppler" => {
-                packages.push("poppler");
+                packages.push(homebrew_package(t).unwrap());
                 names.push("Poppler");
             }
             "qpdf" => {
-                packages.push("qpdf");
+                packages.push(homebrew_package(t).unwrap());
                 names.push("Qpdf");
             }
             _ => {}
@@ -559,9 +574,10 @@ pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
     let body = format!(
         r#"{bootstrap}
 echo "--> 正在通过 Homebrew 安装所选组件: {pkgs_str}..."
-yes | brew install {pkgs_str}"#,
+{install_command}"#,
         bootstrap = homebrew_bootstrap_sh(),
-        pkgs_str = pkgs_str
+        pkgs_str = pkgs_str,
+        install_command = homebrew_install_command(&packages)
     );
 
     let script = wrap_terminal_script(
@@ -595,6 +611,31 @@ mod tests {
     fn exit_status(code: u32) -> std::process::ExitStatus {
         use std::os::windows::process::ExitStatusExt;
         std::process::ExitStatus::from_raw(code)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn homebrew_install_requires_full_ffmpeg_and_propagates_watermark_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::util::fs::temp_named_path("docsy-brew-test", "dir");
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
+        let binary = dir.join("bin/ffmpeg");
+        let command = homebrew_install_command(&[homebrew_package("ffmpeg").unwrap(), "poppler"]);
+        let script = format!(r#"brew() {{
+  if [ "$1" = "--prefix" ]; then printf '%s' "$DOCSY_TEST_PREFIX";
+  elif [ "$*" = "install ffmpeg-full poppler" ]; then return "$DOCSY_BREW_EXIT";
+  else return 99; fi
+}}
+{command}"#);
+        for (brew_exit, filter_exit, expected) in [(0, 0, 0), (0, 42, 42), (17, 0, 17)] {
+            std::fs::write(&binary, format!("#!/bin/sh\nexit {filter_exit}\n")).unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let status = Command::new("/bin/bash").args(["-c", &script])
+                .env("DOCSY_TEST_PREFIX", &dir).env("DOCSY_BREW_EXIT", brew_exit.to_string())
+                .status().unwrap();
+            assert_eq!(status.code(), Some(expected));
+        }
     }
 
     #[test]
