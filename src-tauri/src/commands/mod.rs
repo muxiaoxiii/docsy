@@ -111,6 +111,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         workspace::save_media_workspace_session,
         workspace::find_media_workspace_session,
         // markdown
+        markdown::prepare_markdown_media,
         markdown::convert_markdown,
         markdown::convert_markdown_text,
         markdown::convert_pdf_text_layer,

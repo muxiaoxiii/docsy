@@ -4,10 +4,9 @@ use anyhow::{Context, Result};
 use docx_rs::{
     AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
     Level, LevelJc, LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, PageMargin,
-    Paragraph, ParagraphChild, Pic, Run, RunFonts,
-    Shading, SpecialIndentType, Start, Style, StyleType, Table, TableCell, TableCellBorder,
-    TableCellBorderPosition, TableCellBorders, TableCellMargins, TableLayoutType, TableRow,
-    WidthType,
+    Paragraph, ParagraphChild, Pic, Run, RunFonts, Shading, SpecialIndentType, Start, Style,
+    StyleType, Table, TableCell, TableCellBorder, TableCellBorderPosition, TableCellBorders,
+    TableCellMargins, TableLayoutType, TableRow, WidthType,
 };
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::io::Cursor;
@@ -152,6 +151,7 @@ struct ImageCtx {
 
 struct Builder<'a> {
     base_dir: &'a Path,
+    assets: Option<&'a std::collections::HashMap<String, super::media::Asset>>,
     style: DocxStylePreset,
     docx: Docx,
     next_numbering_id: usize,
@@ -185,9 +185,14 @@ fn table_borders() -> TableCellBorders {
 }
 
 impl<'a> Builder<'a> {
-    fn new(base_dir: &'a Path, style: DocxStylePreset) -> Self {
+    fn new(
+        base_dir: &'a Path,
+        style: DocxStylePreset,
+        assets: Option<&'a std::collections::HashMap<String, super::media::Asset>>,
+    ) -> Self {
         Self {
             base_dir,
+            assets,
             style,
             docx: Docx::new(),
             // numId 从 2 开始：docx-rs 写出 numbering.xml 时总会内置
@@ -501,6 +506,30 @@ impl<'a> Builder<'a> {
         let Some(ctx) = self.image_stack.pop() else {
             return;
         };
+        if let Some(asset) = self.assets.and_then(|assets| assets.get(&ctx.dest)) {
+            let run = if asset.omml.is_some() {
+                Run::new().add_text(super::media::equation_token(&ctx.dest))
+            } else {
+                let scale = (f64::from(MAX_IMAGE_WIDTH_EMU)
+                    / (asset.width * f64::from(EMU_PER_PX)))
+                .min(1.0);
+                let size = image::ImageReader::with_format(
+                    Cursor::new(&asset.png),
+                    image::ImageFormat::Png,
+                )
+                .into_dimensions();
+                if let Ok((w, h)) = size {
+                    Run::new().add_image(Pic::new_with_dimensions(asset.png.clone(), w, h).size(
+                        (asset.width * f64::from(EMU_PER_PX) * scale) as u32,
+                        (asset.height * f64::from(EMU_PER_PX) * scale) as u32,
+                    ))
+                } else {
+                    Run::new().add_text("[图片无效]")
+                }
+            };
+            self.children.push(ParagraphChild::Run(Box::new(run)));
+            return;
+        }
         let placeholder = || {
             let text = format!("![{}]({})", ctx.alt, ctx.dest);
             ParagraphChild::Run(Box::new(Run::new().add_text(text)))
@@ -631,15 +660,16 @@ fn heading_styles(style: DocxStylePreset) -> Vec<Style> {
 }
 
 /// 生成 docx 字节（供写文件与测试复用）。
-pub fn build_docx_bytes_with_style(
+pub fn build_docx_bytes_with_media(
     md: &str,
     base_dir: &Path,
     style: DocxStylePreset,
+    assets: Option<&std::collections::HashMap<String, super::media::Asset>>,
 ) -> Result<Vec<u8>> {
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(md, options);
-    let mut builder = Builder::new(base_dir, style);
+    let mut builder = Builder::new(base_dir, style, assets);
     for event in parser {
         builder.handle_event(event);
     }
@@ -658,7 +688,19 @@ pub fn build_docx_bytes_with_style(
     docx.build()
         .pack(&mut buf)
         .map_err(|e| anyhow::anyhow!("打包 docx 失败: {e}"))?;
-    Ok(buf.into_inner())
+    let bytes = buf.into_inner();
+    match assets {
+        Some(assets) => super::media::inject_equations(bytes, assets),
+        None => Ok(bytes),
+    }
+}
+
+pub fn build_docx_bytes_with_style(
+    md: &str,
+    base_dir: &Path,
+    style: DocxStylePreset,
+) -> Result<Vec<u8>> {
+    build_docx_bytes_with_media(md, base_dir, style, None)
 }
 
 #[cfg(test)]

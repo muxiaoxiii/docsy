@@ -7,7 +7,10 @@
 //!   - `extract`（默认）：AnyDoc 直接提取结构化 Markdown（不执行宏）。
 
 mod docx_to_md;
+pub(crate) mod encoding;
 mod md_to_docx;
+pub(crate) mod media;
+mod omml;
 pub(crate) mod pdf_to_md;
 
 use anyhow::{Context, Result};
@@ -309,11 +312,54 @@ fn markdown_to_office(
     output: &Path,
     target: OfficeOutputFormat,
     style: md_to_docx::DocxStylePreset,
-) -> Result<()> {
-    let markdown = std::fs::read_to_string(input)
-        .with_context(|| format!("无法读取 Markdown 文件: {}", input.display()))?;
+    rendered: Option<&media::RenderedMarkdown>,
+    input_encoding: Option<&str>,
+) -> Result<Option<String>> {
+    let markdown = encoding::read_markdown(input, input_encoding)?;
+    let rich = media::resolve(&markdown, rendered)?;
+    if !rich.assets.is_empty() {
+        match target {
+            OfficeOutputFormat::Docx => {
+                let bytes = md_to_docx::build_docx_bytes_with_media(
+                    &rich.text,
+                    input.parent().unwrap_or_else(|| Path::new(".")),
+                    style,
+                    Some(&rich.assets),
+                )?;
+                std::fs::write(output, bytes)?;
+            }
+            OfficeOutputFormat::Html => {
+                let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("文档");
+                std::fs::write(
+                    output,
+                    wrap_html_fragment(title, &media::html_fragment(&rich)),
+                )?;
+            }
+            OfficeOutputFormat::Xlsx | OfficeOutputFormat::Pptx => {
+                let format = if target == OfficeOutputFormat::Xlsx {
+                    office_oxide::DocumentFormat::Xlsx
+                } else {
+                    office_oxide::DocumentFormat::Pptx
+                };
+                office_oxide::create::create_from_ir(
+                    &media::office_ir(&rich, format),
+                    format,
+                    output,
+                )
+                .map_err(|e| anyhow::anyhow!("生成 Office 文件失败: {e}"))?;
+            }
+        }
+        return Ok(media_warning(&rich, target));
+    }
     match target {
-        OfficeOutputFormat::Docx => md_to_docx::convert(input, output, style),
+        OfficeOutputFormat::Docx => {
+            let bytes = md_to_docx::build_docx_bytes_with_style(
+                &markdown,
+                input.parent().unwrap_or_else(|| Path::new(".")),
+                style,
+            )?;
+            std::fs::write(output, bytes).context("无法写入 Word 文件")
+        }
         OfficeOutputFormat::Xlsx => office_oxide::create::create_from_markdown(
             &markdown,
             office_oxide::DocumentFormat::Xlsx,
@@ -331,7 +377,8 @@ fn markdown_to_office(
             std::fs::write(output, markdown_to_html_document(title, &markdown))
                 .with_context(|| format!("无法写入 HTML 文件: {}", output.display()))
         }
-    }
+    }?;
+    Ok(None)
 }
 
 /// 将 AnyDoc 可识别的 Office 文档提取为 Markdown。
@@ -428,6 +475,26 @@ pub fn convert(
     output_format: Option<&str>,
     docx_style: Option<&str>,
 ) -> Result<ConvertResult> {
+    convert_with_media(
+        input,
+        output_dir,
+        doc_engine,
+        output_format,
+        docx_style,
+        None,
+        None,
+    )
+}
+
+pub fn convert_with_media(
+    input: &str,
+    output_dir: Option<&str>,
+    doc_engine: Option<&str>,
+    output_format: Option<&str>,
+    docx_style: Option<&str>,
+    rendered: Option<&media::RenderedMarkdown>,
+    input_encoding: Option<&str>,
+) -> Result<ConvertResult> {
     let input_path = PathBuf::from(input);
     if !input_path.is_file() {
         anyhow::bail!("输入文件不存在: {input}");
@@ -459,7 +526,14 @@ pub fn convert(
     let mut warning: Option<String> = None;
 
     let (direction, source_format, output_format) = if markdown_input {
-        markdown_to_office(&input_path, &output_path, target, style)?;
+        warning = markdown_to_office(
+            &input_path,
+            &output_path,
+            target,
+            style,
+            rendered,
+            input_encoding,
+        )?;
         (
             target.direction(),
             "markdown".to_string(),
@@ -537,6 +611,7 @@ pub fn convert(
 /// `convert_markdown_text` 的返回结果（snake_case JSON）。
 #[derive(Debug, Serialize)]
 pub struct ConvertTextResult {
+    pub warning: Option<String>,
     pub output_path: String,
     pub format: String,
     pub input_size: u64,
@@ -602,6 +677,17 @@ pub fn convert_text(
     file_stem: Option<&str>,
     docx_style: Option<&str>,
 ) -> Result<ConvertTextResult> {
+    convert_text_with_media(text, format, output_dir, file_stem, docx_style, None)
+}
+
+pub fn convert_text_with_media(
+    text: &str,
+    format: &str,
+    output_dir: Option<&str>,
+    file_stem: Option<&str>,
+    docx_style: Option<&str>,
+    rendered: Option<&media::RenderedMarkdown>,
+) -> Result<ConvertTextResult> {
     if text.trim().is_empty() {
         anyhow::bail!("粘贴内容为空，无法转换");
     }
@@ -621,11 +707,14 @@ pub fn convert_text(
             let guard = TempPathGuard::new(temp_path);
             let target = OfficeOutputFormat::parse(Some(ext))?;
             let style = md_to_docx::DocxStylePreset::parse(docx_style)?;
-            markdown_to_office(guard.path(), &output_path, target, style)?;
+            markdown_to_office(guard.path(), &output_path, target, style, rendered, None)?;
         }
         "html" => {
-            std::fs::write(&output_path, markdown_to_html_document(&stem, text))
-                .with_context(|| format!("无法写入 HTML 文件: {}", output_path.display()))?;
+            std::fs::write(&output_path, {
+                let rich = media::resolve(text, rendered)?;
+                wrap_html_fragment(&stem, &media::html_fragment(&rich))
+            })
+            .with_context(|| format!("无法写入 HTML 文件: {}", output_path.display()))?;
         }
         _ => unreachable!(),
     }
@@ -634,6 +723,10 @@ pub fn convert_text(
         .with_context(|| format!("输出文件生成失败: {}", output_path.display()))?
         .len();
     Ok(ConvertTextResult {
+        warning: media_warning(
+            &media::resolve(text, rendered)?,
+            OfficeOutputFormat::parse(Some(format))?,
+        ),
         output_path: output_path.display().to_string(),
         format: ext.to_string(),
         input_size: text.len() as u64,
@@ -878,5 +971,25 @@ mod tests {
         assert!(md.contains("**加粗**"), "md:\n{md}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+fn media_warning(rich: &media::RichMarkdown, format: OfficeOutputFormat) -> Option<String> {
+    if rich.assets.is_empty() {
+        return None;
+    }
+    match format {
+        OfficeOutputFormat::Docx if rich.fallback_count > 0 => Some(format!(
+            "{} 个公式暂不支持原生编辑，已嵌入清晰图片；其他公式为可编辑的 Word 公式。",
+            rich.fallback_count
+        )),
+        OfficeOutputFormat::Xlsx => Some(
+            "公式与 Mermaid 图已嵌入独立工作表，按源文顺序排列；公式在 Excel 中为图片。".into(),
+        ),
+        OfficeOutputFormat::Pptx => Some(
+            "公式与 Mermaid 图已嵌入独立幻灯片，按源文顺序排列；公式在 PowerPoint 中为图片。"
+                .into(),
+        ),
+        _ => None,
     }
 }

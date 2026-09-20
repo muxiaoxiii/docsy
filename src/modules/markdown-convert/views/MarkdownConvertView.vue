@@ -9,8 +9,12 @@
       description="Markdown、Office 与 PDF 文本层互转；生成的 Word、Excel 和演示文稿均可继续编辑。"
     >
       <template #toolbar>
-        <el-button type="primary" plain :disabled="converting" @click="selectFiles">添加 Markdown / Office / PDF 文件</el-button>
-        <el-button type="success" :loading="converting" :disabled="!hasPendingFiles" @click="runQueue"> 开始转换 </el-button>
+        <el-button type="primary" plain :disabled="converting" @click="selectFiles"
+          >添加 Markdown / Office / PDF 文件</el-button
+        >
+        <el-button type="success" :loading="converting" :disabled="!hasPendingFiles" @click="runQueue">
+          开始转换
+        </el-button>
       </template>
 
       <div class="convert-workspace">
@@ -25,8 +29,8 @@
           <div class="file-convert-options">
             <span class="option-label">转成 Markdown</span>
             <span class="option-hint">
-              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 添加后点击“开始转换”；暂不支持 HTML 转 Markdown（.html
-              文件会被忽略）。
+              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 添加后点击“开始转换”；暂不支持 HTML 转
+              Markdown（.html 文件会被忽略）。
             </span>
           </div>
           <div class="file-convert-options">
@@ -51,6 +55,33 @@
               {{ docxStyleHint }}
             </span>
           </div>
+          <div class="file-convert-options">
+            <span class="option-label">Markdown 文件编码</span>
+            <el-select
+              v-model="inputEncoding"
+              :disabled="converting"
+              class="encoding-select"
+              aria-label="Markdown 文件编码"
+            >
+              <el-option label="自动（UTF-8 / UTF-16 BOM）" value="auto" />
+              <el-option label="UTF-8" value="utf-8" />
+              <el-option label="UTF-16 LE" value="utf-16le" />
+              <el-option label="UTF-16 BE" value="utf-16be" />
+              <el-option label="西欧 Windows-1252" value="windows-1252" />
+              <el-option label="日文 Shift-JIS" value="shift_jis" />
+              <el-option label="韩文 EUC-KR / CP949" value="euc-kr" />
+              <el-option label="简体中文 GB18030 / GBK" value="gb18030" />
+              <el-option label="繁体中文 Big5" value="big5" />
+            </el-select>
+            <span class="option-hint">支持多语言混排。旧编码需手动选择，适用于本批 Markdown 文件。</span>
+          </div>
+          <p class="rich-media-hint">
+            公式支持 $…$、$$…$$、\(…\)、\[…\]；Word 优先生成可编辑公式，不支持的结构回退为图片。Mermaid
+            代码块会嵌入图像。
+          </p>
+          <p v-if="['xlsx', 'pptx'].includes(fileOfficeFormat)" class="rich-media-hint">
+            Excel / PowerPoint 中，公式和图表以图片独立成表或成页。
+          </p>
           <div class="pdf-convert-note">
             <span>PDF 当前使用文本层提取，不会改写原件。</span>
             <div v-if="hasPdfInQueue" class="pdf-page-range">
@@ -96,7 +127,14 @@
               >
                 打开文件
               </el-button>
-              <el-button v-if="item.status !== 'processing'" :disabled="converting" link type="danger" size="small" @click="removeFile(index)">
+              <el-button
+                v-if="item.status !== 'processing'"
+                :disabled="converting"
+                link
+                type="danger"
+                size="small"
+                @click="removeFile(index)"
+              >
                 移除
               </el-button>
             </template>
@@ -119,6 +157,9 @@
             resize="vertical"
             placeholder="在此粘贴 Markdown 文本…"
           />
+          <p class="rich-media-hint">
+            支持数学公式与 Mermaid 代码块。Word 优先使用可编辑公式；Excel / PowerPoint 的图形独立成表或成页。
+          </p>
           <div class="paste-actions">
             <el-radio-group v-model="pasteFormat" :disabled="pasteConverting">
               <el-radio-button value="docx">Word</el-radio-button>
@@ -151,9 +192,10 @@
               :disabled="pasteConverting || !pasteText.trim()"
               @click="convertPastedText"
             >
-              生成文件
+              {{ pasteConverting ? pasteProgress : '生成文件' }}
             </el-button>
           </div>
+          <el-alert v-if="pasteWarning" :title="pasteWarning" type="warning" :closable="false" show-icon />
           <div v-if="pasteOutputPath" class="result-line output-result">
             <span>已生成：{{ pasteOutputPath }}</span>
             <el-button link type="primary" size="small" @click="openPasteOutputDir">打开文件夹</el-button>
@@ -169,6 +211,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { convertWithMedia } from '../composables/convertWithMedia.js'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
@@ -185,7 +228,10 @@ const pasteFormat = ref('docx')
 const pasteFileName = ref('')
 const pasteConverting = ref(false)
 const pasteOutputPath = ref('')
+const pasteWarning = ref('')
+const pasteProgress = ref('')
 const fileOfficeFormat = ref('docx')
+const inputEncoding = ref('auto')
 const docxStyle = ref('professional')
 const docxStyleHints = {
   professional: '宋体正文 + Times New Roman + 商务深蓝标题',
@@ -199,13 +245,16 @@ const activeBackendOperationId = ref('')
 const queueCancellation = useQueueCancellation()
 const PDF_CONVERT_OPERATION_ID = 'convert_pdf_text_layer:auto'
 const preference = useWorkspacePreferences('markdown-convert.workspace', {
+  inputEncoding,
   fileOfficeFormat,
   docxStyle,
   pasteFormat,
 })
 
 const hasPdfInQueue = computed(() => files.value.some((item) => extensionOf(item.path) === 'pdf'))
-const hasPendingFiles = computed(() => files.value.some((item) => ['pending', 'failed', 'cancelled'].includes(item.status)))
+const hasPendingFiles = computed(() =>
+  files.value.some((item) => ['pending', 'failed', 'cancelled'].includes(item.status)),
+)
 
 const markdownExtensions = ['md', 'markdown', 'mdown', 'mkdn', 'mdwn', 'mdtxt']
 const officeExtensions = [
@@ -396,13 +445,21 @@ async function runQueue() {
               startPage: startPage || null,
               endPage: endPage || null,
             })
-          : await tauriCallSafe('convert_markdown', {
-              input: item.path,
-              outputDir: null,
-              docEngine: item.docEngine || null,
-              outputFormat: item.outputFormat,
-              docxStyle: item.docxStyle,
-            })
+          : await (isMarkdownPath(item.path) ? convertWithMedia : tauriCallSafe)(
+              'convert_markdown',
+              {
+                input: item.path,
+                inputEncoding: inputEncoding.value,
+                outputDir: null,
+                docEngine: item.docEngine || null,
+                outputFormat: item.outputFormat,
+                docxStyle: item.docxStyle,
+              },
+              (current, total) => {
+                if (queueCancellation.cancelled.value) throw new Error('操作已取消')
+                item.statusText = total && current < total ? `正在渲染公式与图表 ${current}/${total}` : '转换中'
+              },
+            )
       } finally {
         activeBackendOperationId.value = ''
       }
@@ -450,16 +507,25 @@ async function convertPastedText() {
   if (pasteConverting.value || !pasteText.value.trim()) return
   pasteConverting.value = true
   pasteOutputPath.value = ''
+  pasteWarning.value = ''
+  pasteProgress.value = '正在转换'
   try {
-    const result = await tauriCallSafe('convert_markdown_text', {
-      text: pasteText.value,
-      format: pasteFormat.value,
-      outputDir: null,
-      fileStem: pasteFileName.value.trim() || null,
-      docxStyle: pasteFormat.value === 'docx' ? docxStyle.value : null,
-    })
+    const result = await convertWithMedia(
+      'convert_markdown_text',
+      {
+        text: pasteText.value,
+        format: pasteFormat.value,
+        outputDir: null,
+        fileStem: pasteFileName.value.trim() || null,
+        docxStyle: pasteFormat.value === 'docx' ? docxStyle.value : null,
+      },
+      (current, total) => {
+        pasteProgress.value = total && current < total ? `正在渲染公式与图表 ${current}/${total}` : '正在转换'
+      },
+    )
     if (result.ok) {
       pasteOutputPath.value = String(result.data?.output_path || '')
+      pasteWarning.value = String(result.data?.warning || '')
       ElMessage.success(`转换完成：${pasteOutputPath.value}`)
     } else {
       ElMessage.error(userFacingError(result.error, '转换失败'))
@@ -507,6 +573,16 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.encoding-select {
+  width: 250px;
+  max-width: 100%;
+}
+.rich-media-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--docsy-text-muted);
+  margin: 8px 0;
+}
 .markdown-convert-view {
   position: relative;
   height: 100%;

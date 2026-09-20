@@ -66,6 +66,7 @@ pub struct ConvertMarkdownResult {
 /// convert_markdown_text 的返回结果（snake_case JSON，前端按此对接）。
 #[derive(Debug, Serialize)]
 pub struct ConvertMarkdownTextResult {
+    pub warning: Option<String>,
     pub output_path: String,
     pub format: String,
     pub input_size: u64,
@@ -81,18 +82,21 @@ pub async fn convert_markdown_text(
     output_dir: Option<String>,
     file_stem: Option<String>,
     docx_style: Option<String>,
+    rendered_media: Option<crate::markdown::media::RenderedMarkdown>,
 ) -> Result<ConvertMarkdownTextResult, String> {
     let result = run_blocking(move || {
-        crate::markdown::convert_text(
+        crate::markdown::convert_text_with_media(
             &text,
             &format,
             output_dir.as_deref(),
             file_stem.as_deref(),
             docx_style.as_deref(),
+            rendered_media.as_ref(),
         )
     })
     .await?;
     Ok(ConvertMarkdownTextResult {
+        warning: result.warning,
         output_path: result.output_path,
         format: result.format,
         input_size: result.input_size,
@@ -103,18 +107,22 @@ pub async fn convert_markdown_text(
 #[tauri::command]
 pub async fn convert_markdown(
     input: String,
+    input_encoding: Option<String>,
     output_dir: Option<String>,
     doc_engine: Option<String>,
     output_format: Option<String>,
     docx_style: Option<String>,
+    rendered_media: Option<crate::markdown::media::RenderedMarkdown>,
 ) -> Result<ConvertMarkdownResult, String> {
     let result = run_blocking(move || {
-        crate::markdown::convert(
+        crate::markdown::convert_with_media(
             &input,
             output_dir.as_deref(),
             doc_engine.as_deref(),
             output_format.as_deref(),
             docx_style.as_deref(),
+            rendered_media.as_ref(),
+            input_encoding.as_deref(),
         )
     })
     .await?;
@@ -127,4 +135,32 @@ pub async fn convert_markdown(
         output_size: result.output_size,
         warning: result.warning,
     })
+}
+
+/// Read-only plan: only mathematical/diagram sources are sent to the local renderer.
+#[tauri::command]
+pub async fn prepare_markdown_media(
+    input: Option<String>,
+    text: Option<String>,
+    input_encoding: Option<String>,
+) -> Result<crate::markdown::media::Preparation, String> {
+    run_blocking(move || {
+        let source = match (input, text) {
+            (Some(path), None) => crate::markdown::encoding::read_markdown(
+                std::path::Path::new(&path),
+                input_encoding.as_deref(),
+            )?,
+            (None, Some(text)) => text,
+            _ => anyhow::bail!("请选择 Markdown 文件或粘贴文本"),
+        };
+        if source.len() > 16 * 1024 * 1024 {
+            anyhow::bail!("Markdown 文本过大，请分批转换");
+        }
+        let plan = crate::markdown::media::prepare(&source);
+        if plan.items.len() > 500 || plan.items.iter().any(|item| item.source.len() > 50_000) {
+            anyhow::bail!("公式或图表过多/过长，请拆分后转换");
+        }
+        Ok(plan)
+    })
+    .await
 }

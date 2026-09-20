@@ -17,7 +17,7 @@ describe('MD 转换队列操作一致性', () => {
     state.docxStyle.value = 'legal'
     tauriCallSafe.mockResolvedValue({ ok: true, data: { output_path: '/a.xlsx' } })
     await state.runQueue()
-    expect(tauriCallSafe).toHaveBeenCalledWith('convert_markdown', { input: '/a.md', outputDir: null, docEngine: null, outputFormat: 'xlsx', docxStyle: 'legal' })
+    expect(tauriCallSafe).toHaveBeenCalledWith('convert_markdown', { input: '/a.md', inputEncoding: 'auto', outputDir: null, docEngine: null, outputFormat: 'xlsx', docxStyle: 'legal' })
     expect(state.files.value[0].directionTag).toContain('Excel')
   })
   it('运行中保留整个列表，取消的项目可以再次执行', async () => {
