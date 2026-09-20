@@ -17,7 +17,7 @@
 
 还有一只超可爱的桌宠 **Doclet** 🐾，在遇到大批文件处理或外部工具调用时，它会在界面一角安静地陪你等待～
 
-当前源码为 **1.0.8 停更候选**：功能范围冻结，修复数据保护、图片排版与历史恢复问题。尚未发布；平台验收及已知限制见 [停更候选记录](docs/STOP_RELEASE_1.0.8.md)。
+当前版本为 **v1.0.8**：功能范围冻结，修复数据保护、图片排版、Markdown 公式/Mermaid/多语言与历史恢复问题。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)；平台验收边界与已知限制见 [停更/发布记录](docs/STOP_RELEASE_1.0.8.md)。
 
 ![Docsy 主页界面](site/public/assets/screenshots/home.png)
 
