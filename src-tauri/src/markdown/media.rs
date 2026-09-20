@@ -40,6 +40,7 @@ pub struct Asset {
     pub width: f64,
     pub height: f64,
     pub omml: Option<String>,
+    pub equation_token: String,
     pub display: bool,
     pub kind: String,
 }
@@ -147,8 +148,23 @@ pub fn prepare(text: &str) -> Preparation {
     }
 }
 
-pub fn resolve(text: &str, rendered: Option<&RenderedMarkdown>) -> Result<RichMarkdown> {
+/// Apply the same limits at preparation and at the conversion trust boundary.
+pub fn prepare_checked(text: &str) -> Result<Preparation> {
+    if text.len() > 16 * 1024 * 1024 {
+        bail!("Markdown 文本过大，请分批转换");
+    }
     let plan = prepare(text);
+    if plan.items.len() > 500 || plan.items.iter().any(|item| item.source.len() > 50_000) {
+        bail!("公式或图表过多/过长，请拆分后转换");
+    }
+    Ok(plan)
+}
+
+pub fn resolve(text: &str, rendered: Option<&RenderedMarkdown>) -> Result<RichMarkdown> {
+    let plan = prepare_checked(text)?;
+    if rendered.is_some_and(|data| data.items.len() > 500) {
+        bail!("公式或图表过多，请拆分后转换");
+    }
     let mut result = RichMarkdown {
         text: text.into(),
         assets: HashMap::new(),
@@ -207,6 +223,13 @@ pub fn resolve(text: &str, rendered: Option<&RenderedMarkdown>) -> Result<RichMa
         if w == 0 || h == 0 || u64::from(w) * u64::from(h) > 32_000_000 {
             bail!("渲染图片像素过大");
         }
+        if item
+            .mathml
+            .as_ref()
+            .is_some_and(|xml| xml.len() > 1_000_000)
+        {
+            bail!("公式结构过大，请拆分内容");
+        }
         let omml = if request.kind == "math" {
             item.mathml.as_deref().and_then(super::omml::from_mathml)
         } else {
@@ -237,6 +260,7 @@ pub fn resolve(text: &str, rendered: Option<&RenderedMarkdown>) -> Result<RichMa
             request.id.clone(),
             Asset {
                 png,
+                equation_token: unused_equation_token(text, &request.id),
                 width: item.width,
                 height: item.height,
                 omml,
@@ -248,8 +272,14 @@ pub fn resolve(text: &str, rendered: Option<&RenderedMarkdown>) -> Result<RichMa
     Ok(result)
 }
 
-pub fn equation_token(id: &str) -> String {
-    format!("DOCSYOMML{}END", id.replace('-', ""))
+fn unused_equation_token(text: &str, id: &str) -> String {
+    // A token is internal, and must never alias literal user text.
+    let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
+    let mut token = format!("DOCSYOMML{digest}{}END", id.replace('-', ""));
+    while text.contains(&token) {
+        token.push('X');
+    }
+    token
 }
 
 pub fn inject_equations(bytes: Vec<u8>, assets: &HashMap<String, Asset>) -> Result<Vec<u8>> {
@@ -269,22 +299,26 @@ pub fn inject_equations(bytes: Vec<u8>, assets: &HashMap<String, Asset>) -> Resu
         if name == "word/document.xml" {
             let mut xml = String::from_utf8(data)?;
             xml = xml.replacen("<w:document ", "<w:document xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\" ", 1);
-            for (id, asset) in assets {
-                if let Some(omml) = &asset.omml {
-                    let token = equation_token(id);
-                    xml = run
-                        .replace_all(&xml, |caps: &regex::Captures| {
-                            if caps[0].contains(&format!(">{token}</w:t>")) {
-                                omml.clone()
-                            } else {
-                                caps[0].to_string()
-                            }
-                        })
-                        .into_owned();
-                    if xml.contains(&token) {
-                        bail!("原生公式写入失败，请重新转换");
-                    }
-                }
+            let replacements: HashMap<_, _> = assets
+                .values()
+                .filter_map(|asset| {
+                    asset
+                        .omml
+                        .as_ref()
+                        .map(|omml| (asset.equation_token.as_str(), omml.as_str()))
+                })
+                .collect();
+            let text = regex::Regex::new(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>")?;
+            xml = run
+                .replace_all(&xml, |caps: &regex::Captures| {
+                    text.captures(&caps[0])
+                        .and_then(|t| replacements.get(&t[1]))
+                        .map(|omml| (*omml).to_owned())
+                        .unwrap_or_else(|| caps[0].to_owned())
+                })
+                .into_owned();
+            if replacements.keys().any(|token| xml.contains(token)) {
+                bail!("原生公式写入失败，请重新转换");
             }
             data = xml.into_bytes();
         }
@@ -345,14 +379,7 @@ pub fn office_ir(
 }
 
 pub fn html_fragment(rich: &RichMarkdown) -> String {
-    let mut fragment = String::new();
-    pulldown_cmark::html::push_html(
-        &mut fragment,
-        Parser::new_ext(
-            &rich.text,
-            Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS,
-        ),
-    );
+    let mut fragment = super::safe_html_fragment(&rich.text);
     for (id, asset) in &rich.assets {
         let style = if asset.display {
             "display:block;margin:1em auto;max-width:100%;height:auto"
@@ -454,18 +481,17 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires real browser multilingual fixture in /tmp/docsy-md-multilingual.json"]
     fn real_browser_multilingual_export() {
-        let text = std::fs::read_to_string("/tmp/docsy-md-multilingual.md").unwrap();
-        let data: RenderedMarkdown = serde_json::from_str(
-            &std::fs::read_to_string("/tmp/docsy-md-multilingual.json").unwrap(),
-        )
-        .unwrap();
+        let text = include_str!("fixtures/multilingual.md");
+        let data: RenderedMarkdown =
+            serde_json::from_str(include_str!("fixtures/multilingual.json")).unwrap();
         let rich = resolve(&text, Some(&data)).unwrap();
         assert_eq!(rich.assets.len(), 2);
         assert_eq!(rich.fallback_count, 0);
-        let dir = std::path::Path::new("/tmp/docsy-md-export");
+        let temp = crate::util::fs::temp_named_path("docsy-media-fixture", "out");
+        let dir = temp.as_path();
         std::fs::create_dir_all(dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(temp.clone()).unwrap();
         for format in ["docx", "html", "xlsx", "pptx"] {
             let result = super::super::convert_text_with_media(
                 &text,
@@ -503,6 +529,33 @@ mod tests {
     }
 
     #[test]
+    fn conversion_enforces_limits_without_prepare_command() {
+        assert!(resolve(&"x".repeat(16 * 1024 * 1024 + 1), None).is_err());
+        let many = "$x$ ".repeat(501);
+        assert!(resolve(&many, None)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("过多"));
+        assert!(resolve(&format!("$${}$$", "x".repeat(50_001)), None)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("过长"));
+        let mut data = rendered("plain", "");
+        data.items = (0..501)
+            .map(|i| RenderedMedia {
+                id: i.to_string(),
+                png: String::new(),
+                width: 1.0,
+                height: 1.0,
+                mathml: None,
+            })
+            .collect();
+        assert!(resolve("plain", Some(&data)).is_err());
+    }
+
+    #[test]
     fn detects_changed_sources_missing_assets_and_invalid_images() {
         let mut data = rendered("$x$", "<math><mi>x</mi></math>");
         assert!(resolve("$y$", Some(&data)).is_err());
@@ -512,6 +565,23 @@ mod tests {
         data.items.clear();
         assert!(resolve("$x$", Some(&data)).is_err());
     }
+    #[test]
+    fn equation_placeholders_never_replace_literal_body_text() {
+        let text = "DOCSYOMMLdocsymedia0END $x$";
+        let data = rendered(text, "<math><mi>x</mi></math>");
+        let rich = resolve(text, Some(&data)).unwrap();
+        let bytes = super::super::md_to_docx::build_docx_bytes_with_media(
+            &rich.text,
+            std::path::Path::new("."),
+            super::super::md_to_docx::DocxStylePreset::Professional,
+            Some(&rich.assets),
+        )
+        .unwrap();
+        let xml = zip_part(&bytes, "word/document.xml");
+        assert!(xml.contains("DOCSYOMMLdocsymedia0END"));
+        assert_eq!(xml.matches("<m:oMath>").count(), 1);
+    }
+
     #[test]
     fn docx_has_editable_math_and_embedded_fallback_and_diagram() {
         let text = "before $x$ after\n\n$$y$$\n\n```mermaid\ngraph LR\nA-->B\n```";
@@ -540,15 +610,15 @@ mod tests {
         assert!(!html.contains("docsy-media-"));
     }
     #[test]
-    #[ignore = "requires /tmp/docsy-md-rendered.json produced by the real browser renderer"]
     fn real_browser_media_export() {
         let text = "# 公式与图表验证\n\n能量 $E=mc^2$。\n\n$$\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$\n\n$$\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$$\n\n$$\\sum_{i=1}^{n} i=\\frac{n(n+1)}{2}$$\n\n```mermaid\nflowchart LR\n A[导入 Markdown] --> B{包含公式?}\n B -->|是| C[可编辑 Word 公式]\n B -->|否| D[正常转换]\n```";
         let mut data: RenderedMarkdown =
-            serde_json::from_str(&std::fs::read_to_string("/tmp/docsy-md-rendered.json").unwrap())
-                .unwrap();
+            serde_json::from_str(include_str!("fixtures/rendered.json")).unwrap();
         data.source_hash = prepare(text).source_hash;
-        let dir = std::path::Path::new("/tmp/docsy-md-export");
+        let temp = crate::util::fs::temp_named_path("docsy-media-fixture", "out");
+        let dir = temp.as_path();
         std::fs::create_dir_all(dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(temp.clone()).unwrap();
         let rich = resolve(text, Some(&data)).unwrap();
         assert_eq!(rich.fallback_count, 0, "common formulas must be editable");
         for format in ["docx", "html", "xlsx", "pptx"] {

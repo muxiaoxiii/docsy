@@ -19,7 +19,9 @@ vi.mock('../../../core/tauriBridge.js', () => ({
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('element-plus', () => ({ ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
 
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { nextTick } from 'vue'
+import { open } from '@tauri-apps/plugin-dialog'
+import { tauriCallSafe, openPath } from '../../../core/tauriBridge.js'
 import { useImagePaddlerState } from './useImagePaddlerState.js'
 
 const images = Array.from({ length: 6 }, (_, index) => ({ path: `/images/${index}.png`, width: 100, height: 100 }))
@@ -377,6 +379,24 @@ describe('image paddler state integration', () => {
     expect(Object.keys(state.pageScales.value).length).toBe(0)
   })
 
+  it('smart width respects the narrower three-column reflow page', async () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images: Array.from({ length: 7 }, (_, i) => ({
+      path: `/images/${i}.png`, width: 2400, height: 800,
+    })) }
+    state.setImagesPerPage(4)
+    state.setArrangeMode('grid')
+    state.settings.last_page_mode = 'keep'
+    const baseWidth = state.layoutAwareRecommendation.value.recommended_width_mm
+    state.settings.last_page_mode = 'reflow'
+    const width = state.layoutAwareRecommendation.value.recommended_width_mm
+    const safeWidth = (210 - 2 * state.settings.margin_mm) / 3 - state.settings.print_safety_pad_mm
+    expect(width).toBeLessThan(baseWidth)
+    expect(width).toBeLessThanOrEqual(safeWidth)
+    await nextTick()
+    expect(state.settings.fixed_width_mm).toBe(width)
+  })
+
   it('layout-aware recommendation updates with per-page count and does not overwrite layout on import apply', () => {
     const state = useImagePaddlerState()
     const wideImages = Array.from({ length: 9 }, (_, index) => ({
@@ -448,17 +468,40 @@ describe('image paddler state integration', () => {
     expect(payload.page_scales[2]).toBeCloseTo(0.8)
   })
 
-  it('caption gap participates in layout metrics', () => {
-    const state = useImagePaddlerState()
-    state.analysis.value = { images: images.slice(0, 2) }
-    state.settings.layout = '2x1'
-    state.settings.show_filename = true
-    state.settings.caption_gap_mm = 0
-    const reserve0 = state.layoutMetrics.value.filenameReserve
-    state.settings.caption_gap_mm = 8
-    expect(state.layoutMetrics.value.captionGapMm).toBe(8)
-    expect(state.layoutMetrics.value.filenameReserve).toBeGreaterThan(reserve0)
-    expect(state.layoutMetrics.value.imageCellHeight).toBeLessThan(state.layoutMetrics.value.cellHeight)
+  it('changing caption gap keeps image geometry and moves only text by the requested distance', async () => {
+    const { nextTick } = await import('vue')
+    for (const mode of ['smart', 'manual', 'fit', 'original']) {
+      for (const position of ['above', 'below']) {
+        const state = useImagePaddlerState()
+        state.analysis.value = { images: images.slice(0, 2) }
+        state.settings.caption_position = position
+        state.setSizeMode(mode)
+        if (mode === 'manual') state.settings.fixed_width_mm = 80
+        state.settings.caption_gap_mm = 2
+        await nextTick()
+        const beforeDraw = state.previewImageStyle(images[0])
+        const beforeArea = state.previewImageAreaStyle.value
+        const beforeWidth = state.layoutAwareRecommendation.value.recommended_width_mm
+        const beforeCaptionTop = parseFloat(state.previewCaptionStyle(images[0], 0).top)
+        state.settings.caption_gap_mm = 8
+        await nextTick()
+        expect(state.previewImageStyle(images[0])).toEqual(beforeDraw)
+        expect(state.previewImageAreaStyle.value).toEqual(beforeArea)
+        expect(state.layoutAwareRecommendation.value.recommended_width_mm).toBe(beforeWidth)
+        const caption = state.previewCaptionStyle(images[0], 0)
+        expect(caption.position).toBe('absolute')
+        const afterCaptionTop = parseFloat(caption.top)
+        // 标题必须随间距移动（禁止“只动图、不动字”）
+        const deltaPct = afterCaptionTop - beforeCaptionTop
+        const deltaMm = (deltaPct / 100) * state.layoutMetrics.value.cellHeight
+        expect(deltaMm).toBeCloseTo(position === 'above' ? -6 : 6, 6)
+        state.settings.caption_position = position === 'above' ? 'below' : 'above'
+        await nextTick()
+        const flipped = parseFloat(state.previewCaptionStyle(images[0], 0).top)
+        if (state.settings.caption_position === 'above') expect(flipped).toBeLessThan(afterCaptionTop)
+        else expect(flipped).toBeGreaterThan(afterCaptionTop)
+      }
+    }
   })
 })
 
@@ -551,8 +594,8 @@ describe('停更候选回归', () => {
     state.imageAnnotations.value = { '/A/tall.png': { description: '说明' } }
     await nextTick()
     expect(state.settings.fixed_width_mm).toBeLessThan(20)
-    expect(state.previewCaptionGapStyle.value.marginTop).toContain('cqw')
-    expect(parseFloat(state.previewCaptionGapStyle.value.marginTop)).toBeGreaterThan(0)
+    expect(state.captionGapMm.value).toBe(2)
+    expect(state.previewCaptionStyle(state.analysis.value.images[0], 0).top).toContain('%')
   })
 })
 
@@ -567,4 +610,35 @@ it('custom title renders in preview and fixed width obeys the native 500mm limit
   state.setGlobalScale(140)
   const drawWidth = parseFloat(state.previewImageStyle(state.analysis.value.images[0]).width) * 186 / 100
   expect(drawWidth).toBeCloseTo(500)
+})
+
+
+describe('输出目录选择与结果入口', () => {
+  beforeEach(() => vi.clearAllMocks())
+  it('选择目录传入导出，取消选择保留原目录，执行中不能改目录', async () => {
+    const state = useImagePaddlerState()
+    state.folders.value = ['/images']
+    state.analysis.value = { images: images.slice(0, 2) }
+    open.mockResolvedValueOnce('/export/我的排版')
+    await state.chooseOutputDirectory()
+    expect(state.settings.output_dir).toBe('/export/我的排版')
+    open.mockResolvedValueOnce(null)
+    await state.chooseOutputDirectory()
+    expect(state.settings.output_dir).toBe('/export/我的排版')
+    state.generating.value = true
+    await state.chooseOutputDirectory()
+    expect(open).toHaveBeenCalledTimes(2)
+    state.generating.value = false
+    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: { output_path: '/export/我的排版/a.pdf' } })
+    await state.run()
+    expect(tauriCallSafe).toHaveBeenCalledWith('run_image_paddler', { args: expect.objectContaining({ output_dir: '/export/我的排版' }) })
+    openPath.mockResolvedValue({ ok: true })
+    await state.openGeneratedDirectory(state.generatedOutputDirectories.value[0])
+    expect(openPath).toHaveBeenCalledWith('/export/我的排版')
+  })
+  it('分组输出列出所有不同的结果目录', () => {
+    const state = useImagePaddlerState()
+    state.generatedResult.value = { output_paths: ['/A/a.pdf', '/B/b.pdf', '/A/c.pdf'] }
+    expect(state.generatedOutputDirectories.value).toEqual(['/A', '/B'])
+  })
 })

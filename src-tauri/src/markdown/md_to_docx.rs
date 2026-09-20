@@ -9,7 +9,7 @@ use docx_rs::{
     TableCellMargins, TableLayoutType, TableRow, WidthType,
 };
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
 /// Markdown 生成 DOCX 的版式预设。只影响新生成文件，不会改写导入的文档。
@@ -150,7 +150,7 @@ struct ImageCtx {
 }
 
 struct Builder<'a> {
-    base_dir: &'a Path,
+    base_dir: Option<&'a Path>,
     assets: Option<&'a std::collections::HashMap<String, super::media::Asset>>,
     style: DocxStylePreset,
     docx: Docx,
@@ -186,7 +186,7 @@ fn table_borders() -> TableCellBorders {
 
 impl<'a> Builder<'a> {
     fn new(
-        base_dir: &'a Path,
+        base_dir: Option<&'a Path>,
         style: DocxStylePreset,
         assets: Option<&'a std::collections::HashMap<String, super::media::Asset>>,
     ) -> Self {
@@ -508,10 +508,11 @@ impl<'a> Builder<'a> {
         };
         if let Some(asset) = self.assets.and_then(|assets| assets.get(&ctx.dest)) {
             let run = if asset.omml.is_some() {
-                Run::new().add_text(super::media::equation_token(&ctx.dest))
+                Run::new().add_text(&asset.equation_token)
             } else {
                 let scale = (f64::from(MAX_IMAGE_WIDTH_EMU)
                     / (asset.width * f64::from(EMU_PER_PX)))
+                .min(f64::from(MAX_IMAGE_HEIGHT_EMU) / (asset.height * f64::from(EMU_PER_PX)))
                 .min(1.0);
                 let size = image::ImageReader::with_format(
                     Cursor::new(&asset.png),
@@ -538,15 +539,11 @@ impl<'a> Builder<'a> {
             self.children.push(placeholder());
             return;
         }
-        let path = {
-            let p = PathBuf::from(&ctx.dest);
-            if p.is_absolute() {
-                p
-            } else {
-                self.base_dir.join(p)
-            }
-        };
-        match build_pic(&path) {
+        match self
+            .base_dir
+            .and_then(|root| safe_image_path(root, &ctx.dest))
+            .and_then(|path| build_pic(&path))
+        {
             Some(pic) => {
                 let run = Run::new().add_image(pic);
                 self.children.push(ParagraphChild::Run(Box::new(run)));
@@ -592,27 +589,58 @@ impl<'a> Builder<'a> {
     }
 }
 
-/// 读取本地图片并转成 PNG Pic；失败返回 None。
+const MAX_IMAGE_HEIGHT_EMU: u32 = 8_000_000;
+const MAX_LOCAL_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+
+fn safe_image_path(root: &Path, destination: &str) -> Option<PathBuf> {
+    let relative = Path::new(destination);
+    if relative.is_absolute() || destination.contains(':') || destination.contains('\\') {
+        return None;
+    }
+    let root = root.canonicalize().ok()?;
+    let path = root.join(relative).canonicalize().ok()?;
+    path.starts_with(&root).then_some(path)
+}
+
+/// Bound both compressed input and decoded pixels before reading local images.
 fn build_pic(path: &Path) -> Option<Pic> {
-    if !path.is_file() {
+    let file = std::fs::File::open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_LOCAL_IMAGE_BYTES {
         return None;
     }
-    let bytes = std::fs::read(path).ok()?;
-    let img = image::load_from_memory(&bytes).ok()?;
-    let (w_px, h_px) = (img.width(), img.height());
-    if w_px == 0 || h_px == 0 {
+    let mut bytes = Vec::new();
+    file.take(MAX_LOCAL_IMAGE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_LOCAL_IMAGE_BYTES {
         return None;
     }
+    let reader = image::ImageReader::new(Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()?;
+    let (w_px, h_px) = reader.into_dimensions().ok()?;
+    if w_px == 0 || h_px == 0 || u64::from(w_px) * u64::from(h_px) > 32_000_000 {
+        return None;
+    }
+    let mut reader = image::ImageReader::new(Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    let img = reader.decode().ok()?;
     let mut png = Cursor::new(Vec::new());
     img.write_to(&mut png, image::ImageFormat::Png).ok()?;
-    let mut w_emu = w_px.saturating_mul(EMU_PER_PX);
-    let mut h_emu = h_px.saturating_mul(EMU_PER_PX);
-    if w_emu > MAX_IMAGE_WIDTH_EMU {
-        let scale = f64::from(MAX_IMAGE_WIDTH_EMU) / f64::from(w_emu);
-        w_emu = MAX_IMAGE_WIDTH_EMU;
-        h_emu = (f64::from(h_emu) * scale) as u32;
-    }
-    Some(Pic::new_with_dimensions(png.into_inner(), w_px, h_px).size(w_emu, h_emu))
+    let w = f64::from(w_px) * f64::from(EMU_PER_PX);
+    let h = f64::from(h_px) * f64::from(EMU_PER_PX);
+    let scale = (f64::from(MAX_IMAGE_WIDTH_EMU) / w)
+        .min(f64::from(MAX_IMAGE_HEIGHT_EMU) / h)
+        .min(1.0);
+    Some(
+        Pic::new_with_dimensions(png.into_inner(), w_px, h_px)
+            .size((w * scale) as u32, (h * scale) as u32),
+    )
 }
 
 /// 内置标题样式：黑体加粗 + 西文 Times New Roman + 规范段前段后间距。
@@ -663,6 +691,15 @@ fn heading_styles(style: DocxStylePreset) -> Vec<Style> {
 pub fn build_docx_bytes_with_media(
     md: &str,
     base_dir: &Path,
+    style: DocxStylePreset,
+    assets: Option<&std::collections::HashMap<String, super::media::Asset>>,
+) -> Result<Vec<u8>> {
+    build_docx_with_resources(md, Some(base_dir), style, assets)
+}
+
+pub fn build_docx_with_resources(
+    md: &str,
+    base_dir: Option<&Path>,
     style: DocxStylePreset,
     assets: Option<&std::collections::HashMap<String, super::media::Asset>>,
 ) -> Result<Vec<u8>> {
@@ -909,5 +946,58 @@ let x = 1;
             .unwrap();
         // 分割线转为纯空段落（回车空行），不带有任何边框或方框
         assert!(!document_xml.contains("<w:pBdr"));
+    }
+}
+
+#[cfg(test)]
+mod resource_security_tests {
+    use super::*;
+    #[test]
+    fn local_images_stay_in_source_directory_and_paste_has_no_local_access() {
+        let temp = crate::util::fs::temp_named_path("docsy-image-security", "dir");
+        let root = temp.join("source");
+        std::fs::create_dir_all(&root).unwrap();
+        let image = image::DynamicImage::new_rgb8(20, 10);
+        image.save(root.join("日本語한국어.png")).unwrap();
+        image.save(temp.join("secret.png")).unwrap();
+        assert!(safe_image_path(&root, "日本語한국어.png").is_some());
+        assert!(safe_image_path(&root, "../secret.png").is_none());
+        assert!(safe_image_path(&root, temp.join("secret.png").to_str().unwrap()).is_none());
+        assert!(safe_image_path(&root, "file:///secret.png").is_none());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(temp.join("secret.png"), root.join("escape.png")).unwrap();
+            assert!(safe_image_path(&root, "escape.png").is_none());
+        }
+        fn drawing_count(bytes: Vec<u8>) -> usize {
+            let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+            let mut xml = String::new();
+            zip.by_name("word/document.xml")
+                .unwrap()
+                .read_to_string(&mut xml)
+                .unwrap();
+            xml.matches("<w:drawing>").count()
+        }
+        let md = "![ok](日本語한국어.png) ![bad](../secret.png)";
+        assert_eq!(
+            drawing_count(
+                build_docx_with_resources(md, Some(&root), DocxStylePreset::Professional, None)
+                    .unwrap()
+            ),
+            1
+        );
+        assert_eq!(
+            drawing_count(
+                build_docx_with_resources(md, None, DocxStylePreset::Professional, None).unwrap()
+            ),
+            0
+        );
+        let oversized = root.join("large.png");
+        std::fs::File::create(&oversized)
+            .unwrap()
+            .set_len(MAX_LOCAL_IMAGE_BYTES + 1)
+            .unwrap();
+        assert!(build_pic(&oversized).is_none());
+        std::fs::remove_dir_all(temp).unwrap();
     }
 }

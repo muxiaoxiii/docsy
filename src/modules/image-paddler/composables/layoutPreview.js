@@ -132,6 +132,7 @@ export function detectPageConflicts({
   showFilename = true,
   captionPosition = 'below',
   captionReserveMm = 0,
+  captionGapMm = 0,
   fontSizePt = 8,
   noteFontSizePt = 8,
   pairMode = 'cell-center',
@@ -161,7 +162,6 @@ export function detectPageConflicts({
 
     const imgAreaY = captionPosition === 'above' ? cellY + captionH : cellY
     const imgAreaH = Math.max(1, cellH - captionH)
-    const capAreaY = captionPosition === 'above' ? cellY : cellY + imgAreaH
 
     let drawW, drawH
     if (scaleMode === 'fixed_width') {
@@ -216,14 +216,17 @@ export function detectPageConflicts({
       const descW = descText ? estimateTextWidthMm(descText, noteFontSizePt || fontSizePt) : 0
       const textW = Math.min(cellW, Math.max(10, Math.max(titleW, descW)))
       const capX = cellX + (cellW - textW) / 2
+      const textH = Number.isFinite(img.captionHeightMm) ? img.captionHeightMm : captionH
+      const capAreaY = captionPosition === 'above' ? imgY - textH - captionGapMm : imgY + drawH + captionGapMm
       captionBoxes.push({
         index: idx,
         x: capX,
         y: capAreaY,
         w: textW,
-        h: captionH,
+        h: textH,
+        outsideCell: capAreaY < cellY - 0.5 || capAreaY + textH > cellY + cellH + 0.5,
         right: capX + textW,
-        bottom: capAreaY + captionH,
+        bottom: capAreaY + textH,
       })
     }
   })
@@ -263,7 +266,12 @@ export function detectPageConflicts({
     }
     if (captionOverlap) hasAnyCaptionOverlap = true
 
-    const overflow = exceedsImageArea || exceedsPageMargin || captionOverlap
+    const caption = captionBoxes.find(cap => cap.index === idx)
+    const captionOverflow = Boolean(caption?.outsideCell)
+    const captionCollision = Boolean(caption && captionBoxes.some(other => other.index !== idx && aabbIntersect(caption, other)))
+    captionOverlap ||= captionCollision
+    if (captionOverlap) hasAnyCaptionOverlap = true
+    const overflow = exceedsImageArea || exceedsPageMargin || captionOverlap || captionOverflow
     if (overflow) hasAnyOverflow = true
 
     const ratio = img.width > 0 ? img.height / img.width : 1
@@ -283,6 +291,7 @@ export function detectPageConflicts({
       overflow,
       overlap,
       captionOverlap,
+      captionOverflow,
       review,
     }
   })

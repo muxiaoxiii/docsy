@@ -317,68 +317,52 @@ fn markdown_to_office(
 ) -> Result<Option<String>> {
     let markdown = encoding::read_markdown(input, input_encoding)?;
     let rich = media::resolve(&markdown, rendered)?;
-    if !rich.assets.is_empty() {
-        match target {
-            OfficeOutputFormat::Docx => {
-                let bytes = md_to_docx::build_docx_bytes_with_media(
-                    &rich.text,
-                    input.parent().unwrap_or_else(|| Path::new(".")),
-                    style,
-                    Some(&rich.assets),
-                )?;
-                std::fs::write(output, bytes)?;
-            }
-            OfficeOutputFormat::Html => {
-                let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("文档");
-                std::fs::write(
-                    output,
-                    wrap_html_fragment(title, &media::html_fragment(&rich)),
-                )?;
-            }
-            OfficeOutputFormat::Xlsx | OfficeOutputFormat::Pptx => {
-                let format = if target == OfficeOutputFormat::Xlsx {
-                    office_oxide::DocumentFormat::Xlsx
-                } else {
-                    office_oxide::DocumentFormat::Pptx
-                };
-                office_oxide::create::create_from_ir(
-                    &media::office_ir(&rich, format),
-                    format,
-                    output,
-                )
-                .map_err(|e| anyhow::anyhow!("生成 Office 文件失败: {e}"))?;
-            }
-        }
-        return Ok(media_warning(&rich, target));
-    }
+    export_rich_markdown(
+        &rich,
+        output,
+        target,
+        style,
+        Some(input.parent().unwrap_or_else(|| Path::new("."))),
+        input.file_stem().and_then(|s| s.to_str()).unwrap_or("文档"),
+    )
+}
+
+fn export_rich_markdown(
+    rich: &media::RichMarkdown,
+    output: &Path,
+    target: OfficeOutputFormat,
+    style: md_to_docx::DocxStylePreset,
+    resource_root: Option<&Path>,
+    title: &str,
+) -> Result<Option<String>> {
     match target {
         OfficeOutputFormat::Docx => {
-            let bytes = md_to_docx::build_docx_bytes_with_style(
-                &markdown,
-                input.parent().unwrap_or_else(|| Path::new(".")),
+            let bytes = md_to_docx::build_docx_with_resources(
+                &rich.text,
+                resource_root,
                 style,
+                Some(&rich.assets),
             )?;
-            std::fs::write(output, bytes).context("无法写入 Word 文件")
+            std::fs::write(output, bytes).context("无法写入 Word 文件")?;
         }
-        OfficeOutputFormat::Xlsx => office_oxide::create::create_from_markdown(
-            &markdown,
-            office_oxide::DocumentFormat::Xlsx,
-            output,
-        )
-        .map_err(|error| anyhow::anyhow!("生成 Excel 失败: {error}")),
-        OfficeOutputFormat::Pptx => office_oxide::create::create_from_markdown(
-            &markdown,
-            office_oxide::DocumentFormat::Pptx,
-            output,
-        )
-        .map_err(|error| anyhow::anyhow!("生成 PowerPoint 失败: {error}")),
         OfficeOutputFormat::Html => {
-            let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("文档");
-            std::fs::write(output, markdown_to_html_document(title, &markdown))
-                .with_context(|| format!("无法写入 HTML 文件: {}", output.display()))
+            std::fs::write(
+                output,
+                wrap_html_fragment(title, &media::html_fragment(rich)),
+            )
+            .context("无法写入 HTML 文件")?;
         }
-    }?;
-    Ok(None)
+        OfficeOutputFormat::Xlsx | OfficeOutputFormat::Pptx => {
+            let format = if target == OfficeOutputFormat::Xlsx {
+                office_oxide::DocumentFormat::Xlsx
+            } else {
+                office_oxide::DocumentFormat::Pptx
+            };
+            office_oxide::create::create_from_ir(&media::office_ir(rich, format), format, output)
+                .map_err(|e| anyhow::anyhow!("生成 Office 文件失败: {e}"))?;
+        }
+    }
+    Ok(media_warning(rich, target))
 }
 
 /// 将 AnyDoc 可识别的 Office 文档提取为 Markdown。
@@ -642,6 +626,12 @@ fn text_file_stem(file_stem: Option<&str>) -> String {
 
 /// 最小 HTML 骨架：utf-8 meta + 简单排版样式。
 fn wrap_html_fragment(title: &str, fragment: &str) -> String {
+    let title = title
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;");
     format!(
         "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n\
 <title>{title}</title>\n<style>\n\
@@ -659,14 +649,75 @@ blockquote {{ margin: 0; padding-left: 1em; border-left: 4px solid #ddd; color: 
 }
 
 /// Markdown → 完整 HTML 文档（含骨架样式）。文件队列与粘贴即转共用。
+#[cfg(test)]
 fn markdown_to_html_document(title: &str, markdown: &str) -> String {
-    let options = pulldown_cmark::Options::ENABLE_TABLES
-        | pulldown_cmark::Options::ENABLE_STRIKETHROUGH
-        | pulldown_cmark::Options::ENABLE_TASKLISTS;
-    let parser = pulldown_cmark::Parser::new_ext(markdown, options);
+    wrap_html_fragment(title, &safe_html_fragment(markdown))
+}
+
+/// Raw HTML is displayed as text. Only known navigation protocols are active;
+/// locally rendered PNG data URLs are added afterwards by media::html_fragment.
+fn safe_html_fragment(markdown: &str) -> String {
+    use pulldown_cmark::{Event, Options, Parser, Tag};
+    fn safe_url(url: &str, image: bool) -> bool {
+        if url.chars().any(|c| c.is_control() || c == '\\') {
+            return false;
+        }
+        let lower = url.to_ascii_lowercase();
+        if lower.starts_with("https://") || lower.starts_with("http://") {
+            return true;
+        }
+        if !image && lower.starts_with("mailto:") {
+            return true;
+        }
+        !url.contains(':') && !url.starts_with('/') && !url.split('/').any(|part| part == "..")
+    }
+    let parser = Parser::new_ext(
+        markdown,
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS,
+    )
+    .map(|event| match event {
+        Event::Html(text) | Event::InlineHtml(text) => Event::Text(text),
+        Event::Start(Tag::Link {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) => {
+            let dest_url = if safe_url(&dest_url, false) {
+                dest_url
+            } else {
+                "".into()
+            };
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                title,
+                id,
+            })
+        }
+        Event::Start(Tag::Image {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) => {
+            let dest_url = if safe_url(&dest_url, true) {
+                dest_url
+            } else {
+                "".into()
+            };
+            Event::Start(Tag::Image {
+                link_type,
+                dest_url,
+                title,
+                id,
+            })
+        }
+        other => other,
+    });
     let mut fragment = String::new();
     pulldown_cmark::html::push_html(&mut fragment, parser);
-    wrap_html_fragment(title, &fragment)
+    fragment
 }
 
 /// 粘贴 Markdown 文本直接转换为 Office / HTML 文件。
@@ -699,34 +750,22 @@ pub fn convert_text_with_media(
     let stem = text_file_stem(file_stem);
     let output_path = unique_output_path(&dir, &stem, ext);
 
-    match ext {
-        "docx" | "xlsx" | "pptx" => {
-            // 复用 md → docx 管线：先落临时 .md，转换后由守卫自动清理
-            let temp_path = crate::util::fs::temp_named_path("docsy-paste-md", "md");
-            std::fs::write(&temp_path, text).context("写入临时 Markdown 文件失败")?;
-            let guard = TempPathGuard::new(temp_path);
-            let target = OfficeOutputFormat::parse(Some(ext))?;
-            let style = md_to_docx::DocxStylePreset::parse(docx_style)?;
-            markdown_to_office(guard.path(), &output_path, target, style, rendered, None)?;
-        }
-        "html" => {
-            std::fs::write(&output_path, {
-                let rich = media::resolve(text, rendered)?;
-                wrap_html_fragment(&stem, &media::html_fragment(&rich))
-            })
-            .with_context(|| format!("无法写入 HTML 文件: {}", output_path.display()))?;
-        }
-        _ => unreachable!(),
-    }
+    let rich = media::resolve(text, rendered)?;
+    // Pasted text has no authorized resource directory; never borrow the system tmp directory.
+    let warning = export_rich_markdown(
+        &rich,
+        &output_path,
+        OfficeOutputFormat::parse(Some(ext))?,
+        md_to_docx::DocxStylePreset::parse(docx_style)?,
+        None,
+        &stem,
+    )?;
 
     let output_size = std::fs::metadata(&output_path)
         .with_context(|| format!("输出文件生成失败: {}", output_path.display()))?
         .len();
     Ok(ConvertTextResult {
-        warning: media_warning(
-            &media::resolve(text, rendered)?,
-            OfficeOutputFormat::parse(Some(format))?,
-        ),
+        warning,
         output_path: output_path.display().to_string(),
         format: ext.to_string(),
         input_size: text.len() as u64,
@@ -737,6 +776,27 @@ pub fn convert_text_with_media(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn html_exports_escape_raw_markup_titles_and_unsafe_protocols() {
+        let md = r#"Français 日本語 한국어 <script>alert(1)</script>
+<img src=x onerror=alert(2)><svg onload=alert(3)></svg>
+
+[bad](javascript:alert%281%29) [bad2](file:///etc/passwd)
+[encoded](java&#x73;cript:alert%281%29) ![bad](data:image/svg+xml,test)
+[good](https://example.com)"#;
+        let html = markdown_to_html_document("</title><script>alert(4)</script>", md);
+        assert!(!html.contains("<script"));
+        assert!(!html.contains("<img src=x"));
+        assert!(!html.contains("<svg"));
+        assert!(!html.contains("href=\"javascript:"));
+        assert!(!html.contains("href=\"file:"));
+        assert!(!html.contains("src=\"data:"));
+        assert!(html.contains("href=\"https://example.com\""));
+        assert!(html.contains("Français 日本語 한국어"));
+        let rich = media::resolve(md, None).unwrap();
+        assert_eq!(media::html_fragment(&rich), safe_html_fragment(md));
+    }
 
     #[test]
     fn detect_direction_by_extension() {

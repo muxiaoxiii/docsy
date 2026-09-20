@@ -8,7 +8,6 @@ import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.j
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   safeColumnWidth,
-  effectivePageWidth,
   pairOffsets,
   pairAlignToXY,
   detectPageConflicts,
@@ -78,6 +77,7 @@ export function useImagePaddlerState(options = {}) {
 
   const settings = reactive({
     output_format: 'pdf',
+    output_dir: '',
     output_mode: 'merged',
     layout: '2x1',
     custom_rows: 2,
@@ -157,8 +157,9 @@ export function useImagePaddlerState(options = {}) {
   const excludedCount = computed(() => orderedImages.value.length - includedImages.value.length)
   const perPage = computed(() => Math.max(1, layoutGrid.value.rows * layoutGrid.value.cols))
   const isPairLayout = computed(() => perPage.value === 2 && !isFlowLayout.value)
+  const captionControlsEnabled = computed(() => settings.show_filename || settings.reserve_note_placeholder || includedImages.value.some(image => imageDescription(image.path)))
   const captionGapMm = computed(() =>
-    settings.show_filename || settings.reserve_note_placeholder || includedImages.value.some(image => imageDescription(image.path))
+    captionControlsEnabled.value
       ? Math.max(0, Math.min(20, Number(settings.caption_gap_mm) || 0))
       : 0,
   )
@@ -171,6 +172,7 @@ export function useImagePaddlerState(options = {}) {
       const grid = settings.last_page_mode === 'reflow'
         ? compactGridForCount(layoutGrid.value, entry.images.length) : layoutGrid.value
       const metrics = computeMetricsForGrid(grid, entry.images)
+      width = Math.min(width, metrics.cellWidth - Math.max(0, Number(settings.print_safety_pad_mm) || 0))
       if (metrics.filenameReserve >= metrics.cellHeight) feasible = false
       for (const image of entry.images) {
         width = Math.min(width, metrics.imageCellHeight * image.width / Math.max(1, image.height),
@@ -423,9 +425,10 @@ export function useImagePaddlerState(options = {}) {
     const titleReserve = settings.show_filename ? filenameLineHeightMm * filenameMaxLines : 0
     const noteReserve = hasAnyNote ? noteLineHeightMm * noteMaxLines : 0
     const filenameSafetyMm = settings.output_format === 'docx' ? DOCX_FILENAME_SAFETY_MM : PDF_FILENAME_SAFETY_MM
+    // 固定基础预留区，用户间距只影响文字坐标。
     const gapMm = titleReserve > 0 || noteReserve > 0 ? captionGapMm.value : 0
     const filenameReserve =
-      titleReserve > 0 || noteReserve > 0 ? titleReserve + noteReserve + filenameSafetyMm + gapMm : 0
+      titleReserve > 0 || noteReserve > 0 ? titleReserve + noteReserve + filenameSafetyMm + 2 : 0
 
     return {
       cellWidth,
@@ -448,20 +451,40 @@ export function useImagePaddlerState(options = {}) {
   const previewImageAreaStyle = computed(() => {
     const metrics = layoutMetrics.value
     const height = `${Math.min(100, (metrics.imageCellHeight / metrics.cellHeight) * 100)}%`
+    // 图片区固定在单元格内：图上标题时下移 reserve，图下标题时贴顶；与 caption_gap 无关
     return {
       height,
-      flexBasis: height,
+      position: 'absolute',
+      left: 0,
+      width: '100%',
+      top: settings.caption_position === 'above' ? `${(metrics.filenameReserve / metrics.cellHeight) * 100}%` : '0%',
     }
   })
-  const previewCaptionGapStyle = computed(() => {
+
+  function captionTextHeightMm(image, metrics) {
+    const titleLines = settings.show_filename
+      ? requiredFilenameLines(imageTitle(image.path), metrics.cellWidth, metrics.filenameFontSizePt, FILENAME_MAX_LINES)
+      : 0
+    const note = imageDescription(image.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : '')
+    const noteLineCount = note
+      ? requiredFilenameLines(note, metrics.cellWidth, metrics.noteFontSizePt, NOTE_MAX_LINES)
+      : 0
+    return titleLines * metrics.filenameLineHeightMm + noteLineCount * metrics.noteLineHeightMm
+  }
+
+  // Reuse conflict geometry so preview text, images and export follow the same positions.
+  function previewCaptionStyle(image, index) {
     const metrics = layoutMetrics.value
-    const pageW = resolvedOrientation.value === 'landscape' ? 297 : 210
-    const gap = metrics.captionGapMm || 0
-    const gapCqw = (gap / pageW) * 100
-    return settings.caption_position === 'above'
-      ? { marginBottom: `${gapCqw}cqw` }
-      : { marginTop: `${gapCqw}cqw` }
-  })
+    const box = currentPageConflictReport.value.imageBoxes?.[index]
+    if (!box || !image || captionTextHeightMm(image, metrics) <= 0) return { display: 'none' }
+    const row = Math.floor(index / previewLayoutGrid.value.cols)
+    const imageTop = box.y - settings.margin_mm - row * metrics.cellHeight
+    const textHeight = captionTextHeightMm(image, metrics)
+    const top = settings.caption_position === 'above'
+      ? imageTop - textHeight - captionGapMm.value
+      : imageTop + box.h + captionGapMm.value
+    return { position: 'absolute', left: 0, width: '100%', top: `${top / metrics.cellHeight * 100}%` }
+  }
   const previewNameStyle = computed(() => {
     const metrics = layoutMetrics.value
     return {
@@ -523,8 +546,6 @@ export function useImagePaddlerState(options = {}) {
     if (local !== undefined) return Number(local) || 1
     return (Number(globalScalePercent.value) || 100) / 100
   }
-
-  const currentPageScale = computed(() => effectiveScaleForPage(currentPageIndex.value))
 
   watch(
     [currentPageIndex, pageScales, globalScalePercent],
@@ -602,6 +623,7 @@ export function useImagePaddlerState(options = {}) {
     const pageImgsWithAnnotations = pageImgs.map((img) => ({
       ...img,
       title: imageTitle(img.path),
+      captionHeightMm: captionTextHeightMm(img, metrics),
       description:
         imageDescription(img.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : ''),
     }))
@@ -619,6 +641,7 @@ export function useImagePaddlerState(options = {}) {
       showFilename: settings.show_filename,
       captionPosition: settings.caption_position,
       captionReserveMm: metrics.filenameReserve,
+      captionGapMm: captionGapMm.value,
       fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
       noteFontSizePt: clampNumber(settings.note_font_size_pt, 6, 24, 8),
       pairMode: settings.pair_mode,
@@ -886,6 +909,19 @@ export function useImagePaddlerState(options = {}) {
     generatedResult.value = null
   }
 
+  async function chooseOutputDirectory() {
+    if (generating.value) return
+    const selected = await open({ directory: true, multiple: false, title: '选择输出文件夹', defaultPath: settings.output_dir || undefined })
+    if (typeof selected === 'string') settings.output_dir = selected
+  }
+
+  const generatedOutputDirectories = computed(() => [...new Set(generatedOutputPaths.value.map(parentDir).filter(Boolean))])
+  async function openGeneratedDirectory(path) {
+    if (!path) return
+    const result = await openPath(path)
+    if (!result.ok) ElMessage.error(userFacingError(result.error, '无法打开输出文件夹'))
+  }
+
   async function openGeneratedOutput() {
     const path = generatedResult.value?.output_path
     if (!path) return
@@ -1121,27 +1157,13 @@ export function useImagePaddlerState(options = {}) {
     }
   }
 
-  function previewImageStyle(img) {
+  function previewImageStyle(img, index = previewImages.value.findIndex(image => image.path === img.path)) {
     const metrics = layoutMetrics.value
-    const dpi = settings.dpi === 0 ? 300 : Math.min(1200, Math.max(72, settings.dpi))
-    const nativeWidth = (img.width * 25.4) / dpi
-    const nativeHeight = (img.height * 25.4) / dpi
-    let drawWidth, drawHeight
-    const scaleFactor = currentPageScale.value
-    if (settings.scale_mode === 'fixed_width') {
-      const fixedW = effectivePageWidth(actualImageWidth.value, scaleFactor)
-      const ratio = img.width > 0 ? img.height / img.width : 1
-      drawWidth = fixedW
-      drawHeight = fixedW * ratio
-    } else {
-      const fitScale = Math.min(metrics.cellWidth / nativeWidth, metrics.imageCellHeight / nativeHeight) * scaleFactor
-      const scale = settings.scale_mode === 'original' ? Math.min(fitScale, scaleFactor) : fitScale
-      drawWidth = nativeWidth * scale
-      drawHeight = nativeHeight * scale
-    }
+    const box = currentPageConflictReport.value.imageBoxes?.[index]
+    if (!box) return { display: 'none' }
     return {
-      width: `${(drawWidth / metrics.cellWidth) * 100}%`,
-      height: `${(drawHeight / metrics.imageCellHeight) * 100}%`,
+      width: `${(box.w / metrics.cellWidth) * 100}%`,
+      height: `${(box.h / metrics.imageCellHeight) * 100}%`,
       maxWidth: 'none',
       maxHeight: 'none',
       flexShrink: 0,
@@ -1463,6 +1485,7 @@ export function useImagePaddlerState(options = {}) {
     const pageImgsWithAnnotations = pageImgs.map((img) => ({
       ...img,
       title: imageTitle(img.path),
+      captionHeightMm: captionTextHeightMm(img, metrics),
       description:
         imageDescription(img.path) || (settings.reserve_note_placeholder ? settings.note_placeholder_text : ''),
     }))
@@ -1482,6 +1505,7 @@ export function useImagePaddlerState(options = {}) {
       showFilename: settings.show_filename,
       captionPosition: settings.caption_position,
       captionReserveMm: metrics.filenameReserve,
+      captionGapMm: captionGapMm.value,
       fontSizePt: clampNumber(settings.filename_font_size_pt, 6, 24, 8),
       noteFontSizePt: clampNumber(settings.note_font_size_pt, 6, 24, 8),
       pairMode: settings.pair_mode,
@@ -1515,7 +1539,9 @@ export function useImagePaddlerState(options = {}) {
     let tip = DOCLET_TIPS[worstColor] || ''
     if (worstColor === 'green') {
       const isHighDensity = layoutGrid.value.rows * layoutGrid.value.cols >= 6
-      if (isHighDensity && settings.show_filename) {
+      if (conflicts.some(item => item.captionOverflow)) {
+        tip = '标题或说明超出单元格，可减小间距或图片比例；图片位置不会随间距改变。'
+      } else if (isHighDensity && settings.show_filename) {
         tip = '高密度排版图片易超界，可调小统一宽度、缩小字号或关闭文件名。'
       } else if (report.hasCaptionOverlap) {
         tip = '图片探入标题区域，可调小本页比例或调小统一宽度。'
@@ -1559,6 +1585,8 @@ export function useImagePaddlerState(options = {}) {
             reason = '与其他图片重叠'
           } else if (item.captionOverlap) {
             reason = '遮挡或压盖图注'
+          } else if (item.captionOverflow) {
+            reason = '标题或说明超出单元格，请减小间距或图片比例'
           } else if (item.overflow) {
             reason = '超出单元格或页边距'
           }
@@ -1662,6 +1690,7 @@ export function useImagePaddlerState(options = {}) {
     setSettingsPanelWidth,
     startSettingsPanelResize,
     captionGapMm,
+    captionControlsEnabled,
     nextPage,
     prevPage,
     goToPage,
@@ -1669,13 +1698,16 @@ export function useImagePaddlerState(options = {}) {
     previewSlots,
     previewLayoutGrid,
     generatedOutputPaths,
+    generatedOutputDirectories,
+    chooseOutputDirectory,
+    openGeneratedDirectory,
     previewPageStyle,
     previewGridStyle,
     previewCellStyle,
     layoutMetrics,
     previewImageAreaStyle,
     previewImageAreaContainerStyle,
-    previewCaptionGapStyle,
+    previewCaptionStyle,
     previewNameStyle,
     previewNoteStyle,
     selectFolder,

@@ -37,6 +37,17 @@
             </el-radio-group>
           </el-form-item>
 
+          <el-form-item label="输出目录">
+            <div class="output-directory-control">
+              <el-input :model-value="settings.output_dir" readonly placeholder="默认：素材目录下的 _docsy_image_out" :title="settings.output_dir || '素材目录下的 _docsy_image_out'" />
+              <div class="source-actions">
+                <el-button :disabled="generating" @click="chooseOutputDirectory">选择文件夹</el-button>
+                <el-button v-if="settings.output_dir" :disabled="generating" text @click="settings.output_dir = ''">恢复默认</el-button>
+              </div>
+              <div class="field-hint">{{ settings.output_dir ? '本次所有文档保存到所选目录，并记住此选择。' : '合并输出保存在首张图片所在目录；分文件夹输出各自保存。' }}</div>
+            </div>
+          </el-form-item>
+
           <el-form-item v-if="settings.output_format === 'docx'" label="排版">
             <el-radio-group v-model="settings.use_table" size="small">
               <el-radio-button :label="true">表格</el-radio-button>
@@ -222,7 +233,7 @@
               <div class="filename-panel-row">
                 <el-switch v-model="settings.show_filename" size="small" active-text="显示" />
                 <el-switch v-model="settings.filename_without_ext" size="small" active-text="无扩展名" />
-                <el-select v-model="settings.caption_position" size="small" :disabled="!settings.show_filename" class="cap-select">
+                <el-select v-model="settings.caption_position" size="small" :disabled="!captionControlsEnabled" class="cap-select">
                   <el-option label="图下" value="below" />
                   <el-option label="图上" value="above" />
                 </el-select>
@@ -234,7 +245,7 @@
                   :min="0"
                   :max="20"
                   :step="0.5"
-                  :disabled="!settings.show_filename && !settings.reserve_note_placeholder"
+                  :disabled="!captionControlsEnabled"
                   class="gap-slider"
                 />
                 <el-input-number
@@ -246,10 +257,11 @@
                   :precision="1"
                   controls-position="right"
                   class="gap-num"
-                  :disabled="!settings.show_filename && !settings.reserve_note_placeholder"
+                  :disabled="!captionControlsEnabled"
                 />
                 <span class="unit-label">mm</span>
               </div>
+              <div class="field-hint">间距只移动文字；超出单元格时会提示冲突，可调整图片比例。</div>
               <div class="filename-panel-row">
                 <el-select v-model="settings.filename_font_family" size="small" :disabled="!settings.show_filename" class="font-select">
                   <el-option label="无衬线" value="sans" />
@@ -377,7 +389,10 @@
               <div v-for="path in generatedOutputPaths" :key="path" class="output-path">{{ path }}</div>
               <div v-for="warning in generatedResult.warnings || []" :key="warning" role="alert" class="field-hint">{{ warning }}</div>
             </div>
-            <el-button size="small" type="primary" text @click="openGeneratedOutput">打开文件</el-button>
+            <div class="generated-actions">
+              <el-button size="small" type="primary" text @click="openGeneratedOutput">打开文件</el-button>
+              <el-button v-for="(dir, index) in generatedOutputDirectories" :key="dir" size="small" type="primary" text :title="dir" @click="openGeneratedDirectory(dir)">{{ generatedOutputDirectories.length > 1 ? `打开文件夹 ${index + 1}` : '打开文件夹' }}</el-button>
+            </div>
           </div>
 
           <div v-if="isFrameSequence" class="sequence-mode-note">
@@ -496,7 +511,7 @@
                       <div
                         v-if="settings.caption_position === 'above' && hasCellCaption(img)"
                         class="preview-caption preview-caption-above"
-                        :style="previewCaptionGapStyle"
+                        :style="previewCaptionStyle(img, idx)"
                       >
                         <div v-if="settings.show_filename" class="preview-name preview-name-above" :style="previewNameStyle">
                           <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
@@ -512,13 +527,14 @@
                       <div
                         class="preview-image-area"
                         :style="[previewImageAreaStyle, previewImageAreaContainerStyle(idx)]"
+                        data-paddler="image-area"
                       >
-                        <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :style="previewImageStyle(img)" />
+                        <img :src="imageSrc(img.path)" :alt="fileName(img.path)" :style="previewImageStyle(img, idx)" />
                       </div>
                       <div
                         v-if="settings.caption_position !== 'above' && hasCellCaption(img)"
                         class="preview-caption"
-                        :style="previewCaptionGapStyle"
+                        :style="previewCaptionStyle(img, idx)"
                       >
                         <div v-if="settings.show_filename" class="preview-name" :style="previewNameStyle">
                           <span v-for="(line, lineIdx) in fileNameLines(img.path)" :key="`${lineIdx}-${line}`">{{
@@ -674,12 +690,16 @@ const {
   previewImages,
   previewSlots,
   generatedOutputPaths,
+  generatedOutputDirectories,
+  chooseOutputDirectory,
+  openGeneratedDirectory,
   previewPageStyle,
   previewGridStyle,
   previewCellStyle,
   previewImageAreaStyle,
   previewImageAreaContainerStyle,
-  previewCaptionGapStyle,
+  previewCaptionStyle,
+  captionControlsEnabled,
   previewNameStyle,
   previewNoteStyle,
   addFolders,
@@ -746,6 +766,8 @@ function hasCellCaption(img) {
 </script>
 
 <style scoped>
+.output-directory-control { width: 100%; min-width: 0; display: grid; gap: 6px; }
+.generated-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 :deep(.workspace-content) {
   overflow: hidden;
 }
@@ -1268,6 +1290,7 @@ function hasCellCaption(img) {
   align-items: center;
   justify-content: center;
   overflow: visible;
+  /* 内联 style 会覆盖为 absolute；保留 relative 作无内联时的回退 */
   position: relative;
 }
 
@@ -1281,9 +1304,13 @@ function hasCellCaption(img) {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   overflow: hidden;
+  /* 标题与图片同一套绝对定位：调间距只动文字，切上/下两边一起换 */
+  position: absolute;
+  left: 0;
+  pointer-events: none;
 }
 
 .preview-name {

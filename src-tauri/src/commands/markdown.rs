@@ -153,14 +153,7 @@ pub async fn prepare_markdown_media(
             (None, Some(text)) => text,
             _ => anyhow::bail!("请选择 Markdown 文件或粘贴文本"),
         };
-        if source.len() > 16 * 1024 * 1024 {
-            anyhow::bail!("Markdown 文本过大，请分批转换");
-        }
-        let plan = crate::markdown::media::prepare(&source);
-        if plan.items.len() > 500 || plan.items.iter().any(|item| item.source.len() > 50_000) {
-            anyhow::bail!("公式或图表过多/过长，请拆分后转换");
-        }
-        Ok(plan)
+        crate::markdown::media::prepare_checked(&source)
     })
     .await
 }
