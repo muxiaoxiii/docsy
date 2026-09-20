@@ -145,6 +145,8 @@ pub struct RunArgs {
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct ImageAnnotation {
     #[serde(default)]
+    pub rotation_degrees: u16,
+    #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -836,6 +838,15 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, default_output_dir: &P
         anyhow::bail!("排版参数无效，请检查页边距、字号和图片宽度");
     }
 
+    for image in &mut images {
+        let rotation = args.image_annotations.as_ref().and_then(|annotations| annotations.get(&image.path))
+            .map_or(0, |annotation| annotation.rotation_degrees);
+        crate::util::images::validate_rotation(rotation)?;
+        if rotation == 90 || rotation == 270 {
+            std::mem::swap(&mut image.width, &mut image.height);
+        }
+    }
+
     let mut grid = parse_layout(&args.layout, args.custom_rows, args.custom_cols);
     if args.output_format == "docx" && args.use_table == Some(false) {
         grid = LayoutGrid { rows: grid.rows * grid.cols, cols: 1 };
@@ -1481,7 +1492,7 @@ fn generate_pdf(
             );
             let (target_width_px, target_height_px) =
                 target_pixel_size(draw_w_pt, draw_h_pt, config.dpi);
-            let img = image_for_output(&img_info.path, target_width_px, target_height_px)?;
+            let img = image_for_output(&img_info.path, target_width_px, target_height_px, config.image_annotations.get(&img_info.path).map_or(0, |annotation| annotation.rotation_degrees))?;
             let encoded_width = img.width();
             let raw_image =
                 RawImage::from_dynamic_image(img).map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -1918,7 +1929,7 @@ fn docx_cell_paragraphs(
         _ => AlignmentType::Center,
     };
     let (target_w, target_h) = target_pixel_size(draw_w, draw_h, cfg.dpi);
-    let (png, width, height) = image_as_png(&img.path, target_w, target_h)?;
+    let (png, width, height) = image_as_png(&img.path, target_w, target_h, cfg.image_annotations.get(&img.path).map_or(0, |annotation| annotation.rotation_degrees))?;
     let pic =
         Pic::new_with_dimensions(png, width, height).size(pt_to_emu(draw_w), pt_to_emu(draw_h));
     let above = has_caption && cfg.caption_position == "above";
@@ -2278,8 +2289,9 @@ fn image_for_output(
     path: &str,
     target_width: u32,
     target_height: u32,
+    rotation_degrees: u16,
 ) -> Result<::image::DynamicImage> {
-    let img = ::image::open(path).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let img = crate::util::images::rotate(::image::open(path)?, rotation_degrees)?;
     if img.width() <= target_width && img.height() <= target_height {
         return Ok(img);
     }
@@ -2290,21 +2302,21 @@ fn image_for_output(
     ))
 }
 
-fn image_as_png(path: &str, target_width: u32, target_height: u32) -> Result<(Vec<u8>, u32, u32)> {
+fn image_as_png(path: &str, target_width: u32, target_height: u32, rotation_degrees: u16) -> Result<(Vec<u8>, u32, u32)> {
     let source_dimensions =
         ::image::image_dimensions(path).map_err(|e| anyhow::anyhow!("{}", e))?;
     let is_png = Path::new(path)
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
-    if is_png && source_dimensions.0 <= target_width && source_dimensions.1 <= target_height {
+    if rotation_degrees == 0 && is_png && source_dimensions.0 <= target_width && source_dimensions.1 <= target_height {
         return Ok((
             std::fs::read(path)?,
             source_dimensions.0,
             source_dimensions.1,
         ));
     }
-    let img = image_for_output(path, target_width, target_height)?;
+    let img = image_for_output(path, target_width, target_height, rotation_degrees)?;
     let width = img.width();
     let height = img.height();
     let mut cursor = std::io::Cursor::new(Vec::new());
@@ -2730,7 +2742,7 @@ mod tests {
         image.save(&path).unwrap();
         let original = std::fs::read(&path).unwrap();
 
-        let (embedded, width, height) = image_as_png(path.to_str().unwrap(), 320, 180).unwrap();
+        let (embedded, width, height) = image_as_png(path.to_str().unwrap(), 320, 180, 0).unwrap();
 
         assert_eq!((width, height), (160, 90));
         assert_eq!(embedded, original);
@@ -2750,7 +2762,7 @@ mod tests {
             image::ImageBuffer::from_pixel(1200, 800, image::Rgba([240, 240, 236, 255]));
         image.save(&path).unwrap();
 
-        let resized = image_for_output(path.to_str().unwrap(), 600, 400).unwrap();
+        let resized = image_for_output(path.to_str().unwrap(), 600, 400, 0).unwrap();
 
         assert_eq!((resized.width(), resized.height()), (600, 400));
         let _ = std::fs::remove_dir_all(root);
@@ -2935,6 +2947,7 @@ mod tests {
         annotations.insert(
             "img1.png".to_string(),
             ImageAnnotation {
+                rotation_degrees: 0,
                 title: Some("自定义标题 1".into()),
                 description: Some("拍摄时间：2026-09-18\n见证人：张三".into()),
             },
@@ -3281,6 +3294,88 @@ mod caption_and_destination_tests {
             }
         }
         (images, text)
+    }
+
+    #[test]
+    fn rotation_reaches_pdf_docx_geometry_and_embedded_pixels_without_changing_source() {
+        let dir = crate::util::fs::temp_named_path("docsy-rotation-export", "dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
+        let path = dir.join("image.png");
+        let fixture = image::RgbImage::from_fn(60, 30, |x, _| if x < 30 { image::Rgb([255, 0, 0]) } else { image::Rgb([0, 0, 255]) });
+        fixture.save(&path).unwrap();
+        let source = std::fs::read(&path).unwrap();
+        for angle in [0, 90, 180, 270] {
+            let expected = if angle == 90 || angle == 270 { (30, 60) } else { (60, 30) };
+            let image = image_for_output(path.to_str().unwrap(), 1000, 1000, angle).unwrap();
+            assert_eq!((image.width(), image.height()), expected);
+            for format in ["pdf", "docx"] {
+                let args: RunArgs = serde_json::from_value(serde_json::json!({
+                    "folder": dir, "image_paths": [path], "output_dir": dir, "output_format": format,
+                    "layout": "1", "orientation": "portrait", "dpi": 300,
+                    "scale_mode": "fixed_width", "fixed_width_mm": 40, "show_filename": false,
+                    "image_annotations": {path.to_string_lossy().to_string(): {"rotation_degrees": angle}}
+                })).unwrap();
+                let result = run(&args).unwrap();
+                if format == "docx" {
+                    let mut zip = zip::ZipArchive::new(std::fs::File::open(&result.output_path).unwrap()).unwrap();
+                    let mut xml = String::new();
+                    zip.by_name("word/document.xml").unwrap().read_to_string(&mut xml).unwrap();
+                    let re = regex::Regex::new(r#"<wp:extent cx="(\d+)" cy="(\d+)""#).unwrap();
+                    let extent = re.captures(&xml).unwrap();
+                    let ratio = extent[2].parse::<f64>().unwrap() / extent[1].parse::<f64>().unwrap();
+                    assert!((ratio - expected.1 as f64 / expected.0 as f64).abs() < 0.001);
+                    let media = zip.file_names().find(|name| name.starts_with("word/media/") && !name.ends_with('/')).unwrap().to_string();
+                    let mut bytes = Vec::new();
+                    zip.by_name(&media).unwrap().read_to_end(&mut bytes).unwrap();
+                    let decoded = image::load_from_memory(&bytes).unwrap().to_rgb8();
+                    assert_eq!(decoded.dimensions(), expected);
+                    assert_eq!(decoded, image.to_rgb8());
+                } else {
+                    let (matrices, _) = pdf_positions(&result.output_path);
+                    let matrix = matrices.iter().find(|m| m[0].as_float().unwrap_or(0.0) > 2.0).unwrap();
+                    let ratio = matrix[3].as_float().unwrap() / matrix[0].as_float().unwrap();
+                    assert!((ratio as f64 - expected.1 as f64 / expected.0 as f64).abs() < 0.001);
+                }
+            }
+        }
+        assert_eq!(std::fs::read(path).unwrap(), source);
+    }
+
+    #[test]
+    fn scaled_portrait_caption_keeps_its_gap_in_mixed_orientation_exports() {
+        let dir = crate::util::fs::temp_named_path("docsy-mixed-caption", "dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
+        let portrait = dir.join("portrait.png");
+        let landscape = dir.join("landscape.png");
+        image::RgbImage::new(108, 192).save(&portrait).unwrap();
+        image::RgbImage::new(192, 108).save(&landscape).unwrap();
+        for position in ["above", "below"] {
+            for format in ["pdf", "docx"] {
+                let args: RunArgs = serde_json::from_value(serde_json::json!({
+                    "folder": dir, "image_paths": [portrait, landscape], "output_dir": dir,
+                    "output_format": format, "layout": "2x1", "orientation": "portrait", "dpi": 300,
+                    "scale_mode": "fixed_width", "fixed_width_mm": 160, "page_scales": [0.4],
+                    "caption_position": position, "caption_gap_mm": 8, "filename_font_size_pt": 8,
+                    "image_annotations": {portrait.to_string_lossy().to_string(): {"title":"CAPTION"}}
+                })).unwrap();
+                let result = run(&args).unwrap();
+                assert_eq!(result.pages, 1);
+                if format == "docx" {
+                    let (image_y, text_y) = docx_positions(&result.output_path);
+                    let separation = if position == "above" { image_y - text_y } else { text_y - image_y };
+                    let height = if position == "above" { filename_line_height_mm(8.0) } else { 160.0 * 0.4 * 192.0 / 108.0 };
+                    assert!((separation - mm_to_twips(height + 8.0) as f64).abs() <= 2.0);
+                } else {
+                    let (images, captions) = pdf_positions(&result.output_path);
+                    let matrix = images.iter().find(|m| m[0].as_float().unwrap_or(0.0) > 2.0).unwrap();
+                    let bottom = matrix[5].as_float().unwrap() as f64;
+                    let top = bottom + matrix[3].as_float().unwrap() as f64;
+                    assert!(if position == "above" { captions[0] > top } else { captions[0] < bottom });
+                }
+            }
+        }
     }
 
     #[test]

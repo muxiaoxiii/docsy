@@ -269,7 +269,8 @@ export function detectPageConflicts({
     const caption = captionBoxes.find(cap => cap.index === idx)
     const captionOverflow = Boolean(caption?.outsideCell)
     const captionCollision = Boolean(caption && captionBoxes.some(other => other.index !== idx && aabbIntersect(caption, other)))
-    captionOverlap ||= captionCollision
+    const captionCovered = Boolean(caption && imageBoxes.some(other => aabbIntersect(other, caption, 0.1)))
+    captionOverlap ||= captionCollision || captionCovered
     if (captionOverlap) hasAnyCaptionOverlap = true
     const overflow = exceedsImageArea || exceedsPageMargin || captionOverlap || captionOverflow
     if (overflow) hasAnyOverflow = true

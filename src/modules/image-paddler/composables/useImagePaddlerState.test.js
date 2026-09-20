@@ -642,3 +642,57 @@ describe('输出目录选择与结果入口', () => {
     expect(state.generatedOutputDirectories.value).toEqual(['/A', '/B'])
   })
 })
+
+
+describe('non-destructive layout rotation', () => {
+  it('keeps source dimensions and annotations through reorder, export and four rotations', async () => {
+    const state = useImagePaddlerState()
+    const path = '/images/landscape.png'
+    state.folders.value = ['/images']
+    state.analysis.value = { images: [{ path, width: 1920, height: 1080 }, images[0]] }
+    state.setImageAnnotation(path, { title: 'Titre 日本語 한국어', description: 'Note' })
+    state.rotateImage({ path })
+    expect(state.imageRotation(path)).toBe(90)
+    expect(state.orderedImages.value[0]).toMatchObject({ width: 1080, height: 1920 })
+    state.reorderLayoutImages({ from: 0, to: 1 })
+    expect(state.analysis.value.images[1]).toMatchObject({ width: 1920, height: 1080 })
+    expect(state.orderedImages.value[1]).toMatchObject({ width: 1080, height: 1920 })
+    state.settings.size_mode = 'manual'
+    state.settings.fixed_width_mm = 30
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { images: 2, pages: 1 } })
+    await state.run()
+    const call = tauriCallSafe.mock.calls.findLast(([command]) => command === 'run_image_paddler')
+    expect(call[1].args.image_annotations[path]).toEqual({ rotation_degrees: 90, title: 'Titre 日本語 한국어', description: 'Note' })
+    state.generating.value = true
+    state.rotateImage({ path })
+    expect(state.imageRotation(path)).toBe(90)
+    state.generating.value = false
+    for (let i = 0; i < 3; i++) state.rotateImage({ path })
+    expect(state.imageRotation(path)).toBe(0)
+    expect(state.orderedImages.value[1]).toMatchObject({ width: 1920, height: 1080 })
+    expect(state.getImageAnnotation(path).title).toBe('Titre 日本語 한국어')
+  })
+
+  it.each(['above', 'below'])('fits mixed orientations with %s captions and exports the chosen scale', async position => {
+    const state = useImagePaddlerState()
+    const mixed = [{ path: '/images/landscape.png', width: 1920, height: 1080 }, { path: '/images/portrait.png', width: 1080, height: 1920 }]
+    state.folders.value = ['/images']
+    state.analysis.value = { images: mixed }
+    state.settings.layout = '2x1'
+    state.settings.orientation = 'portrait'
+    state.setSizeMode('manual')
+    state.settings.fixed_width_mm = 160
+    state.settings.caption_position = position
+    state.settings.caption_gap_mm = 8
+    state.setImageAnnotation(mixed[0].path, { description: 'First line\nSecond line' })
+    await nextTick()
+    state.activePageScale.value = 80
+    expect(state.currentPageConflicts.value.some(item => item.captionOverlap)).toBe(true)
+    state.autoFitCurrentPageScale()
+    expect(state.currentPageConflicts.value.every(item => !item.overflow && !item.overlap && !item.captionOverlap)).toBe(true)
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { images: 2, pages: 1 } })
+    await state.run()
+    const call = tauriCallSafe.mock.calls.findLast(([command]) => command === 'run_image_paddler')
+    expect(call[1].args.page_scales[0]).toBeCloseTo(state.activePageScale.value / 100)
+  })
+})

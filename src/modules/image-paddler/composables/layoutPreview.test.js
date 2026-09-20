@@ -404,3 +404,17 @@ describe('image layout preview', () => {
   })
 })
 
+
+
+it('marks both the encroaching portrait and the landscape whose caption is covered', () => {
+  const report = detectPageConflicts({
+    images: [
+      { path: 'landscape.png', width: 1920, height: 1080, captionHeightMm: 5 },
+      { path: 'portrait.png', width: 1080, height: 1920, captionHeightMm: 5 },
+    ],
+    grid: { rows: 2, cols: 1 }, cellWidth: 186, imageCellHeight: 129,
+    fixedWidthMm: 160, pageScale: 0.8, captionPosition: 'below', captionReserveMm: 7.5, captionGapMm: 2,
+  })
+  expect(report.items[0].captionOverlap).toBe(true)
+  expect(report.items[1].captionOverlap).toBe(true)
+})

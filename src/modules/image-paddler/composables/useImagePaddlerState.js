@@ -146,7 +146,12 @@ export function useImagePaddlerState(options = {}) {
   })
   const resolvedOrientationLabel = computed(() => (resolvedOrientation.value === 'landscape' ? '横向' : '竖向'))
   const orderedImages = computed(() => {
-    const images = analysis.value?.images || []
+    const images = (analysis.value?.images || []).map(image => {
+      const rotation = imageRotation(image.path)
+      const swapped = rotation === 90 || rotation === 270
+      return { ...image, width: swapped ? image.height : image.width,
+        height: swapped ? image.width : image.height, rotation_degrees: rotation }
+    })
     if (settings.output_mode === 'per_folder') {
       return buildOutputPlan(images, Math.max(1, images.length), 'per_folder')
         .flatMap(file => reorderImages(file.pages[0].images, layoutGrid.value, settings.order_mode))
@@ -903,7 +908,8 @@ export function useImagePaddlerState(options = {}) {
     if (!analysis.value) return
     analysis.value = {
       ...analysis.value,
-      images: moveItem(orderedImages.value, from, to),
+      // Keep analysis dimensions in source orientation; rotation is applied only by orderedImages.
+      images: moveItem(orderedImages.value, from, to).map(image => analysis.value.images.find(source => source.path === image.path)),
     }
     settings.order_mode = 'custom'
     generatedResult.value = null
@@ -960,8 +966,20 @@ export function useImagePaddlerState(options = {}) {
     return Math.min(max, Math.max(min, Math.round(number)))
   }
 
+  function imageRotation(path) {
+    const value = Number(imageAnnotations.value[path]?.rotation_degrees || 0)
+    return [0, 90, 180, 270].includes(value) ? value : 0
+  }
+
+  function rotateImage({ path }) {
+    if (!path || generating.value) return
+    setImageAnnotation(path, { rotation_degrees: (imageRotation(path) + 90) % 360 })
+  }
+
+  function previewSourceKey(path) { return JSON.stringify([path, imageRotation(path)]) }
+
   function imageSrc(path) {
-    return previewSources[path] || ''
+    return previewSources[previewSourceKey(path)] || ''
   }
 
   function fileName(path) {
@@ -1226,11 +1244,10 @@ export function useImagePaddlerState(options = {}) {
   async function preloadImages(paths) {
     await Promise.all(
       paths.map(async (path) => {
-        if (previewSources[path]) return
-        const result = await tauriCallQuiet('read_image_data_url', { path, maxEdge: 900 })
-        if (result.ok) {
-          previewSources[path] = result.data
-        }
+        const key = previewSourceKey(path)
+        if (previewSources[key]) return
+        const result = await tauriCallQuiet('read_image_data_url', { path, maxEdge: 900, rotationDegrees: imageRotation(path) })
+        if (result.ok) previewSources[key] = result.data
       }),
     )
   }
@@ -1537,7 +1554,9 @@ export function useImagePaddlerState(options = {}) {
     }
 
     let tip = DOCLET_TIPS[worstColor] || ''
-    if (worstColor === 'green') {
+    if (report.hasCaptionOverlap) {
+      tip = '图片与标题或说明重叠；缩小后仍有冲突时，可切换「本页」并点击「智能」，或使用「适应」尺寸。'
+    } else if (worstColor === 'green') {
       const isHighDensity = layoutGrid.value.rows * layoutGrid.value.cols >= 6
       if (conflicts.some(item => item.captionOverflow)) {
         tip = '标题或说明超出单元格，可减小间距或图片比例；图片位置不会随间距改变。'
@@ -1732,6 +1751,8 @@ export function useImagePaddlerState(options = {}) {
     imageTitle,
     imageDescription,
     getImageAnnotation,
+    imageRotation,
+    rotateImage,
     setImageAnnotation,
     clearImageAnnotation,
     noteLines,

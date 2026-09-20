@@ -6,10 +6,26 @@ mod preview_tests {
     use base64::Engine;
 
     #[test]
+    fn detail_preview_supports_high_resolution_and_rotation_without_modifying_source() {
+        let path = crate::util::fs::temp_named_path("docsy-detail-preview", "png");
+        image::RgbaImage::from_pixel(2400, 1200, image::Rgba([20, 40, 60, 80])).save(&path).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        for (edge, angle, dimensions) in [(None, 0, (1600, 800)), (Some(4096), 90, (1200, 2400))] {
+            let preview = preview_image_data_url(path.to_str().unwrap(), edge, angle).unwrap();
+            let bytes = base64::engine::general_purpose::STANDARD.decode(preview.split_once(',').unwrap().1).unwrap();
+            let decoded = image::load_from_memory(&bytes).unwrap().to_rgba8();
+            assert_eq!(decoded.dimensions(), dimensions);
+            assert_eq!(decoded.get_pixel(0, 0).0, [20, 40, 60, 80]);
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn transparent_png_preview_preserves_alpha() {
         let path = std::env::temp_dir().join(format!("docsy-alpha-{}.png", std::process::id()));
         image::RgbaImage::from_pixel(4, 4, image::Rgba([20, 40, 60, 80])).save(&path).unwrap();
-        let preview = preview_image_data_url(path.to_str().unwrap(), Some(160)).unwrap();
+        let preview = preview_image_data_url(path.to_str().unwrap(), Some(160), 0).unwrap();
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(preview.strip_prefix("data:image/png;base64,").unwrap()).unwrap();
         let decoded = image::load_from_memory(&bytes).unwrap().to_rgba8();
@@ -291,15 +307,17 @@ fn collect_recent_logs(max_lines: usize) -> Vec<String> {
 }
 
 #[tauri::command]
-pub async fn read_image_data_url(path: String, max_edge: Option<u32>) -> Result<String, String> {
-    crate::commands::run_blocking(move || preview_image_data_url(&path, max_edge)).await
+pub async fn read_image_data_url(path: String, max_edge: Option<u32>, rotation_degrees: Option<u16>) -> Result<String, String> {
+    crate::commands::run_blocking(move || preview_image_data_url(&path, max_edge, rotation_degrees.unwrap_or(0))).await
 }
 
-fn preview_image_data_url(path: &str, max_edge: Option<u32>) -> anyhow::Result<String> {
+fn preview_image_data_url(path: &str, max_edge: Option<u32>, rotation_degrees: u16) -> anyhow::Result<String> {
     use base64::Engine;
     use std::io::Cursor;
 
+    crate::util::images::validate_rotation(rotation_degrees)?;
     const DEFAULT_PREVIEW_EDGE: u32 = 1600;
+    const MAX_PREVIEW_EDGE: u32 = 4096;
     const MAX_SOURCE_PIXELS: u64 = 64_000_000;
     // 源文件大小上限，防止前端传任意大文件读爆内存
     const MAX_SOURCE_BYTES: u64 = 50 * 1024 * 1024;
@@ -329,8 +347,9 @@ fn preview_image_data_url(path: &str, max_edge: Option<u32>) -> anyhow::Result<S
     let image = image::open(&path).map_err(|error| anyhow::anyhow!("读取图片失败: {error}"))?;
     let preview_edge = max_edge
         .unwrap_or(DEFAULT_PREVIEW_EDGE)
-        .clamp(160, DEFAULT_PREVIEW_EDGE);
-    let preview = image.thumbnail(preview_edge, preview_edge);
+        .clamp(160, MAX_PREVIEW_EDGE)
+        .min(width.max(height));
+    let preview = crate::util::images::rotate(image.thumbnail(preview_edge, preview_edge), rotation_degrees)?;
     let has_alpha = preview.color().has_alpha();
     let (format, mime) = if has_alpha || ext == "png" || ext == "webp" {
         (image::ImageFormat::Png, "image/png")

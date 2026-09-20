@@ -565,6 +565,9 @@
               :excluded-resolver="isImageExcluded"
               :page-badge-resolver="imageBadgeResolver"
               :annotation-resolver="getImageAnnotation"
+              :rotation-resolver="imageRotation"
+              :disabled="generating"
+              @rotate="rotateImage"
               preserve-aspect-ratio
               :initial-zoom="130"
               v-model:page-fraction="previewPageFraction"
@@ -717,6 +720,8 @@ const {
   imageItemName,
   imageItemMeta,
   getImageAnnotation,
+  imageRotation,
+  rotateImage,
   setImageAnnotation,
   noteLines,
   isImageExcluded,
@@ -1268,7 +1273,8 @@ function hasCellCaption(img) {
   box-sizing: border-box;
   min-width: 0;
   min-height: 0;
-  background: var(--docsy-surface-elevated);
+  /* The page supplies the paper background; cells must not paint over overflow. */
+  background: transparent;
   display: flex;
   flex-direction: column;
   justify-content: center;
