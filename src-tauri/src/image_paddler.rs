@@ -1504,11 +1504,11 @@ fn generate_pdf(
                 _ => (cell_w_pt - draw_w_pt) / 2.0,
             };
             let (image_top_mm, text_top_mm) = caption_geometry(config, draw_h_pt * 25.4 / 72.0,
-                caption_height(&img_info.path, config), align);
+                caption_height(&img_info.path, config, !omit_filenames), align);
             let cell_top_mm = cell_y_mm + config.image_cell_h_mm + config.filename_reserve_mm;
             let base_x_pt = cell_x_mm * 72.0 / 25.4 + offset_x_pt;
             let base_y_pt = (cell_top_mm - image_top_mm) * 72.0 / 25.4 - draw_h_pt;
-            let text_area_y_mm = cell_top_mm - text_top_mm - caption_height(&img_info.path, config);
+            let text_area_y_mm = cell_top_mm - text_top_mm - caption_height(&img_info.path, config, !omit_filenames);
 
             let scale_factor = draw_w_pt / (encoded_width as f64 * 72.0 / config.dpi as f64);
 
@@ -1555,7 +1555,6 @@ fn generate_pdf(
                             + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
                         let line_from_bottom = title_lines.len() - line_idx - 1;
                         let text_y_pt = (text_area_y_mm
-                            + 0.8
                             + note_height_offset
                             + line_from_bottom as f64
                                 * filename_line_height_mm(config.filename_font_size_pt))
@@ -1587,7 +1586,6 @@ fn generate_pdf(
                             + ((cell_w_pt - line_w_pt) / 2.0).max(0.0);
                         let line_from_bottom = note_lines.len() - line_idx - 1;
                         let text_y_pt = (text_area_y_mm
-                            + 0.8
                             + line_from_bottom as f64
                                 * filename_line_height_mm(config.note_font_size_pt))
                             * 72.0
@@ -1871,9 +1869,9 @@ fn caption_geometry(
     (image_top, text_top)
 }
 
-fn caption_height(path: &str, config: &LayoutConfig) -> f64 {
+fn caption_height(path: &str, config: &LayoutConfig, include_title: bool) -> f64 {
     let (title, note) = resolve_image_title_and_note(path, config);
-    (if config.show_filename {
+    (if include_title && config.show_filename {
         title.len() as f64 * filename_line_height_mm(config.filename_font_size_pt)
     } else {
         0.0
@@ -1900,26 +1898,25 @@ fn docx_cell_paragraphs(
         page_scale,
     );
     let draw_h_mm = draw_h * 25.4 / 72.0;
-    let text_h = caption_height(&img.path, cfg);
+    let text_h = caption_height(&img.path, cfg, cfg.show_filename);
     let (image_top, text_top) = caption_geometry(cfg, draw_h_mm, text_h, align);
     let cell_h = cfg.image_cell_h_mm + cfg.filename_reserve_mm;
     let has_caption = text_h > 0.0;
-    // Paragraph spacing cannot be negative. Reject a newly displaced caption rather
-    // than shifting the image or silently clipping its text in Word's exact-height row.
-    if has_caption && cfg.caption_gap_mm > 0.0 {
-        let base_top = if cfg.caption_position == "above" {
-            image_top - text_h
-        } else {
-            image_top + draw_h_mm
-        };
-        if base_top >= -0.01
-            && base_top + text_h <= cell_h + 0.01
-            && (text_top < -0.01 || text_top + text_h > cell_h + 0.01)
-        {
+    // Align with preview: clamp captions that leave the cell instead of hard-failing
+    // after a force-generate. Only refuse when the caption itself cannot fit.
+    let mut text_top = text_top;
+    if has_caption {
+        if text_h > cell_h + 0.05 {
             anyhow::bail!(
-                "图文间距使标题或说明超出单元格，请减小间距或图片比例后生成 Word：{}",
+                "标题或说明高度超过单元格，请减少文字或缩小字号后生成 Word：{}",
                 img.path
             );
+        }
+        let max_top = (cell_h - text_h).max(0.0);
+        if text_top < 0.0 {
+            text_top = 0.0;
+        } else if text_top > max_top {
+            text_top = max_top;
         }
     }
     let twips = |mm: f64| mm_to_twips(mm.max(0.0)).max(0) as u32;

@@ -224,7 +224,8 @@ export function detectPageConflicts({
         y: capAreaY,
         w: textW,
         h: textH,
-        outsideCell: capAreaY < cellY - 0.5 || capAreaY + textH > cellY + cellH + 0.5,
+        // Keep preview/preflight epsilon aligned with Word export (0.05mm).
+        outsideCell: capAreaY < cellY - 0.05 || capAreaY + textH > cellY + cellH + 0.05,
         right: capX + textW,
         bottom: capAreaY + textH,
       })
@@ -269,7 +270,10 @@ export function detectPageConflicts({
     const caption = captionBoxes.find(cap => cap.index === idx)
     const captionOverflow = Boolean(caption?.outsideCell)
     const captionCollision = Boolean(caption && captionBoxes.some(other => other.index !== idx && aabbIntersect(caption, other)))
-    const captionCovered = Boolean(caption && imageBoxes.some(other => aabbIntersect(other, caption, 0.1)))
+    const captionCovered = Boolean(
+      caption &&
+        imageBoxes.some((other, otherIdx) => otherIdx !== idx && aabbIntersect(other, caption, 0.05)),
+    )
     captionOverlap ||= captionCollision || captionCovered
     if (captionOverlap) hasAnyCaptionOverlap = true
     const overflow = exceedsImageArea || exceedsPageMargin || captionOverlap || captionOverflow

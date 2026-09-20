@@ -485,6 +485,11 @@ impl<'a> Builder<'a> {
             return;
         };
         let drained: Vec<ParagraphChild> = self.children.drain(checkpoint..).collect();
+        // Same protocol policy as HTML export — never emit clickable javascript/file/data links.
+        if !crate::markdown::safe_export_url(&url, false) {
+            self.children.extend(drained);
+            return;
+        }
         let mut link = Hyperlink::new(&url, HyperlinkType::External);
         let mut rest = Vec::new();
         for child in drained {
@@ -592,7 +597,7 @@ impl<'a> Builder<'a> {
 const MAX_IMAGE_HEIGHT_EMU: u32 = 8_000_000;
 const MAX_LOCAL_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
 
-fn safe_image_path(root: &Path, destination: &str) -> Option<PathBuf> {
+pub(crate) fn safe_image_path(root: &Path, destination: &str) -> Option<PathBuf> {
     let relative = Path::new(destination);
     if relative.is_absolute() || destination.contains(':') || destination.contains('\\') {
         return None;
@@ -854,6 +859,27 @@ let x = 1;
             md.contains("☑ 已完成事项") || md.contains("已完成事项"),
             "md:\n{md}"
         );
+    }
+
+    #[test]
+    fn docx_links_reject_dangerous_protocols() {
+        let dir = crate::util::fs::temp_named_path("docsy-docx-link", "dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        let md = "[ok](https://example.com) [bad](javascript:alert(1)) [file](file:///etc/passwd)\n";
+        let bytes = build_docx_bytes(md, &dir).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut xml = String::new();
+        zip.by_name("word/document.xml").unwrap().read_to_string(&mut xml).unwrap();
+        let mut rels = String::new();
+        zip.by_name("word/_rels/document.xml.rels")
+            .unwrap()
+            .read_to_string(&mut rels)
+            .unwrap();
+        assert!(rels.contains("https://example.com") || xml.contains("https://example.com"));
+        assert!(!rels.contains("javascript:") && !xml.contains("javascript:"));
+        assert!(!rels.contains("file:///") && !xml.contains("file:///"));
+        // Unsafe destinations stay as plain text content, not external hyperlink targets.
+        assert!(xml.contains("bad") || xml.contains("alert"));
     }
 
     #[test]

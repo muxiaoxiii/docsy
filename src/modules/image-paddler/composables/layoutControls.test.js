@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   arrangeOptionsFor,
   controlsFromLayout,
+  importRecommendationDrifts,
   layoutFromControls,
   parseLayoutString,
-  recommendForLayout,
 } from './layoutControls.js'
 
 describe('layoutControls', () => {
@@ -31,42 +31,14 @@ describe('layoutControls', () => {
     expect(controlsFromLayout('4', 2, 2, false).imagesPerPage).toBe(4)
   })
 
-  it('recommendForLayout shrinks unified width when per-page grid gets denser', () => {
-    const images = Array.from({ length: 9 }, (_, i) => ({
-      path: `/img/${i}.png`,
-      width: 1920,
-      height: 1080,
-    }))
-    const two = recommendForLayout({
-      images,
-      grid: parseLayoutString('2x1'),
-      orientation: 'portrait',
-      perPage: 2,
-    })
-    const nine = recommendForLayout({
-      images,
-      grid: parseLayoutString('3x3'),
-      orientation: 'portrait',
-      perPage: 9,
-    })
-    expect(nine.recommended_width_mm).toBeLessThan(two.recommended_width_mm)
-    expect(nine.recommended_width_mm).toBeLessThanOrEqual(nine.safe_column_width_mm + 1)
+  it('parses custom and legacy count layouts', () => {
+    expect(parseLayoutString('custom', 2, 3)).toEqual({ rows: 2, cols: 3 })
+    expect(parseLayoutString('4')).toEqual({ rows: 2, cols: 2 })
   })
 
-  it('recommendForLayout respects tall images via height constraint not only column width', () => {
-    const squares = [
-      { path: '/s1.png', width: 1000, height: 1000 },
-      { path: '/s2.png', width: 1000, height: 1000 },
-    ]
-    const rec = recommendForLayout({
-      images: squares,
-      grid: { rows: 2, cols: 1 },
-      orientation: 'portrait',
-      perPage: 2,
-      showFilename: true,
-    })
-    // 两张正方形上下排：宽度不能超过格高，否则溢出
-    expect(rec.recommended_width_mm).toBeLessThanOrEqual(rec.image_cell_height_mm + 1)
-    expect(rec.recommended_width_mm).toBeLessThan(180)
+  it('detects import recommendation drift vs current grid', () => {
+    const importRec = { layout: '2x1' }
+    expect(importRecommendationDrifts(importRec, { rows: 2, cols: 1 }, 2)).toBe(false)
+    expect(importRecommendationDrifts(importRec, { rows: 3, cols: 3 }, 9)).toBe(true)
   })
 })

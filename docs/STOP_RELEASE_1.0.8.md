@@ -125,6 +125,15 @@
 - Chromium 在 1360×820 和 1100×680 验证卡片/弹窗旋转、400% 缩放拖动、适合窗口、窄侧栏、编辑多语言标题及关闭重开；混排上/下标题经智能缩放后无冲突，截图验证空白单元格遮挡前后差异。原生接口由夹具模拟，Rust 单独执行真实文件导出。记录位于 `release-candidate/image-paddler-rotation/`。
 - 本轮没有新增 Word/WPS 实机检查或 Windows 安装验收；候选包以构建清单为准。
 
+### 1.0.8 复审修复（本分支）
+
+- Word 图文间距越界改为夹紧文字坐标（标题本身过高才失败），与前端预检 0.05mm 容差对齐；强制生成不再因间距硬失败。
+- PDF 缺 CJK 字体时按实际绘制内容计算说明高度；去掉与预览不一致的 +0.8mm 基线。
+- DOCX 超链接与 HTML 共用 `safe_export_url`：拒绝 javascript/file/data/vbscript，并解码 `%2e%2e` 穿越。
+- `rendered.json` 绑定真实 sourceHash，测试不再改写；xlsx/pptx 在 resource_root 下嵌入沙箱内的本地图片。
+- FFmpeg 安装依次尝试 `homebrew-ffmpeg/ffmpeg/ffmpeg-full`、`ffmpeg-full`、`ffmpeg`，以 drawtext 实测为准。
+- 删除死代码 `recommendForLayout`；Windows CI 测试设置 `CARGO_BUILD_TARGET`；CI 工具 ZIP SHA256 仍不纳入（下载源不提供校验文件）。
+
 ## 必须明确的验收边界
 
 - 未进行 Windows x64/x86 真机安装、macOS 原生全流程交互验收、Word/WPS 的真实分页与裁字检查、真实 700+ 页及 100MB+ 扫描件端到端验收。

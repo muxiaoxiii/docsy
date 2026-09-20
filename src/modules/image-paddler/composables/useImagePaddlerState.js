@@ -906,10 +906,15 @@ export function useImagePaddlerState(options = {}) {
 
   function reorderLayoutImages({ from, to }) {
     if (!analysis.value) return
+    const sourceByPath = new Map(analysis.value.images.map(image => [image.path, image]))
+    const reordered = moveItem(orderedImages.value, from, to)
+      .map(image => sourceByPath.get(image?.path))
+      .filter(Boolean)
+    if (!reordered.length) return
     analysis.value = {
       ...analysis.value,
       // Keep analysis dimensions in source orientation; rotation is applied only by orderedImages.
-      images: moveItem(orderedImages.value, from, to).map(image => analysis.value.images.find(source => source.path === image.path)),
+      images: reordered,
     }
     settings.order_mode = 'custom'
     generatedResult.value = null

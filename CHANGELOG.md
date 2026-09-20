@@ -6,6 +6,15 @@
 
 停更候选：冻结功能范围，收尾数据保护、图片排版和恢复可靠性。本地候选不代表已在 GitHub 发布或完成 Windows / Word / WPS 验收。
 
+### 1.0.8 复审修复（本分支）
+
+- Word 图文间距越界改为夹紧文字坐标（标题本身过高才失败），与前端预检 0.05mm 容差对齐；强制生成不再因间距硬失败。
+- PDF 缺 CJK 字体时按实际绘制内容计算说明高度；去掉与预览不一致的 +0.8mm 基线。
+- DOCX 超链接与 HTML 共用 `safe_export_url`：拒绝 javascript/file/data/vbscript，并解码 `%2e%2e` 穿越。
+- `rendered.json` 绑定真实 sourceHash，测试不再改写；xlsx/pptx 在 resource_root 下嵌入沙箱内的本地图片。
+- FFmpeg 安装依次尝试 `homebrew-ffmpeg/ffmpeg/ffmpeg-full`、`ffmpeg-full`、`ffmpeg`，以 drawtext 实测为准。
+- 删除死代码 `recommendForLayout`；Windows CI 测试设置 `CARGO_BUILD_TARGET`；CI 工具 ZIP SHA256 仍不纳入（下载源不提供校验文件）。
+
 ### 修复
 - 图片排版支持在页码旁和大图弹窗顺时针旋转 90°，保留原文件；方向同步到缩略图、排版尺寸、冲突检测及 PDF/Word 导出。
 - 大图弹窗以图片为主，标题和说明收进可折叠窄栏；提供 5%～400% 缩放、拖动查看、适合窗口和 100%，高清预览长边上限提高到 4096 像素，小图不插值放大。

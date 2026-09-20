@@ -333,6 +333,7 @@ pub fn inject_equations(bytes: Vec<u8>, assets: &HashMap<String, Asset>) -> Resu
 pub fn office_ir(
     rich: &RichMarkdown,
     format: office_oxide::DocumentFormat,
+    resource_root: Option<&std::path::Path>,
 ) -> office_oxide::ir::DocumentIR {
     use office_oxide::ir::{DocumentIR, Element, Image, ImageFormat, Section};
     let pattern = regex::Regex::new(r"!\[(?:公式|Mermaid 图)\]\((docsy-media-\d+)\)").unwrap();
@@ -345,7 +346,7 @@ pub fn office_ir(
             if !text.trim().is_empty() {
                 result
                     .sections
-                    .extend(DocumentIR::from_markdown(text, format).sections);
+                    .extend(sections_with_local_images(text, format, resource_root));
             }
             let scale = (850.0 / asset.width).min(600.0 / asset.height).min(1.0);
             result.sections.push(Section {
@@ -373,9 +374,61 @@ pub fn office_ir(
     if !rich.text[end..].trim().is_empty() {
         result
             .sections
-            .extend(DocumentIR::from_markdown(&rich.text[end..], format).sections);
+            .extend(sections_with_local_images(&rich.text[end..], format, resource_root));
     }
     result
+}
+
+fn sections_with_local_images(
+    markdown: &str,
+    format: office_oxide::DocumentFormat,
+    resource_root: Option<&std::path::Path>,
+) -> Vec<office_oxide::ir::Section> {
+    use office_oxide::ir::{DocumentIR, Element, Image, ImageFormat, Section};
+    let mut sections = DocumentIR::from_markdown(markdown, format).sections;
+    let Some(root) = resource_root else {
+        return sections;
+    };
+    // Embed sandboxed local markdown images that office_oxide markdown parsing drops.
+    let re = regex::Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
+    let mut extra = Vec::new();
+    for caps in re.captures_iter(markdown) {
+        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let dest = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        if dest.is_empty() || dest.starts_with("docsy-media-") || dest.starts_with("http") {
+            continue;
+        }
+        let Some(path) = crate::markdown::md_to_docx::safe_image_path(root, dest) else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        if bytes.len() > 20 * 1024 * 1024 {
+            continue;
+        }
+        let Ok(reader) = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format()
+        else {
+            continue;
+        };
+        let Ok((w, h)) = reader.into_dimensions() else { continue };
+        if w == 0 || h == 0 || u64::from(w) * u64::from(h) > 32_000_000 {
+            continue;
+        }
+        let scale = (850.0 / w as f32).min(600.0 / h as f32).min(1.0);
+        extra.push(Section {
+            title: None,
+            elements: vec![Element::Image(Image {
+                data: Some(bytes),
+                format: Some(ImageFormat::Png),
+                alt_text: Some(if alt.is_empty() { "图片".into() } else { alt.into() }),
+                display_width_emu: Some((w as f32 * scale * 9525.0) as u64),
+                display_height_emu: Some((h as f32 * scale * 9525.0) as u64),
+                ..Default::default()
+            })],
+            ..Default::default()
+        });
+    }
+    sections.extend(extra);
+    sections
 }
 
 pub fn html_fragment(rich: &RichMarkdown) -> String {
@@ -612,9 +665,14 @@ mod tests {
     #[test]
     fn real_browser_media_export() {
         let text = "# 公式与图表验证\n\n能量 $E=mc^2$。\n\n$$\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$\n\n$$\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$$\n\n$$\\sum_{i=1}^{n} i=\\frac{n(n+1)}{2}$$\n\n```mermaid\nflowchart LR\n A[导入 Markdown] --> B{包含公式?}\n B -->|是| C[可编辑 Word 公式]\n B -->|否| D[正常转换]\n```";
-        let mut data: RenderedMarkdown =
+        let data: RenderedMarkdown =
             serde_json::from_str(include_str!("fixtures/rendered.json")).unwrap();
-        data.source_hash = prepare(text).source_hash;
+        // Fixture must stay bound to this exact source; never rewrite the hash in-test.
+        assert_eq!(
+            data.source_hash,
+            prepare(text).source_hash,
+            "fixtures/rendered.json sourceHash is out of date for real_browser_media_export"
+        );
         let temp = crate::util::fs::temp_named_path("docsy-media-fixture", "out");
         let dir = temp.as_path();
         std::fs::create_dir_all(dir).unwrap();

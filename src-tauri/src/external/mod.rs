@@ -80,21 +80,45 @@ pub fn check_by_name(name: &str) -> ToolStatus {
 
 fn homebrew_package(name: &str) -> Option<&'static str> {
     match name {
-        "ffmpeg" => Some("ffmpeg-full"),
+        "ffmpeg" => Some("homebrew-ffmpeg/ffmpeg/ffmpeg-full"),
         "poppler" => Some("poppler"),
         "qpdf" => Some("qpdf"),
         _ => None,
     }
 }
 
+/// Prefer full FFmpeg formulas that ship drawtext; fall back to core `ffmpeg`
+/// and still verify the filter before reporting success.
+fn homebrew_ffmpeg_candidates() -> &'static [&'static str] {
+    &[
+        "homebrew-ffmpeg/ffmpeg/ffmpeg-full",
+        "ffmpeg-full",
+        "ffmpeg",
+    ]
+}
+
 fn homebrew_install_command(packages: &[&str]) -> String {
     let install = format!("brew install {}", packages.join(" "));
-    if packages.contains(&"ffmpeg-full") {
-        format!(r#"{install} && {{
-    DOCSY_FFMPEG_PREFIX="$(brew --prefix ffmpeg-full)" &&
-    "$DOCSY_FFMPEG_PREFIX/bin/ffmpeg" -hide_banner -f lavfi -i 'color=c=white:s=320x100:d=0.1' -vf 'drawtext=text=Docsy' -frames:v 1 -f null -
-}}"#)
-    } else { install }
+    if packages.iter().any(|p| p.contains("ffmpeg")) {
+        format!(
+            r#"{install} || true
+for formula in homebrew-ffmpeg/ffmpeg/ffmpeg-full ffmpeg-full ffmpeg; do
+  brew install "$formula" || true
+  prefix="$(brew --prefix "$formula" 2>/dev/null || true)"
+  [ -n "$prefix" ] && [ -x "$prefix/bin/ffmpeg" ] || continue
+  if "$prefix/bin/ffmpeg" -hide_banner -f lavfi -i 'color=c=white:s=320x100:d=0.1' -vf 'drawtext=text=Docsy' -frames:v 1 -f null - 2>/dev/null; then
+    exit 0
+  fi
+done
+if command -v ffmpeg >/dev/null 2>&1 && ffmpeg -hide_banner -f lavfi -i 'color=c=white:s=320x100:d=0.1' -vf 'drawtext=text=Docsy' -frames:v 1 -f null - 2>/dev/null; then
+  exit 0
+fi
+echo "未能安装带 drawtext 的 FFmpeg（已尝试 ffmpeg-full 与常见 formula）" >&2
+exit 1"#
+        )
+    } else {
+        install
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -106,6 +130,30 @@ fn install_via_homebrew_background(name: &str) -> anyhow::Result<String> {
     } else {
         "brew"
     };
+
+    if name == "ffmpeg" {
+        let mut last_error = String::from("未知错误");
+        for formula in homebrew_ffmpeg_candidates() {
+            let mut cmd = hidden_command(brew_bin);
+            cmd.arg("install").arg(formula);
+            cmd.env("HOMEBREW_API_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles/api");
+            cmd.env("HOMEBREW_BOTTLE_DOMAIN", "https://mirrors.ustc.edu.cn/homebrew-bottles");
+            cmd.env("HOMEBREW_NO_AUTO_UPDATE", "1");
+            cmd.env("NONINTERACTIVE", "1");
+            match cmd.output() {
+                Ok(output) if output.status.success() => {
+                    validate_tool(name)?;
+                    if FfmpegTool.binary_path_with_drawtext().is_ok() {
+                        return Ok(format!("FFmpeg（{formula}）安装成功"));
+                    }
+                    last_error = format!("{formula} 安装后仍无 drawtext");
+                }
+                Ok(output) => last_error = command_failure_detail(&output),
+                Err(error) => last_error = error.to_string(),
+            }
+        }
+        anyhow::bail!("未安装可用的 drawtext FFmpeg：{last_error}");
+    }
 
     let package = homebrew_package(name).ok_or_else(|| anyhow::anyhow!("未知工具: {name}"))?;
 
@@ -122,7 +170,6 @@ fn install_via_homebrew_background(name: &str) -> anyhow::Result<String> {
         anyhow::bail!(command_failure_detail(&output));
     }
     validate_tool(name)?;
-    if name == "ffmpeg" { FfmpegTool.binary_path_with_drawtext()?; }
     Ok(format!("{} 安装成功", name))
 }
 
@@ -550,7 +597,7 @@ pub fn install_tools_via_terminal(tools: &[String]) -> anyhow::Result<()> {
         match t.as_str() {
             "ffmpeg" => {
                 packages.push(homebrew_package(t).unwrap());
-                names.push("FFmpeg 完整版");
+                names.push("FFmpeg（含 drawtext）");
             }
             "poppler" => {
                 packages.push(homebrew_package(t).unwrap());
@@ -615,27 +662,28 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn homebrew_install_requires_full_ffmpeg_and_propagates_watermark_failure() {
+    fn homebrew_install_command_tolerates_missing_full_formula_and_requires_drawtext() {
         use std::os::unix::fs::PermissionsExt;
         let dir = crate::util::fs::temp_named_path("docsy-brew-test", "dir");
         std::fs::create_dir_all(dir.join("bin")).unwrap();
         let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
         let binary = dir.join("bin/ffmpeg");
-        let command = homebrew_install_command(&[homebrew_package("ffmpeg").unwrap(), "poppler"]);
-        let script = format!(r#"brew() {{
-  if [ "$1" = "--prefix" ]; then printf '%s' "$DOCSY_TEST_PREFIX";
-  elif [ "$*" = "install ffmpeg-full poppler" ]; then return "$DOCSY_BREW_EXIT";
-  else return 99; fi
-}}
-{command}"#);
-        for (brew_exit, filter_exit, expected) in [(0, 0, 0), (0, 42, 42), (17, 0, 17)] {
-            std::fs::write(&binary, format!("#!/bin/sh\nexit {filter_exit}\n")).unwrap();
-            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
-            let status = Command::new("/bin/bash").args(["-c", &script])
-                .env("DOCSY_TEST_PREFIX", &dir).env("DOCSY_BREW_EXIT", brew_exit.to_string())
-                .status().unwrap();
-            assert_eq!(status.code(), Some(expected));
-        }
+        let command = homebrew_install_command(&["poppler"]);
+        assert!(!command.contains("drawtext"));
+        let ff_command = homebrew_install_command(&[homebrew_package("ffmpeg").unwrap(), "poppler"]);
+        assert!(ff_command.contains("drawtext"));
+        assert!(ff_command.contains("ffmpeg-full"));
+        // Fake brew installs nothing useful; script must fail after drawtext checks.
+        let script = format!(r#"brew() {{ return 1; }}
+command() {{ return 1; }}
+{ff_command}"#);
+        std::fs::write(&binary, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let status = Command::new("/bin/bash").args(["-c", &script])
+            .env("DOCSY_TEST_PREFIX", &dir)
+            .status().unwrap();
+        assert_eq!(status.code(), Some(1));
+        let _ = command;
     }
 
     #[test]

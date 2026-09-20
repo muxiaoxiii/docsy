@@ -358,7 +358,11 @@ fn export_rich_markdown(
             } else {
                 office_oxide::DocumentFormat::Pptx
             };
-            office_oxide::create::create_from_ir(&media::office_ir(rich, format), format, output)
+            office_oxide::create::create_from_ir(
+                &media::office_ir(rich, format, resource_root),
+                format,
+                output,
+            )
                 .map_err(|e| anyhow::anyhow!("生成 Office 文件失败: {e}"))?;
         }
     }
@@ -654,22 +658,67 @@ fn markdown_to_html_document(title: &str, markdown: &str) -> String {
     wrap_html_fragment(title, &safe_html_fragment(markdown))
 }
 
+/// Exported for DOCX hyperlinks and HTML destinations. Percent-decodes path
+/// segments so `%2e%2e` traversal cannot bypass the `..` check.
+pub(crate) fn safe_export_url(url: &str, image: bool) -> bool {
+    if url.chars().any(|c| c.is_control() || c == '\\') {
+        return false;
+    }
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("javascript:")
+        || lower.starts_with("vbscript:")
+        || lower.starts_with("data:")
+        || lower.starts_with("file:")
+    {
+        return false;
+    }
+    if lower.starts_with("https://") || lower.starts_with("http://") {
+        return true;
+    }
+    if !image && lower.starts_with("mailto:") {
+        return true;
+    }
+    if url.contains(':') || url.starts_with('/') {
+        return false;
+    }
+    if url.starts_with('#') {
+        return true;
+    }
+    // Decode the whole path first so `%2e%2e/` cannot survive as a single segment.
+    let decoded = percent_decode_path_segment(url);
+    for part in decoded.split(['/', '?', '#']) {
+        if part == ".." || part.contains('\0') {
+            return false;
+        }
+    }
+    true
+}
+
+fn percent_decode_path_segment(segment: &str) -> String {
+    let bytes = segment.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Raw HTML is displayed as text. Only known navigation protocols are active;
 /// locally rendered PNG data URLs are added afterwards by media::html_fragment.
 fn safe_html_fragment(markdown: &str) -> String {
     use pulldown_cmark::{Event, Options, Parser, Tag};
     fn safe_url(url: &str, image: bool) -> bool {
-        if url.chars().any(|c| c.is_control() || c == '\\') {
-            return false;
-        }
-        let lower = url.to_ascii_lowercase();
-        if lower.starts_with("https://") || lower.starts_with("http://") {
-            return true;
-        }
-        if !image && lower.starts_with("mailto:") {
-            return true;
-        }
-        !url.contains(':') && !url.starts_with('/') && !url.split('/').any(|part| part == "..")
+        crate::markdown::safe_export_url(url, image)
     }
     let parser = Parser::new_ext(
         markdown,
@@ -776,6 +825,21 @@ pub fn convert_text_with_media(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_export_url_rejects_encoded_traversal_and_dangerous_protocols() {
+        assert!(safe_export_url("https://example.com/a", false));
+        assert!(safe_export_url("docs/pic.png", true));
+        assert!(safe_export_url("#section", false));
+        assert!(!safe_export_url("javascript:alert(1)", false));
+        assert!(!safe_export_url("JAVASCRIPT:alert(1)", false));
+        assert!(!safe_export_url("file:///etc/passwd", false));
+        assert!(!safe_export_url("data:text/html,<script>", false));
+        assert!(!safe_export_url("..%2fsecret.png", true));
+        assert!(!safe_export_url("%2e%2e/secret.png", true));
+        assert!(!safe_export_url("foo/%2e%2e/%2e%2e/etc/passwd", true));
+        assert!(!safe_export_url("/absolute/path.png", true));
+    }
 
     #[test]
     fn html_exports_escape_raw_markup_titles_and_unsafe_protocols() {
