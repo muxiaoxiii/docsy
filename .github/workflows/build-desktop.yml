@@ -173,10 +173,10 @@ jobs:
 
       - name: Run stop-release Rust regressions on Windows
         if: runner.os == 'Windows'
-        env:
-          CARGO_BUILD_TARGET: ${{ matrix.rust-target }}
+        # Host triple tests only: managed tools (qpdf) are x64, and i686 test
+        # binaries fail with STATUS_ENTRYPOINT_NOT_FOUND when those DLLs load.
+        # Package builds still use matrix.rust-target for the installer itself.
         run: |
-          rustup target add ${{ matrix.rust-target }}
           cargo test --lib freeze
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --lib markdown
