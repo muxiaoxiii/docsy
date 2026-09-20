@@ -134,6 +134,12 @@
 - FFmpeg 安装依次尝试 `homebrew-ffmpeg/ffmpeg/ffmpeg-full`、`ffmpeg-full`、`ffmpeg`，以 drawtext 实测为准。
 - 删除死代码 `recommendForLayout`；Windows CI 测试设置 `CARGO_BUILD_TARGET`；CI 工具 ZIP SHA256 仍不纳入（下载源不提供校验文件）。
 
+## 交付前多轮检查（本分支 fix/1.0.8-review-p1）
+
+- 自动化：Rust `--lib` 395 通过 / 12 ignore；前端 39 文件 / 325 通过；ESLint 0；生产构建通过；版本 1.0.8 一致。
+- 分模块人工+子代理审查：图片排版、Markdown、PDF 冻结、核心 UI/视频/模板。P0 spacer 已修；P1 取消竞态/偏好覆盖/模板导入覆盖/DOCX 链接/编码穿越/fixture hash/FFmpeg 多 formula/说明预留等已处理。
+- 仍保留：CI 工具 ZIP 无 SHA256（下载源无校验文件，用户明确不做）；PDF 全量 unique_path TOCTOU 未迁移 create_new；MathJax/Mermaid 无强制超时；xlsx/pptx 超链接由 office_oxide 丢弃（保真限制）；Word/WPS/Windows 实机仍待验收。
+
 ## 必须明确的验收边界
 
 - 未进行 Windows x64/x86 真机安装、macOS 原生全流程交互验收、Word/WPS 的真实分页与裁字检查、真实 700+ 页及 100MB+ 扫描件端到端验收。

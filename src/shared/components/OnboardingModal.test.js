@@ -10,9 +10,11 @@ import OnboardingModal from './OnboardingModal.vue'
 describe('组件安装复检', () => {
   beforeEach(() => vi.clearAllMocks())
   it.each([false, true])('安装命令成功后，复检可用=%s 才决定就绪', async available => {
-    tauriCallSafe.mockImplementation(async command => command === 'install_external_tool'
-      ? { ok: true }
-      : { ok: true, data: { available } })
+    tauriCallSafe.mockImplementation(async command => {
+      if (command === 'install_external_tool') return { ok: true }
+      if (command === 'check_ffmpeg') return { ok: true, data: { has_drawtext: available } }
+      return { ok: true, data: { available } }
+    })
     const state = OnboardingModal.setup({}, { expose: vi.fn() })
     await state.startSetup()
     expect(state.isAllDone.value).toBe(available)

@@ -305,6 +305,12 @@
                     class="font-size"
                   />
                   <span class="unit-label">pt</span>
+                  <el-select v-model="settings.note_color" size="small" class="color-select">
+                    <el-option label="灰" value="gray" />
+                    <el-option label="深灰" value="dark_gray" />
+                    <el-option label="黑" value="black" />
+                    <el-option label="蓝" value="blue" />
+                  </el-select>
                 </template>
               </div>
               <el-input

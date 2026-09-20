@@ -900,15 +900,65 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, default_output_dir: &P
         cell_w,
         filename_font_size_pt,
     );
-    let filename_reserve = if show_filename {
-        filename_line_height_mm(filename_font_size_pt) * filename_max_lines as f64
-            + filename_safety_mm
-    } else {
-        0.0
+    // Include notes + baseline gap so the first gate matches FE metrics and later per-page checks.
+    let probe = LayoutConfig {
+        page_w_mm: page_w,
+        page_h_mm: page_h,
+        margin_mm,
+        grid: LayoutGrid {
+            rows: grid.rows,
+            cols: grid.cols,
+        },
+        cell_w_mm: cell_w,
+        image_cell_h_mm: 1.0,
+        filename_reserve_mm: 0.0,
+        show_filename,
+        filename_without_ext,
+        filename_font_family: normalize_filename_font_family(args.filename_font_family.as_deref()),
+        filename_font_size_pt,
+        filename_max_lines,
+        filename_safety_mm,
+        filename_remove_text: filename_remove_text.clone(),
+        filename_rules: filename_rules.clone(),
+        border_enabled: false,
+        border_color: String::new(),
+        scale_mode: args.scale_mode.clone(),
+        dpi: if args.dpi == 0 {
+            300
+        } else {
+            args.dpi.clamp(72, 1200)
+        },
+        use_table: true,
+        fixed_width_mm: None,
+        filename_color: String::new(),
+        caption_position: args
+            .caption_position
+            .clone()
+            .unwrap_or_else(|| "below".to_string()),
+        pair_mode: "cell-center".into(),
+        print_safety_pad_mm: args.print_safety_pad_mm.unwrap_or(6.0).max(0.0),
+        caption_gap_mm: args.caption_gap_mm.unwrap_or(2.0).clamp(0.0, 20.0),
+        last_page_mode: args
+            .last_page_mode
+            .clone()
+            .unwrap_or_else(|| "keep".to_string()),
+        page_scales: Vec::new(),
+        reserve_note_placeholder: args.reserve_note_placeholder.unwrap_or(false),
+        note_placeholder_text: args
+            .note_placeholder_text
+            .clone()
+            .unwrap_or_else(|| "[点击输入说明]".to_string()),
+        note_font_family: normalize_filename_font_family(
+            args.note_font_family.as_deref().or(Some("kaiti")),
+        ),
+        note_font_size_pt: args.note_font_size_pt.unwrap_or(8.0).clamp(6.0, 24.0),
+        note_color: args.note_color.as_deref().unwrap_or("gray").to_string(),
+        image_annotations: args.image_annotations.clone().unwrap_or_default(),
     };
+    let (_, _, filename_reserve) = caption_reserve_for_page(&images, &probe);
     let image_cell_h = cell_h - filename_reserve;
     if image_cell_h <= 1.0 {
-        anyhow::bail!("当前每页张数和字号没有为图片留下足够空间，请减少张数或缩小字号");
+        anyhow::bail!("标题或说明已占满单元格，请减少每页张数或缩小字号");
     }
 
     let total_pages = images.len().div_ceil(per_page);

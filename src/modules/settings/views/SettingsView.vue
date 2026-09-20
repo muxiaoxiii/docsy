@@ -451,8 +451,8 @@ async function loadSettings() {
 async function saveSettings() {
   // 简单验证
   const manifestUrl = (settings.value.tool_manifest_url || '').trim()
-  if (manifestUrl && !manifestUrl.startsWith('http://') && !manifestUrl.startsWith('https://')) {
-    ElMessage.warning('工具清单地址必须以 http:// 或 https:// 开头')
+  if (manifestUrl && !manifestUrl.startsWith('https://')) {
+    ElMessage.warning('工具清单地址必须使用以 https:// 开头的安全地址')
     return
   }
   const loPath = (settings.value.libreoffice_path || '').trim()

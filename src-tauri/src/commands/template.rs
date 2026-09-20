@@ -293,7 +293,7 @@ pub async fn save_batch_history_rows(rows: Vec<BatchHistoryRow>) -> Result<usize
 }
 
 #[tauri::command]
-pub async fn import_template_to_library(source_path: String) -> Result<String, String> {
+pub async fn import_template_to_library(source_path: String, overwrite: Option<bool>) -> Result<String, String> {
     run_blocking(move || {
         let source = std::path::Path::new(&source_path);
         let file_name = source
@@ -301,10 +301,15 @@ pub async fn import_template_to_library(source_path: String) -> Result<String, S
             .ok_or_else(|| anyhow::anyhow!("无效文件名"))?;
         let dest = crate::docx_template::template_library_dir().join(file_name);
         if dest.exists() {
-            anyhow::bail!(
-                "模板库中已存在同名文件：{}，请先删除已有模板或重命名源文件",
-                dest.display()
-            );
+            if !overwrite.unwrap_or(false) {
+                anyhow::bail!(
+                    "模板库中已存在同名文件：{}，请先删除已有模板或确认覆盖",
+                    dest.display()
+                );
+            }
+            std::fs::remove_file(&dest).map_err(|error| {
+                anyhow::anyhow!("无法覆盖已有模板：{}：{error}", dest.display())
+            })?;
         }
         std::fs::copy(source, &dest)?;
         Ok(dest.display().to_string())

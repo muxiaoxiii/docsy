@@ -678,11 +678,11 @@ pub(crate) fn safe_export_url(url: &str, image: bool) -> bool {
     if !image && lower.starts_with("mailto:") {
         return true;
     }
+    if url.starts_with('#') {
+        return !url.chars().any(|c| c.is_control() || c == '\\');
+    }
     if url.contains(':') || url.starts_with('/') {
         return false;
-    }
-    if url.starts_with('#') {
-        return true;
     }
     // Decode the whole path first so `%2e%2e/` cannot survive as a single segment.
     let decoded = percent_decode_path_segment(url);

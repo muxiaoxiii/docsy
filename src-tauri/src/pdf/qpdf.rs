@@ -7,15 +7,18 @@ use std::process::ExitStatus;
 /// `label` is used as a human-readable operation ID prefix for cancellation tracking.
 pub(crate) fn run_cancellable(label: &str, mut cmd: std::process::Command) -> Result<std::process::Output> {
     crate::operations::check_current_cancelled()?;
-    if let Some(registry) = crate::get_subprocess_registry() {
+    let output = if let Some(registry) = crate::get_subprocess_registry() {
         let op_id = format!("qpdf:{label}:{}", std::process::id());
         registry
             .spawn_and_wait(&op_id, cmd)
-            .with_context(|| format!("执行 qpdf {label} 失败"))
+            .with_context(|| format!("执行 qpdf {label} 失败"))?
     } else {
         cmd.output()
-            .with_context(|| format!("执行 qpdf {label} 失败"))
-    }
+            .with_context(|| format!("执行 qpdf {label} 失败"))?
+    };
+    // Cancel can land while qpdf is running; do not treat that as success.
+    crate::operations::check_current_cancelled()?;
+    Ok(output)
 }
 
 pub(crate) fn status_is_success(status: &ExitStatus) -> bool {
@@ -483,7 +486,14 @@ fn unique_available_path(path: &Path) -> PathBuf {
             return candidate;
         }
     }
-    path.to_path_buf()
+    // Never fall back to overwriting the requested path.
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let name = if extension.is_empty() {
+        format!("{stem}-{stamp}")
+    } else {
+        format!("{stem}-{stamp}.{extension}")
+    };
+    parent.join(name)
 }
 
 pub fn page_count(input: &str) -> Result<u32> {

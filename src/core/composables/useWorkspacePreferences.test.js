@@ -40,3 +40,18 @@ it('loads old manual width before defaults and preserves explicit new global sca
   expect(globalScalePercent.value).toBe(90)
   await preference.stop()
 })
+
+it('does not overwrite backend preferences when the initial load fails', async () => {
+  const mode = ref('user-value')
+  tauriCallSafe.mockReset()
+  tauriCallSafe.mockResolvedValue({ ok: false, error: 'db locked' })
+  const preference = useWorkspacePreferences('video-extract.workspace', { mode })
+  await preference.start()
+  mode.value = 'local-edit'
+  await preference.stop()
+  const commands = tauriCallSafe.mock.calls.map(call => call[0])
+  expect(commands).toContain('get_workspace_preference')
+  expect(commands).not.toContain('set_workspace_preference')
+})
+
+

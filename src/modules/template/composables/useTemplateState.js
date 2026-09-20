@@ -2302,7 +2302,10 @@ export function useTemplateState() {
         return // User cancelled
       }
     }
-    const result = await tauriCallSafe('import_template_to_library', { sourcePath: selected })
+    const result = await tauriCallSafe('import_template_to_library', {
+      sourcePath: selected,
+      overwrite: Boolean(existing),
+    })
     if (!result.ok) {
       ElMessage.error(userFacingError(result.error, '导入失败'))
       return

@@ -385,19 +385,26 @@ fn sections_with_local_images(
     resource_root: Option<&std::path::Path>,
 ) -> Vec<office_oxide::ir::Section> {
     use office_oxide::ir::{DocumentIR, Element, Image, ImageFormat, Section};
-    let mut sections = DocumentIR::from_markdown(markdown, format).sections;
-    let Some(root) = resource_root else {
-        return sections;
-    };
-    // Embed sandboxed local markdown images that office_oxide markdown parsing drops.
-    let re = regex::Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
-    let mut extra = Vec::new();
+    // Walk markdown once so local images stay at source order.
+    let mut sections = Vec::new();
+    let mut cursor = 0usize;
+    let re = regex::Regex::new(r#"!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)"#).unwrap();
     for caps in re.captures_iter(markdown) {
+        let found = match caps.get(0) {
+            Some(m) => m,
+            None => continue,
+        };
+        let text = &markdown[cursor..found.start()];
+        if !text.trim().is_empty() {
+            sections.extend(DocumentIR::from_markdown(text, format).sections);
+        }
+        cursor = found.end();
         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let dest = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         if dest.is_empty() || dest.starts_with("docsy-media-") || dest.starts_with("http") {
             continue;
         }
+        let Some(root) = resource_root else { continue };
         let Some(path) = crate::markdown::md_to_docx::safe_image_path(root, dest) else {
             continue;
         };
@@ -413,11 +420,32 @@ fn sections_with_local_images(
         if w == 0 || h == 0 || u64::from(w) * u64::from(h) > 32_000_000 {
             continue;
         }
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(128 * 1024 * 1024);
+        let Ok(decoded) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .map_err(|_| ())
+            .and_then(|r| {
+                let mut r = r;
+                r.limits(limits);
+                r.decode().map_err(|_| ())
+            })
+        else {
+            continue;
+        };
+        // Re-encode to PNG so xlsx/pptx media parts match ImageFormat::Png.
+        let mut png = std::io::Cursor::new(Vec::new());
+        if decoded
+            .write_to(&mut png, image::ImageFormat::Png)
+            .is_err()
+        {
+            continue;
+        }
         let scale = (850.0 / w as f32).min(600.0 / h as f32).min(1.0);
-        extra.push(Section {
+        sections.push(Section {
             title: None,
             elements: vec![Element::Image(Image {
-                data: Some(bytes),
+                data: Some(png.into_inner()),
                 format: Some(ImageFormat::Png),
                 alt_text: Some(if alt.is_empty() { "图片".into() } else { alt.into() }),
                 display_width_emu: Some((w as f32 * scale * 9525.0) as u64),
@@ -427,7 +455,9 @@ fn sections_with_local_images(
             ..Default::default()
         });
     }
-    sections.extend(extra);
+    if cursor < markdown.len() && !markdown[cursor..].trim().is_empty() {
+        sections.extend(DocumentIR::from_markdown(&markdown[cursor..], format).sections);
+    }
     sections
 }
 

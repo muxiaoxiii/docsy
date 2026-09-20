@@ -321,9 +321,14 @@ async function startSetup() {
       currentStatusText.value = `Doclet 正在为您配置 ${item.title}…`
       const res = await tauriCallSafe('install_external_tool', { toolName: item.tool })
       if (res.ok) {
-        // 复检工具可用性
+        // 复检工具可用性；FFmpeg 还必须具备 drawtext
         const checkRes = await tauriCallSafe('check_external_tool', { toolName: item.tool })
-        if (checkRes.ok && checkRes.data?.available) {
+        let ready = Boolean(checkRes.ok && checkRes.data?.available)
+        if (ready && item.tool === 'ffmpeg') {
+          const capability = await tauriCallSafe('check_ffmpeg')
+          ready = capability.ok && capability.data?.has_drawtext
+        }
+        if (ready) {
           item.ready = true
           item.status = 'ready'
         } else {

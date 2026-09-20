@@ -51,7 +51,7 @@ where
     T: Send + 'static,
     F: FnOnce(tokio_util::sync::CancellationToken) -> anyhow::Result<T> + Send + 'static,
 {
-    let op_id = operation_id.unwrap_or_else(|| format!("{}:auto", command));
+    let op_id = operation_id.unwrap_or_else(|| format!("{}:auto:{}", command, uuid_v4_lite()));
     let token = manager.begin(&op_id, command);
 
     // 不在 spawn_blocking 上使用 ?，确保 finish() 一定被调用
@@ -64,6 +64,16 @@ where
     // 无论成功失败都必须 finish，否则操作永远留在 map 里
     manager.finish(&op_id, result.is_err());
     result
+}
+
+fn uuid_v4_lite() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    format!("{pid:x}-{nanos:x}")
 }
 
 pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {

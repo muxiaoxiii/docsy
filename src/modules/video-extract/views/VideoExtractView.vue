@@ -513,7 +513,15 @@ async function extractFrames() {
 
   if (res.ok) {
     extractResult.value = res.data
-    ElMessage.success(`抽帧完成，共 ${res.data.count} 帧`)
+    if (res.data?.cancelled) {
+      ElMessage.warning('抽帧已取消')
+      if (!Array.isArray(res.data.frames) || !res.data.frames.length) {
+        extractResult.value = null
+        return
+      }
+    } else {
+      ElMessage.success(`抽帧完成，共 ${res.data.count} 帧`)
+    }
 
     if (Array.isArray(res.data.frames)) {
       await initializeResultImages(res.data.frames, res.data.output_dir)

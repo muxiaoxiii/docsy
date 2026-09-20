@@ -73,16 +73,26 @@ export function useWorkspacePreferences(scope, bindings, options = {}) {
     if (stopWatch) stopWatch()
     const result = await tauriCallSafe('get_workspace_preference', { scope })
     if (stopped) return
-    if (result.ok && result.data) applyBindings(bindings, options.migrate ? options.migrate(result.data) : result.data)
-    loaded = true
-    stopWatch = watch(() => readBindings(bindings), scheduleSave, { deep: true })
+    if (result.ok) {
+      if (result.data) {
+        applyBindings(bindings, options.migrate ? options.migrate(result.data) : result.data)
+      }
+      loaded = true
+      stopWatch = watch(() => readBindings(bindings), scheduleSave, { deep: true })
+    }
+    // Failed load must not arm auto-save, or defaults would overwrite backend prefs.
   }
 
   async function stop() {
     stopped = true
     if (stopWatch) stopWatch()
     stopWatch = null
-    if (timer) await save()
+    if (timer) {
+      window.clearTimeout(timer)
+      timer = null
+    }
+    // Never persist when the initial load failed — that would clobber backend prefs.
+    if (loaded) await save()
   }
 
   return { start, save, stop }

@@ -406,6 +406,36 @@ describe('image layout preview', () => {
 
 
 
+it('smart-width placement matches fixed_width export geometry within 0.05mm', () => {
+  // Same numbers as production layout-aware recommendation + detectPageConflicts.
+  const images = [
+    { path: 'a.png', width: 1600, height: 1200 },
+    { path: 'b.png', width: 1200, height: 1600 },
+  ]
+  const recommendedWidth = 93.4
+  const report = detectPageConflicts({
+    images,
+    grid: { rows: 2, cols: 1 },
+    cellWidth: 186,
+    imageCellHeight: 131.3,
+    fixedWidthMm: recommendedWidth,
+    pageScale: 1,
+    scaleMode: 'fixed_width',
+    dpi: 300,
+    pageWidth: 210,
+    pageHeight: 297,
+    marginMm: 12,
+    showFilename: true,
+    captionPosition: 'below',
+    captionReserveMm: 7.5,
+    captionGapMm: 2,
+  })
+  expect(Math.abs(report.imageBoxes[0].w - recommendedWidth)).toBeLessThan(0.05)
+  expect(Math.abs(report.imageBoxes[0].h - recommendedWidth * 0.75)).toBeLessThan(0.05)
+  expect(Math.abs(report.imageBoxes[1].w - recommendedWidth)).toBeLessThan(0.05)
+  expect(Math.abs(report.imageBoxes[1].h - recommendedWidth * (1600 / 1200))).toBeLessThan(0.05)
+})
+
 it('marks both the encroaching portrait and the landscape whose caption is covered', () => {
   const report = detectPageConflicts({
     images: [
