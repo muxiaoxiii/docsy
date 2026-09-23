@@ -40,8 +40,8 @@ pub enum Format {
     Rtf,
     /// EPUB 2 and 3 (`.epub`).
     Epub,
-    /// Excel workbooks in every container calamine reads: `.xlsx`, `.xlsm`,
-    /// `.xlsb`, and binary `.xls`.
+    /// Excel workbooks: `.xlsx`, `.xlsm`, binary `.xlsb`, and legacy
+    /// OLE-based `.xls`.
     Excel,
     /// OpenDocument Spreadsheet (`.ods`).
     Ods,
@@ -54,8 +54,8 @@ pub enum Format {
 
 impl Format {
     /// Detect the format from the content itself: the signature and identity
-    /// each container specification designates (PDF header, RTF open group,
-    /// OLE stream names, ZIP package mimetype/content types). Plain-text
+    /// each container specification designates (RTF open group, OLE
+    /// stream names, ZIP package mimetype/content types). Plain-text
     /// formats (CSV) carry no signature and return `None`; so does anything
     /// unrecognized.
     pub fn from_bytes(bytes: &[u8]) -> Option<Format> {
@@ -116,7 +116,6 @@ pub fn to_markdown_bytes(
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to
 /// select the parser, or `None` to detect it from the content.
-///
 pub fn to_document(
     bytes: &[u8],
     format: impl Into<Option<Format>>,

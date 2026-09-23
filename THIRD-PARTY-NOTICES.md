@@ -2,7 +2,7 @@
 
 本产品包含以下第三方开源组件，按各自许可证使用。
 
-## Docsy AnyDoc（基于 Firecrawl AnyDoc 0.1.8 的修改版）
+## Docsy AnyDoc（基于 Firecrawl AnyDoc 0.2.4 的修改版）
 
 - 来源：vendored 于 `src-tauri/vendor/docsy-anydoc`
 - 上游项目：https://github.com/firecrawl/anydoc
@@ -10,7 +10,7 @@
 - 版权：Copyright (c) 2026 Sideguide Technologies Inc.
 
 本组件用于将 Office / OpenDocument / RTF / CSV / EPUB 等文档提取为 Markdown，
-Docsy 在其 0.1.8 版本基础上做了适配性修改。许可证全文如下（英文原文）：
+Docsy 在其 0.2.4 版本基础上做了适配性修改。许可证全文如下（英文原文）：
 
 ```text
 MIT License

@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.88"
 name = "docsy-anydoc"
-version = "0.1.8"
+version = "0.2.4"
 build = false
 include = [
     "/src",
@@ -45,9 +45,6 @@ repository = "https://github.com/muxiaoxiii/docsy"
 name = "docsy_anydoc"
 path = "src/lib.rs"
 
-[dependencies.calamine]
-version = "0.36.1"
-features = ["dates"]
 
 [dependencies.cfb]
 version = "0.14.0"
