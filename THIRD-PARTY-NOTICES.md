@@ -46,6 +46,14 @@ SOFTWARE.
 
 仅用于文书模板等场景把旧版 Word `.doc` 转成 `.docx`；Docsy 不重实现 MS-DOC 解析。
 
+## htmd（HTML → Markdown 转换库）
+
+- 来源：crates.io 依赖 `htmd`（0.5.x）
+- 上游项目：https://github.com/letmutex/htmd
+- 许可证：Apache License 2.0
+
+用于 MD 转换模块把 HTML 文件提取为 Markdown（语义结构，不执行脚本）。
+
 ## opencv-mobile（精简嵌入式 OpenCV 构建）
 
 - 来源：vendored 于 `src-tauri/vendor/opencv-mobile`

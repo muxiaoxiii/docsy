@@ -29,8 +29,7 @@
           <div class="file-convert-options">
             <span class="option-label">转成 Markdown</span>
             <span class="option-hint">
-              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 添加后点击“开始转换”；暂不支持 HTML 转
-              Markdown（.html 文件会被忽略）。
+              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、HTML、PDF 添加后点击“开始转换”。
             </span>
           </div>
           <div class="file-convert-options">
@@ -281,6 +280,7 @@ const officeExtensions = [
   'csv',
   'epub',
 ]
+const htmlExtensions = ['html', 'htm']
 const pdfExtensions = ['pdf']
 
 function extensionOf(path) {
@@ -299,7 +299,10 @@ function isMarkdownPath(path) {
 function isConvertiblePath(path) {
   const extension = extensionOf(path)
   return (
-    markdownExtensions.includes(extension) || officeExtensions.includes(extension) || pdfExtensions.includes(extension)
+    markdownExtensions.includes(extension) ||
+    officeExtensions.includes(extension) ||
+    htmlExtensions.includes(extension) ||
+    pdfExtensions.includes(extension)
   )
 }
 
@@ -309,6 +312,7 @@ function directionTag(path, outputFormat = fileOfficeFormat.value) {
   }
   const extension = extensionOf(path)
   if (extension === 'pdf') return 'PDF→MD'
+  if (htmlExtensions.includes(extension)) return 'HTML→MD'
   if (extension === 'epub') return 'EPUB→MD'
   if (['xls', 'xlsx', 'xlsm', 'xlsb'].includes(extension)) return 'Excel→MD'
   if (['ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'ppsm', 'pot', 'potx', 'potm'].includes(extension)) return 'PowerPoint→MD'
@@ -320,7 +324,7 @@ async function selectFiles() {
   const selected = await open({
     multiple: true,
     filters: [
-      { name: 'Markdown / Office / PDF', extensions: [...markdownExtensions, ...officeExtensions, ...pdfExtensions] },
+      { name: 'Markdown / Office / HTML / PDF', extensions: [...markdownExtensions, ...officeExtensions, ...htmlExtensions, ...pdfExtensions] },
     ],
   })
   if (!selected) return

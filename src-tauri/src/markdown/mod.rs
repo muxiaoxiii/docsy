@@ -1,11 +1,12 @@
 //! Markdown ↔ Office 文档转换。
 //!
 //! - `.md` / `.markdown` → `.docx` / `.xlsx` / `.pptx` / `.html`
-//! - Office / OpenDocument / RTF / CSV / EPUB → `.md`
+//! - Office / OpenDocument / RTF / CSV / EPUB / HTML → `.md`
 //! - `.doc` → 默认 `doc2x` 侧车转临时 `.docx` 再提取；可选 `extract`（AnyDoc）
 //!   或 `word`（本机 Word/WPS 高保真）。无需用户先手动另存。
 
 mod docx_to_md;
+mod html_to_md;
 pub(crate) mod encoding;
 mod md_to_docx;
 pub(crate) mod media;
@@ -28,6 +29,7 @@ pub enum Direction {
     MdToHtml,
     OfficeToMd,
     PdfToMd,
+    HtmlToMd,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,11 +161,16 @@ fn is_pdf_input(input: &Path) -> bool {
     source_extension(input) == "pdf"
 }
 
+fn is_html_input(input: &Path) -> bool {
+    matches!(source_extension(input).as_str(), "html" | "htm")
+}
+
 fn detect_direction(input: &Path) -> Result<Direction> {
     let ext = source_extension(input);
     match ext.as_str() {
         "md" | "markdown" | "mdown" | "mkdn" | "mdwn" | "mdtxt" => Ok(Direction::MdToDocx),
         "pdf" => Ok(Direction::PdfToMd),
+        "html" | "htm" => Ok(Direction::HtmlToMd),
         _ if is_office_input(input) => Ok(Direction::OfficeToMd),
         _ => anyhow::bail!("不支持的文件类型: {}", input.display()),
     }
@@ -557,6 +564,22 @@ pub fn convert_with_media(
             output_size: extracted.output_size,
             warning: extracted.warning,
         });
+    } else if is_html_input(&input_path) {
+        let out_path = html_to_md::convert(&input_path, output_dir)?;
+        let out_meta = std::fs::metadata(&out_path)
+            .with_context(|| format!("输出文件生成失败: {out_path}"))?;
+        return Ok(ConvertResult {
+            output_path: out_path,
+            direction: Direction::HtmlToMd,
+            source_format: "html".to_string(),
+            output_format: "markdown".to_string(),
+            input_size,
+            output_size: out_meta.len(),
+            warning: Some(
+                "已按语义结构提取 HTML 正文；复杂 CSS 布局、脚本交互与精确样式无法保留。"
+                    .to_string(),
+            ),
+        });
     } else {
         match ext.as_str() {
             "docx" | "docm" => {
@@ -935,6 +958,14 @@ mod tests {
             detect_direction(Path::new("/tmp/a.pdf")).unwrap(),
             Direction::PdfToMd
         );
+        assert_eq!(
+            detect_direction(Path::new("/tmp/a.html")).unwrap(),
+            Direction::HtmlToMd
+        );
+        assert_eq!(
+            detect_direction(Path::new("/tmp/a.HTM")).unwrap(),
+            Direction::HtmlToMd
+        );
         assert!(detect_direction(Path::new("/tmp/a.txt")).is_err());
         assert!(detect_direction(Path::new("/tmp/noext")).is_err());
     }
@@ -1181,5 +1212,22 @@ mod doc_default_engine_smoke {
             "ok direction={:?} out={} bytes={} warning={:?}",
             out.direction, out.output_path, out.output_size, out.warning
         );
+    }
+}
+
+#[cfg(test)]
+mod html_default_convert_smoke {
+    #[test]
+    #[ignore = "manual smoke: set DOCSY_HTML_FIXTURE"]
+    fn converts_html_fixture_to_markdown() {
+        let Ok(path) = std::env::var("DOCSY_HTML_FIXTURE") else {
+            eprintln!("skip: DOCSY_HTML_FIXTURE not set");
+            return;
+        };
+        let out = super::convert(&path, None, None, None, None).expect("convert");
+        assert_eq!(out.direction, super::Direction::HtmlToMd);
+        let md = std::fs::read_to_string(&out.output_path).expect("read md");
+        assert!(!md.trim().is_empty());
+        println!("ok out={} bytes={}", out.output_path, out.output_size);
     }
 }
