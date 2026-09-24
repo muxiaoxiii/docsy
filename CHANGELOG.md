@@ -8,6 +8,8 @@
 - 文书模板与 Markdown 转换支持旧版 `.doc`：引入 doc2x 侧车自动 `.doc` → `.docx`，无需再提示用户手动另存。
 - 模板 `.doc` 默认走 doc2x（保留黄色字段标记）；`office_oxide` 0.1.12 作为可选文件转换引擎，`DOCSY_DOC_ENGINE` 可强制 `oxide` / `doc2x` / `auto`。
 - Markdown 转换 `.doc` 默认 doc2x 转临时 docx 再提取；失败时自动回退 AnyDoc 直读，队列不再弹出引擎选择框。
+- Markdown 转换新增 **HTML → Markdown**（`.html` / `.htm`）：基于 htmd 语义提取标题、列表、表格与链接，跳过 script/style/nav 等噪声，无需再手动另存。
+- 发布链路接入 `doc2x` 侧车准备与资源打包，安装包内可直接处理旧版 `.doc`。
 
 ### 升级
 - 升级内置 AnyDoc fork 至 0.2.4（自研 Excel、公式 LaTeX 等）；移除 fork 对 calamine 的依赖。
@@ -15,6 +17,7 @@
 
 ### 验证
 - 黄标 `.doc` 实测：oxide 0 标黄 / doc2x 36 标黄 / 模板扫描 21 marks；`doc2docx`、`docx_template`、前端模板测试通过。
+- HTML→MD 单测与端到端冒烟通过；`markdown` 模块测试 54 项通过。
 
 ## [1.0.8] - 2026-09-20
 

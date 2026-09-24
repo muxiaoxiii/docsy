@@ -27,7 +27,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "nsis"],
+    "targets": [
+      "dmg",
+      "nsis"
+    ],
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"
@@ -45,7 +48,10 @@
       "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "runtime/": "runtime/"
+    }
   },
   "plugins": {}
 }

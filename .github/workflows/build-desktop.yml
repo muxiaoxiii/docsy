@@ -147,6 +147,10 @@ jobs:
             ) `
             -Executables @("ffmpeg.exe", "ffprobe.exe")
 
+      - name: Prepare doc2x sidecar
+        shell: bash
+        run: node scripts/prepare-doc2x.mjs
+
       - name: Build frontend
         shell: bash
         run: |

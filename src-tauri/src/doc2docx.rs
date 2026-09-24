@@ -54,7 +54,16 @@ pub fn converter_path() -> Option<PathBuf> {
 }
 
 fn tauri_runtime_dir() -> Option<PathBuf> {
-    // Prefer the app resource bundle when running inside Tauri; fall back to env for tests.
+    // Packaged app resources first (Tauri resource_dir/runtime), then env override for tests.
+    if let Some(app) = crate::get_app_handle() {
+        use tauri::Manager;
+        if let Ok(resource) = app.path().resource_dir() {
+            let runtime = resource.join("runtime");
+            if runtime.is_dir() {
+                return Some(runtime);
+            }
+        }
+    }
     if let Ok(dir) = std::env::var("DOCSY_RUNTIME_DIR") {
         let path = PathBuf::from(dir);
         if path.is_dir() {

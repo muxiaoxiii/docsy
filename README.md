@@ -17,7 +17,7 @@
 
 还有一只超可爱的桌宠 **Doclet** 🐾，在遇到大批文件处理或外部工具调用时，它会在界面一角安静地陪你等待～
 
-当前版本为 **v1.0.9**：旧版 `.doc` 模板与 Markdown 转换打通（doc2x 自动转换，无需手动另存）；AnyDoc 升级 0.2.4，office_oxide 升级 0.1.12。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)。
+当前版本为 **v1.0.9**：旧版 `.doc` 模板与 Markdown 转换打通（doc2x 自动转换，无需手动另存）；新增 HTML → Markdown；AnyDoc 升级 0.2.4，office_oxide 升级 0.1.12。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)。
 
 ![Docsy 主页界面](site/public/assets/screenshots/home.png)
 
@@ -130,7 +130,7 @@
 
 ### ✅ 核心特性
 - **Markdown 导出**：将 Markdown 快速转为 排版精良的 **Word (.docx)**、**Excel (.xlsx)**、**PPT (.pptx)** 或 **HTML** 网页。
-- **提取 Markdown**：支持将现成的 Word、OpenDocument、RTF、CSV、EPUB 甚至带有文本层的 PDF 转换为结构清晰的 Markdown，方便导入知识库或二次整理。
+- **提取 Markdown**：支持将现成的 Word（含旧版 `.doc` 自动转换）、OpenDocument、RTF、CSV、EPUB、**HTML 网页** 甚至带有文本层的 PDF 转换为结构清晰的 Markdown，方便导入知识库或二次整理。
 
 ---
 

@@ -14,6 +14,7 @@
     "tauri:build:windows:x86": "tauri build --target i686-pc-windows-msvc --bundles nsis",
     "lint": "eslint src vite.config.js",
     "format:check": "prettier \"src/**/*.{js,vue,css}\" \"*.js\" \"*.json\" --check",
+    "prepare:doc2x": "node scripts/prepare-doc2x.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
