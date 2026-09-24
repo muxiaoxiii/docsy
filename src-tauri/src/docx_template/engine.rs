@@ -369,21 +369,108 @@ fn ensure_template_package_safe(pkg: &HashMap<String, Vec<u8>>) -> Result<()> {
     Ok(())
 }
 
-/// Convert old .doc to .docx using office_oxide
-fn convert_doc_to_docx(path: &std::path::Path) -> Result<std::path::PathBuf> {
+/// How legacy `.doc` is converted before template scanning.
+///
+/// - `oxide` / `office_oxide`: in-process `office_oxide`
+/// - `doc2x`: Casy-style sidecar binary (b2xtranslator-derived)
+/// - `auto` (default): prefer oxide when the product keeps yellow marks; else doc2x
+fn doc_engine_preference() -> String {
+    std::env::var("DOCSY_DOC_ENGINE")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "auto".to_string())
+}
+
+fn convert_with_oxide(path: &std::path::Path) -> Result<std::path::PathBuf> {
     let doc = office_oxide::Document::open(path.display().to_string())
         .with_context(|| format!("无法读取旧版 .doc 文件: {}", path.display()))?;
     let output = unique_docx_output_path(
         &std::env::temp_dir()
             .join(format!(
-                "docsy-template-{:016x}",
+                "docsy-template-oxide-{:016x}",
                 fnv1a_hash(&path.display().to_string())
             ))
             .with_extension("docx"),
     )?;
     doc.save_as(output.display().to_string())
-        .with_context(|| format!("转换 .doc → .docx 失败: {}", path.display()))?;
+        .with_context(|| format!("office_oxide 转换 .doc → .docx 失败: {}", path.display()))?;
     Ok(output)
+}
+
+fn convert_with_doc2x(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("无法读取旧版 .doc 文件: {}", path.display()))?;
+    let converted = crate::doc2docx::convert_doc_to_docx(&bytes)
+        .with_context(|| format!("doc2x 转换 .doc → .docx 失败: {}", path.display()))?;
+    let output = unique_docx_output_path(
+        &std::env::temp_dir()
+            .join(format!(
+                "docsy-template-doc2x-{:016x}",
+                fnv1a_hash(&path.display().to_string())
+            ))
+            .with_extension("docx"),
+    )?;
+    std::fs::write(&output, converted)
+        .with_context(|| format!("无法写入转换后的 docx: {}", output.display()))?;
+    Ok(output)
+}
+
+fn count_yellow_marks(docx_path: &std::path::Path) -> usize {
+    let Ok(pkg) = package::read_docx_package(docx_path) else {
+        return 0;
+    };
+    scan_package_to_runs_and_marks(&pkg)
+        .map(|(_, marks, _)| marks.len())
+        .unwrap_or(0)
+}
+
+/// Convert old `.doc` to `.docx` for template scan/save.
+///
+/// Selection:
+/// - `DOCSY_DOC_ENGINE=oxide|office_oxide` → oxide only
+/// - `DOCSY_DOC_ENGINE=doc2x` → sidecar only
+/// - default/`auto` → oxide first; if it yields no yellow marks and doc2x works better, use doc2x
+fn convert_doc_to_docx(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    let preference = doc_engine_preference();
+    match preference.as_str() {
+        "oxide" | "office_oxide" => convert_with_oxide(path),
+        "doc2x" => convert_with_doc2x(path),
+        _ => {
+            let oxide = convert_with_oxide(path);
+            match oxide {
+                Ok(candidate) => {
+                    let oxide_marks = count_yellow_marks(&candidate);
+                    if oxide_marks > 0 {
+                        return Ok(candidate);
+                    }
+                    match convert_with_doc2x(path) {
+                        Ok(sidecar) => {
+                            let sidecar_marks = count_yellow_marks(&sidecar);
+                            if sidecar_marks > oxide_marks {
+                                let _ = std::fs::remove_file(&candidate);
+                                return Ok(sidecar);
+                            }
+                            let _ = std::fs::remove_file(&sidecar);
+                            Ok(candidate)
+                        }
+                        Err(sidecar_error) => {
+                            if crate::doc2docx::converter_path().is_some() {
+                                log::warn!("doc2x fallback failed for {}: {sidecar_error:#}", path.display());
+                            }
+                            Ok(candidate)
+                        }
+                    }
+                }
+                Err(oxide_error) => match convert_with_doc2x(path) {
+                    Ok(sidecar) => Ok(sidecar),
+                    Err(sidecar_error) => Err(oxide_error.context(format!(
+                        "doc2x 兜底也失败: {sidecar_error:#}"
+                    ))),
+                },
+            }
+        }
+    }
 }
 
 /// Scan all XML parts and produce runs + marks for the Tauri inspect response.
@@ -922,5 +1009,52 @@ mod tests {
         writer.finish()?;
 
         Ok(docx_path)
+    }
+}
+
+
+#[cfg(test)]
+mod doc_engine_probe {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn count_yellow(path: &std::path::Path) -> usize {
+        let pkg = package::read_docx_package(path).expect("read converted docx");
+        let xml_parts: Vec<_> = pkg
+            .iter()
+            .filter(|(name, _)| is_word_xml_part(name))
+            .map(|(name, data)| (name.as_str(), data.as_slice()))
+            .collect();
+        // cheap string search on utf8 lossy
+        let mut n = 0;
+        for (_, data) in xml_parts {
+            let s = String::from_utf8_lossy(data);
+            n += s.matches("w:highlight").count();
+            n += s.matches("w:val=\"yellow\"").count();
+        }
+        n
+    }
+
+    #[test]
+    #[ignore = "manual probe: set DOCSY_TEST_DOC"]
+    fn oxide_vs_doc2x_yellow_probe() {
+        let doc = std::env::var("DOCSY_TEST_DOC").expect("set DOCSY_TEST_DOC to a .doc path");
+        let path = PathBuf::from(doc);
+        let oxide = convert_with_oxide(&path).expect("oxide convert");
+        let oxide_marks = count_yellow(&oxide);
+        println!("oxide yellow/highlight hits: {oxide_marks} path={}", oxide.display());
+
+        match convert_with_doc2x(&path) {
+            Ok(sidecar) => {
+                let sidecar_marks = count_yellow(&sidecar);
+                println!("doc2x yellow/highlight hits: {sidecar_marks} path={}", sidecar.display());
+            }
+            Err(e) => println!("doc2x failed: {e:#}"),
+        }
+
+        // also full inspect path counts
+        let inspection = inspect_docx(path.to_str().unwrap()).expect("inspect");
+        println!("inspect marks={} checkbox={}", inspection.summary.mark_count, inspection.summary.checkbox_like_count);
+        assert!(inspection.summary.mark_count > 0 || oxide_marks > 0, "expected some yellow marks somewhere");
     }
 }

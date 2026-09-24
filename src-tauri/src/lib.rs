@@ -1,5 +1,6 @@
 mod app_log;
 mod commands;
+mod doc2docx;
 mod docx_template;
 mod error;
 mod external;

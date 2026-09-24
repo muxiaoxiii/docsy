@@ -36,6 +36,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## doc2x（旧版 `.doc` → `.docx` 侧车转换器）
+
+- 来源：`src-tauri/runtime/bin/doc2x`（由 `scripts/prepare-doc2x.mjs` 按平台钉版本准备）
+- 上游包装：https://github.com/jitOffice/doc2docx
+- 派生自：b2xtranslator（BSD-3-Clause）
+- 许可证：BSD-3-Clause（全文见 `src-tauri/runtime/licenses/doc2x-BSD-3-Clause.txt`）
+- 溯源：`src-tauri/runtime/licenses/doc2x-provenance.json`
+
+仅用于文书模板等场景把旧版 Word `.doc` 转成 `.docx`；Docsy 不重实现 MS-DOC 解析。
+
 ## opencv-mobile（精简嵌入式 OpenCV 构建）
 
 - 来源：vendored 于 `src-tauri/vendor/opencv-mobile`

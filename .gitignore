@@ -66,3 +66,7 @@ site/scripts/verify-structure.sh
 # Local historical review
 /REVIEW_1.0.6.md
 node_modules
+
+# doc2x sidecar binary (prepared by scripts/prepare-doc2x.mjs)
+src-tauri/runtime/bin/doc2x
+src-tauri/runtime/bin/doc2x.exe

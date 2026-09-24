@@ -1,0 +1,10 @@
+{
+  "package": "@jitword/doc2docx-darwin-arm64",
+  "version": "0.1.0",
+  "sha256": "503cfe45ae93885aece34a0c3fdef799bdc73a81610c1aa123291a60b08d5ce8",
+  "license": "BSD-3-Clause",
+  "derivedFrom": "b2xtranslator",
+  "source": "https://github.com/EvolutionJobs/b2xtranslator",
+  "wrapper": "https://github.com/jitOffice/doc2docx",
+  "platform": "darwin-arm64"
+}
