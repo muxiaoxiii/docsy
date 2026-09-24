@@ -6,24 +6,25 @@
       {
         "title": "新增",
         "items": [
-          "文书模板与 Markdown 转换支持旧版 .doc：doc2x 侧车自动转换，无需手动另存为 docx。",
-          "模板 .doc 默认保留黄色字段标记；office_oxide 0.1.12 与 doc2x 双引擎可用 DOCSY_DOC_ENGINE 切换。",
-          "MD 转换去掉 .doc 引擎选择弹窗，默认 doc2x，失败回退 AnyDoc 直读。",
-          "Markdown 转换新增 HTML → Markdown（.html/.htm）：htmd 语义提取，跳过 script/style/nav，无需手动另存。"
+          "文书模板与 Markdown 转换支持旧版 `.doc`：引入 doc2x 侧车自动 `.doc` → `.docx`，无需再提示用户手动另存。",
+          "模板 `.doc` 默认走 doc2x（保留黄色字段标记）；`office_oxide` 0.1.12 作为可选文件转换引擎，`DOCSY_DOC_ENGINE` 可强制 `oxide` / `doc2x` / `auto`。",
+          "Markdown 转换 `.doc` 默认 doc2x 转临时 docx 再提取；失败时自动回退 AnyDoc 直读，队列不再弹出引擎选择框。",
+          "Markdown 转换新增 **HTML → Markdown**（`.html` / `.htm`）：基于 htmd 语义提取标题、列表、表格与链接，跳过 script/style/nav 等噪声，无需再手动另存。",
+          "发布链路接入 `doc2x` 侧车准备与资源打包，安装包内可直接处理旧版 `.doc`。"
         ]
       },
       {
         "title": "升级",
         "items": [
-          "AnyDoc fork 升级 0.2.4；office_oxide 升级 0.1.12；接入 BSD-3 doc2x 侧车与 prepare 脚本。",
-          "发布链路接入 doc2x 侧车准备与资源打包，安装包可直接处理旧版 .doc。"
+          "升级内置 AnyDoc fork 至 0.2.4（自研 Excel、公式 LaTeX 等）；移除 fork 对 calamine 的依赖。",
+          "升级 `office_oxide` 至 0.1.12；引入 BSD-3 的 doc2x 侧车（`scripts/prepare-doc2x.mjs`，二进制不入库）。"
         ]
       },
       {
         "title": "验证",
         "items": [
-          "黄标 .doc 实测 oxide 0 / doc2x 36 / 模板扫描 21 marks；Rust 与前端模板相关测试通过。",
-          "HTML→MD 单测与端到端冒烟通过；markdown 模块测试 54 项通过。"
+          "黄标 `.doc` 实测：oxide 0 标黄 / doc2x 36 标黄 / 模板扫描 21 marks；`doc2docx`、`docx_template`、前端模板测试通过。",
+          "HTML→MD 单测与端到端冒烟通过；`markdown` 模块测试 54 项通过。"
         ]
       }
     ]
@@ -33,9 +34,19 @@
     "date": "2026-09-20",
     "sections": [
       {
+        "title": "1.0.8 复审修复（本分支）",
+        "items": [
+          "Word 图文间距越界改为夹紧文字坐标（标题本身过高才失败），与前端预检 0.05mm 容差对齐；强制生成不再因间距硬失败。",
+          "PDF 缺 CJK 字体时按实际绘制内容计算说明高度；去掉与预览不一致的 +0.8mm 基线。",
+          "DOCX 超链接与 HTML 共用 `safe_export_url`：拒绝 javascript/file/data/vbscript，并解码 `%2e%2e` 穿越。",
+          "`rendered.json` 绑定真实 sourceHash，测试不再改写；xlsx/pptx 在 resource_root 下嵌入沙箱内的本地图片。",
+          "FFmpeg 安装依次尝试 `homebrew-ffmpeg/ffmpeg/ffmpeg-full`、`ffmpeg-full`、`ffmpeg`，以 drawtext 实测为准。",
+          "删除死代码 `recommendForLayout`；Windows CI 测试设置 `CARGO_BUILD_TARGET`；CI 工具 ZIP SHA256 仍不纳入（下载源不提供校验文件）。"
+        ]
+      },
+      {
         "title": "修复",
         "items": [
-          "正式发布 v1.0.8：图片排版旋转/大图预览/图文间距与混排冲突；Markdown 公式、Mermaid 与多语言；PDF 数据保护与设置恢复加固。",
           "图片排版支持在页码旁和大图弹窗顺时针旋转 90°，保留原文件；方向同步到缩略图、排版尺寸、冲突检测及 PDF/Word 导出。",
           "大图弹窗以图片为主，标题和说明收进可折叠窄栏；提供 5%～400% 缩放、拖动查看、适合窗口和 100%，高清预览长边上限提高到 4096 像素，小图不插值放大。",
           "横竖图混排时，移除预览单元格底色对越界标题的遮挡；图文冲突同时标记遮挡者和受影响的图片，提示通过本页智能缩放或适应模式调整。",
@@ -70,8 +81,8 @@
         "title": "验证与限制",
         "items": [
           "自动回归、构建信息及待验收项见 `docs/STOP_RELEASE_1.0.8.md`。",
-          "Word/WPS 分页、Windows 安装及真实超大扫描件仍需人工验收；Markdown/Office 当前转换步骤可能需要完成后才能停止。",
-          "源码候选版本与站点已发布下载版本分别校验，避免把未发布安装包写成可下载版本。"
+          "Word/WPS 分页、Windows 安装及真实超大扫描件仍需人工抽验；Markdown/Office 当前转换步骤可能需要完成后才能停止。",
+          "源码版本与站点「已发布下载」版本分别校验：安装包文件名以 GitHub Release 资产为准。"
         ]
       }
     ]

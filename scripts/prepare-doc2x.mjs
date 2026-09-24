@@ -13,11 +13,31 @@ const cache = join(root, 'src-tauri/target/runtime-cache/doc2docx')
 
 /** Pinned @jitword/doc2docx platform packages (b2xtranslator-derived native doc2x). */
 const packages = {
-  'darwin-arm64': ['@jitword/doc2docx-darwin-arm64', '0.1.0', '503cfe45ae93885aece34a0c3fdef799bdc73a81610c1aa123291a60b08d5ce8'],
-  'darwin-x64': ['@jitword/doc2docx-darwin-x64', '0.1.0', '37d051390b70aab6edfeb60934a456d9a02e42753195e77127bdc18208077ce9'],
-  'linux-x64': ['@jitword/doc2docx-linux-x64', '0.1.0', '0d0a82def78f68baf8cb53de8d40b91cd22f7c9357634d71ff4c35b9b990ae71'],
-  'linux-arm64': ['@jitword/doc2docx-linux-arm64', '0.1.0', 'ec758e8c81f10df5d67cbd0d0615c64a5ff318eb8d804466eff4875ef65fb081'],
-  'win32-x64': ['@jitword/doc2docx-win32-x64', '0.1.0', '6b9c7c6e725d2019e86ebdaae6c13b7b51de772110a9ae486ff2dd364ca8bae5'],
+  'darwin-arm64': [
+    '@jitword/doc2docx-darwin-arm64',
+    '0.1.0',
+    '503cfe45ae93885aece34a0c3fdef799bdc73a81610c1aa123291a60b08d5ce8',
+  ],
+  'darwin-x64': [
+    '@jitword/doc2docx-darwin-x64',
+    '0.1.0',
+    '37d051390b70aab6edfeb60934a456d9a02e42753195e77127bdc18208077ce9',
+  ],
+  'linux-x64': [
+    '@jitword/doc2docx-linux-x64',
+    '0.1.0',
+    '0d0a82def78f68baf8cb53de8d40b91cd22f7c9357634d71ff4c35b9b990ae71',
+  ],
+  'linux-arm64': [
+    '@jitword/doc2docx-linux-arm64',
+    '0.1.0',
+    'ec758e8c81f10df5d67cbd0d0615c64a5ff318eb8d804466eff4875ef65fb081',
+  ],
+  'win32-x64': [
+    '@jitword/doc2docx-win32-x64',
+    '0.1.0',
+    '6b9c7c6e725d2019e86ebdaae6c13b7b51de772110a9ae486ff2dd364ca8bae5',
+  ],
 }
 
 const key = `${process.platform}-${process.arch}`
@@ -35,7 +55,9 @@ await mkdir(destination, { recursive: true })
 await mkdir(cache, { recursive: true })
 const archive = join(cache, `${short}-${version}.tgz`)
 const valid = async () =>
-  createHash('sha256').update(await readFile(archive).catch(() => Buffer.alloc(0))).digest('hex') === expected
+  createHash('sha256')
+    .update(await readFile(archive).catch(() => Buffer.alloc(0)))
+    .digest('hex') === expected
 
 if (!(await valid())) {
   const url = `https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${version}.tgz`
@@ -77,6 +99,9 @@ const provenance = {
   wrapper: 'https://github.com/jitOffice/doc2docx',
   platform: key,
 }
-await writeFile(join(root, 'src-tauri/runtime/licenses/doc2x-provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`)
+await writeFile(
+  join(root, 'src-tauri/runtime/licenses/doc2x-provenance.json'),
+  `${JSON.stringify(provenance, null, 2)}\n`,
+)
 
 console.log(`doc2x verified: ${targetExe}`)
