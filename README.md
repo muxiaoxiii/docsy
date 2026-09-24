@@ -3,7 +3,7 @@
 > 一个专为法律人、行政党、文字工作者打造的本地文档处理效率工具 ✨  
 > 所有操作 100% 在本地电脑完成，**断网可用，绝不上传云端** 🔒
 
-[![Version](https://img.shields.io/badge/version-1.0.8-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
+[![Version](https://img.shields.io/badge/version-1.0.9-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/muxiaoxiii/docsy/releases)
 
@@ -17,7 +17,7 @@
 
 还有一只超可爱的桌宠 **Doclet** 🐾，在遇到大批文件处理或外部工具调用时，它会在界面一角安静地陪你等待～
 
-当前版本为 **v1.0.8**：功能范围冻结，修复数据保护、图片排版、Markdown 公式/Mermaid/多语言与历史恢复问题。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)；平台验收边界与已知限制见 [停更/发布记录](docs/STOP_RELEASE_1.0.8.md)。
+当前版本为 **v1.0.9**：旧版 `.doc` 模板与 Markdown 转换打通（doc2x 自动转换，无需手动另存）；AnyDoc 升级 0.2.4，office_oxide 升级 0.1.12。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)。
 
 ![Docsy 主页界面](site/public/assets/screenshots/home.png)
 

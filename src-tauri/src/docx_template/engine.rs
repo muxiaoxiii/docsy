@@ -371,15 +371,15 @@ fn ensure_template_package_safe(pkg: &HashMap<String, Vec<u8>>) -> Result<()> {
 
 /// How legacy `.doc` is converted before template scanning.
 ///
-/// - `oxide` / `office_oxide`: in-process `office_oxide`
-/// - `doc2x`: Casy-style sidecar binary (b2xtranslator-derived)
-/// - `auto` (default): prefer oxide when the product keeps yellow marks; else doc2x
+/// - `doc2x`（默认）：sidecar binary，能保留黄色高亮字段
+/// - `oxide` / `office_oxide`：in-process `office_oxide`（一般会丢标黄）
+/// - `auto`：oxide 先试；无黄标且 doc2x 更好则用 doc2x
 fn doc_engine_preference() -> String {
     std::env::var("DOCSY_DOC_ENGINE")
         .ok()
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "auto".to_string())
+        .unwrap_or_else(|| "doc2x".to_string())
 }
 
 fn convert_with_oxide(path: &std::path::Path) -> Result<std::path::PathBuf> {
@@ -428,9 +428,9 @@ fn count_yellow_marks(docx_path: &std::path::Path) -> usize {
 /// Convert old `.doc` to `.docx` for template scan/save.
 ///
 /// Selection:
+/// - default/`doc2x` → sidecar only (preserves yellow field marks)
 /// - `DOCSY_DOC_ENGINE=oxide|office_oxide` → oxide only
-/// - `DOCSY_DOC_ENGINE=doc2x` → sidecar only
-/// - default/`auto` → oxide first; if it yields no yellow marks and doc2x works better, use doc2x
+/// - `DOCSY_DOC_ENGINE=auto` → oxide first; if it yields no yellow marks and doc2x works better, use doc2x
 fn convert_doc_to_docx(path: &std::path::Path) -> Result<std::path::PathBuf> {
     let preference = doc_engine_preference();
     match preference.as_str() {

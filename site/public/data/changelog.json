@@ -1,5 +1,31 @@
 [
   {
+    "version": "1.0.9",
+    "date": "2026-09-24",
+    "sections": [
+      {
+        "title": "新增",
+        "items": [
+          "文书模板与 Markdown 转换支持旧版 .doc：doc2x 侧车自动转换，无需手动另存为 docx。",
+          "模板 .doc 默认保留黄色字段标记；office_oxide 0.1.12 与 doc2x 双引擎可用 DOCSY_DOC_ENGINE 切换。",
+          "MD 转换去掉 .doc 引擎选择弹窗，默认 doc2x，失败回退 AnyDoc 直读。"
+        ]
+      },
+      {
+        "title": "升级",
+        "items": [
+          "AnyDoc fork 升级 0.2.4；office_oxide 升级 0.1.12；接入 BSD-3 doc2x 侧车与 prepare 脚本。"
+        ]
+      },
+      {
+        "title": "验证",
+        "items": [
+          "黄标 .doc 实测 oxide 0 / doc2x 36 / 模板扫描 21 marks；Rust 与前端模板相关测试通过。"
+        ]
+      }
+    ]
+  },
+  {
     "version": "1.0.8",
     "date": "2026-09-20",
     "sections": [

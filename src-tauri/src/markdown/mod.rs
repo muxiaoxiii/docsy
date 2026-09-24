@@ -2,9 +2,8 @@
 //!
 //! - `.md` / `.markdown` → `.docx` / `.xlsx` / `.pptx` / `.html`
 //! - Office / OpenDocument / RTF / CSV / EPUB → `.md`
-//! - `.doc` → 两条引擎，由前端让用户选择：
-//!   - `word`：本机 Word/WPS 自动化另存临时 `.docx`（高保真），失败报错提示手动另存；
-//!   - `extract`（默认）：AnyDoc 直接提取结构化 Markdown（不执行宏）。
+//! - `.doc` → 默认 `doc2x` 侧车转临时 `.docx` 再提取；可选 `extract`（AnyDoc）
+//!   或 `word`（本机 Word/WPS 高保真）。无需用户先手动另存。
 
 mod docx_to_md;
 pub(crate) mod encoding;
@@ -92,16 +91,20 @@ impl OfficeOutputFormat {
     }
 }
 
-/// .doc 转换引擎：`extract` = AnyDoc 直接提取；`word` = 本机 Word/WPS
-/// 自动化另存 docx（高保真，需安装了 Word 或 WPS）。
+/// .doc 转换引擎：
+/// - `doc2x`（默认）：Casy 式侧车 `.doc` → 临时 `.docx`，再走 DOCX 提取
+/// - `extract`：AnyDoc 直接提取结构化 Markdown
+/// - `word`：本机 Word/WPS 自动化另存临时 `.docx`（高保真）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocEngine {
+    Doc2x,
     Extract,
     Word,
 }
 
 fn parse_doc_engine(value: Option<&str>) -> Result<DocEngine> {
-    match value.unwrap_or("extract") {
+    match value.unwrap_or("doc2x") {
+        "doc2x" => Ok(DocEngine::Doc2x),
         "extract" => Ok(DocEngine::Extract),
         "word" => Ok(DocEngine::Word),
         other => anyhow::bail!("未知的 .doc 转换引擎: {other}"),
@@ -192,19 +195,33 @@ pub(crate) fn output_path_for(
     Ok(unique_output_path(&dir, stem, extension))
 }
 
-/// 旧版 .doc → 临时 .docx，走本机 Word/WPS 自动化（高保真）。
-/// 用户显式选择此引擎，失败直接报错（提示手动另存），不回退纯文本。
+/// 旧版 .doc → 临时 .docx，走 doc2x 侧车（默认路径，无需用户手动另存）。
+fn convert_doc_to_temp_docx_with_doc2x(input: &Path) -> Result<TempPathGuard> {
+    let bytes = std::fs::read(input)
+        .with_context(|| format!("读取旧版 .doc 文件失败: {}", input.display()))?;
+    let converted = crate::doc2docx::convert_doc_to_docx(&bytes)
+        .with_context(|| format!("doc2x 转换 .doc → .docx 失败: {}", input.display()))?;
+    let guard_path = crate::util::fs::temp_named_path("docsy-doc2docx", "docx");
+    std::fs::write(&guard_path, converted)
+        .with_context(|| format!("无法写入转换后的 docx: {}", guard_path.display()))?;
+    if !guard_path.is_file() {
+        anyhow::bail!("doc2x 未生成预期输出: {}", guard_path.display());
+    }
+    Ok(TempPathGuard::new(guard_path))
+}
+
+/// 旧版 .doc → 临时 .docx，走本机 Word/WPS 自动化（可选高保真引擎）。
 fn convert_doc_to_temp_docx_with_word(input: &Path) -> Result<TempPathGuard> {
     let guard_path = crate::util::fs::temp_named_path("docsy-doc2docx-word", "docx");
     word_save_as_docx(input, &guard_path).with_context(|| {
         format!(
-            "Word/WPS 自动转换失败: {}。可以改用纯文本转换，或用 Word/WPS 手动另存为 .docx 后再转换。",
+            "Word/WPS 自动转换失败: {}。可改用默认 doc2x 引擎，或用 Word/WPS 手动另存为 .docx 后再转换。",
             input.display()
         )
     })?;
     if !guard_path.is_file() {
         anyhow::bail!(
-            "Word/WPS 未生成预期输出: {}。可以改用纯文本转换，或手动另存为 .docx 后再转换。",
+            "Word/WPS 未生成预期输出: {}。可改用默认 doc2x 引擎，或手动另存为 .docx 后再转换。",
             guard_path.display()
         );
     }
@@ -558,17 +575,43 @@ pub fn convert_with_media(
             }
             "doc" => {
                 let engine = parse_doc_engine(doc_engine)?;
-                if engine == DocEngine::Word {
-                    let guard = convert_doc_to_temp_docx_with_word(&input_path)?;
-                    docx_to_md::convert(guard.path(), &output_path)?;
-                } else {
-                    let facts = office_to_markdown(&input_path, &output_path)?;
-                    let base =
-                        "已直接读取旧版 .doc；复杂图文排版建议改用 Word/WPS 中转以获得更完整的结构。"
-                            .to_string();
-                    warning = office_input_warning(&ext, &facts)
-                        .map(|notice| format!("{base} {notice}"))
-                        .or(Some(base));
+                match engine {
+                    DocEngine::Doc2x => match convert_doc_to_temp_docx_with_doc2x(&input_path) {
+                        Ok(guard) => {
+                            docx_to_md::convert(guard.path(), &output_path).with_context(|| {
+                                format!("doc2x 转换后的 docx 提取失败: {input}")
+                            })?;
+                        }
+                        Err(doc2x_error) => {
+                            // 侧车缺失或失败时退回 AnyDoc 直读，仍不打断队列。
+                            log::warn!("doc2x path failed for {input}: {doc2x_error:#}");
+                            let facts = office_to_markdown(&input_path, &output_path)
+                                .with_context(|| {
+                                    format!(
+                                        "doc2x 转换失败（{doc2x_error:#}），AnyDoc 直读也失败"
+                                    )
+                                })?;
+                            warning = office_input_warning(&ext, &facts).or_else(|| {
+                                Some(
+                                    "已使用兼容读取器导出 Markdown；个别图片或细节格式可能简化。"
+                                        .to_string(),
+                                )
+                            });
+                        }
+                    },
+                    DocEngine::Word => {
+                        let guard = convert_doc_to_temp_docx_with_word(&input_path)?;
+                        docx_to_md::convert(guard.path(), &output_path)?;
+                    }
+                    DocEngine::Extract => {
+                        let facts = office_to_markdown(&input_path, &output_path)?;
+                        let base =
+                            "已直接读取旧版 .doc；复杂图文排版可改用 doc2x 或 Word/WPS 中转以获得更完整的结构。"
+                                .to_string();
+                        warning = office_input_warning(&ext, &facts)
+                            .map(|notice| format!("{base} {notice}"))
+                            .or(Some(base));
+                    }
                 }
             }
             _ => {
@@ -933,7 +976,11 @@ mod tests {
 
     #[test]
     fn parse_doc_engine_values() {
-        assert_eq!(parse_doc_engine(None).unwrap(), DocEngine::Extract);
+        assert_eq!(parse_doc_engine(None).unwrap(), DocEngine::Doc2x);
+        assert_eq!(
+            parse_doc_engine(Some("doc2x")).unwrap(),
+            DocEngine::Doc2x
+        );
         assert_eq!(
             parse_doc_engine(Some("extract")).unwrap(),
             DocEngine::Extract
@@ -1115,5 +1162,24 @@ fn media_warning(rich: &media::RichMarkdown, format: OfficeOutputFormat) -> Opti
                 .into(),
         ),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod doc_default_engine_smoke {
+    #[test]
+    #[ignore = "manual smoke: set DOCSY_DOC_FIXTURE"]
+    fn converts_legacy_doc_with_default_engine() {
+        let Ok(path) = std::env::var("DOCSY_DOC_FIXTURE") else {
+            eprintln!("skip: DOCSY_DOC_FIXTURE not set");
+            return;
+        };
+        let out = super::convert(&path, None, None, None, None).expect("convert");
+        let md = std::fs::read_to_string(&out.output_path).expect("read md");
+        assert!(!md.trim().is_empty(), "markdown should not be empty");
+        println!(
+            "ok direction={:?} out={} bytes={} warning={:?}",
+            out.direction, out.output_path, out.output_size, out.warning
+        );
     }
 }

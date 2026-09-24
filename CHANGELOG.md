@@ -2,6 +2,20 @@
 
 本文件记录 Docsy 每个版本的核心变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [1.0.9] - 2026-09-24
+
+### 新增
+- 文书模板与 Markdown 转换支持旧版 `.doc`：引入 doc2x 侧车自动 `.doc` → `.docx`，无需再提示用户手动另存。
+- 模板 `.doc` 默认走 doc2x（保留黄色字段标记）；`office_oxide` 0.1.12 作为可选文件转换引擎，`DOCSY_DOC_ENGINE` 可强制 `oxide` / `doc2x` / `auto`。
+- Markdown 转换 `.doc` 默认 doc2x 转临时 docx 再提取；失败时自动回退 AnyDoc 直读，队列不再弹出引擎选择框。
+
+### 升级
+- 升级内置 AnyDoc fork 至 0.2.4（自研 Excel、公式 LaTeX 等）；移除 fork 对 calamine 的依赖。
+- 升级 `office_oxide` 至 0.1.12；引入 BSD-3 的 doc2x 侧车（`scripts/prepare-doc2x.mjs`，二进制不入库）。
+
+### 验证
+- 黄标 `.doc` 实测：oxide 0 标黄 / doc2x 36 标黄 / 模板扫描 21 marks；`doc2docx`、`docx_template`、前端模板测试通过。
+
 ## [1.0.8] - 2026-09-20
 
 **正式发布 v1.0.8**：功能范围冻结，收尾数据保护、图片排版、Markdown 公式/图表与历史恢复可靠性。发布安装包以 GitHub Releases 为准；平台验收边界与已知限制见 `docs/STOP_RELEASE_1.0.8.md`。

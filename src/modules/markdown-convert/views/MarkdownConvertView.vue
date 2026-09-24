@@ -210,7 +210,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
 import { open } from '@tauri-apps/plugin-dialog'
-import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { convertWithMedia } from '../composables/convertWithMedia.js'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
@@ -333,47 +333,14 @@ async function loadFiles(paths) {
     files.value.filter((item) => ['pending', 'processing'].includes(item.status)).map((item) => item.path),
   )
   const candidates = [...new Set(paths)].filter((path) => isConvertiblePath(path) && !busy.has(path))
-  let accepted = candidates
-  let docEngine = 'extract'
-  const legacyDocs = candidates.filter((path) => /\.doc$/i.test(path))
-
-  if (legacyDocs.length) {
-    const [wordStatus, wpsStatus] = await Promise.all([
-      tauriCallSafe('check_external_tool', { toolName: 'word' }),
-      tauriCallSafe('check_external_tool', { toolName: 'wps' }),
-    ])
-    const officeAvailable =
-      Boolean(wordStatus.ok && wordStatus.data?.available) || Boolean(wpsStatus.ok && wpsStatus.data?.available)
-    try {
-      await ElMessageBox.confirm(
-        `${legacyDocs.length} 个旧版 .doc 文件：默认直接提取为 Markdown（文字、标题、表格结构均可保留，快且无额外依赖）。` +
-          (officeAvailable
-            ? '如文档版式复杂、需要更高保真度，可改用本机 Word/WPS 中转（较慢）。'
-            : '未检测到本机 Word/WPS，仅支持直接提取。'),
-        '旧版 .doc 转换方式',
-        {
-          distinguishCancelAndClose: true,
-          confirmButtonText: '直接转换',
-          cancelButtonText: officeAvailable ? '用 Word/WPS 高保真转换' : '跳过 .doc',
-          type: 'warning',
-        },
-      )
-      docEngine = 'extract'
-    } catch (action) {
-      if (action === 'cancel' && officeAvailable) {
-        docEngine = 'word'
-      } else {
-        accepted = candidates.filter((path) => !/\.doc$/i.test(path))
-        if (accepted.length) ElMessage.info('已跳过 .doc 文件，其余文件照常转换')
-      }
-    }
-  }
+  // 旧版 .doc 由后端默认 doc2x 自动转换，无需再询问引擎或要求手动另存。
+  const accepted = candidates
 
   const items = accepted.map((path) => ({
     path,
     name: fileName(path),
     directionTag: directionTag(path, fileOfficeFormat.value),
-    docEngine: /\.doc$/i.test(path) ? docEngine : null,
+    docEngine: null,
     outputFormat: isMarkdownPath(path) ? fileOfficeFormat.value : null,
     docxStyle: isMarkdownPath(path) ? docxStyle.value : null,
     status: 'pending',
