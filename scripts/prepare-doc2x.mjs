@@ -47,7 +47,16 @@ if (!(await valid())) throw new Error('doc2docx platform package checksum mismat
 
 const temporary = await mkdtemp(join(tmpdir(), 'docsy-doc2x-'))
 try {
-  execFileSync('tar', ['-xzf', archive, '-C', temporary])
+  // Git Bash tar on Windows treats `D:\...` as a remote host; use Python tarfile there.
+  if (process.platform === 'win32') {
+    execFileSync(
+      'python',
+      ['-c', 'import sys,tarfile; tarfile.open(sys.argv[1]).extractall(sys.argv[2])', archive, temporary],
+      { stdio: 'inherit' },
+    )
+  } else {
+    execFileSync('tar', ['-xzf', archive, '-C', temporary], { stdio: 'inherit' })
+  }
   await copyFile(join(temporary, 'package', 'bin', exe), targetExe)
   if (process.platform !== 'win32') await chmod(targetExe, 0o755)
   if (process.platform === 'darwin') {
