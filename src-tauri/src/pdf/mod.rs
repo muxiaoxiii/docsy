@@ -22,6 +22,7 @@ pub(crate) mod qpdf_stream;
 pub mod signatures;
 pub mod split;
 pub(crate) mod text_utils;
+pub mod word_convert;
 
 // 通用 fs 工具已收敛到 crate::util::fs；此处 re-export 保持原有调用路径不变。
 pub use crate::util::fs::{safe_file_stem, same_path, temp_named_path, unique_output_path};

@@ -118,9 +118,43 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
 }
 
 pub fn merge(inputs: &[String], output: &str, duplex_separate: bool) -> Result<String> {
+    let state = std::sync::Arc::new(crate::ConversionState::new());
+    merge_with_state(inputs, output, duplex_separate, &state)
+}
+
+pub fn merge_with_state(
+    inputs: &[String],
+    output: &str,
+    duplex_separate: bool,
+    conversion_state: &std::sync::Arc<crate::ConversionState>,
+) -> Result<String> {
+    if inputs.is_empty() {
+        anyhow::bail!("没有可合并的文件");
+    }
+
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let output_path = unique_available_path(Path::new(output));
+
+    // Convert Word files to temp PDF guards if present
+    let mut temp_converted_guards: Vec<crate::util::fs::TempPathGuard> = Vec::new();
+    let mut resolved_inputs: Vec<String> = Vec::with_capacity(inputs.len());
+
+    for input in inputs {
+        if super::word_convert::is_word_file(input) {
+            let temp_pdf_path = crate::util::fs::temp_named_path("docsy_merged_word", "pdf");
+            let converted = super::word_convert::convert_word_to_pdf_file(
+                input,
+                &temp_pdf_path,
+                conversion_state,
+            )
+            .with_context(|| format!("Word 文件转 PDF 失败: {input}"))?;
+            temp_converted_guards.push(crate::util::fs::TempPathGuard::new(temp_pdf_path));
+            resolved_inputs.push(converted);
+        } else {
+            resolved_inputs.push(input.clone());
+        }
+    }
 
     let mut cmd = crate::external::hidden_command(&bin);
     // Merging is a print-oriented operation. Flatten annotation appearances
@@ -133,7 +167,7 @@ pub fn merge(inputs: &[String], output: &str, duplex_separate: bool) -> Result<S
     // 都占满整张纸，避免两份文件拼在同一张纸的正反面。
     // 空白页临时文件由守卫持有，合并命令运行期间保持存在，结束后自动清理。
     let mut blank_guards: Vec<crate::util::fs::TempPathGuard> = Vec::new();
-    for input in inputs {
+    for input in &resolved_inputs {
         cmd.arg(input);
         if duplex_separate {
             let count = page_count(input)
@@ -637,5 +671,12 @@ mod tests {
         assert_eq!(page_count(&merged).unwrap(), 6, "普通模式不应补空白页");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn merge_with_empty_inputs_fails() {
+        let res = merge(&[], "/tmp/empty_test.pdf", false);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("没有可合并的文件"));
     }
 }

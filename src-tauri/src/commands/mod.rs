@@ -83,6 +83,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         pdf::inspect_pdf,
         pdf::unlock_pdf,
         pdf::merge_pdfs,
+        pdf::convert_word_to_pdf,
         pdf::extract_pdf_pages,
         pdf::compress_pdf,
         pdf::optimize_pdf_lossless,

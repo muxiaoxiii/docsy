@@ -1,7 +1,7 @@
 <template>
   <div class="pdf-tools-view" :class="{ 'is-file-dragging': pdfDragging }">
     <div v-if="pdfDragging" class="pdf-drop-overlay">
-      <div class="pdf-drop-message">松开以添加 PDF 文件</div>
+      <div class="pdf-drop-message">{{ activeTab === 'merge' ? '松开以添加 PDF 或 Word 文件' : '松开以添加 PDF 文件' }}</div>
     </div>
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
       <el-tab-pane label="PDF 解锁" name="unlock" lazy>
@@ -37,20 +37,43 @@
       <el-tab-pane label="PDF 合并" name="merge" lazy>
         <ToolWorkspaceShell
           title="PDF 合并"
-          description="按列表顺序合并多个 PDF；合并时会压平页面注释和电子签章外观以便打印，不保留签章证书和交互。"
+          description="按列表顺序合并多个 PDF 或 Word 文档；Word 文档会自动转为 PDF 后合并；合并时会压平页面注释和电子签章外观以便打印，不保留签章证书和交互。"
         >
           <template #toolbar>
-            <el-button type="primary" plain :disabled="merging" @click="selectMergeFiles">添加 PDF 文件</el-button>
+            <el-button type="primary" plain :disabled="merging" @click="selectMergeFiles">添加文件</el-button>
           </template>
           <FileQueuePanel
             :items="mergeFiles"
             :busy="merging"
             sortable
-            empty-text="添加至少两个需要合并的 PDF 文件"
+            empty-text="添加需要合并的 PDF 或 Word 文档（支持 .pdf、.docx、.doc）"
             @clear="clearMergeFiles"
             @remove="removeMergeFile"
             @reorder="reorderMergeFiles"
-          />
+          >
+            <template #meta="{ item }">
+              <el-tag :type="isWordPath(item.path) ? 'warning' : 'info'" size="small">
+                {{ isWordPath(item.path) ? 'Word' : 'PDF' }}
+              </el-tag>
+              <span v-if="item.statusText" class="merge-item-status">{{ item.statusText }}</span>
+              <el-button v-if="item.outputPath" link type="primary" size="small" @click="openPath(item.outputPath)">打开文件</el-button>
+            </template>
+            <template #item-actions="{ item, index }">
+              <el-button
+                v-if="isWordPath(item.path) && !item.outputPath"
+                link
+                size="small"
+                type="primary"
+                :disabled="merging"
+                @click="convertSingleWordFile(item)"
+              >
+                转为 PDF
+              </el-button>
+              <el-button :disabled="merging" link size="small" type="danger" @click="removeMergeFile(index)">
+                移除
+              </el-button>
+            </template>
+          </FileQueuePanel>
           <template #actions>
             <div class="merge-options">
               <el-checkbox v-model="duplexSeparate" :disabled="merging">双面打印分隔模式</el-checkbox>
@@ -58,8 +81,13 @@
                 >文件页数为奇数时在末尾补一页空白，让每份文件独立占满双面打印的整张纸</span
               >
             </div>
-            <el-button type="success" @click="doMerge" :loading="merging" :disabled="mergeFiles.length < 2">
-              合并为一个 PDF
+            <el-button
+              type="success"
+              @click="doMerge"
+              :loading="merging"
+              :disabled="mergeFiles.length === 0 || (mergeFiles.length === 1 && !isWordPath(mergeFiles[0].path))"
+            >
+              {{ mergeFiles.length === 1 && isWordPath(mergeFiles[0].path) ? '转换为 PDF' : '合并为一个 PDF' }}
             </el-button>
             <el-button v-if="mergeOutputPath" @click="openPath(mergeOutputPath)">打开文件</el-button>
           </template>
@@ -728,7 +756,11 @@ async function processAntiCopy(removeProtection) {
 async function selectMergeFiles() {
   const selected = await open({
     multiple: true,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    filters: [
+      { name: 'PDF 与 Word 文档 (*.pdf, *.docx, *.doc)', extensions: ['pdf', 'docx', 'doc', 'docm'] },
+      { name: 'PDF 文档 (*.pdf)', extensions: ['pdf'] },
+      { name: 'Word 文档 (*.docx, *.doc)', extensions: ['docx', 'doc', 'docm'] },
+    ],
   })
   if (selected) {
     const paths = Array.isArray(selected) ? selected : [selected]
@@ -763,23 +795,56 @@ function reorderMergeFiles({ from, to }) {
   mergeFiles.value.splice(to, 0, item)
 }
 
+async function convertSingleWordFile(item) {
+  if (merging.value) return
+  merging.value = true
+  item.statusText = '正在转为 PDF…'
+  item.statusType = 'warning'
+  try {
+    const result = await tauriCallSafe('convert_word_to_pdf', {
+      input: item.path,
+    })
+    if (result.ok) {
+      const outputPath = result.data?.output_path || result.data
+      item.outputPath = outputPath
+      item.statusText = '已转为 PDF'
+      item.statusType = 'success'
+      mergeOutputPath.value = outputPath
+      ElMessage.success(`转换完成：${fileName(outputPath)}`)
+    } else {
+      item.statusText = '转换失败'
+      item.statusType = 'danger'
+      ElMessage.error(userFacingError(result.error, 'Word 转 PDF 失败，请确认系统已安装 Microsoft Word、WPS 或 LibreOffice'))
+    }
+  } finally {
+    merging.value = false
+  }
+}
+
 async function doMerge() {
-  if (merging.value || mergeFiles.value.length < 2) return
+  if (merging.value || !mergeFiles.value.length) return
+  if (mergeFiles.value.length === 1 && !isWordPath(mergeFiles.value[0].path)) return
+
+  if (mergeFiles.value.length === 1 && isWordPath(mergeFiles.value[0].path)) {
+    await convertSingleWordFile(mergeFiles.value[0])
+    return
+  }
+
   merging.value = true
   try {
-  const output = await open({ directory: true })
-  if (output) {
-    const outputPath = `${output}/merged.pdf`
-    const result = await tauriCallSafe('merge_pdfs', {
-      inputs: mergeFiles.value.map((file) => file.path),
-      output: outputPath,
-      duplexSeparate: duplexSeparate.value,
-    })
-    if (result.ok) mergeOutputPath.value = result.data?.output_path || outputPath
-    result.ok
-      ? ElMessage.success('合并完成')
-      : ElMessage.error(userFacingError(result.error, 'PDF 合并失败，请确认文件未损坏且未被其他程序占用'))
-  }
+    const output = await open({ directory: true })
+    if (output) {
+      const outputPath = `${output}/merged.pdf`
+      const result = await tauriCallSafe('merge_pdfs', {
+        inputs: mergeFiles.value.map((file) => file.path),
+        output: outputPath,
+        duplexSeparate: duplexSeparate.value,
+      })
+      if (result.ok) mergeOutputPath.value = result.data?.output_path || result.data || outputPath
+      result.ok
+        ? ElMessage.success('合并完成')
+        : ElMessage.error(userFacingError(result.error, '合并失败，请确认文件未损坏且未被其他程序占用'))
+    }
   } finally {
     merging.value = false
   }
@@ -1005,7 +1070,26 @@ function isPdfPath(path) {
   return /\.pdf$/i.test(String(path || ''))
 }
 
+function isWordPath(path) {
+  return /\.(docx|doc|docm)$/i.test(String(path || ''))
+}
+
+function isMergeSupportedPath(path) {
+  return /\.(pdf|docx|doc|docm)$/i.test(String(path || ''))
+}
+
 async function handleDroppedPdfPaths(paths) {
+  if (activeTab.value === 'merge') {
+    const mergePaths = [...new Set((paths || []).filter(isMergeSupportedPath))]
+    if (!mergePaths.length) {
+      ElMessage.warning('请拖入 PDF 或 Word 文件（.docx, .doc）')
+      return
+    }
+    if (mergePaths.length < (paths || []).length) ElMessage.warning('已忽略不支持的文件格式（仅支持 PDF、Word）')
+    addMergeFiles(mergePaths)
+    return
+  }
+
   const pdfPaths = [...new Set((paths || []).filter(isPdfPath))]
   if (!pdfPaths.length) {
     ElMessage.warning('请拖入 PDF 文件')
@@ -1017,8 +1101,6 @@ async function handleDroppedPdfPaths(paths) {
     addUnlockFiles(pdfPaths)
   } else if (activeTab.value === 'anti-ocr') {
     addAntiOcrFiles(pdfPaths)
-  } else if (activeTab.value === 'merge') {
-    addMergeFiles(pdfPaths)
   } else if (activeTab.value === 'compress') {
     loadCompressFiles(pdfPaths)
   } else {
@@ -1590,5 +1672,10 @@ h3 {
   color: var(--docsy-text-muted);
   font-size: 12px;
   line-height: 1.4;
+}
+.merge-item-status {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+  margin-left: 8px;
 }
 </style>

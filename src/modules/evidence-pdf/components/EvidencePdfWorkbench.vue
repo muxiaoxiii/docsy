@@ -5,7 +5,7 @@
     :class="{ 'is-evidence-dragging': evidenceDragging, 'is-list-reordering': listReordering }"
   >
     <div v-if="evidenceDragging" class="evidence-drop-overlay">
-      <div class="evidence-drop-message">松开以导入 PDF 文件</div>
+      <div class="evidence-drop-message">松开以导入 PDF 或 Word 文件</div>
     </div>
     <section class="hf-panel" ref="hfPanelRef">
       <div class="section-head">
@@ -14,7 +14,7 @@
           <p class="hint">{{ workflowHint }}</p>
         </div>
         <div class="section-actions">
-          <el-button v-if="workflowMode !== 'split'" type="primary" plain :disabled="overlaying || batchRunning" @click="selectOverlayFiles">{{
+          <el-button v-if="workflowMode !== 'split'" type="primary" plain :loading="importingEvidence" :disabled="overlaying || batchRunning || importingEvidence" @click="selectOverlayFiles">{{
             splitImportButtonText
           }}</el-button>
           <el-button v-if="workflowMode !== 'merge'" type="primary" plain :loading="importingMergedPdf" :disabled="batchRunning || detectingMergedImport || splittingMergedImport" @click="importMergedPdfAsEvidence">{{
@@ -1292,6 +1292,7 @@ const mergedImportButtonText = computed(() => '导入合并证据 PDF')
 
 const overlayFiles = ref([])
 const overlayOutputDir = ref('')
+const importingEvidence = ref(false)
 const checkingOverlayPages = ref(false)
 const overlaying = ref(false)
 const overlayProgressText = ref('')
@@ -2382,7 +2383,7 @@ const hasUnresolvedExistingOverlapRisk = computed(() => {
   )
 })
 const canApplyOverlay = computed(
-  () => overlayFiles.value.length > 0 && overlayFiles.value.every(file => Number(file.pages) > 0) && !checkingOverlayPages.value && !overlaying.value && !deepDetecting.value && hasApplicableProcessingRule.value,
+  () => overlayFiles.value.length > 0 && overlayFiles.value.every(file => Number(file.pages) > 0) && !importingEvidence.value && !checkingOverlayPages.value && !overlaying.value && !deepDetecting.value && hasApplicableProcessingRule.value,
 )
 const canApplySplitReplacement = computed(
   () =>
@@ -2723,7 +2724,11 @@ function applyWorkflowDefaults() {
 async function selectOverlayFiles() {
   const selected = await open({
     multiple: true,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    filters: [
+      { name: 'PDF 与 Word 文档 (*.pdf, *.docx, *.doc)', extensions: ['pdf', 'docx', 'doc', 'docm'] },
+      { name: 'PDF 文档 (*.pdf)', extensions: ['pdf'] },
+      { name: 'Word 文档 (*.docx, *.doc)', extensions: ['docx', 'doc', 'docm'] },
+    ],
   })
   if (!selected) return
   const paths = Array.isArray(selected) ? selected : [selected]
@@ -2731,26 +2736,48 @@ async function selectOverlayFiles() {
 }
 
 async function handleEvidenceDrop(paths) {
-  const pdfPaths = paths.filter((p) => p.toLowerCase().endsWith('.pdf'))
-  if (!pdfPaths.length) return
+  const supportedPaths = paths.filter((p) => /\.(pdf|docx|doc|docm)$/i.test(p))
+  if (!supportedPaths.length) return
   if (workflowMode.value === 'split') {
-    await importMergedPdfAsEvidence(pdfPaths)
+    const pdfPaths = paths.filter((p) => p.toLowerCase().endsWith('.pdf'))
+    if (pdfPaths.length) await importMergedPdfAsEvidence(pdfPaths)
     return
   }
-  await loadEvidenceFiles(pdfPaths)
+  await loadEvidenceFiles(supportedPaths)
 }
 
 async function loadEvidenceFiles(paths) {
-  if (mergedBatchBusy.value || checkingOverlayPages.value || overlaying.value || deepDetecting.value) {
+  if (importingEvidence.value || mergedBatchBusy.value || checkingOverlayPages.value || overlaying.value || deepDetecting.value) {
     ElMessage.warning('当前正在读取或处理证据，请完成后再导入')
     return
   }
-  mergedImportPlan.value = null
-  mergedImportPlans.value = []
-  overlayFiles.value = paths.map(createEvidenceFile)
-  selectedOverlayIndex.value = 0
-  await refreshOverlayPageCounts()
-  await checkExistingBookmarks()
+  importingEvidence.value = true
+  try {
+    mergedImportPlan.value = null
+    mergedImportPlans.value = []
+
+    const resolvedPaths = []
+    for (const p of paths) {
+      if (/\.(docx|doc|docm)$/i.test(p)) {
+        const res = await tauriCallSafe('convert_word_to_pdf', { input: p })
+        if (res.ok && (res.data?.output_path || res.data)) {
+          resolvedPaths.push(res.data?.output_path || res.data)
+        } else {
+          ElMessage.error(userFacingError(res.error, `Word 转 PDF 失败: ${fileName(p)}`))
+        }
+      } else {
+        resolvedPaths.push(p)
+      }
+    }
+    if (!resolvedPaths.length) return
+
+    overlayFiles.value = resolvedPaths.map(createEvidenceFile)
+    selectedOverlayIndex.value = 0
+    await refreshOverlayPageCounts()
+    await checkExistingBookmarks()
+  } finally {
+    importingEvidence.value = false
+  }
 }
 
 // 点击处理后才做导入侧无损优化：payload 的 inputPath 换成本次生成的优化副本，

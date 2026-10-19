@@ -134,9 +134,31 @@ pub async fn merge_pdfs(
     inputs: Vec<String>,
     output: String,
     duplex_separate: Option<bool>,
+    conversion_state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
 ) -> Result<String, String> {
     let duplex = duplex_separate.unwrap_or(false);
-    run_blocking(move || crate::pdf::qpdf::merge(&inputs, &output, duplex)).await
+    let state = (*conversion_state).clone();
+    run_blocking(move || crate::pdf::qpdf::merge_with_state(&inputs, &output, duplex, &state)).await
+}
+
+#[tauri::command]
+pub async fn convert_word_to_pdf(
+    input: String,
+    output: Option<String>,
+    conversion_state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
+) -> Result<String, String> {
+    let state = (*conversion_state).clone();
+    run_blocking(move || {
+        if let Some(out) = output {
+            let target_path = std::path::PathBuf::from(out);
+            crate::pdf::word_convert::convert_word_to_pdf_file(&input, &target_path, &state)
+        } else {
+            let path = std::path::Path::new(&input);
+            let parent = path.parent().unwrap_or(std::path::Path::new("."));
+            crate::pdf::word_convert::convert_word_to_pdf(&input, parent, &state)
+        }
+    })
+    .await
 }
 
 #[tauri::command]

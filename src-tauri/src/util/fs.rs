@@ -98,12 +98,21 @@ pub fn sibling_temp_path(target: &Path, prefix: &str) -> PathBuf {
 /// Windows 不能直接 rename 覆盖已有文件，因此先将旧文件改名为备份；若替换失败，
 /// 会尽力恢复旧文件。调用方应确保 `from` 和 `to` 在同一目录。
 pub fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if to.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "目标路径是目录，不能替换为文件",
+        ));
+    }
     #[cfg(unix)]
     {
         return std::fs::rename(from, to);
     }
     #[cfg(not(unix))]
     {
+        if !to.exists() {
+            return std::fs::rename(from, to);
+        }
         let backup = sibling_temp_path(to, "docsy-backup");
         std::fs::rename(to, &backup)?;
         match std::fs::rename(from, to) {
@@ -256,12 +265,23 @@ impl Drop for TempDirGuard {
 
 /// Copy without ever replacing a pre-existing destination, including races.
 pub fn copy_unique(source: &Path, directory: &Path) -> std::io::Result<PathBuf> {
-    use std::io::Write;
     let stem = source
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("template");
     let ext = source.extension().and_then(|s| s.to_str()).unwrap_or("");
+    copy_unique_with_stem(source, directory, stem, ext)
+}
+
+/// Copy to directory with a preferred stem and extension without ever replacing a pre-existing destination,
+/// handling races via exclusive file creation.
+pub fn copy_unique_with_stem(
+    source: &Path,
+    directory: &Path,
+    stem: &str,
+    ext: &str,
+) -> std::io::Result<PathBuf> {
+    use std::io::Write;
     loop {
         let path = unique_output_path(directory, stem, ext);
         let mut output = match std::fs::OpenOptions::new()
@@ -312,5 +332,46 @@ mod freeze_tests {
         assert_ne!(copied, source);
         assert_eq!(std::fs::read(&source).unwrap(), b"old");
         assert_eq!(std::fs::read(copied).unwrap(), b"old");
+    }
+    #[test]
+    fn copy_unique_with_stem_handles_pre_existing_target() {
+        let path = temp_named_path("docsy-stem-test", "dir");
+        std::fs::create_dir(&path).unwrap();
+        let _guard = TempDirGuard::new(path.clone()).unwrap();
+
+        let source = path.join("input.tmp");
+        std::fs::write(&source, b"new_data").unwrap();
+
+        // Pre-create report.pdf
+        std::fs::write(path.join("report.pdf"), b"initial_data").unwrap();
+
+        let published = copy_unique_with_stem(&source, &path, "report", "pdf").unwrap();
+        assert_eq!(published.file_name().unwrap(), "report-2.pdf");
+        assert_eq!(std::fs::read(path.join("report.pdf")).unwrap(), b"initial_data");
+        assert_eq!(std::fs::read(&published).unwrap(), b"new_data");
+    }
+
+    #[test]
+    fn concurrent_unique_copies_keep_all_outputs_and_existing_file() {
+        let dir = temp_named_path("docsy-concurrent-publish", "dir");
+        std::fs::create_dir(&dir).unwrap();
+        let _guard = TempDirGuard::new(dir.clone()).unwrap();
+        std::fs::write(dir.join("report.pdf"), b"original").unwrap();
+        let mut workers = Vec::new();
+        for index in 0..8 {
+            let source = dir.join(format!("source-{index}.tmp"));
+            let bytes = format!("payload-{index}").into_bytes();
+            std::fs::write(&source, &bytes).unwrap();
+            let output_dir = dir.clone();
+            workers.push(std::thread::spawn(move || {
+                let output = copy_unique_with_stem(&source, &output_dir, "report", "pdf").unwrap();
+                assert_eq!(std::fs::read(&output).unwrap(), bytes);
+                output
+            }));
+        }
+        let outputs: std::collections::HashSet<_> =
+            workers.into_iter().map(|worker| worker.join().unwrap()).collect();
+        assert_eq!(outputs.len(), 8);
+        assert_eq!(std::fs::read(dir.join("report.pdf")).unwrap(), b"original");
     }
 }
