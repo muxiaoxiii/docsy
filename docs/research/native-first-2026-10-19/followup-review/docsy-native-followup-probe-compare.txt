@@ -1,0 +1,178 @@
+   Compiling docsy-native-followup-review v0.1.0 (/var/folders/tz/q100sk452ndb8fk0wtqhc3mc0000gn/T/docsy-native-followup-review-20261019-jr4q2tg3)
+warning: unused import: `Object`
+ --> src/main.rs:3:52
+  |
+3 | use pdfcraft_cos::{Document,SaveOptions,write_full,Object};
+  |                                                    ^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `docsy-native-followup-review` (bin "docsy-native-followup-review") generated 1 warning (run `cargo fix --bin "docsy-native-followup-review" -p docsy-native-followup-review` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.65s
+     Running `/var/folders/tz/q100sk452ndb8fk0wtqhc3mc0000gn/T/docsy-phase34-review-20261019-wgw5kqzn/target/debug/docsy-native-followup-review /var/folders/tz/q100sk452ndb8fk0wtqhc3mc0000gn/T/docsy-native-followup-review-20261019-jr4q2tg3`
+[
+  {
+    "case": "bookmark_plain",
+    "page_info": [
+      {
+        "height": 220.0,
+        "raw_width": 200.0,
+        "width": 200.0,
+        "x0": 0.0
+      }
+    ]
+  },
+  {
+    "case": "bookmark_plain",
+    "encrypted_after_bookmark": false
+  },
+  {
+    "case": "bookmark_plain",
+    "encrypted_before_patch_bookmark": false
+  },
+  {
+    "case": "stamp_opacity",
+    "page_info": [
+      {
+        "height": 220.0,
+        "raw_width": 200.0,
+        "width": 200.0,
+        "x0": 0.0
+      }
+    ]
+  },
+  {
+    "case": "stamp_opacity",
+    "production_backend_error": null,
+    "production_backend_success": true
+  },
+  {
+    "case": "stamp_opacity",
+    "direct_error": null,
+    "direct_flatten_success": true
+  },
+  {
+    "case": "stamp_opacity",
+    "drawn": 1,
+    "error": null
+  },
+  {
+    "case": "bookmark_encrypted",
+    "page_info": [
+      {
+        "height": 220.0,
+        "raw_width": 200.0,
+        "width": 200.0,
+        "x0": 0.0
+      }
+    ]
+  },
+  {
+    "case": "bookmark_encrypted",
+    "encrypted_after_bookmark": false
+  },
+  {
+    "case": "bookmark_encrypted",
+    "encrypted_before_patch_bookmark": true
+  },
+  {
+    "case": "unit_parent",
+    "page_info": [
+      {
+        "height": 320.0,
+        "raw_width": 320.0,
+        "width": 320.0,
+        "x0": 40.0
+      }
+    ]
+  },
+  {
+    "case": "unit_leaf",
+    "page_info": [
+      {
+        "height": 320.0,
+        "raw_width": 320.0,
+        "width": 320.0,
+        "x0": 40.0
+      }
+    ]
+  },
+  {
+    "case": "highlight_no_ap",
+    "page_info": [
+      {
+        "height": 220.0,
+        "raw_width": 200.0,
+        "width": 200.0,
+        "x0": 0.0
+      }
+    ]
+  },
+  {
+    "case": "highlight_no_ap",
+    "production_backend_error": null,
+    "production_backend_success": true
+  },
+  {
+    "case": "highlight_no_ap",
+    "direct_error": null,
+    "direct_flatten_success": true
+  },
+  {
+    "case": "highlight_no_ap",
+    "drawn": 0,
+    "error": null
+  },
+  {
+    "case": "stale_widget",
+    "page_info": [
+      {
+        "height": 220.0,
+        "raw_width": 200.0,
+        "width": 200.0,
+        "x0": 0.0
+      }
+    ]
+  },
+  {
+    "case": "stale_widget",
+    "production_backend_error": null,
+    "production_backend_success": true
+  },
+  {
+    "case": "stale_widget",
+    "direct_error": "不支持的 PDF 特性: 文档包含 NeedAppearances=true 的未更新表单外观，需回退至 Qpdf 重新生成外观后再压平",
+    "direct_flatten_success": false
+  },
+  {
+    "case": "stale_widget",
+    "drawn": 1,
+    "error": null
+  },
+  {
+    "case": "stamp_norotate",
+    "page_info": [
+      {
+        "height": 200.0,
+        "raw_width": 200.0,
+        "width": 220.0,
+        "x0": 0.0
+      }
+    ]
+  },
+  {
+    "case": "stamp_norotate",
+    "production_backend_error": null,
+    "production_backend_success": true
+  },
+  {
+    "case": "stamp_norotate",
+    "direct_error": null,
+    "direct_flatten_success": true
+  },
+  {
+    "case": "stamp_norotate",
+    "drawn": 1,
+    "error": null
+  }
+]

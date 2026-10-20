@@ -1,0 +1,543 @@
+   Compiling bzip2-sys v0.1.13+1.0.8
+   Compiling bzip2 v0.4.4
+   Compiling zip v0.6.6
+   Compiling docsy v1.1.1 (/Users/only/Documents/PythonProgram/Docsy/src-tauri)
+warning: function `convert` is never used
+   --> src/markdown/md_to_docx.rs:753:8
+    |
+753 | pub fn convert(input: &Path, output: &Path, style: DocxStylePreset) -> Result<()> {
+    |        ^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `merge_edit_result` is never used
+    --> src/pdf/artifacts.rs:1033:4
+     |
+1033 | fn merge_edit_result(
+     |    ^^^^^^^^^^^^^^^^^
+
+warning: function `edit_referenced_form_artifacts` is never used
+    --> src/pdf/artifacts.rs:1463:4
+     |
+1463 | fn edit_referenced_form_artifacts(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `object_reference` is never used
+    --> src/pdf/artifacts.rs:1534:15
+     |
+1534 | pub(crate) fn object_reference(object: &Object) -> Option<ObjectId> {
+     |               ^^^^^^^^^^^^^^^^
+
+warning: function `resource_dictionary` is never used
+    --> src/pdf/artifacts.rs:1538:15
+     |
+1538 | pub(crate) fn resource_dictionary(doc: &Document, object: Option<&Object>) -> Option<Dictionary> {
+     |               ^^^^^^^^^^^^^^^^^^^
+
+warning: function `properties_from_resources` is never used
+    --> src/pdf/artifacts.rs:1546:4
+     |
+1546 | fn properties_from_resources(doc: &Document, resources: Option<&Dictionary>) -> Dictionary {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `xobjects_from_resources` is never used
+    --> src/pdf/artifacts.rs:1554:15
+     |
+1554 | pub(crate) fn xobjects_from_resources(
+     |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `page_xobjects` is never used
+    --> src/pdf/artifacts.rs:1564:15
+     |
+1564 | pub(crate) fn page_xobjects(doc: &Document, page_id: ObjectId) -> Dictionary {
+     |               ^^^^^^^^^^^^^
+
+warning: function `merge_xobjects` is never used
+    --> src/pdf/artifacts.rs:1580:4
+     |
+1580 | fn merge_xobjects(doc: &Document, resources: &Dictionary, output: &mut Dictionary) {
+     |    ^^^^^^^^^^^^^^
+
+warning: function `page_properties` is never used
+    --> src/pdf/artifacts.rs:1589:4
+     |
+1589 | fn page_properties(doc: &Document, page_id: ObjectId) -> Dictionary {
+     |    ^^^^^^^^^^^^^^^
+
+warning: function `merge_properties` is never used
+    --> src/pdf/artifacts.rs:1604:4
+     |
+1604 | fn merge_properties(doc: &Document, resources: &Dictionary, output: &mut Dictionary) {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `review_dpi` is never used
+    --> src/pdf/compress.rs:1103:8
+     |
+1103 | pub fn review_dpi(doc: &Document) -> Result<HashMap<ObjectId, f64>> {
+     |        ^^^^^^^^^^
+
+warning: function `review_compress` is never used
+    --> src/pdf/compress.rs:1107:8
+     |
+1107 | pub fn review_compress(input: &std::path::Path, output: &std::path::Path, dpi: u32) -> Result<()> {
+     |        ^^^^^^^^^^^^^^^
+
+warning: `docsy` (lib test) generated 13 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.50s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/docsy_lib-635950b80b1b2a61)
+
+running 450 tests
+test close_request_tests::confirmed_close_is_consumed_once ... ok
+test doc2docx::tests::classifies_zip_as_docx_passthrough ... ok
+test doc2docx::tests::accepts_cfb_with_worddocument_stream_anywhere ... ok
+test close_request_tests::subprocess_registry_reports_active_work ... ok
+test doc2docx::tests::rejects_non_word_cfb_and_encrypted ... ok
+test doc2docx::tests::validates_docx_structure_bytes ... ok
+test docx_template::batch::tests::batch_date_values_passthrough_when_unparsable_or_no_format ... ok
+test docx_template::batch::tests::batch_party_values_keep_per_item_suffixes_in_a_separate_column ... ok
+test docx_template::batch::tests::batch_party_values_use_template_suffixes_when_suffix_column_is_empty ... ok
+test docx_template::batch::tests::checkbox_truth_table_includes_cn_check_marks ... ok
+test docx_template::batch::tests::configured_reference_is_resolved_without_an_excel_input_column ... ok
+test docx_template::batch::tests::batch_date_values_apply_field_date_format ... ok
+test docx_template::batch::tests::float_cell_does_not_saturate_to_i64_max ... ok
+test docx_template::batch::tests::instruction_row_is_not_treated_as_the_header ... ok
+test commands::system::preview_tests::transparent_png_preview_preserves_alpha ... ok
+test docx_template::batch::tests::vertical_continuation_rows_build_one_record_with_multiple_items ... ok
+test docx_template::engine::doc_engine_probe::oxide_vs_doc2x_yellow_probe ... ignored, manual probe: set DOCSY_TEST_DOC
+test docx_template::batch::tests::filename_literal_separators_are_not_duplicated ... ok
+test docx_template::engine::tests::ignores_accidental_punctuation_ref_in_multi_run_value_field ... ok
+test docx_template::batch::tests::filename_value_tokens_match_preview_without_hidden_separator ... ok
+test docx_template::index::tests::text_index_basic ... ok
+test docx_template::index::tests::document_index_iter ... ok
+test docx_template::ooxml::tests::illegal_control_chars_are_stripped_on_write ... ok
+test docx_template::ooxml::tests::parse_paragraph_with_multiple_runs ... ok
+test app_log::tests::uses_the_same_alias_for_repeated_file_references ... ok
+test app_log::tests::redacts_filename_and_directory_fields_in_structured_logs ... ok
+test docx_template::ooxml::tests::attr_special_chars_roundtrip_stays_valid_xml ... ok
+test docx_template::ooxml::tests::xml_special_chars_are_escaped ... ok
+test docx_template::ooxml::tests::roundtrip_preserves_content ... ok
+test docx_template::ooxml::tests::parse_simple_document ... ok
+test docx_template::render::tests::fill_all_positions_duplicates_value_to_every_slot ... ok
+test docx_template::render::tests::edited_template_default_affix_replaces_embedded_source_text ... ok
+test docx_template::render::tests::explicitly_empty_default_affix_removes_embedded_source_text ... ok
+test docx_template::render::tests::generic_multiple_table_rows_keep_each_item_prefix ... ok
+test docx_template::render::tests::generic_multiple_text_field_joins_items_and_repeats_suffix_once ... ok
+test docx_template::render::tests::generic_multiple_text_field_uses_custom_separator ... ok
+test docx_template::render::tests::render_delete_text_removes_sdt ... ok
+test app_log::tests::redacts_windows_and_macos_document_paths_without_losing_error_text ... ok
+test docx_template::render::tests::party_list_uses_frontend_array_payload_and_per_item_suffixes ... ok
+test docx_template::render::tests::party_list_removes_unused_separator_and_unwraps_sdt ... ok
+test docx_template::render::tests::render_preserves_unrelated_sdt ... ok
+test docx_template::render::tests::render_empty_optional_rule_removes_content ... ok
+test docx_template::render::tests::render_marker_preserves_font ... ok
+test docx_template::render::tests::render_removes_known_truncated_placeholder_from_legacy_template ... ok
+test docx_template::render::tests::legacy_fragment_does_not_block_repeated_suffix_replacement ... ok
+test docx_template::render::tests::render_text_field_preserves_rpr ... ok
+test docx_template::render::tests::repeatable_party_suffix_replaces_its_template_text_once ... ok
+test docx_template::render::tests::repeated_plain_field_fills_only_the_primary_slot ... ok
+test docx_template::render::tests::structure_override_replaces_source_affix_instead_of_duplicating_it ... ok
+test docx_template::render::tests::render_table_row_replication ... ok
+test docx_template::render::tests::table_row_replication_keeps_static_suffix_untouched_when_item_suffix_matches ... ok
+test docx_template::render::tests::table_row_replication_replaces_static_suffix_with_differing_item_suffix ... ok
+test docx_template::save::tests::detect_no_sdt_passes ... ok
+test docx_template::save::tests::parse_mark_coords_invalid ... ok
+test docx_template::save::tests::parse_mark_coords_valid ... ok
+test docx_template::save::tests::whole_run_delete_keeps_runs_with_non_text_payload ... ok
+test docx_template::save::tests::detect_existing_sdt_rejects_only_yellow_marked ... ok
+test docx_template::scan::tests::scan_checkbox_text ... ok
+test docx_template::scan::tests::scan_hyperlink_nested_yellow_run ... ok
+test docx_template::save::tests::multi_range_run_does_not_shift_later_source_run_coordinates ... ok
+test docx_template::scan::tests::scan_multiple_paragraphs ... ok
+test docx_template::scan::tests::scan_single_paragraph_with_highlight ... ok
+test docx_template::scan::tests::scan_preserves_non_yellow_highlight ... ok
+test docx_template::scan::tests::scan_split_text_run ... ok
+test external::ffmpeg::tests::detects_drawtext_from_either_output_stream ... ok
+test docx_template::scan::tests::scan_text_box_content ... ok
+test docx_template::save::tests::resave_unwraps_previous_sdt_instead_of_nesting ... ok
+test docx_template::save::tests::resave_preserves_ranged_sdt_without_splitting_anonymous_placeholder ... ok
+test external::libreoffice::tests::rejects_existing_directory_without_binary ... ok
+test external::managed::tests::archive_entry_names_cannot_escape_staging_directory ... ok
+test external::managed::tests::builds_platform_binary_name ... ok
+test external::libreoffice::tests::rejects_arbitrary_binary_file ... ok
+test external::libreoffice::tests::accepts_direct_binary_path ... ok
+test external::libreoffice::tests::rejects_arbitrary_binary_file_outside_libreoffice_dirs ... ok
+test external::managed::tests::embedded_windows_packages_are_integrity_checked ... ok
+test external::managed::tests::hex_encodes_lowercase ... ok
+test external::managed::tests::package_limits_are_tool_aware_and_manifest_overridable ... ok
+test external::managed::tests::download_url_must_be_https ... ok
+test external::managed::tests::parses_sha256_from_various_checksum_file_formats ... ok
+test external::managed::tests::remove_managed_tool_rejects_traversal_attempts ... ok
+test external::managed::tests::redirects_must_remain_https ... ok
+test external::managed::tests::validate_managed_tool_name_enforces_whitelist_and_blocks_traversal ... ok
+test external::libreoffice::tests::resolves_install_directory_to_binary ... ok
+test external::tests::command_failure_includes_exit_code_when_stderr_is_empty ... ok
+test external::tests::command_failure_prefers_first_stderr_line ... ok
+test external::word::tests::parses_quoted_word_path ... ok
+test external::word::tests::parses_unquoted_word_path_with_spaces ... ok
+test external::word::tests::prefers_expand_string_type_without_matching_reg_sz_suffix ... ok
+test external::tests::bounded_output_reader_drains_but_caps_diagnostics ... ok
+test external::wps::tests::parses_quoted_wps_local_server_command ... ok
+test external::wps::tests::extracts_registry_value ... ok
+test external::wps::tests::parses_unquoted_wps_command_with_spaces ... ok
+test ffmpeg::extract::tests::default_output_prefix_uses_video_name_without_run_timestamp ... ok
+test ffmpeg::extract::tests::frame_time_is_filename_safe_and_precise ... ok
+test ffmpeg::extract::tests::output_prefix_only_replaces_cross_platform_invalid_characters ... ok
+test ffmpeg::extract::tests::rejects_nonempty_invalid_video_time ... ok
+test ffmpeg::extract::tests::parses_video_time_range ... ok
+test ffmpeg::extract::tests::rejects_reversed_video_time_range ... ok
+test ffmpeg::selection::tests::identical_bytes_are_fully_similar ... ok
+test external::managed::tests::verify_sha256_file_rejects_missing_or_wrong_hash ... ok
+test ffmpeg::opencv_enhancer::tests::embedded_opencv_detects_a_known_horizontal_shift ... ok
+test close_request_tests::registered_subprocess_captures_output ... ok
+test ffmpeg::selection::tests::multi_signal_gate_classifies_duplicates ... ok
+test ffmpeg::selection::tests::shifted_similarity_finds_exact_vertical_overlap ... ok
+test ffmpeg::selection::tests::multi_signal_gate_keeps_scene_cuts ... ok
+test ffmpeg::selection::tests::multi_signal_gate_detects_ten_percent_vertical_continuity ... ok
+test ffmpeg::selection::tests::user_overrides_adjust_only_safe_downstream_thresholds ... ok
+未能安装带 drawtext 的 FFmpeg（已尝试 ffmpeg-full 与常见 formula）
+test image_paddler::caption_and_destination_tests::actual_title_and_note_reserve_cannot_silently_squeeze_images_to_one_mm ... ok
+test external::tests::homebrew_install_command_tolerates_missing_full_formula_and_requires_drawtext ... ok
+test image_paddler::caption_and_destination_tests::caption_gap_visual_samples ... ignored, manual visual fixtures for PDF and Word
+test docx_template::engine::tests::end_to_end_table_party_list_replication ... ok
+test ffmpeg::selection::tests::user_keep_becomes_the_next_dynamic_anchor ... ok
+test ffmpeg::selection::tests::user_excludes_are_removed_from_anchor_candidates ... ok
+test external::managed::tests::seven_zip_limit_is_enforced_before_large_entry_is_written ... ok
+test docx_template::engine::tests::end_to_end_inspect_save_render ... ok
+test ffmpeg::selection::tests::sequence_never_compares_beyond_local_window ... ok
+test image_paddler::tests::explicit_image_paths_preserve_user_order ... ok
+test image_paddler::caption_and_destination_tests::docx_clamped_caption_spacers_stay_inside_cell ... ok
+test image_paddler::tests::docx_reuses_png_bytes_when_layout_does_not_need_downsampling ... ok
+test image_paddler::tests::final_single_image_uses_the_full_page_cell ... ok
+test image_paddler::tests::filename_rules_keep_time_and_number_with_custom_name ... ok
+test image_paddler::tests::frame_document_name_removes_timeline_and_keeps_video_stem ... ok
+test image_paddler::tests::flow_mode_docx_generates_paragraphs_without_tables ... ok
+test image_paddler::tests::incomplete_final_page_uses_a_compact_grid_without_empty_cells ... ok
+test image_paddler::tests::legacy_two_image_layout_matches_preview_stacked_order ... ok
+test image_paddler::freeze_layout_tests::folder_scales_and_separate_caption_line_heights_reach_docx ... ok
+test image_paddler::tests::placement_fit_and_original_have_distinct_print_sizes ... ok
+test image_paddler::tests::recommends_side_by_side_pages_for_portrait_frames ... ok
+test image_paddler::tests::recommends_single_page_for_single_image ... ok
+test image_paddler::tests::recommends_stacked_pages_for_landscape_video_frames ... ok
+test image_paddler::tests::recursive_sources_are_deduplicated ... ok
+test image_paddler::tests::six_point_long_name_can_expand_to_three_lines ... ok
+test image_paddler::tests::test_golden_fixture_wysiwyg_rectangles ... ok
+test image_paddler::tests::test_image_annotations_and_placeholder_resolution ... ok
+test image_paddler::tests::test_layout_for_page_preserves_fixed_width_without_clamping_to_safe_column_width ... ok
+test image_paddler::tests::test_natural_sort ... ok
+test image_paddler::tests::test_pair_offsets_and_compute_placement_with_scale ... ok
+test image_paddler::tests::test_parse_custom_layout ... ok
+test image_paddler::tests::test_parse_layout_count ... ok
+test image_paddler::tests::test_parse_layout_grid ... ok
+test image_paddler::tests::wraps_long_filename_to_two_lines_with_ellipsis ... ok
+test markdown::doc_default_engine_smoke::converts_legacy_doc_with_default_engine ... ignored, manual smoke: set DOCSY_DOC_FIXTURE
+test image_paddler::tests::generated_docx_has_valid_package_parts_and_unique_name ... ok
+test markdown::docx_to_md::image_export_tests::existing_assets_dir_is_reused_and_overwritten ... ok
+test image_paddler::caption_and_destination_tests::chosen_destination_covers_merged_grouped_and_scanned_sources_without_overwriting ... ok
+test markdown::docx_to_md::image_export_tests::exports_images_with_dedup_and_relative_refs ... ok
+test markdown::docx_to_md::image_export_tests::no_assets_dir_when_document_has_no_images ... ok
+test markdown::docx_to_md::tests::extracts_heading_and_inline_marks ... ok
+test markdown::docx_to_md::tests::extracts_merged_cells ... ok
+test markdown::docx_to_md::tests::extracts_table_and_merges_cell_lines ... ok
+test markdown::docx_to_md::tests::extracts_lists_with_counters ... ok
+test markdown::docx_to_md::tests::extracts_textbox_content_as_paragraph_text ... ok
+test markdown::docx_to_md::tests::rejects_invalid_bytes ... ok
+test markdown::encoding::tests::legacy_encodings_are_explicit_and_strict ... ok
+test markdown::encoding::tests::unicode_and_boms_preserve_every_character ... ok
+test markdown::html_default_convert_smoke::converts_html_fixture_to_markdown ... ignored, manual smoke: set DOCSY_HTML_FIXTURE
+test markdown::docx_to_md::tests::extracts_underline_as_inline_html ... ok
+test markdown::html_to_md::tests::rejects_empty_html ... ok
+test markdown::html_to_md::tests::converts_basic_structure ... ok
+test markdown::encoding::tests::selected_encoding_is_used_by_file_export_and_preserves_image_base_directory ... ok
+test markdown::md_to_docx::resource_security_tests::local_images_stay_in_source_directory_and_paste_has_no_local_access ... ok
+test markdown::md_to_docx::tests::all_word_style_presets_emit_a4_and_distinct_typography ... ok
+test markdown::md_to_docx::tests::builds_valid_docx_with_expected_structure ... ok
+test markdown::md_to_docx::tests::empty_markdown_produces_empty_doc ... ok
+test markdown::md_to_docx::tests::docx_links_reject_dangerous_protocols ... ok
+test markdown::md_to_docx::tests::missing_image_falls_back_to_placeholder ... ok
+test markdown::md_to_docx::tests::local_image_is_embedded ... ok
+test markdown::md_to_docx::tests::horizontal_rule_emits_blank_paragraph ... ok
+test markdown::media::tests::detects_changed_sources_missing_assets_and_invalid_images ... ok
+test markdown::media::tests::docx_has_editable_math_and_embedded_fallback_and_diagram ... ok
+test markdown::media::tests::conversion_enforces_limits_without_prepare_command ... ok
+test markdown::md_to_docx::tests::round_trip_preserves_key_structure ... ok
+test markdown::media::tests::equation_placeholders_never_replace_literal_body_text ... ok
+test markdown::media::tests::parser_preserves_code_currency_and_escaped_delimiters ... ok
+test markdown::media::tests::multilingual_offsets_text_and_currency_survive_export ... ok
+test markdown::omml::tests::native_fraction_roots_scripts_and_matrix ... ok
+test markdown::omml::tests::unsupported_or_untrusted_math_uses_image_fallback ... ok
+test markdown::pdf_to_md::tests::cancellation_stops_before_pdf_text_is_rendered ... ok
+test markdown::media::tests::real_browser_multilingual_export ... ok
+test markdown::pdf_to_md::tests::normalizes_varying_page_numbers_without_content_specific_rules ... ok
+test markdown::pdf_to_md::tests::only_repeated_edge_text_is_removed ... ok
+test markdown::pdf_to_md::tests::page_range_validation_rejects_bad_values ... ok
+test markdown::pdf_to_md::tests::pdftotext_args_with_page_range ... ok
+test markdown::pdf_to_md::tests::repeating_page_edges_leave_header_only_pages_empty ... ok
+test markdown::tests::convert_md_file_end_to_end ... ok
+test markdown::tests::convert_md_file_to_html_end_to_end ... ok
+test markdown::tests::convert_rejects_missing_input ... ok
+test markdown::tests::convert_text_rejects_empty_and_bad_format ... ok
+test markdown::tests::convert_text_to_docx_end_to_end ... ok
+test markdown::tests::convert_text_to_excel_and_powerpoint_end_to_end ... ok
+test markdown::tests::convert_text_to_html_end_to_end ... ok
+test markdown::tests::detect_direction_by_extension ... ok
+test markdown::tests::doc_extract_manual_quality_probe ... ignored, manual QA: set DOCSY_DOC_FIXTURE to a .doc path
+test markdown::tests::html_exports_escape_raw_markup_titles_and_unsafe_protocols ... ok
+test markdown::tests::output_dir_must_exist ... ok
+test markdown::tests::output_path_uses_input_dir_and_swapped_ext ... ok
+test markdown::tests::parse_doc_engine_values ... ok
+test markdown::tests::safe_export_url_rejects_encoded_traversal_and_dangerous_protocols ... ok
+test operations::tests::test_begin_and_cancel ... ok
+test operations::tests::test_cancel_all ... ok
+test markdown::media::tests::real_browser_media_export ... ok
+test operations::tests::test_cancel_nonexistent ... ok
+test operations::tests::test_cancel_is_idempotent ... ok
+test operations::tests::test_list_active ... ok
+test operations::tests::test_finish_removes_entry ... ok
+test operations::tests::test_multiple_operations_independent ... ok
+test pdf::annotations::tests::default_kinds_remove_review_annotations_not_links ... ok
+test pdf::annotations::tests::normalizes_annotation_kinds ... ok
+test pdf::anti_ocr::tests::no_mapping_is_not_reported_as_protected_and_unbacked_restore_is_rejected ... ok
+test pdf::artifacts::geometry::tests::accumulated_form_transform_matches_direct_transform ... ok
+test pdf::artifacts::geometry::tests::classifies_visible_bands_with_rotation_and_crop_origin ... ok
+test pdf::artifacts::geometry::tests::real_mislabeled_forms_are_corrected_and_footer_only_deleted ... ignored, requires DOCSY_ARTIFACT_FIXTURE and qpdf
+test pdf::artifacts::repro_artifact_tests::evidence13_do_only_artifact_is_deleted ... ignored, requires the local PDF fixture directory and qpdf
+test pdf::artifacts::repro_artifact_tests::evidence13_do_only_artifact_is_detected_via_contents ... ignored, requires the local PDF fixture directory and qpdf
+test pdf::artifacts::tests::artifact_inspection_ignores_blank_header_and_counts_visible_footer ... ok
+test pdf::artifacts::tests::artifact_with_contents_but_only_form_do_is_meaningful ... ok
+test pdf::artifacts::tests::artifact_without_contents_and_without_text_is_still_skipped ... ok
+test pdf::anti_ocr::tests::compressed_cmap_roundtrip_preserves_source_and_existing_outputs ... ok
+test pdf::artifacts::tests::edits_artifact_range_and_clears_remaining_text_shows ... ok
+test pdf::artifacts::tests::edits_ascii_header_artifact_in_place ... ok
+test pdf::artifacts::tests::edits_utf16be_header_artifact_in_place ... ok
+test pdf::artifacts::tests::inspects_cid_artifact_text_with_tounicode_map ... ok
+test pdf::artifacts::tests::keeps_footer_when_only_removing_header ... ok
+test pdf::artifacts::tests::legacy_cjk_decode_keeps_gb18030_for_simplified_chinese ... ok
+test pdf::artifacts::tests::legacy_cjk_decode_prefers_big5_over_gb18030_mojibake ... ok
+test pdf::artifacts::tests::legacy_cjk_decode_prefers_euc_kr_for_korean ... ok
+test pdf::artifacts::tests::legacy_cjk_decode_prefers_shift_jis_for_japanese ... ok
+test pdf::artifacts::tests::legacy_cjk_decode_rejects_pure_ascii ... ok
+test pdf::artifacts::tests::deletes_header_artifact_from_pdf_file ... ok
+test pdf::artifacts::tests::refuses_unbalanced_marked_content_removal ... ok
+test pdf::artifacts::tests::removes_standard_artifact_when_replacement_encoding_is_unsafe ... ok
+test pdf::artifacts::tests::removes_standard_header_artifact_range ... ok
+test pdf::artifacts::tests::resolves_named_artifact_properties ... ok
+test pdf::backend::tests::test_body_stream_with_docsy_wrapper_key_is_preserved ... ok
+test pdf::backend::tests::test_default_backend_selection ... ok
+test pdf::backend::tests::test_docsy_marks_lifecycle_isolated_and_lossless ... ok
+test pdf::backend::tests::test_extract_poc_structure_and_empty_page_notice ... ok
+test markdown::pdf_to_md::tests::end_to_end_extracts_fixture_pdf ... ok
+test pdf::artifacts::tests::qpdf_inspection_and_targeted_edit_roundtrip ... ok
+test pdf::backend::tests::test_native_print_flatten_cases_and_merge ... ok
+test pdf::backend::tests::test_pdfcraft_extract_invalid_pages ... ok
+test pdf::backend::tests::test_pdfcraft_extract_pages_1based_reverse ... ok
+test pdf::backend::tests::test_pdfcraft_form_field_renamed_on_collision ... ok
+test doc2docx::tests::end_to_end_when_sidecar_present ... ok
+test pdf::backend::tests::test_pdfcraft_merge_basic ... ok
+test pdf::backend::tests::test_preflight_signature_warning ... ok
+test pdf::backend::tests::test_user_unit_page_info_consistency ... ok
+test pdf::backend::tests::test_view_matrix_four_rotations ... ok
+test pdf::blank::tests::blank_page_preserves_non_zero_box_origin ... ok
+test pdf::backend::tests::test_prune_unused_xobject_when_page_has_no_do_operator ... ok
+test pdf::backend::tests::test_pdfcraft_merge_duplex_separate ... ok
+test pdf::backend::tests::test_preflight_anticopy_backup_and_safe_fallback ... ok
+test pdf::blank::tests::blank_page_preserves_rotation ... ok
+test pdf::blank::tests::writes_blank_pdf_with_matching_media_box ... ok
+test pdf::bookmarks::tests::out_of_range_bookmark_fails ... ok
+test pdf::bookmarks::tests::qpdf_string_uses_unicode_prefix ... ok
+test pdf::chunked::tests::thresholds_are_300_pages_or_100mb ... ok
+test pdf::cmap::tests::builds_identity_cid_map_with_two_byte_codes ... ok
+test pdf::chunked::tests::small_docs_do_not_chunk ... ok
+test pdf::cmap::tests::compose_skips_cids_missing_from_unicode_map ... ok
+test pdf::cmap::tests::composes_mixed_width_codespaces ... ok
+test pdf::bookmarks::tests::bookmark_roundtrip_via_qpdf ... ok
+test pdf::cmap::tests::decodes_bfchar_and_bfrange ... ok
+test pdf::cmap::tests::decodes_variable_length_codespaces_and_range_lists ... ok
+test pdf::cmap::tests::glyph_name_mapping_is_available_for_font_fallbacks ... ok
+test pdf::cmap::tests::invalid_embedded_font_is_not_guessed ... ok
+test pdf::cmap::tests::loads_embedded_adobe_ucs2_maps ... ok
+test pdf::cmap::tests::decodes_halfwidth_katakana_from_90ms_rksj ... ok
+test pdf::cmap::tests::rejects_incomplete_or_missing_mappings ... ok
+test pdf::compress::tests::test_evidence_fixtures ... ignored, requires local evidence PDFs; run explicitly for manual compression QA
+test pdf::compress::tests::test_compress_options_from_level ... ok
+test pdf::compress::tests::test_mat_mul_composition ... ok
+test pdf::compress::tests::test_placement_dpi_full_page_scan ... ok
+test pdf::compress::tests::test_placement_dpi_scaled_with_cm ... ok
+test pdf::compress::tests::test_plan_dct_downsample_when_dpi_exceeded ... ok
+test pdf::compress::tests::test_plan_dct_never_transcoded_when_dpi_ok ... ok
+test pdf::compress::tests::test_plan_flate_to_jpeg ... ok
+test pdf::compress::tests::test_plan_skips_untouchable_images ... ok
+test pdf::content_text::tests::decodes_pdf_doc_encoding_in_plain_content_streams ... ok
+test pdf::content_text::tests::decodes_cid_text_with_current_font_tounicode_map ... ok
+test pdf::cmap::tests::composes_predefined_encoding_and_ucs2_maps ... ok
+test pdf::content_text::tests::deletes_header_by_detected_bbox_when_text_is_not_decodable ... ok
+test pdf::content_text::tests::deletes_confirmed_plain_header_inside_form_xobject ... ok
+test pdf::content_text::tests::deletes_plain_text_from_pdf_file ... ok
+test pdf::content_text::tests::matches_bbox_with_ctm_from_nested_form ... ok
+test pdf::content_text::tests::matches_page_number_placeholder_targets ... ok
+test pdf::content_text::tests::removes_matching_header_text_in_header_zone ... ok
+test pdf::detection::real_split_audit::audit_real_split_suggestions ... ignored, requires DOCSY_ARTIFACT_FIXTURE, qpdf and pdftotext
+test pdf::content_text::tests::deletes_header_by_bbox_inside_nested_form_with_cm ... ok
+test pdf::detection::tests::attaches_font_size_from_content_stream_when_available ... ok
+test pdf::detection::tests::builds_split_suggestions_from_header_changes ... ok
+test pdf::detection::tests::candidate_repetition_counts_distinct_pages ... ok
+test pdf::detection::tests::circled_page_numbers_normalize_and_classify ... ok
+test pdf::detection::tests::decodes_pdf_doc_encoded_content_strings ... ok
+test pdf::detection::tests::detect_evidence9_header_candidates ... ignored, requires the real patent PDF and pdftotext
+test pdf::detection::tests::detect_fixture_directory_without_unreliable_content_candidates ... ignored, requires the local PDF fixture directory, qpdf, and pdftotext
+test pdf::detection::tests::evidence_label_artifact_bbox_comes_from_matching_content_line ... ignored, requires the local PDF fixture directory, qpdf, and pdftotext
+test pdf::detection::tests::evidence_label_survives_repetition_gate_on_any_page ... ok
+test pdf::detection::tests::evidence_label_text_matches_expected_shapes ... ok
+test pdf::detection::tests::fallback_accepts_repeated_headers_only_when_position_is_stable ... ok
+test pdf::detection::tests::fallback_keeps_unique_body_like_headers_in_one_range ... ok
+test pdf::detection::tests::evidence_labels_keep_repeating_headers_inside_the_evidence_range ... ok
+test pdf::detection::tests::labels_for_page_number_patterns ... ok
+test pdf::detection::tests::later_evidence_label_is_promoted ... ok
+test pdf::content_text::tests::deletes_plain_text_when_page_box_is_inherited ... ok
+test pdf::detection::tests::names_first_headerless_split_range_as_catalog ... ok
+test pdf::detection::tests::noise_filter_counts_characters_not_bytes ... ok
+test pdf::detection::tests::keeps_standalone_numeric_footer_candidates ... ok
+test pdf::detection::tests::limits_detection_with_millimeter_zones ... ok
+test pdf::detection::tests::normalizes_common_page_number_formats ... ok
+test pdf::detection::tests::page_number_sequence_splits_on_format_switch ... ok
+test pdf::detection::tests::page_number_sequence_splits_on_gaps ... ok
+test pdf::detection::tests::page_number_sequence_splits_on_section_resets ... ok
+test pdf::detection::tests::page_number_sequence_splits_unordered_values ... ok
+test pdf::detection::tests::page_number_shape_does_not_override_unstable_positions ... ok
+test pdf::detection::tests::repeated_numbers_require_a_page_sequence ... ok
+test pdf::detection::tests::sectioned_page_numbers_produce_separate_candidates ... ok
+test pdf::detection::tests::split_suggestions_fallback_accepts_evidence_label_once ... ok
+test pdf::detection::tests::split_suggestions_ignore_single_page_noise_header ... ok
+test pdf::detection::tests::split_suggestions_use_artifact_candidate_ranges ... ok
+test pdf::detection::tests::preserves_blank_pages_in_detection ... ok
+test pdf::detection::tests::split_warning_summarizes_header_and_page_number_counts ... ok
+test pdf::detection::tests::still_filters_short_non_page_footer_noise ... ok
+test pdf::detection::tests::test_evidence_label_fullwidth ... ok
+test pdf::detection::tests::standard_artifact_candidate_precedes_text_heuristics ... ok
+test pdf::detection::tests::tm_font_size_uses_vertical_matrix_scale ... ok
+test pdf::evidence::tests::apply_identity_rename_blocks_path_traversal ... ok
+test pdf::detection::tests::parses_pdftotext_bbox_words ... ok
+test pdf::evidence::tests::safe_file_stem_keeps_common_chinese_names ... ok
+test pdf::detection::tests::test_normalize_split_item_name ... ok
+test pdf::evidence::tests::safe_file_stem_blocks_path_segments ... ok
+test pdf::evidence_session::tests::annotation_rule_from_json ... ok
+test pdf::evidence_session::tests::extract_annotation_rule_from_session_field ... ok
+test pdf::evidence_session::tests::extract_merge_from_args_basic ... ok
+test pdf::evidence_session::tests::file_name_of_takes_last_path_segment ... ok
+test pdf::evidence_session::tests::merge_result_serializes_correctly ... ok
+test pdf::evidence_session::tests::skips_merge_when_item_failed ... ok
+test pdf::evidence::tests::scan_includes_root_files_and_excludes_nested_outputs ... ok
+test pdf::freeze_tests::legacy_recovery_backup_is_blocked_before_qpdf_can_renumber_fonts ... ok
+test pdf::freeze_tests::optimize_preserves_bookmarks_info_and_real_anti_copy_recovery ... ok
+test pdf::freeze_tests::unsupported_large_bookmarks_stop_before_processing ... ok
+test pdf::glyph_names::tests::non_ascii_uni_name_does_not_panic ... ok
+test pdf::glyph_names::tests::u_hex_parsing ... ok
+test pdf::glyph_names::tests::uni_hex_parsing ... ok
+test pdf::header_footer::bookmark_serde_camelcase ... ok
+test pdf::header_footer::tests::artifact_rebuild_overlays_keep_only_removed_page_ranges ... ok
+test image_paddler::tests::output_image_is_downsampled_to_the_selected_print_dpi_bounds ... ok
+test pdf::header_footer::tests::manual_normalize_then_overlay_keeps_body_and_header_at_page_top ... ignored, manual QA: set DOCSY_NORMALIZE_FIXTURE to a representative PDF
+test pdf::header_footer::tests::confirmed_plain_header_edit_rebuilds_as_standard_artifact ... ok
+test pdf::normalize::tests::a4_normalize_does_not_upscale_small_pages ... ok
+test pdf::normalize::tests::a4_normalize_keeps_rotated_landscape_visual_orientation ... ok
+test pdf::normalize::tests::a4_normalize_scales_down_large_pages ... ok
+test pdf::normalize::tests::automatic_rotation_is_opt_in_and_uses_the_better_fit ... ok
+test pdf::normalize::tests::explicit_content_rotation_resets_page_rotation_entry ... ok
+test pdf::normalize::tests::explicit_counterclockwise_rotation_is_respected ... ok
+test pdf::normalize::tests::landscape_paper_does_not_rotate_portrait_content_by_default ... ok
+test pdf::normalize::tests::non_zero_source_origin_is_translated_before_centering ... ok
+test pdf::normalize::tests::normalization_wraps_original_stream_without_reencoding_it ... ok
+test pdf::normalize::tests::normalized_page_dimensions_drive_the_following_overlay_coordinates ... ok
+test pdf::normalize::tests::portrait_paper_does_not_rotate_landscape_content_by_default ... ok
+test pdf::normalize::tests::preserve_mode_keeps_page_rotation_entry ... ok
+test pdf::normalize::tests::safety_margin_keeps_wide_content_away_from_a4_edges ... ok
+test pdf::overlay_font::tests::compute_x_uses_configured_margin_for_left_and_right_alignment ... ok
+test pdf::overlay_font::tests::embedded_font_choice_prefers_font_covering_text ... ok
+test pdf::overlay_font::tests::expands_global_page_placeholders ... ok
+test pdf::overlay_font::tests::expands_styled_page_numbers_with_offset_and_total_override ... ok
+test pdf::overlay_font::tests::font_covers_text_rejects_missing_glyphs ... ok
+test pdf::overlay_font::tests::font_fallback_sequence_tries_similar_embeddable_families ... ok
+test pdf::overlay_font::tests::font_paths_include_platform_cjk_fallbacks ... ok
+test pdf::overlay_font::tests::formats_large_chinese_and_dingbat_page_numbers ... ok
+test pdf::overlay_font::tests::fullwidth_punctuation_counts_as_one_em_in_width_estimate ... ok
+test pdf::overlay_font::tests::parses_hex_text_color ... ok
+test pdf::header_footer::tests::processing_cjk_header_does_not_embed_full_font ... ok
+test pdf::overlay_pdf::tests::cjk_overlay_embeds_only_subset_font ... ok
+test pdf::overlay_pdf::tests::overlapping_overlays_warn_but_are_both_written ... ok
+test pdf::overlay_pdf::tests::overlay_page_range_limits_rebuilt_text_to_detected_pages ... ok
+test pdf::overlay_pdf::tests::rotated_page_overlay_uses_visual_mediabox_without_extra_cm ... ok
+test pdf::overlay_pdf::tests::unrotated_page_overlay_has_no_compensation_cm ... ok
+test pdf::page_info::tests::lopdf_fallback_resolves_inherited_and_indirect_page_attributes ... ok
+test pdf::page_info::tests::parses_modern_objects_map_layout ... ok
+test pdf::page_info::tests::parses_qpdf_page_sizes ... ok
+test pdf::page_info::tests::parses_rotated_page_size_as_visual_size ... ok
+test pdf::page_info::tests::preserves_non_zero_page_box_origin ... ok
+test pdf::page_info::tests::real_qpdf_pages_do_not_embed_boxes_so_objects_are_required ... ok
+test pdf::page_info::tests::resolves_inherited_media_box_from_parent ... ok
+test pdf::page_info::tests::resolves_rotated_page_size_from_page_object ... ok
+test pdf::page_info::tests::skips_qpdf_metadata_before_object_map ... ok
+test pdf::qpdf::tests::accepts_qpdf_warning_exit_status ... ok
+test pdf::overlay_pdf::tests::overflowing_overlay_is_pulled_back_into_page_with_warning ... ok
+test pdf::qpdf::tests::merge_with_empty_inputs_fails ... ok
+test pdf::qpdf::tests::parses_qpdf_is_encrypted_exit_status ... ok
+test pdf::signatures::tests::counts_sig_dicts_and_ft_sig_fields ... ok
+test pdf::signatures::tests::ordinary_widget_without_sig_is_ignored ... ok
+test pdf::split::tests::builds_unique_output_path_candidate ... ok
+test pdf::split::tests::detects_pages_without_visible_content_as_blank ... ok
+test pdf::split::tests::extract_range_excludes_blank_pages_from_selection ... ok
+test pdf::split::tests::operation_visibility_classifies_text_images_and_vectors ... ok
+test pdf::split::tests::sanitizes_split_file_names ... ok
+test pdf::split::tests::split_cleans_only_selected_footer_and_preserves_original ... ignored, requires DOCSY_ARTIFACT_FIXTURE and qpdf
+test pdf::split::tests::split_merged_removes_blank_pages_end_to_end ... ok
+test pdf::split::tests::validates_page_ranges ... ok
+test pdf::split::tests::warns_for_split_gaps_and_overlaps ... ok
+test pdf::text_utils::tests::expands_latin_ligatures_and_invisible_characters ... ok
+test pdf::text_utils::tests::keeps_cjk_and_normal_arabic_in_logical_order ... ok
+test pdf::text_utils::tests::keeps_combining_marks_on_base_when_reversing ... ok
+test pdf::text_utils::tests::keeps_digit_runs_in_logical_order_when_reversing ... ok
+test pdf::text_utils::tests::mirrors_brackets_when_reversing ... ok
+test pdf::text_utils::tests::normalizes_fullwidth_ascii_for_matching ... ok
+test pdf::text_utils::tests::normalizes_halfwidth_katakana_for_matching ... ok
+test pdf::text_utils::tests::normalizes_hebrew_presentation_forms ... ok
+test pdf::text_utils::tests::normalizes_ligatures_for_matching_only ... ok
+test pdf::text_utils::tests::normalizes_rtl_presentation_forms ... ok
+test pdf::text_utils::tests::removes_bidi_control_characters ... ok
+test pdf::word_convert::tests::test_convert_pdf_passthrough ... ok
+test pdf::qpdf::tests::merge_with_duplex_separate_pads_odd_files ... ok
+test pdf::word_convert::tests::test_convert_word_to_pdf_publishes_unique_on_collision ... ok
+test pdf::word_convert::tests::test_is_word_file ... ok
+test pdf::word_convert::tests::test_passthrough_does_not_corrupt_existing_target_on_same_source ... ok
+test pdf::word_convert::tests::test_sibling_guard_cleans_up_on_replace_failure ... ok
+test review_probe::review_extract_respects_anti_copy_preflight ... ok
+test review_probe::review_late_parse_failure_does_not_delete_existing_target ... ok
+test review_probe::review_geometry_and_duplex_is_read_back_by_lopdf ... ok
+test review_probe::review_merge_does_not_overwrite_source ... ok
+test pdf::freeze_tests::new_anti_copy_backup_survives_chunk_font_renumbering ... ok
+test review_probe::review_merge_existing_target_is_preserved ... ok
+test review_probe::review_print_policy_flattens_form_appearance ... ok
+test review_probe::review_reverse_order_is_read_back_by_lopdf ... ok
+test review_probe::review_structural_fallback_does_not_use_print_semantics ... ok
+test review_probe::review_structural_merge_honors_metadata_policy ... ok
+test services::workspace_state::tests::source_key_ignores_order ... ok
+test sort_utils::tests::handles_leading_zeroes_stably ... ok
+test sort_utils::tests::sorts_embedded_numbers_naturally ... ok
+test template_history::tests::canonical_history_keeps_reference_value_separate_from_same_name_field ... ok
+test template_history::tests::context_shape_is_serializable ... ok
+test template_history::tests::flattens_party_list_values ... ok
+test template_history::tests::value_display_handles_party_like_objects ... ok
+test review_probe::review_real_legacy_backup_roundtrip_is_not_broken_by_extract ... ok
+test services::history::tests::recover_previous_valid_settings_without_destroying_corrupt_file ... ok
+test util::fs::freeze_tests::copy_unique_with_stem_handles_pre_existing_target ... ok
+test util::fs::freeze_tests::directory_guard_allows_children_and_cleans_on_failure ... ok
+test util::images::tests::clockwise_rotations_preserve_pixels_and_reject_arbitrary_angles ... ok
+test util::fs::freeze_tests::export_copy_keeps_existing_file ... ok
+test util::fs::freeze_tests::concurrent_unique_copies_keep_all_outputs_and_existing_file ... ok
+test pdf::freeze_tests::actual_threshold_chunks_preserve_info_and_clean_success_failure_and_cancel ... ok
+test image_paddler::caption_and_destination_tests::scaled_portrait_caption_keeps_its_gap_in_mixed_orientation_exports ... ok
+test pdf::cmap::tests::bundled_cmap_resources_are_parseable ... ok
+test image_paddler::caption_and_destination_tests::rotation_reaches_pdf_docx_geometry_and_embedded_pixels_without_changing_source ... ok
+test commands::system::preview_tests::detail_preview_supports_high_resolution_and_rotation_without_modifying_source ... ok
+test image_paddler::caption_and_destination_tests::changing_caption_gap_moves_text_without_moving_images_in_both_exports ... ok
+test image_paddler::tests::export_matrix_preserves_page_counts_and_rejects_missing_selection ... ok
+
+test result: ok. 435 passed; 0 failed; 15 ignored; 0 measured; 0 filtered out; finished in 16.21s
+

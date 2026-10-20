@@ -182,7 +182,7 @@
                     :model-value="getEntryValue(field)"
                     @update:model-value="setEntryValue(field, $event)"
                   >
-                    <el-radio v-for="option in field.options" :key="option.id" :label="option.id">
+                    <el-radio v-for="option in field.options" :key="option.id" :value="option.id">
                       {{ option.label }}
                     </el-radio>
                   </el-radio-group>

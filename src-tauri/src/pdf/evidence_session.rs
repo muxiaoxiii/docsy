@@ -424,7 +424,20 @@ fn apply_merge_if_requested(
             fs::create_dir_all(parent).context("创建合并 PDF 输出目录失败")?;
         }
     }
-    let output = qpdf::merge(&inputs, &merge.output_path, false)?;
+    let policy = super::backend::policy::OutputPolicy {
+        merge_policy: super::backend::policy::MergePolicy::Print,
+        duplex_separate: false,
+        ..Default::default()
+    };
+    let req = super::backend::MergeRequest {
+        inputs,
+        output_path: PathBuf::from(&merge.output_path),
+        policy,
+        preferred_backend: None,
+        conversion_state: None,
+    };
+    let merge_res = super::backend::dispatch_merge(&req).map_err(|err| anyhow::anyhow!("{err}"))?;
+    let output = merge_res.output_path.to_string_lossy().to_string();
 
     let merge_bookmarks = collect_merge_bookmarks(items, results);
     let remove_existing = items

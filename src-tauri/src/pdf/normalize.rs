@@ -153,10 +153,14 @@ fn unrotated_content_transform(
     } else {
         (visual_page_w, visual_page_h)
     };
+    let user_unit = source.user_unit();
     let raw_w = source.raw_width_pt.max(0.0);
     let raw_h = source.raw_height_pt.max(0.0);
+    let phys_raw_w = raw_w * user_unit;
+    let phys_raw_h = raw_h * user_unit;
     let (safe_w, safe_h) = safe_content_size(page_w, page_h, content_margin_pt);
-    let scale = fit_scale(raw_w, raw_h, safe_w, safe_h);
+    let fit = fit_scale(phys_raw_w, phys_raw_h, safe_w, safe_h);
+    let scale = user_unit * fit;
     let fit_matrix = [
         scale,
         0.0,
@@ -208,6 +212,8 @@ fn rotated_content_transform(
         (page_w - content_w * scale) / 2.0,
         (page_h - content_h * scale) / 2.0,
     ];
+    let user_unit = source.user_unit();
+    let unit_matrix = [user_unit, 0.0, 0.0, user_unit, 0.0, 0.0];
     let user_rotation = content_rotation_matrix(source.width_pt, source.height_pt, rotation);
     let source_rotation = unrotate_matrix(source);
     let origin_matrix = [1.0, 0.0, 0.0, 1.0, -source.box_x0, -source.box_y0];
@@ -215,7 +221,10 @@ fn rotated_content_transform(
         page_w,
         page_h,
         matrix: multiply_matrix(
-            multiply_matrix(multiply_matrix(fit_matrix, user_rotation), source_rotation),
+            multiply_matrix(
+                multiply_matrix(multiply_matrix(fit_matrix, user_rotation), unit_matrix),
+                source_rotation,
+            ),
             origin_matrix,
         ),
         preserve_rotation: false,
@@ -363,6 +372,8 @@ fn set_page_box(
     for name in ["MediaBox", "CropBox", "TrimBox", "BleedBox", "ArtBox"] {
         page.set(name, box_object.clone());
     }
+    // Normalized A4 pages express physical pt directly in default user space (UserUnit = 1.0).
+    page.remove(b"UserUnit");
     if !preserve_rotation {
         // `/Rotate` is inheritable. Removing a page-local value could expose
         // a rotation from the parent page tree, so forced directions must
@@ -769,5 +780,31 @@ mod tests {
         let _ = std::fs::remove_file(normalized);
         let _ = std::fs::remove_file(overlay_path);
         let _ = std::fs::remove_file(output_path);
+    }
+
+    #[test]
+    fn user_unit_with_nonzero_crop_box_centers_in_physical_a4_coordinates() {
+        let source = PageSize {
+            width_pt: 320.0,
+            height_pt: 320.0,
+            raw_width_pt: 160.0,
+            raw_height_pt: 160.0,
+            box_x0: 20.0,
+            box_y0: 30.0,
+            rotate: 0,
+        };
+        let transform = a4_transform(&source, "portrait", "none", 0.0);
+        assert!((transform.page_w - A4_WIDTH_PT).abs() < 0.01);
+        assert!((transform.page_h - A4_HEIGHT_PT).abs() < 0.01);
+        // Source box corner (20, 30) in user space (160x160 user units = 320x320 pt)
+        // must map to centered physical offset ((595.28 - 320)/2, (841.89 - 320)/2).
+        let x0 = transform.matrix[0] * 20.0 + transform.matrix[2] * 30.0 + transform.matrix[4];
+        let y0 = transform.matrix[1] * 20.0 + transform.matrix[3] * 30.0 + transform.matrix[5];
+        let x1 = transform.matrix[0] * 180.0 + transform.matrix[2] * 190.0 + transform.matrix[4];
+        let y1 = transform.matrix[1] * 180.0 + transform.matrix[3] * 190.0 + transform.matrix[5];
+        assert!((x0 - (A4_WIDTH_PT - 320.0) / 2.0).abs() < 0.01);
+        assert!((y0 - (A4_HEIGHT_PT - 320.0) / 2.0).abs() < 0.01);
+        assert!(((x1 - x0) - 320.0).abs() < 0.01);
+        assert!(((y1 - y0) - 320.0).abs() < 0.01);
     }
 }

@@ -1,12 +1,12 @@
 <template>
   <section class="workspace">
-    <div class="panel source-panel" :class="{ 'has-source': sourceDocx }">
+    <div class="panel source-panel" :class="{ 'has-source': sourceDocx, 'is-empty': !sourceDocx }">
       <div class="panel-header">
         <div>
           <h3>导入标黄 Word</h3>
           <p>在 Word 里把可替换文字或勾选符号标黄，再导入确认字段。</p>
         </div>
-        <el-button type="primary" plain :disabled="saving" :loading="scanning" @click="$emit('select-source-docx')">选择 Word</el-button>
+        <el-button v-if="sourceDocx" type="primary" plain :disabled="saving" :loading="scanning" @click="$emit('select-source-docx')">选择 Word</el-button>
       </div>
 
       <el-descriptions v-if="sourceDocx" :column="2" size="small" border>
@@ -17,12 +17,17 @@
       </el-descriptions>
       <WorkspaceEmptyState
         v-else
-        compact
         class="template-empty-state"
         :icon-url="templateIconUrl"
         title="等待导入 Word"
         description="把需要替换的文字或勾选符号标黄后导入，Docsy 会自动识别成模板字段。"
-      />
+      >
+        <template #actions>
+          <el-button type="primary" plain :disabled="saving" :loading="scanning" @click="$emit('select-source-docx')">
+            选择 Word
+          </el-button>
+        </template>
+      </WorkspaceEmptyState>
     </div>
 
     <div v-if="fieldRows.length" class="panel filename-panel">
@@ -916,6 +921,8 @@ defineExpose({ fieldTableRef, sourcePreviewRef, documentPreviewRef })
 <style scoped>
 .workspace {
   display: grid;
+  min-height: 100%;
+  align-content: start;
   gap: 14px;
   padding-top: 8px;
 }
@@ -928,7 +935,14 @@ defineExpose({ fieldTableRef, sourcePreviewRef, documentPreviewRef })
   box-shadow: var(--docsy-shadow-soft);
 }
 
-.template-empty-state {
+.source-panel.is-empty {
+  display: flex;
+  min-height: min(64vh, 600px);
+  flex-direction: column;
+}
+
+.source-panel.is-empty .template-empty-state {
+  flex: 1;
   margin-top: 4px;
 }
 

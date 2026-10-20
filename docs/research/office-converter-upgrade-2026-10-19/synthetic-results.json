@@ -1,0 +1,227 @@
+{
+  "scope": "Synthetic smoke test; no native Office ground truth; debug MiniPdf and release office2pdf timings are not comparable benchmarks",
+  "office2pdf_version": "0.9.1",
+  "minipdf_source": "b34f3a41c86c1127d6504df0629fd62c1449e144",
+  "legacy_docx_sidecar_exit": 0,
+  "results": [
+    {
+      "engine": "office2pdf",
+      "input": "basic.docx",
+      "exit_code": 0,
+      "elapsed_s": 2.162,
+      "output_exists": true,
+      "output_bytes": 32761,
+      "stderr": "Warning: [DOCX] fallback: Arial rendered as Microsoft YaHei\n",
+      "stdout": "Converted: \"/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/inputs/basic.docx\" -> \"/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/office2pdf/basic.pdf\"\n",
+      "pages": 2,
+      "page_boxes": [
+        [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ]
+      ],
+      "page_text": [
+        "AUDIT HEADER\nNative conversion probe\nBASIC FIRST PAGE 合同中文测试。\nFormatting: BOLD ITALIC\nAUDIT FOOTER",
+        "AUDIT HEADER\nBASIC SECOND PAGE 第二页内容。\nAUDIT FOOTER"
+      ],
+      "render_code": 0
+    },
+    {
+      "engine": "office2pdf",
+      "input": "legacy.docx",
+      "exit_code": 0,
+      "elapsed_s": 2.196,
+      "output_exists": true,
+      "output_bytes": 29211,
+      "stderr": "Warning: [DOCX] fallback: Arial Black rendered as Arial\n",
+      "stdout": "Converted: \"/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/inputs/legacy.docx\" -> \"/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/office2pdf/legacy.pdf\"\n",
+      "pages": 2,
+      "page_boxes": [
+        [
+          0.0,
+          0.0,
+          595.35,
+          842.0
+        ],
+        [
+          0.0,
+          0.0,
+          595.35,
+          842.0
+        ]
+      ],
+      "page_text": [
+        "I am a test document\nThis is page 1\nI am Calibri (Body) in font size 11",
+        "This is page two\nIts Arial Black in 16 point\nIts also in blue"
+      ],
+      "render_code": 0
+    },
+    {
+      "engine": "office2pdf",
+      "input": "sections.docx",
+      "exit_code": 0,
+      "elapsed_s": 0.772,
+      "output_exists": true,
+      "output_bytes": 23608,
+      "stderr": "Warning: [DOCX] fallback: Arial rendered as Microsoft YaHei\n",
+      "stdout": "Converted: \"/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/inputs/sections.docx\" -> \"/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/office2pdf/sections.pdf\"\n",
+      "pages": 2,
+      "page_boxes": [
+        [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        [
+          0.0,
+          0.0,
+          792.0,
+          612.0
+        ]
+      ],
+      "page_text": [
+        "Section conversion probe\nPORTRAIT SECTION",
+        "LANDSCAPE SECTION 横向页面"
+      ],
+      "render_code": 0
+    },
+    {
+      "engine": "office2pdf",
+      "input": "table.docx",
+      "exit_code": 0,
+      "elapsed_s": 0.774,
+      "output_exists": true,
+      "output_bytes": 25546,
+      "stderr": "Warning: [DOCX] fallback: Arial rendered as Microsoft YaHei\n",
+      "stdout": "Converted: \"/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/inputs/table.docx\" -> \"/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/office2pdf/table.pdf\"\n",
+      "pages": 1,
+      "page_boxes": [
+        [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ]
+      ],
+      "page_text": [
+        "Table conversion probe\nITEM DESCRIPTION VALUE\nA 中文表格内容 100\nB Two line\ncell content\n200\nC MERGED CELL\nTABLE END MARKER"
+      ],
+      "render_code": 0
+    },
+    {
+      "engine": "minipdf",
+      "input": "basic.docx",
+      "exit_code": 0,
+      "elapsed_s": 0.793,
+      "output_exists": true,
+      "output_bytes": 41992,
+      "stderr": "",
+      "stdout": "/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/minipdf/basic.pdf\n",
+      "pages": 2,
+      "page_boxes": [
+        [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ]
+      ],
+      "page_text": [
+        "Native conversion probe\nBASIC FIRST PAGE 合同中文测试。\nFormatting: BOLD ITALIC ",
+        "BASIC SECOND PAGE 第二页内容。"
+      ],
+      "render_code": 0
+    },
+    {
+      "engine": "minipdf",
+      "input": "legacy.docx",
+      "exit_code": 0,
+      "elapsed_s": 0.824,
+      "output_exists": true,
+      "output_bytes": 41227,
+      "stderr": "",
+      "stdout": "/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/minipdf/legacy.pdf\n",
+      "pages": 2,
+      "page_boxes": [
+        [
+          0.0,
+          0.0,
+          595.35,
+          842.0
+        ],
+        [
+          0.0,
+          0.0,
+          595.35,
+          842.0
+        ]
+      ],
+      "page_text": [
+        "I am a test document\nThis is page 1\nI am Calibri (Body) in font size 11",
+        "This is page two\nIt s Arial Black in 16 point\nIt s also in blue"
+      ],
+      "render_code": 0
+    },
+    {
+      "engine": "minipdf",
+      "input": "sections.docx",
+      "exit_code": 0,
+      "elapsed_s": 0.335,
+      "output_exists": true,
+      "output_bytes": 34287,
+      "stderr": "",
+      "stdout": "/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/minipdf/sections.pdf\n",
+      "pages": 1,
+      "page_boxes": [
+        [
+          0.0,
+          0.0,
+          792.0,
+          612.0
+        ]
+      ],
+      "page_text": [
+        "Section conversion probe\nPORTRAIT SECTION\nLANDSCAPE SECTION 横向页面"
+      ],
+      "render_code": 0
+    },
+    {
+      "engine": "minipdf",
+      "input": "table.docx",
+      "exit_code": 0,
+      "elapsed_s": 0.446,
+      "output_exists": true,
+      "output_bytes": 42554,
+      "stderr": "",
+      "stdout": "/Users/only/Documents/PythonProgram/Docsy/release-candidate/office-converter-upgrade-2026-10-19/minipdf/table.pdf\n",
+      "pages": 1,
+      "page_boxes": [
+        [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ]
+      ],
+      "page_text": [
+        "Table conversion probe\nITEM DESCRIPTION VALUE\nA 中文表格内容 100\nB Two line\ncell content\n200\nC MERGED CELL\nTABLE END MARKER"
+      ],
+      "render_code": 0
+    }
+  ]
+}

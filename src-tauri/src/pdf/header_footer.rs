@@ -387,18 +387,38 @@ fn process_job(
     token: Option<&tokio_util::sync::CancellationToken>,
 ) -> Result<HeaderFooterResult> {
     let job_start = std::time::Instant::now();
-    let input = Path::new(&args.input_path);
-    if !input.exists() {
-        anyhow::bail!("原始 PDF 不存在: {}", input.display());
+    let raw_input = Path::new(&args.input_path);
+    if !raw_input.exists() {
+        anyhow::bail!("原始文件不存在: {}", raw_input.display());
     }
-    let file_name = input
+    let file_name = raw_input
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
+
+    let mut _word_temp_guard: Option<TempPathGuard> = None;
+    let mut effective_job: Option<HeaderFooterJob> = None;
+    if super::word_convert::is_word_file(&args.input_path) {
+        let temp_pdf = temp_named_path("docsy_hf_word", "pdf");
+        let state = std::sync::Arc::new(crate::ConversionState::new());
+        let converted = super::word_convert::convert_word_to_pdf_file(
+            &args.input_path,
+            &temp_pdf,
+            &state,
+        )
+        .context("证据处理前转换 Word 文档为 PDF 失败")?;
+        _word_temp_guard = Some(TempPathGuard::new(temp_pdf));
+        let mut cloned = args.clone();
+        cloned.input_path = converted;
+        effective_job = Some(cloned);
+    }
+    let args = effective_job.as_ref().unwrap_or(args);
+    let input = Path::new(&args.input_path);
+
     let output_requested = Path::new(&args.output_path);
     let output_path = unique_output_path(output_requested);
     let output = output_path.as_path();
-    if same_path(input, output) {
+    if same_path(raw_input, output) || same_path(input, output) {
         anyhow::bail!("输出路径不能和原始 PDF 相同，请另存为副本");
     }
     if let Some(parent) = output.parent() {

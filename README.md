@@ -3,7 +3,7 @@
 > 一个专为法律人、行政党、文字工作者打造的本地文档处理效率工具 ✨  
 > 所有操作 100% 在本地电脑完成，**断网可用，绝不上传云端** 🔒
 
-[![Version](https://img.shields.io/badge/version-1.0.10-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/muxiaoxiii/docsy/releases)
 
@@ -17,7 +17,7 @@
 
 还有一只超可爱的桌宠 **Doclet** 🐾，在遇到大批文件处理或外部工具调用时，它会在界面一角安静地陪你等待～
 
-当前版本为 **v1.0.10**：PDF 合并与分项证据导入支持 Word 文档；修复输出同名保护、转换临时文件清理和导入并发问题。Word 转 PDF 需要本机可用的 Microsoft Word、Windows WPS 或 LibreOffice。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)。
+当前版本为 **v1.1.1**：内置纯 Rust PDF 原生处理引擎（合并、提取、电子印章压平固化、编辑权限密码移除、页数与尺寸读取、签章与书签检查），支持无外置工具时开箱即用，并在复杂特殊结构下受控回退至 qpdf；Word 转 PDF 保持优先调用本机 Microsoft Word、Windows WPS 或 LibreOffice 以确保复杂版式与表单域保真。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)。
 
 ![Docsy 主页界面](site/public/assets/screenshots/home.png)
 

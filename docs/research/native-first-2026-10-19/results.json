@@ -1,0 +1,87 @@
+{
+  "date": "2026-10-19",
+  "docsy_head": "8746760240ce801156620d8d840d7bf825d9d2f8",
+  "scope": "source review and synthetic isolated probes, not installed-app acceptance",
+  "source_sha256": {
+    "src-tauri/src/commands/pdf.rs": "b4db375cc3ee33f0199cdd1a78cff9e6f94340ada2627d41c37c3431d30d5c64",
+    "src-tauri/src/pdf/backend/mod.rs": "44c4db8c97689101d834be635533303122d2f70ea57cf5342c182f03d8325857",
+    "src-tauri/src/pdf/backend/policy.rs": "a8626ebadede78f35819f9b65829187bd427f657669a54ff60542d0688af7d19",
+    "src-tauri/src/pdf/backend/pdfcraft_backend.rs": "0bf3aeac94fe34ef158dbe521d62dc72a014f801c71c2b6bca9453a28a1fa807",
+    "src-tauri/src/pdf/backend/marks.rs": "ba81903ea485627ec400c9167a54e903703b96dd93684543d56b24b13ef9efdc",
+    "src-tauri/src/pdf/backend/extract_poc.rs": "d8c80780d020fcdf9b52fe736e259e256b2ee25e246a6e786d28c9cf67c826be",
+    "src-tauri/src/pdf/qpdf_stream.rs": "9858cac246bd5cfbd07e9cb139f583f54edf8573bfd6f0f25f41c0ec9eb64e60",
+    "src-tauri/src/pdf/header_footer.rs": "ea9039ef779911df31df0ec1c7dbc45a93a7b49121cd870d6ff8119ad7959bae",
+    "src-tauri/src/pdf/page_info.rs": "b8107e3b150c785098ee2c6de6a7eb07a54783490bbfd666ae871d52f33c11e7",
+    "src-tauri/src/pdf/detection.rs": "1a59982adef133b19125a8222cb4793a49f57874f898e9262afca9679303a0fd",
+    "src-tauri/src/markdown/pdf_to_md.rs": "d7cef6f91864d9de2ef2a83bb446c182f71680ed855b5ed233b8ccae5f020fb2",
+    "src/shared/pdf-tools/components/PdfJsPreview.vue": "fa8d8a4b12279dd82aaa4cc07622e01f4b83f2f3b435dae3df514849a6d61001",
+    "src/shared/components/OnboardingModal.vue": "7d2d44fb1676bee683c4bcbe9b548e57c5cba570b4ae841c8eb3bd794ed0797e",
+    "src-tauri/vendor/pdfcraft/crates/organize/src/prune.rs": "08b13e10b75c12a5a9288962534795e4c65852caedc5c5dc41df5d9e057b7681"
+  },
+  "upstream": {
+    "pdfcraft": "4db6ac4ae2448df6389d8bb0bc54db6ba175721c",
+    "craft-libs": "ae2f796b673f29cf3161f36eb6a8933f0a3fe028",
+    "pdf_oxide": "ad49c4cb3638dc950a29350ef882161372fde473",
+    "office_oxide": "0.1.9"
+  },
+  "pdfjs_version": "6.1.200",
+  "synthetic_inputs": 16,
+  "upstream_flatten_tests": {
+    "passed": 9,
+    "failed": 0
+  },
+  "upstream_encryption_tests": {
+    "passed": 11,
+    "failed": 0
+  },
+  "native_without_external_tools": {
+    "PATH": "/nonexistent",
+    "identical_results": true
+  },
+  "native_observations": [
+    "flatten\tas_checkbox\tOK\tdrawn=1\tbefore=(1, 1, 1)\tafter=(0, 0, 0)",
+    "crypto\tcrypto_aes128\tnone\tERR\tthe document is protected by a password",
+    "crypto\tcrypto_aes128\twrong\tERR\tthe password is incorrect",
+    "crypto\tcrypto_aes128\tuser\tOK\tpages=1\tunencrypted=true",
+    "crypto\tcrypto_aes128\towner\tOK\tpages=1\tunencrypted=true",
+    "crypto\tcrypto_aes256\tnone\tERR\tthe document is protected by a password",
+    "crypto\tcrypto_aes256\twrong\tERR\tthe password is incorrect",
+    "crypto\tcrypto_aes256\tuser\tOK\tpages=1\tunencrypted=true",
+    "crypto\tcrypto_aes256\towner\tOK\tpages=1\tunencrypted=true",
+    "crypto\tcrypto_empty_aes256\tnone\tOK\tpages=1\tunencrypted=true",
+    "crypto\tcrypto_empty_aes256\twrong\tERR\tthe password is incorrect",
+    "crypto\tcrypto_empty_aes256\tuser\tERR\tthe password is incorrect",
+    "crypto\tcrypto_empty_aes256\towner\tOK\tpages=1\tunencrypted=true",
+    "crypto\tcrypto_rc4\tnone\tERR\tthe document is protected by a password",
+    "crypto\tcrypto_rc4\twrong\tERR\tthe password is incorrect",
+    "crypto\tcrypto_rc4\tuser\tOK\tpages=1\tunencrypted=true",
+    "crypto\tcrypto_rc4\towner\tOK\tpages=1\tunencrypted=true",
+    "flatten\thidden\tOK\tdrawn=0\tbefore=(1, 1, 1)\tafter=(1, 1, 1)",
+    "flatten\tinvisible\tOK\tdrawn=1\tbefore=(1, 1, 1)\tafter=(0, 0, 0)",
+    "flatten\tmissing_ap\tOK\tdrawn=0\tbefore=(1, 1, 1)\tafter=(1, 1, 1)",
+    "flatten\tno_view\tOK\tdrawn=0\tbefore=(1, 1, 1)\tafter=(1, 1, 1)",
+    "flatten\tnormal_widget\tOK\tdrawn=1\tbefore=(1, 1, 1)\tafter=(0, 0, 0)",
+    "repair\trepair_bad_startxref\tOK\tpages=1\treconstructed=true\tlog=[\"cross-reference data unreadable (syntax error at byte 0: expected xref table or stream); rebuilding from object headers\", \"rebuilt cross-reference index from 8 object headers\"]",
+    "repair\trepair_missing_xref\tOK\tpages=1\treconstructed=true\tlog=[\"cross-reference data unreadable (syntax error at byte 851: no startxref); rebuilding from object headers\", \"rebuilt cross-reference index from 8 object headers\"]",
+    "flatten\trotated_ap\tOK\tdrawn=1\tbefore=(1, 1, 1)\tafter=(0, 0, 0)",
+    "flatten\tstale_widget\tOK\tdrawn=1\tbefore=(1, 1, 1)\tafter=(0, 0, 0)",
+    "flatten\twatermark\tOK\tdrawn=0\tbefore=(1, 0, 0)\tafter=(1, 0, 0)",
+    "flatten\tzero_bbox\tOK\tdrawn=0\tbefore=(1, 1, 1)\tafter=(0, 0, 0)",
+    "gc\tunreachable_removed=true\treachable_kept=true",
+    "resources\tfull_save_keeps_unused=true\textract_without_do_keeps_unused=true\textract_with_do_prunes_unused=true",
+    "bookmarks\tcount=1\tchinese_title=true\tpage=Some(0)"
+  ],
+  "flatten_measurements": "measurements.json",
+  "preview_route": "preview-route.json",
+  "pdfjs": "pdfjs.json",
+  "current_poc": "extraction.jsonl",
+  "oxide": "oxide-results.tsv",
+  "raw_evidence_directory": "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19",
+  "render_contact_sheet": "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/contact-sheet.png",
+  "limitations": [
+    "Synthetic fixtures only; no real Chinese corpus acceptance",
+    "PDF.js tested in Node Canvas, not Tauri installed WebView",
+    "No performance or cross-platform conclusions",
+    "No modifications to Docsy business code"
+  ]
+}

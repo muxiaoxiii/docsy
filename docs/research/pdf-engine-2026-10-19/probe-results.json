@@ -1,0 +1,247 @@
+{
+  "input-A": {
+    "pages": 2,
+    "geometry": [
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 0
+      },
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 90
+      }
+    ],
+    "text": [
+      "SOURCE A PAGE 1\n中文证据测试：页序与内容保持\n",
+      "SOURCE A PAGE 2\n中文证据测试：页序与内容保持\n"
+    ],
+    "fields": {
+      "common_name": "value-A"
+    },
+    "outlines": [
+      "Source A first"
+    ],
+    "attachments": [
+      "A.txt"
+    ],
+    "custom_info_present": true,
+    "qpdf_check_exit": 0,
+    "sha256": "790b409802c1486656cba6f023007e3546fc9d6041b4319ef2726e2f834c9820"
+  },
+  "input-B": {
+    "pages": 1,
+    "geometry": [
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 0
+      }
+    ],
+    "text": [
+      "SOURCE B PAGE 1\n中文证据测试：页序与内容保持\n"
+    ],
+    "fields": {
+      "common_name": "value-B"
+    },
+    "outlines": [
+      "Source B first"
+    ],
+    "attachments": [
+      "B.txt"
+    ],
+    "custom_info_present": true,
+    "qpdf_check_exit": 0,
+    "sha256": "50fa598eb3ca3dcf81ec6b10dee68250b0b29252ba7b9d4f76e19901bc82abd6"
+  },
+  "candidate-merged": {
+    "pages": 3,
+    "geometry": [
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 0
+      },
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 90
+      },
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 0
+      }
+    ],
+    "text": [
+      "SOURCE A PAGE 1\n中文证据测试：页序与内容保持\n",
+      "SOURCE A PAGE 2\n中文证据测试：页序与内容保持\n",
+      "SOURCE B PAGE 1\n中文证据测试：页序与内容保持\n"
+    ],
+    "fields": {
+      "common_name": "value-A",
+      "common_name-1": "value-B"
+    },
+    "outlines": [
+      "A",
+      "Source A first",
+      "B",
+      "Source B first"
+    ],
+    "attachments": [
+      "A.txt",
+      "B.txt"
+    ],
+    "custom_info_present": false,
+    "qpdf_check_exit": 0,
+    "sha256": "c12a544653acc9323012499bc4ac369e80311ffdd6987e4afe3638f3cc6af512"
+  },
+  "candidate-extracted": {
+    "pages": 2,
+    "geometry": [
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 90
+      },
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 0
+      }
+    ],
+    "text": [
+      "SOURCE A PAGE 2\n中文证据测试：页序与内容保持\n",
+      "SOURCE A PAGE 1\n中文证据测试：页序与内容保持\n"
+    ],
+    "fields": {
+      "common_name": "value-A"
+    },
+    "outlines": [],
+    "attachments": [],
+    "custom_info_present": false,
+    "qpdf_check_exit": 0,
+    "sha256": "c9573206cbdaa4a4b22ef3ce7fb2b3e8184b48d938404d886a74140d225d728b"
+  },
+  "qpdf-merged": {
+    "pages": 3,
+    "geometry": [
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 0
+      },
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 90
+      },
+      {
+        "box": [
+          0,
+          0,
+          595,
+          842
+        ],
+        "rotate": 0
+      }
+    ],
+    "text": [
+      "SOURCE A PAGE 1\n中文证据测试：页序与内容保持\n",
+      "SOURCE A PAGE 2\n中文证据测试：页序与内容保持\n",
+      "SOURCE B PAGE 1\n中文证据测试：页序与内容保持\n"
+    ],
+    "fields": {
+      "common_name": "value-A",
+      "common_name+1": "value-B"
+    },
+    "outlines": [],
+    "attachments": [],
+    "custom_info_present": false,
+    "qpdf_check_exit": 0,
+    "sha256": "c94b15f2eed8270d386b73c8a97b5798e93dc205406d43d251bc3b2f2d1d0515"
+  },
+  "pixel_comparisons": [
+    {
+      "reference": "input-A-1.png",
+      "candidate": "candidate-merged-1.png",
+      "identical_at_72dpi": true
+    },
+    {
+      "reference": "input-A-2.png",
+      "candidate": "candidate-merged-2.png",
+      "identical_at_72dpi": true
+    },
+    {
+      "reference": "input-B-1.png",
+      "candidate": "candidate-merged-3.png",
+      "identical_at_72dpi": true
+    },
+    {
+      "reference": "input-A-1.png",
+      "candidate": "qpdf-merged-1.png",
+      "identical_at_72dpi": true
+    },
+    {
+      "reference": "input-A-2.png",
+      "candidate": "qpdf-merged-2.png",
+      "identical_at_72dpi": true
+    },
+    {
+      "reference": "input-B-1.png",
+      "candidate": "qpdf-merged-3.png",
+      "identical_at_72dpi": true
+    },
+    {
+      "reference": "input-A-2.png",
+      "candidate": "candidate-extracted-1.png",
+      "identical_at_72dpi": true
+    },
+    {
+      "reference": "input-A-1.png",
+      "candidate": "candidate-extracted-2.png",
+      "identical_at_72dpi": true
+    }
+  ]
+}

@@ -43,6 +43,27 @@ export default defineConfig({
     target: 'es2021',
     minify: 'esbuild',
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/element-plus')) {
+            return 'element-plus'
+          }
+          if (id.includes('node_modules/mermaid')) {
+            return 'mermaid'
+          }
+          if (id.includes('node_modules/mathjax-full')) {
+            return 'mathjax'
+          }
+          if (id.includes('node_modules/katex')) {
+            return 'katex'
+          }
+          if (id.includes('node_modules/cytoscape')) {
+            return 'cytoscape'
+          }
+        },
+      },
+    },
   },
   test: {
     environment: 'node',

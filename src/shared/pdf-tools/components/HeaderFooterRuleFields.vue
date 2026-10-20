@@ -34,7 +34,7 @@
             @click="$emit('update:selectedHeaderGroupId', group.id)"
           >
             <span class="group-label">
-              <el-icon v-if="group.id === selectedHeaderGroupId"><i-ep-arrow-right /></el-icon>
+              <el-icon v-if="group.id === selectedHeaderGroupId"><ArrowRight /></el-icon>
               {{ group.label || '页眉' }} · {{ groupModeLabel(group) }}
             </span>
             <el-button
@@ -187,7 +187,7 @@
             @click="$emit('update:selectedFooterTextGroupId', group.id)"
           >
             <span class="group-label">
-              <el-icon v-if="group.id === selectedFooterTextGroupId"><i-ep-arrow-right /></el-icon>
+              <el-icon v-if="group.id === selectedFooterTextGroupId"><ArrowRight /></el-icon>
               {{ group.label || '页脚文字' }} · {{ group.text || '（空）' }}
             </span>
             <el-button
@@ -292,7 +292,7 @@
             @click="$emit('update:selectedPageNumberGroupId', group.id)"
           >
             <span class="group-label">
-              <el-icon v-if="group.id === selectedPageNumberGroupId"><i-ep-arrow-right /></el-icon>
+              <el-icon v-if="group.id === selectedPageNumberGroupId"><ArrowRight /></el-icon>
               {{ group.label || '页码' }} · {{ group.template || '{page}/{total}' }}
             </span>
             <el-button
@@ -393,7 +393,7 @@
 
 <script setup>
 import { computed, watch } from 'vue'
-import { Plus, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, InfoFilled, ArrowRight } from '@element-plus/icons-vue'
 import TextPlacementFields from './TextPlacementFields.vue'
 import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
 import { useHistory } from '../../../core/composables/useHistory.js'

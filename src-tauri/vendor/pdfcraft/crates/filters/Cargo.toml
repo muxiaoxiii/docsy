@@ -1,0 +1,10 @@
+[package]
+name = "pdfcraft-filters"
+description = "PDF stream filters (ISO 32000-2 §7.4): Flate, LZW, predictors, ASCII85, ASCIIHex, RunLength"
+version = "0.9.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+thiserror = "2"

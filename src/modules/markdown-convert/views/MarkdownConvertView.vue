@@ -7,6 +7,7 @@
     <ToolWorkspaceShell
       title="MD 转换"
       description="Markdown、Office 与 PDF 文本层互转；生成的 Word、Excel 和演示文稿均可继续编辑。"
+      :hide-toolbar="!files.length"
     >
       <template #toolbar>
         <el-button type="primary" plain :disabled="converting" @click="selectFiles"
@@ -17,8 +18,8 @@
         </el-button>
       </template>
 
-      <div class="convert-workspace">
-        <section class="conversion-panel">
+      <div ref="convertWorkspaceRef" class="convert-workspace" :style="convertGridStyle">
+        <section class="conversion-panel file-panel">
           <div class="panel-heading">
             <div>
               <h3>文件互转</h3>
@@ -26,12 +27,9 @@
             </div>
             <span class="direction-note">MD ↔ Office · PDF → MD</span>
           </div>
-          <div class="file-convert-options">
-            <span class="option-label">转成 Markdown</span>
-            <span class="option-hint">
-              Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、HTML、PDF 添加后点击“开始转换”。
-            </span>
-          </div>
+          <p class="convert-direction-note">
+            Office / PDF 文件添加后自动转为 Markdown；Markdown 文件按下方格式转出。
+          </p>
           <div class="file-convert-options">
             <span class="option-label">Markdown 转出为</span>
             <el-radio-group v-model="fileOfficeFormat" :disabled="converting">
@@ -81,7 +79,7 @@
           <p v-if="['xlsx', 'pptx'].includes(fileOfficeFormat)" class="rich-media-hint">
             Excel / PowerPoint 中，公式和图表以图片独立成表或成页。
           </p>
-          <div class="pdf-convert-note">
+          <div v-if="hasPdfInQueue" class="pdf-convert-note">
             <span>PDF 当前使用文本层提取，不会改写原件。</span>
             <div v-if="hasPdfInQueue" class="pdf-page-range">
               <span class="option-label">PDF 页段（本批所有 PDF，留空为全文）</span>
@@ -105,9 +103,12 @@
             </div>
           </div>
           <FileQueuePanel
+            fill
+            empty-action-label="添加文件"
             :items="files"
             :busy="converting"
             empty-text="选择或拖入 Markdown、Office 或 PDF 文件，转换结果保存在源文件旁"
+            @empty-action="selectFiles"
             @clear="clearFiles"
             @remove="removeFile"
           >
@@ -140,6 +141,14 @@
           </FileQueuePanel>
           <div v-if="summary" class="result-line">{{ summary }}</div>
         </section>
+
+        <div
+          class="convert-resizer"
+          role="separator"
+          aria-label="调整文件转换与粘贴 Markdown 区域宽度"
+          aria-orientation="vertical"
+          @pointerdown="startConvertResize"
+        />
 
         <section class="conversion-panel paste-panel">
           <div class="panel-heading">
@@ -241,6 +250,9 @@ const docxStyleHint = computed(() => docxStyleHints[docxStyle.value] || '')
 const pdfStartPage = ref(null)
 const pdfEndPage = ref(null)
 const activeBackendOperationId = ref('')
+const pastePanelRatio = ref(0.55)
+const convertWorkspaceRef = ref(null)
+let stopConvertResize = null
 const queueCancellation = useQueueCancellation()
 const PDF_CONVERT_OPERATION_ID = 'convert_pdf_text_layer:auto'
 const preference = useWorkspacePreferences('markdown-convert.workspace', {
@@ -248,12 +260,46 @@ const preference = useWorkspacePreferences('markdown-convert.workspace', {
   fileOfficeFormat,
   docxStyle,
   pasteFormat,
+  pastePanelRatio,
 })
 
 const hasPdfInQueue = computed(() => files.value.some((item) => extensionOf(item.path) === 'pdf'))
 const hasPendingFiles = computed(() =>
   files.value.some((item) => ['pending', 'failed', 'cancelled'].includes(item.status)),
 )
+const convertGridStyle = computed(() => {
+  const paste = Math.round(clampPastePanelRatio(pastePanelRatio.value) * 100)
+  return { gridTemplateColumns: `minmax(360px, ${100 - paste}fr) 10px minmax(360px, ${paste}fr)` }
+})
+
+function clampPastePanelRatio(value) {
+  return Math.min(0.65, Math.max(0.35, Number(value) || 0.55))
+}
+
+function setPastePanelRatio(value) {
+  pastePanelRatio.value = clampPastePanelRatio(value)
+}
+
+function startConvertResize(event) {
+  if (event.button !== 0 || !convertWorkspaceRef.value) return
+  event.preventDefault()
+  const rect = convertWorkspaceRef.value.getBoundingClientRect()
+  const update = (pointerEvent) => {
+    setPastePanelRatio((rect.right - pointerEvent.clientX) / Math.max(1, rect.width))
+  }
+  const finish = () => {
+    window.removeEventListener('pointermove', update)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    stopConvertResize = null
+  }
+  stopConvertResize?.()
+  stopConvertResize = finish
+  window.addEventListener('pointermove', update)
+  window.addEventListener('pointerup', finish, { once: true })
+  window.addEventListener('pointercancel', finish, { once: true })
+  update(event)
+}
 
 const markdownExtensions = ['md', 'markdown', 'mdown', 'mkdn', 'mdwn', 'mdtxt']
 const officeExtensions = [
@@ -562,8 +608,8 @@ onBeforeUnmount(() => {
 
 .convert-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(380px, 0.82fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);
+  gap: 0;
   min-height: 100%;
 }
 
@@ -574,6 +620,54 @@ onBeforeUnmount(() => {
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   box-shadow: var(--docsy-shadow-panel);
+}
+
+.file-panel,
+.paste-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.convert-resizer {
+  align-self: stretch;
+  min-height: 420px;
+  margin-inline: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent 3px,
+    var(--docsy-border-subtle) 3px,
+    var(--docsy-border-subtle) 7px,
+    transparent 7px
+  );
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.convert-resizer:hover {
+  background: linear-gradient(
+    90deg,
+    transparent 3px,
+    var(--docsy-primary) 3px,
+    var(--docsy-primary) 7px,
+    transparent 7px
+  );
+}
+
+.file-panel > :deep(.file-queue-panel) {
+  flex: 1;
+}
+
+.paste-panel :deep(.el-textarea) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.paste-panel :deep(.el-textarea__inner) {
+  flex: 1;
+  min-height: 220px;
+  resize: none;
 }
 
 .panel-heading {
@@ -588,7 +682,7 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--docsy-text-strong);
   font-size: 15px;
-  font-weight: 680;
+  font-weight: 700;
 }
 
 .panel-heading p {
@@ -602,8 +696,15 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   color: var(--docsy-primary);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 600;
   white-space: nowrap;
+}
+
+.convert-direction-note {
+  margin: 0 0 4px;
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .file-convert-options {
@@ -611,12 +712,16 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin: 0 0 clamp(8px, 1.7dvh, 12px);
-  padding-block: clamp(8px, 1.8dvh, 10px);
-  padding-inline: 12px;
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-radius);
-  background: var(--docsy-surface-muted);
+  margin: 0;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.file-convert-options:last-of-type {
+  border-bottom: 0;
 }
 
 .pdf-convert-note {
@@ -650,9 +755,8 @@ onBeforeUnmount(() => {
 
 .option-hint {
   color: var(--docsy-text-muted);
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.5;
-  opacity: 0.85;
 }
 
 .style-select {
@@ -663,7 +767,6 @@ onBeforeUnmount(() => {
   color: var(--docsy-text-muted);
   font-size: 11px;
   line-height: 1.4;
-  opacity: 0.85;
 }
 
 .queue-warning {
@@ -727,12 +830,17 @@ onBeforeUnmount(() => {
   border-radius: var(--docsy-radius);
   background: var(--docsy-primary-soft);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 1180px) {
   .convert-workspace {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
+    gap: 14px;
+  }
+
+  .convert-resizer {
+    display: none;
   }
 }
 </style>

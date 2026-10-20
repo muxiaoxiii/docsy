@@ -1,0 +1,588 @@
+[
+  {
+    "case": "as_checkbox",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/as_checkbox.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/as_checkbox.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "native": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      }
+    }
+  },
+  {
+    "case": "hidden",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/hidden.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/hidden.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "native": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      }
+    }
+  },
+  {
+    "case": "invisible",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/invisible.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/invisible.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "native": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      }
+    }
+  },
+  {
+    "case": "missing_ap",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/missing_ap.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/missing_ap.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "native": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "qpdf": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      }
+    }
+  },
+  {
+    "case": "no_view",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/no_view.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/no_view.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "native": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      }
+    }
+  },
+  {
+    "case": "normal_widget",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/normal_widget.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/normal_widget.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "native": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      }
+    }
+  },
+  {
+    "case": "repair_bad_startxref",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/repair_bad_startxref.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/repair_bad_startxref.pdf"
+      ],
+      "code": 3,
+      "stdout": "",
+      "stderr": "WARNING: /Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/repair_bad_startxref.pdf: file is damaged\nWARNING: /Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/repair_bad_startxref.pdf: can't find startxref\nWARNING: /Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/repair_bad_startxref.pdf: Attempting to reconstruct cross-reference table\nqpdf: operation succeeded with warnings; resulting file may have some problems\n"
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "native": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      }
+    }
+  },
+  {
+    "case": "repair_missing_xref",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/repair_missing_xref.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/repair_missing_xref.pdf"
+      ],
+      "code": 3,
+      "stdout": "",
+      "stderr": "WARNING: /Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/repair_missing_xref.pdf: file is damaged\nWARNING: /Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/repair_missing_xref.pdf: can't find startxref\nWARNING: /Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/repair_missing_xref.pdf: Attempting to reconstruct cross-reference table\nqpdf: operation succeeded with warnings; resulting file may have some problems\n"
+    },
+    "documents": {
+      "source": {
+        "reader_error": "startxref not found",
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "native": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      }
+    }
+  },
+  {
+    "case": "rotated_ap",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/rotated_ap.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/rotated_ap.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "native": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      }
+    }
+  },
+  {
+    "case": "stale_widget",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/stale_widget.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/stale_widget.pdf"
+      ],
+      "code": 3,
+      "stdout": "",
+      "stderr": "WARNING: /Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/stale_widget.pdf, object 7 0 at offset 619: document does not have updated appearance streams, so form fields will not be flattened\nqpdf: operation succeeded with warnings; resulting file may have some problems\n"
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "native": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "qpdf": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      }
+    }
+  },
+  {
+    "case": "watermark",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/watermark.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/watermark.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "native": {
+        "annotations": 1,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 6000
+      }
+    }
+  },
+  {
+    "case": "zero_bbox",
+    "qpdf": {
+      "args": [
+        "qpdf",
+        "--flatten-annotations=all",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/inputs/zero_bbox.pdf",
+        "/Users/only/Documents/PythonProgram/Docsy/release-candidate/native-first-2026-10-19/qpdf/zero_bbox.pdf"
+      ],
+      "code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "documents": {
+      "source": {
+        "annotations": 1,
+        "widgets": 1,
+        "fields": 1,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "native": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      },
+      "qpdf": {
+        "annotations": 0,
+        "widgets": 0,
+        "fields": 0,
+        "render": 0,
+        "size": [
+          400,
+          400
+        ],
+        "red_pixels": 0
+      }
+    }
+  }
+]

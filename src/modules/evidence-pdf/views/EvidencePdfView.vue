@@ -33,7 +33,13 @@
                 :sortable="!scanning && !building"
                 max-height="240px"
                 @reorder="(payload) => reorderGroupFiles(group, payload)"
-              />
+              >
+                <template #meta="{ item }">
+                  <el-tag :type="item.type === 'word' || /\.(docx|doc|docm)$/i.test(item.path) ? 'warning' : 'info'" size="small">
+                    {{ item.type === 'word' || /\.(docx|doc|docm)$/i.test(item.path) ? 'Word' : 'PDF' }}
+                  </el-tag>
+                </template>
+              </FileQueuePanel>
             </div>
           </div>
           <WorkspaceEmptyState
@@ -121,27 +127,39 @@ onBeforeUnmount(() => void preference.stop())
 }
 
 .evidence-info {
-  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
-  background: var(--docsy-surface-muted);
+  background: var(--docsy-surface-elevated);
   font-size: 13px;
   color: var(--docsy-text);
 }
 
 .evidence-info p {
-  margin: 4px 0 0;
-  word-break: break-all;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .output-path {
   min-width: 0;
+  margin-right: auto;
+  color: var(--docsy-text-muted);
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .path-label {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--docsy-surface-muted);
   color: var(--docsy-text-muted);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .evidence-groups {
@@ -164,12 +182,16 @@ onBeforeUnmount(() => void preference.stop())
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
 }
 
 .group-item h4 {
   margin: 0;
   font-size: 14px;
-  font-weight: 680;
+  font-weight: 700;
+  color: var(--docsy-text-strong);
 }
 
 .conversion-alert {
@@ -197,7 +219,7 @@ onBeforeUnmount(() => void preference.stop())
 
 .conversion-failure p {
   margin: 2px 0 0;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1280px) {

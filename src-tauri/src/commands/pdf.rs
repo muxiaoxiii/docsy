@@ -3,6 +3,7 @@ use crate::commands::run_managed;
 use crate::external::ExternalTool;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tauri::Emitter;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,6 +110,10 @@ pub struct PdfOutputResult {
     pub output_path: String,
     pub input_size: u64,
     pub output_size: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<crate::pdf::backend::BackendWarning>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<crate::pdf::backend::FallbackReason>,
 }
 
 #[derive(Debug, Serialize)]
@@ -131,6 +136,8 @@ pub async fn unlock_pdf(input: String) -> Result<UnlockResult, String> {
 
 #[tauri::command]
 pub async fn merge_pdfs(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     inputs: Vec<String>,
     output: String,
     duplex_separate: Option<bool>,
@@ -138,7 +145,31 @@ pub async fn merge_pdfs(
 ) -> Result<String, String> {
     let duplex = duplex_separate.unwrap_or(false);
     let state = (*conversion_state).clone();
-    run_blocking(move || crate::pdf::qpdf::merge_with_state(&inputs, &output, duplex, &state)).await
+    let app_handle = app.clone();
+    run_managed(&manager, "merge_pdfs", None, move |_token| {
+        let req = crate::pdf::backend::MergeRequest {
+            inputs,
+            output_path: std::path::PathBuf::from(output),
+            policy: crate::pdf::backend::OutputPolicy::for_policy(
+                crate::pdf::backend::MergePolicy::Print,
+                duplex,
+            ),
+            preferred_backend: None,
+            conversion_state: Some(state),
+        };
+        let res = crate::pdf::backend::dispatch_merge(&req)
+            .map_err(anyhow::Error::from)?;
+        if !res.warnings.is_empty() || res.fallback_reason.is_some() {
+            let _ = app_handle.emit("pdf-backend-notice", serde_json::json!({
+                "operation": "merge",
+                "backend": res.backend,
+                "fallbackReason": res.fallback_reason,
+                "warnings": res.warnings,
+            }));
+        }
+        Ok(res.output_path.to_string_lossy().to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -163,19 +194,41 @@ pub async fn convert_word_to_pdf(
 
 #[tauri::command]
 pub async fn extract_pdf_pages(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     input: String,
     pages: Vec<u32>,
     output_dir: Option<String>,
 ) -> Result<PdfOutputResult, String> {
-    let result = run_blocking(move || {
-        crate::pdf::qpdf::extract_pages(&input, &pages, output_dir.as_deref())
+    let app_handle = app.clone();
+    let result = run_managed(&manager, "extract_pdf_pages", None, move |_token| {
+        let req = crate::pdf::backend::ExtractRequest {
+            input_path: std::path::PathBuf::from(input),
+            pages,
+            output_dir: output_dir.map(std::path::PathBuf::from),
+            output_path: None,
+            preferred_backend: None,
+        };
+        let res = crate::pdf::backend::dispatch_extract(&req)
+            .map_err(anyhow::Error::from)?;
+        if !res.warnings.is_empty() || res.fallback_reason.is_some() {
+            let _ = app_handle.emit("pdf-backend-notice", serde_json::json!({
+                "operation": "extract",
+                "backend": res.backend,
+                "fallbackReason": res.fallback_reason,
+                "warnings": res.warnings,
+            }));
+        }
+        Ok(PdfOutputResult {
+            output_path: res.output_path.to_string_lossy().to_string(),
+            input_size: res.input_size,
+            output_size: res.output_size,
+            warnings: res.warnings,
+            fallback_reason: res.fallback_reason,
+        })
     })
     .await?;
-    Ok(PdfOutputResult {
-        output_path: result.output_path,
-        input_size: result.input_size,
-        output_size: result.output_size,
-    })
+    Ok(result)
 }
 
 #[tauri::command]
@@ -196,6 +249,8 @@ pub async fn compress_pdf(
         output_path: result.output_path,
         input_size: result.input_size,
         output_size: result.output_size,
+        warnings: Vec::new(),
+        fallback_reason: None,
     })
 }
 
@@ -221,9 +276,13 @@ pub async fn optimize_pdf_lossless(
 
 #[tauri::command]
 pub async fn split_merged_evidence_pdf(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     args: crate::pdf::split::SplitMergedArgs,
 ) -> Result<crate::pdf::split::SplitMergedResult, String> {
-    run_blocking(move || crate::pdf::split::split_merged(&args)).await
+    run_managed(&manager, "split_merged_evidence_pdf", None, move |_token| {
+        crate::pdf::split::split_merged(&args)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -233,6 +292,7 @@ pub async fn scan_evidence_folder(root: String) -> Result<serde_json::Value, Str
 
 #[tauri::command]
 pub async fn build_evidence_group_pdfs(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
     args: BuildEvidenceGroupPdfsArgs,
     conversion_state: tauri::State<'_, std::sync::Arc<crate::ConversionState>>,
 ) -> Result<serde_json::Value, String> {
@@ -241,11 +301,17 @@ pub async fn build_evidence_group_pdfs(
         root: args.root,
         groups: args.groups,
     };
-    run_blocking(move || crate::pdf::evidence::build_group_pdfs(&build_args, &state)).await
+    run_managed(&manager, "build_evidence_group_pdfs", None, move |_token| {
+        crate::pdf::evidence::build_group_pdfs(&build_args, &state)
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn merge_evidence_pdfs(args: MergeEvidencePdfsArgs) -> Result<String, String> {
+pub async fn merge_evidence_pdfs(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+    args: MergeEvidencePdfsArgs,
+) -> Result<String, String> {
     let merge_args = crate::pdf::evidence::MergeAllArgs {
         evidence_dir: args.evidence_dir,
         group_pdfs: args.group_pdfs,
@@ -253,7 +319,10 @@ pub async fn merge_evidence_pdfs(args: MergeEvidencePdfsArgs) -> Result<String, 
         identity: None,
         overlay: None,
     };
-    run_blocking(move || crate::pdf::evidence::merge_all(&merge_args)).await
+    run_managed(&manager, "merge_evidence_pdfs", None, move |_token| {
+        crate::pdf::evidence::merge_all(&merge_args)
+    })
+    .await
 }
 
 #[tauri::command]

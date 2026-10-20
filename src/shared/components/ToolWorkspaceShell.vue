@@ -10,7 +10,7 @@
       </div>
     </header>
 
-    <div v-if="$slots.toolbar" class="workspace-toolbar">
+    <div v-if="$slots.toolbar && !hideToolbar" class="workspace-toolbar">
       <slot name="toolbar" />
     </div>
 
@@ -33,6 +33,10 @@ defineProps({
   description: {
     type: String,
     default: '',
+  },
+  hideToolbar: {
+    type: Boolean,
+    default: false,
   },
 })
 </script>
@@ -79,7 +83,7 @@ defineProps({
     'PingFang SC',
     sans-serif;
   font-size: 20px;
-  font-weight: 720;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.35;
 }
@@ -108,18 +112,19 @@ defineProps({
 
 .workspace-toolbar {
   flex-wrap: wrap;
-  min-height: clamp(46px, 5.8dvh, 52px);
+  min-height: 40px;
   margin-top: clamp(8px, 1.5dvh, 12px);
-  padding-block: clamp(7px, 1.2dvh, 9px);
-  padding-inline: 12px;
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-radius);
-  background: color-mix(in srgb, var(--docsy-surface-muted) 68%, var(--docsy-surface-elevated));
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .workspace-content {
+  display: flex;
   flex: 1;
   min-height: 0;
+  flex-direction: column;
   margin-top: clamp(8px, 1.5dvh, 12px);
   overflow: auto;
 }
@@ -130,11 +135,12 @@ defineProps({
   gap: 10px;
   min-height: clamp(50px, 6.5dvh, 58px);
   margin-top: clamp(8px, 1.5dvh, 12px);
-  padding-block: clamp(10px, 1.5dvh, 12px);
-  padding-inline: 16px;
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-panel-radius);
-  background: var(--docsy-surface-elevated);
+  padding-block: clamp(10px, 1.5dvh, 12px) 0;
+  padding-inline: 2px;
+  border: 0;
+  border-top: 1px solid var(--docsy-border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 @media (max-height: 760px) {

@@ -37,9 +37,15 @@ fn write_blank_pdf(path: &Path, size: &PageSize) -> Result<()> {
     } else {
         String::new()
     };
+    let u = size.user_unit();
+    let user_unit = if (u - 1.0).abs() > 1e-4 {
+        format!(" /UserUnit {u}")
+    } else {
+        String::new()
+    };
 
     let page_dict = format!(
-        "<< /Type /Page /Parent 2 0 R /MediaBox [{x0} {y0} {x1} {y1}] /Resources << >>{rotate} >>"
+        "<< /Type /Page /Parent 2 0 R /MediaBox [{x0} {y0} {x1} {y1}] /Resources << >>{rotate}{user_unit} >>"
     );
     let objects: [&[u8]; 3] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",

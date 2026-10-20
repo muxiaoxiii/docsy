@@ -1,6 +1,6 @@
 <template>
-  <section class="file-queue-panel">
-    <div class="queue-summary">
+  <section class="file-queue-panel" :class="{ 'is-fill': fill && !items.length }">
+    <div v-if="items.length" class="queue-summary">
       <span>{{ items.length }} 个文件</span>
       <el-button v-if="items.length && clearable" :disabled="busy" link size="small" type="danger" @click="$emit('clear')">
         清空列表
@@ -49,7 +49,11 @@
     </el-scrollbar>
 
     <div v-else class="queue-empty">
-      <WorkspaceEmptyState compact title="等待添加文件" :description="emptyText" />
+      <WorkspaceEmptyState :compact="!fill" title="等待添加文件" :description="emptyText">
+        <template v-if="emptyActionLabel" #actions>
+          <el-button type="primary" plain @click="$emit('empty-action')">{{ emptyActionLabel }}</el-button>
+        </template>
+      </WorkspaceEmptyState>
     </div>
   </section>
 </template>
@@ -85,9 +89,17 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  fill: {
+    type: Boolean,
+    default: false,
+  },
+  emptyActionLabel: {
+    type: String,
+    default: '',
+  },
 })
 
-const emit = defineEmits(['clear', 'remove', 'reorder'])
+const emit = defineEmits(['clear', 'remove', 'reorder', 'empty-action'])
 const { start, move, finish, reset, itemClasses } = usePointerReorder({
   itemCount: () => props.items.length,
   onReorder: (payload) => { if (!props.busy) emit('reorder', payload) },
@@ -108,7 +120,34 @@ function itemKey(item, index) {
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
-  box-shadow: 0 8px 24px rgba(48, 41, 32, 0.045);
+  box-shadow: var(--docsy-shadow-soft);
+}
+
+.file-queue-panel.is-fill {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  border-style: dashed;
+  border-color: var(--docsy-border-strong);
+  background: color-mix(in srgb, var(--docsy-surface-muted) 34%, var(--docsy-surface-elevated));
+  box-shadow: none;
+}
+
+.file-queue-panel.is-fill .queue-empty {
+  display: grid;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  place-items: center;
+}
+
+.file-queue-panel.is-fill .queue-empty :deep(.workspace-empty-state) {
+  width: 100%;
+  min-height: 100%;
+  padding: 28px;
+  border: 0;
+  background: transparent;
 }
 
 .queue-summary {

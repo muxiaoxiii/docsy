@@ -1,0 +1,5 @@
+{
+  "exit_code": 1,
+  "output_exists": false,
+  "stderr": "Error: converting \"src-tauri/tests/fixtures/doc-import/sample.doc\": unsupported file format: doc\n"
+}

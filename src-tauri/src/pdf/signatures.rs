@@ -19,6 +19,22 @@ pub fn inspect_signatures(input: &Path) -> Result<SignatureInspection> {
     if !input.exists() {
         anyhow::bail!("PDF 不存在: {}", input.display());
     }
+
+    if let Ok(bytes) = std::fs::read(input) {
+        if let Ok(doc) = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)) {
+            let count = count_signature_objects_pdfcraft(&doc);
+            return Ok(SignatureInspection {
+                has_signatures: count > 0,
+                count,
+                summary: if count > 0 {
+                    format!("检测到 {count} 处电子签名/签章相关对象")
+                } else {
+                    "未检测到电子签名".to_string()
+                },
+            });
+        }
+    }
+
     let qpdf_bin = crate::external::QpdfTool.binary_path()?;
     let output = crate::external::hidden_command(qpdf_bin)
         .arg("--json=1")
@@ -44,6 +60,48 @@ pub fn inspect_signatures(input: &Path) -> Result<SignatureInspection> {
             "未检测到电子签名".to_string()
         },
     })
+}
+
+pub(crate) fn count_signature_objects_pdfcraft(doc: &pdfcraft_cos::Document) -> usize {
+    let mut count = 0_usize;
+    for (_obj_ref, obj) in doc.scan_objects() {
+        let Some(dict) = obj.as_dict() else {
+            continue;
+        };
+        if pdfcraft_dict_is_signature(dict) {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn pdfcraft_dict_is_signature(dict: &pdfcraft_cos::Dict) -> bool {
+    if dict
+        .name(b"Type")
+        .is_some_and(|v| v.eq_ignore_ascii_case(b"sig"))
+    {
+        return true;
+    }
+    if dict
+        .name(b"FT")
+        .is_some_and(|v| v.eq_ignore_ascii_case(b"sig"))
+    {
+        return true;
+    }
+    if dict
+        .name(b"Subtype")
+        .is_some_and(|v| v.eq_ignore_ascii_case(b"widget"))
+    {
+        if let Some(pdfcraft_cos::Object::Dict(v_dict)) = dict.get(b"V") {
+            if v_dict
+                .name(b"Type")
+                .is_some_and(|t| t.eq_ignore_ascii_case(b"sig"))
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn count_signature_objects(json: &Value) -> usize {

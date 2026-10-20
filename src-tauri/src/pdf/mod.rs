@@ -1,6 +1,7 @@
 pub mod annotations;
 pub mod anti_ocr;
 pub mod artifacts;
+pub mod backend;
 pub(crate) mod blank;
 pub(crate) mod bookmarks;
 pub(crate) mod chunked;
@@ -12,6 +13,7 @@ pub mod evidence;
 pub mod evidence_session;
 mod glyph_names;
 pub mod header_footer;
+pub(crate) mod metadata;
 pub mod normalize;
 pub(crate) mod overlay_font;
 pub(crate) mod overlay_pdf;

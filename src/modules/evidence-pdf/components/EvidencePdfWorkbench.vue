@@ -17,9 +17,15 @@
           <el-button v-if="workflowMode !== 'split'" type="primary" plain :loading="importingEvidence" :disabled="overlaying || batchRunning || importingEvidence" @click="selectOverlayFiles">{{
             splitImportButtonText
           }}</el-button>
-          <el-button v-if="workflowMode !== 'merge'" type="primary" plain :loading="importingMergedPdf" :disabled="batchRunning || detectingMergedImport || splittingMergedImport" @click="importMergedPdfAsEvidence">{{
-            mergedImportButtonText
-          }}</el-button>
+          <el-button
+            v-if="workflowMode !== 'merge' && (workflowMode !== 'split' || mergedImportPlans.length || mergedImportPlan || overlayFiles.length)"
+            type="primary"
+            plain
+            :loading="importingMergedPdf"
+            :disabled="batchRunning || detectingMergedImport || splittingMergedImport"
+            @click="importMergedPdfAsEvidence"
+            >{{ mergedImportButtonText }}</el-button
+          >
         </div>
       </div>
 
@@ -53,9 +59,22 @@
         </div>
       </div>
 
-      <div v-if="workflowMode === 'split' && !mergedImportPlans.length && !mergedImportPlan && !overlayFiles.length" class="rule-block">
-        <div class="block-title">按证据页段拆分合并 PDF</div>
-        <p class="hint">导入 PDF → 检测页段 → 核对名称与页段 → 确认拆分</p>
+      <div v-if="workflowMode === 'split' && !mergedImportPlans.length && !mergedImportPlan && !overlayFiles.length" class="split-empty-block">
+        <WorkspaceEmptyState
+          title="导入合并证据 PDF"
+          description="导入 PDF → 检测页段 → 核对名称与页段 → 确认拆分。"
+        >
+          <template #actions>
+            <el-button
+              type="primary"
+              plain
+              :loading="importingMergedPdf"
+              :disabled="batchRunning || detectingMergedImport || splittingMergedImport"
+              @click="importMergedPdfAsEvidence"
+              >选择文件</el-button
+            >
+          </template>
+        </WorkspaceEmptyState>
       </div>
       <div v-if="showSplitResultActions" class="split-result-actions">
         <div>
@@ -986,6 +1005,7 @@
     />
 
     <div
+      v-if="showPreviewPanel"
       class="workbench-resizer"
       role="separator"
       aria-label="调整证据列表与预览宽度"
@@ -993,13 +1013,13 @@
       @pointerdown="startWorkbenchResize"
     />
 
-    <section class="preview-panel" :style="previewPanelStyle">
+    <section v-if="showPreviewPanel" class="preview-panel" :style="previewPanelStyle">
       <div class="preview-head">
         <div>
           <h3>位置预览</h3>
-          <p class="hint">{{ listReordering ? '正在调整顺序，松手后更新预览' : previewHint }}</p>
+          <p class="hint">{{ listReordering ? '正在调整顺序，松手后更新预览' : activePreviewFilePath ? previewHint : '导入 PDF 后显示页面位置预览' }}</p>
         </div>
-        <div class="preview-controls">
+        <div v-if="activePreviewFilePath" class="preview-controls">
           <div v-if="mergedImportPlan" class="merged-preview-toolbar">
             <div class="merged-preview-primary-row">
               <el-button size="small" :disabled="mergedBatchBusy || mergedImportPlan.splitRequest || !canUndoMergedImport" @click="undoMergedImportEdit">撤销</el-button>
@@ -1158,6 +1178,7 @@ import HeaderFooterRuleFields from '../../../shared/pdf-tools/components/HeaderF
 import PageNumberRuleDialog from '../../../shared/pdf-tools/components/PageNumberRuleDialog.vue'
 import ExistingPdfElementsDialog from '../../../shared/pdf-tools/components/ExistingPdfElementsDialog.vue'
 import DocletSprite from '../../../shared/components/DocletSprite.vue'
+import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   buildEvidencePdfRulePayload,
@@ -2178,6 +2199,7 @@ const {
 const hasSourceSplitRanges = computed(() => overlayFiles.value.some((file) => Number(file.sourcePageStart || 0) > 0))
 
 const activePreviewFilePath = computed(() => mergedImportPlan.value?.inputPath || selectedOverlayFile.value?.path || '')
+const showPreviewPanel = computed(() => Boolean(activePreviewFilePath.value))
 const previewMaxPage = computed(() => {
   if (mergedImportPlan.value) return Math.max(1, Number(mergedImportPlan.value.totalPages || 1))
   return selectedOverlayFile.value?.pages || 1
@@ -2756,18 +2778,36 @@ async function loadEvidenceFiles(paths) {
     mergedImportPlan.value = null
     mergedImportPlans.value = []
 
+    const wordPaths = paths.filter((p) => /\.(docx|doc|docm)$/i.test(p))
+    let wordLoadingId = null
+    let wordIndex = 0
+    if (wordPaths.length) {
+      wordLoadingId = showLoading(`正在将 Word 文档转为 PDF (1/${wordPaths.length})…`)
+    }
+
     const resolvedPaths = []
-    for (const p of paths) {
-      if (/\.(docx|doc|docm)$/i.test(p)) {
-        const res = await tauriCallSafe('convert_word_to_pdf', { input: p })
-        if (res.ok && (res.data?.output_path || res.data)) {
-          resolvedPaths.push(res.data?.output_path || res.data)
+    try {
+      for (const p of paths) {
+        if (/\.(docx|doc|docm)$/i.test(p)) {
+          wordIndex += 1
+          if (wordLoadingId) {
+            emitOperationUpdate(
+              wordLoadingId,
+              `正在将 Word 转为 PDF (${wordIndex}/${wordPaths.length}): ${fileName(p)}`,
+            )
+          }
+          const res = await tauriCallSafe('convert_word_to_pdf', { input: p })
+          if (res.ok && (res.data?.output_path || res.data)) {
+            resolvedPaths.push(res.data?.output_path || res.data)
+          } else {
+            ElMessage.error(userFacingError(res.error, `Word 转 PDF 失败: ${fileName(p)}`))
+          }
         } else {
-          ElMessage.error(userFacingError(res.error, `Word 转 PDF 失败: ${fileName(p)}`))
+          resolvedPaths.push(p)
         }
-      } else {
-        resolvedPaths.push(p)
       }
+    } finally {
+      if (wordLoadingId) hideLoading(wordLoadingId)
     }
     if (!resolvedPaths.length) return
 
@@ -4454,7 +4494,9 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
 }
 
 .preview-head {
@@ -4469,26 +4511,34 @@ onUnmounted(() => {
 }
 
 .local-processing {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   margin-bottom: 12px;
-  padding: 12px;
-  border: 1px solid var(--docsy-border-subtle);
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--docsy-primary) 26%, var(--docsy-border-subtle));
+  border-left: 3px solid var(--docsy-primary);
   border-radius: var(--docsy-radius);
   background: var(--docsy-primary-soft);
   color: var(--docsy-text-strong);
-  min-height: 60px;
+  min-height: 46px;
 }
 
 .local-processing p {
-  margin: 3px 0 0;
+  margin: 2px 0 0;
   color: var(--docsy-text);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.5;
+}
+
+.local-processing p:first-child {
+  margin-top: 0;
 }
 
 .local-processing strong {
   display: block;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
 h3 {
@@ -4513,21 +4563,40 @@ h3 {
 .rule-block {
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
-  padding: 14px;
+  padding: 14px 16px;
   margin-bottom: 14px;
-  background: var(--docsy-surface-muted);
+  background: color-mix(in srgb, var(--docsy-surface-muted) 58%, var(--docsy-surface-elevated));
 }
+
+.split-empty-block {
+  display: grid;
+  min-height: min(54vh, 460px);
+  padding: 0;
+  border: 1px dashed var(--docsy-border-strong);
+  border-radius: var(--docsy-radius);
+  background: color-mix(in srgb, var(--docsy-surface-muted) 34%, var(--docsy-surface-elevated));
+  place-items: center;
+}
+
+.split-empty-block :deep(.workspace-empty-state) {
+  width: 100%;
+  min-height: 100%;
+  padding: 28px;
+  border: 0;
+  background: transparent;
+}
+
 
 .session-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .summary-item {
   min-width: 0;
-  padding: 10px 12px;
+  padding: 10px 13px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
@@ -4536,7 +4605,8 @@ h3 {
 .summary-item span {
   display: block;
   color: var(--docsy-text-muted);
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 500;
   margin-bottom: 4px;
 }
 
@@ -4545,6 +4615,7 @@ h3 {
   color: var(--docsy-text-strong);
   font-size: 15px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4583,8 +4654,9 @@ h3 {
   flex-wrap: wrap;
   gap: 8px 12px;
   padding: 8px 10px;
+  border: 0;
   border-radius: var(--docsy-radius);
-  background: var(--docsy-surface-muted);
+  background: color-mix(in srgb, var(--docsy-surface-muted) 42%, transparent);
 }
 
 .hf-control-left {
@@ -4628,7 +4700,7 @@ h3 {
 }
 
 .block-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   margin-bottom: 10px;
   color: var(--docsy-text-strong);
@@ -4657,6 +4729,7 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin-top: 8px;
 }
 
 .summary-pill {
@@ -4676,6 +4749,7 @@ h3 {
   color: inherit;
   cursor: pointer;
   text-align: left;
+  transition: border-color 0.15s, background-color 0.15s;
 }
 
 .summary-pill:hover {
@@ -4702,6 +4776,7 @@ h3 {
   color: var(--docsy-text-strong);
   font-size: 16px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .existing-hf-block .block-title-row {
@@ -4771,7 +4846,7 @@ h3 {
 
 .rule-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 8px 12px;
   align-items: start;
 }
@@ -4786,6 +4861,7 @@ h3 {
 
 .rule-item label {
   font-size: 12px;
+  font-weight: 500;
   color: var(--docsy-text);
   line-height: 1.3;
 }
@@ -4811,18 +4887,21 @@ h3 {
 
 .path-text {
   color: var(--docsy-text);
-  font-size: 13px;
+  font-size: 12.5px;
   margin-bottom: 8px;
+  overflow-wrap: anywhere;
 }
 
 .output-plan {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 2px 0;
   color: var(--docsy-text);
   font-size: 12px;
-  line-height: 1.4;
-  margin-bottom: 8px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
 }
 
 .processing-notes {

@@ -21,15 +21,111 @@ pub struct PageSize {
     pub rotate: i32,
 }
 
-pub fn get_page_infos(input: &str) -> Result<Vec<PageSize>> {
-    match get_page_infos_with_qpdf(input) {
-        Ok(pages) => Ok(pages),
-        Err(qpdf_error) => get_page_infos_with_lopdf(Path::new(input)).with_context(|| {
-            format!(
-                "无法读取 PDF 页面尺寸，已停止处理以避免按错误 A4 尺寸定位内容；qpdf 解析失败：{qpdf_error:#}"
-            )
-        }),
+impl PageSize {
+    /// Effective PDF `/UserUnit` factor (physical pt per default user space unit).
+    pub fn user_unit(&self) -> f32 {
+        let unscaled_visual_w = if matches!(self.rotate.rem_euclid(360), 90 | 270) {
+            self.raw_height_pt
+        } else {
+            self.raw_width_pt
+        };
+        if unscaled_visual_w > 0.0 && self.width_pt > 0.0 {
+            let u = self.width_pt / unscaled_visual_w;
+            if u.is_finite() && u > 0.0 && (u - 1.0).abs() > 1e-4 {
+                return u;
+            }
+        }
+        1.0
     }
+}
+
+pub fn get_page_infos(input: &str) -> Result<Vec<PageSize>> {
+    let input_path = Path::new(input);
+    if let Ok(pages) = get_page_infos_with_pdfcraft(input_path) {
+        return Ok(pages);
+    }
+    if let Ok(pages) = get_page_infos_with_lopdf(input_path) {
+        return Ok(pages);
+    }
+    get_page_infos_with_qpdf(input).with_context(|| {
+        format!(
+            "无法读取 PDF 页面尺寸（{}），已停止处理以避免按错误 A4 尺寸定位内容",
+            input
+        )
+    })
+}
+
+fn get_page_infos_with_pdfcraft(input: &Path) -> Result<Vec<PageSize>> {
+    let bytes = std::fs::read(input).context("无法读取 PDF 文件字节")?;
+    let doc = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes))
+        .context("pdfcraft 无法解析 PDF")?;
+    page_infos_from_pdfcraft_document(&doc)
+}
+
+pub(crate) fn page_infos_from_pdfcraft_document(
+    doc: &pdfcraft_cos::Document,
+) -> Result<Vec<PageSize>> {
+    let pages = pdfcraft_organize::walk(doc).context("pdfcraft 无法遍历页面树")?;
+    if pages.is_empty() {
+        anyhow::bail!("PDF 无页面");
+    }
+
+    pages
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (page_ref, attrs))| {
+            let page_number = idx + 1;
+            let box_obj = attrs
+                .get(b"CropBox")
+                .or_else(|| attrs.get(b"MediaBox"))
+                .map(|v| doc.resolve(v))
+                .with_context(|| format!("第 {page_number} 页及其父级均无 CropBox/MediaBox"))?;
+            let size = page_size_from_pdfcraft_box(doc, &box_obj)
+                .with_context(|| format!("第 {page_number} 页的页面框格式无效"))?;
+            // ISO 32000-1 Table 30：/UserUnit 仅属于叶节点 /Page 属性，不可从父节点 /Pages 继承
+            let user_unit = doc
+                .get(page_ref)
+                .as_dict()
+                .and_then(|d| d.get(b"UserUnit"))
+                .and_then(|v| doc.resolve(v).as_f64())
+                .map(|v| v as f32)
+                .unwrap_or(1.0);
+            let rotate = attrs
+                .get(b"Rotate")
+                .and_then(|v| doc.resolve(v).as_int())
+                .unwrap_or(0)
+                .rem_euclid(360) as i32;
+            Ok(apply_rotation(scale_by_user_unit(size, user_unit), rotate))
+        })
+        .collect()
+}
+
+fn page_size_from_pdfcraft_box(
+    doc: &pdfcraft_cos::Document,
+    value: &pdfcraft_cos::Object,
+) -> Option<PageSize> {
+    let values = value.as_array()?;
+    if values.len() < 4 {
+        return None;
+    }
+    let x0 = doc.resolve(&values[0]).as_f64()? as f32;
+    let y0 = doc.resolve(&values[1]).as_f64()? as f32;
+    let x1 = doc.resolve(&values[2]).as_f64()? as f32;
+    let y1 = doc.resolve(&values[3]).as_f64()? as f32;
+    let width = (x1 - x0).abs();
+    let height = (y1 - y0).abs();
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    Some(PageSize {
+        width_pt: width,
+        height_pt: height,
+        raw_width_pt: width,
+        raw_height_pt: height,
+        box_x0: x0.min(x1),
+        box_y0: y0.min(y1),
+        rotate: 0,
+    })
 }
 
 fn get_page_infos_with_qpdf(input: &str) -> Result<Vec<PageSize>> {
@@ -78,11 +174,19 @@ fn page_infos_from_lopdf_document(doc: &Document) -> Result<Vec<PageSize>> {
                 .with_context(|| format!("第 {page_number} 页及其父级均无 CropBox/MediaBox"))?;
             let size = page_size_from_lopdf_box(&box_value)
                 .with_context(|| format!("第 {page_number} 页的页面框格式无效"))?;
+            // ISO 32000-1 Table 30：/UserUnit 仅属于叶节点 /Page 属性，不可从父节点 /Pages 继承
+            let user_unit = doc
+                .get_dictionary(page_id)
+                .ok()
+                .and_then(|d| d.get(b"UserUnit").ok())
+                .and_then(|v| resolve_lopdf_object(doc, v))
+                .and_then(|value| value.as_float().ok())
+                .unwrap_or(1.0);
             let rotate = inherited_page_value(doc, page_id, b"Rotate")
                 .and_then(|value| value.as_i64().ok())
                 .unwrap_or(0)
                 .rem_euclid(360) as i32;
-            Ok(apply_rotation(size, rotate))
+            Ok(apply_rotation(scale_by_user_unit(size, user_unit), rotate))
         })
         .collect()
 }
@@ -127,7 +231,7 @@ fn page_size_from_lopdf_box(value: &Object) -> Option<PageSize> {
     };
     if values.len() < 4 {
         return None;
-    }
+    };
     let x0 = values[0].as_float().ok()?;
     let y0 = values[1].as_float().ok()?;
     let x1 = values[2].as_float().ok()?;
@@ -196,32 +300,58 @@ trait ObjectLookup {
     fn resolve_page_size(&self, obj_ref: &str) -> Option<PageSize> {
         let mut current_ref = obj_ref.to_string();
         let mut visited = std::collections::HashSet::new();
-        for _ in 0..32 {
+        let mut crop_size: Option<PageSize> = None;
+        let mut media_size: Option<PageSize> = None;
+        let mut rotate: Option<i32> = None;
+        let mut user_unit: Option<f32> = None;
+
+        for depth in 0..32 {
             if !visited.insert(current_ref.clone()) {
-                return None;
+                break;
             }
-            let dict = self.object_dict(&current_ref)?;
-            let box_value = dict
-                .get("/CropBox")
-                .or_else(|| dict.get("CropBox"))
-                .or_else(|| dict.get("/MediaBox"))
-                .or_else(|| dict.get("MediaBox"));
-            if let Some(size) = box_value.and_then(page_size_from_box) {
-                let rotate = dict
+            let Some(dict) = self.object_dict(&current_ref) else {
+                break;
+            };
+            if crop_size.is_none() {
+                crop_size = dict
+                    .get("/CropBox")
+                    .or_else(|| dict.get("CropBox"))
+                    .and_then(page_size_from_box);
+            }
+            if media_size.is_none() {
+                media_size = dict
+                    .get("/MediaBox")
+                    .or_else(|| dict.get("MediaBox"))
+                    .and_then(page_size_from_box);
+            }
+            if rotate.is_none() {
+                rotate = dict
                     .get("/Rotate")
                     .or_else(|| dict.get("Rotate"))
                     .and_then(|v| v.as_i64())
-                    .unwrap_or(0)
-                    .rem_euclid(360) as i32;
-                return Some(apply_rotation(size, rotate));
+                    .map(|r| r.rem_euclid(360) as i32);
             }
-            let parent = dict
+            // ISO 32000-1 Table 30：/UserUnit 仅属于叶节点 /Page 属性（depth == 0），不可从父节点继承
+            if depth == 0 && user_unit.is_none() {
+                user_unit = dict
+                    .get("/UserUnit")
+                    .or_else(|| dict.get("UserUnit"))
+                    .and_then(|v| v.as_f64())
+                    .map(|u| u as f32);
+            }
+            let Some(parent) = dict
                 .get("/Parent")
                 .or_else(|| dict.get("Parent"))
-                .and_then(reference_string)?;
+                .and_then(reference_string)
+            else {
+                break;
+            };
             current_ref = parent;
         }
-        None
+
+        let size = crop_size.or(media_size)?;
+        let scaled = scale_by_user_unit(size, user_unit.unwrap_or(1.0));
+        Some(apply_rotation(scaled, rotate.unwrap_or(0)))
     }
 }
 
@@ -294,13 +424,46 @@ fn page_size_from_page_entry(page: &Value) -> Option<PageSize> {
         .or_else(|| page.get("mediaBox"))
         .or_else(|| page.get("MediaBox"))
         .and_then(page_size_from_box)?;
+    let user_unit = page
+        .get("userUnit")
+        .or_else(|| page.get("UserUnit"))
+        .or_else(|| page.get("/UserUnit"))
+        .and_then(|v| v.as_f64())
+        .map(|u| u as f32)
+        .unwrap_or(1.0);
     let rotate = page
         .get("rotate")
         .or_else(|| page.get("Rotate"))
         .and_then(|v| v.as_i64())
         .unwrap_or(0)
         .rem_euclid(360);
-    Some(apply_rotation(size, rotate as i32))
+    Some(apply_rotation(
+        scale_by_user_unit(size, user_unit),
+        rotate as i32,
+    ))
+}
+
+fn scale_by_user_unit(size: PageSize, user_unit: f32) -> PageSize {
+    let u = if user_unit.is_finite() && user_unit > 0.0 {
+        user_unit
+    } else {
+        1.0
+    };
+    if (u - 1.0).abs() <= f32::EPSILON {
+        return size;
+    }
+    // 物理显示尺寸 (width_pt / height_pt) 乘上 UserUnit；
+    // raw_width_pt / raw_height_pt / box_x0 / box_y0 保持默认用户空间坐标（未乘 UserUnit），
+    // 以免破坏 normalize 内容流 CTM 与裁剪起点平移。
+    PageSize {
+        width_pt: size.width_pt * u,
+        height_pt: size.height_pt * u,
+        raw_width_pt: size.raw_width_pt,
+        raw_height_pt: size.raw_height_pt,
+        box_x0: size.box_x0,
+        box_y0: size.box_y0,
+        rotate: size.rotate,
+    }
 }
 
 fn apply_rotation(size: PageSize, rotate: i32) -> PageSize {
@@ -308,8 +471,8 @@ fn apply_rotation(size: PageSize, rotate: i32) -> PageSize {
         PageSize {
             width_pt: size.height_pt,
             height_pt: size.width_pt,
-            raw_width_pt: size.width_pt,
-            raw_height_pt: size.height_pt,
+            raw_width_pt: size.raw_width_pt,
+            raw_height_pt: size.raw_height_pt,
             box_x0: size.box_x0,
             box_y0: size.box_y0,
             rotate,
@@ -318,8 +481,8 @@ fn apply_rotation(size: PageSize, rotate: i32) -> PageSize {
         PageSize {
             width_pt: size.width_pt,
             height_pt: size.height_pt,
-            raw_width_pt: size.width_pt,
-            raw_height_pt: size.height_pt,
+            raw_width_pt: size.raw_width_pt,
+            raw_height_pt: size.raw_height_pt,
             box_x0: size.box_x0,
             box_y0: size.box_y0,
             rotate,
@@ -537,5 +700,65 @@ mod tests {
         assert_eq!(pages[0].box_x0, 10.0);
         assert_eq!(pages[0].box_y0, 20.0);
         assert_eq!(pages[0].rotate, 90);
+    }
+
+    #[test]
+    fn user_unit_scales_display_dimensions_only_on_leaf_page_and_preserves_raw_user_space() {
+        let leaf_json = json!({
+            "pages": [{ "object": "3 0 R" }],
+            "objects": {
+                "3 0 R": {
+                    "value": {
+                        "/Type": "/Page",
+                        "/Parent": "2 0 R",
+                        "/UserUnit": 2.0,
+                        "/CropBox": [20.0, 30.0, 180.0, 190.0]
+                    }
+                },
+                "2 0 R": {
+                    "value": {
+                        "/Type": "/Pages",
+                        "/MediaBox": [0.0, 0.0, 200.0, 220.0]
+                    }
+                }
+            }
+        });
+        let leaf_pages = parse_page_sizes(&leaf_json).expect("leaf UserUnit should resolve");
+        assert_eq!(leaf_pages[0].width_pt, 320.0);
+        assert_eq!(leaf_pages[0].height_pt, 320.0);
+        assert_eq!(leaf_pages[0].raw_width_pt, 160.0);
+        assert_eq!(leaf_pages[0].raw_height_pt, 160.0);
+        assert_eq!(leaf_pages[0].box_x0, 20.0);
+        assert_eq!(leaf_pages[0].box_y0, 30.0);
+        assert!((leaf_pages[0].user_unit() - 2.0).abs() < 1e-4);
+
+        let parent_json = json!({
+            "pages": [{ "object": "3 0 R" }],
+            "objects": {
+                "3 0 R": {
+                    "value": {
+                        "/Type": "/Page",
+                        "/Parent": "2 0 R",
+                        "/CropBox": [20.0, 30.0, 180.0, 190.0]
+                    }
+                },
+                "2 0 R": {
+                    "value": {
+                        "/Type": "/Pages",
+                        "/UserUnit": 2.0,
+                        "/MediaBox": [0.0, 0.0, 200.0, 220.0]
+                    }
+                }
+            }
+        });
+        let parent_pages =
+            parse_page_sizes(&parent_json).expect("parent UserUnit must not inherit");
+        assert_eq!(parent_pages[0].width_pt, 160.0);
+        assert_eq!(parent_pages[0].height_pt, 160.0);
+        assert_eq!(parent_pages[0].raw_width_pt, 160.0);
+        assert_eq!(parent_pages[0].raw_height_pt, 160.0);
+        assert_eq!(parent_pages[0].box_x0, 20.0);
+        assert_eq!(parent_pages[0].box_y0, 30.0);
+        assert!((parent_pages[0].user_unit() - 1.0).abs() < 1e-4);
     }
 }

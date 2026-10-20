@@ -1,0 +1,15 @@
+{
+  "head": "8746760240ce801156620d8d840d7bf825d9d2f8",
+  "sources": {
+    "src-tauri/src/pdf/backend/mod.rs": "fceafbc028eed4542ef0fdb5dfd2dccef335eeb5427c7684e634ef0a07d400dd",
+    "src-tauri/src/pdf/backend/pdfcraft_backend.rs": "2a404c5afaf725dc1f9181e90e7360e11362a0278072a6cbe4041a9423979177",
+    "src-tauri/src/pdf/backend/flatten.rs": "cc8d345fb2ef075577f116f38d7fafa9f03628abb17ab95005dfe28d856414c1",
+    "src-tauri/src/pdf/backend/tests.rs": "9f50e9ebbe023fe9dd28aa7ff1daefd793058762175eefb7b5beb3fe2faa9d58",
+    "src-tauri/src/pdf/page_info.rs": "febe31709e6086fdec5e40fe219236350019c60dc87af60340fc381263d6317c",
+    "src-tauri/src/pdf/bookmarks.rs": "a89c828694a2b0d47ee596f03f356112361484b61f16cc31856c2a2afd5fdcd2",
+    "src-tauri/src/pdf/normalize.rs": "860b92e2121edb1786546e4359b23b3fe1f889eef9e85acc26e66986db971362",
+    "src-tauri/vendor/pdfcraft/crates/organize/src/import.rs": "fc6279ae68ce7e1de3dd6a168e3872d5df54245c3e8acc79ffcde66fd4ef357c",
+    "src-tauri/vendor/pdfcraft/crates/organize/src/lib.rs": "ff2da058a888cee0fea71986779d90c6282ba151ff7cb10244ab77f960e6585b"
+  },
+  "scope": "Read-only code review; report and synthetic evidence only; isolated harness stubs cancellation, Word conversion and chunking (not exercised), uses production PdfCraftBackend and current vendored modules unchanged."
+}

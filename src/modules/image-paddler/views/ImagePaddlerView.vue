@@ -32,8 +32,8 @@
 
           <el-form-item label="输出">
             <el-radio-group v-model="settings.output_format" size="small">
-              <el-radio-button label="pdf">PDF</el-radio-button>
-              <el-radio-button label="docx">DOCX</el-radio-button>
+              <el-radio-button value="pdf">PDF</el-radio-button>
+              <el-radio-button value="docx">DOCX</el-radio-button>
             </el-radio-group>
           </el-form-item>
 
@@ -50,8 +50,8 @@
 
           <el-form-item v-if="settings.output_format === 'docx'" label="排版">
             <el-radio-group v-model="settings.use_table" size="small">
-              <el-radio-button :label="true">表格</el-radio-button>
-              <el-radio-button :label="false">段落</el-radio-button>
+              <el-radio-button :value="true">表格</el-radio-button>
+              <el-radio-button :value="false">段落</el-radio-button>
             </el-radio-group>
             <div class="field-hint">{{ settings.use_table ? '可并排' : '仅上下' }}</div>
           </el-form-item>
@@ -81,7 +81,7 @@
               <el-radio-button
                 v-for="option in PER_PAGE_CHOICES"
                 :key="String(option.value)"
-                :label="option.value"
+                :value="option.value"
               >{{ option.value === 'custom' ? '自定' : option.value }}</el-radio-button>
             </el-radio-group>
             <div class="field-hint">末页可不足</div>
@@ -143,8 +143,8 @@
 
           <el-form-item label="末页">
             <el-radio-group v-model="settings.last_page_mode" size="small">
-              <el-radio-button label="keep">原网格</el-radio-button>
-              <el-radio-button label="reflow">重排网格</el-radio-button>
+              <el-radio-button value="keep">原网格</el-radio-button>
+              <el-radio-button value="reflow">重排网格</el-radio-button>
             </el-radio-group>
           </el-form-item>
 
@@ -167,10 +167,10 @@
 
           <el-form-item label="模式">
             <el-radio-group :model-value="settings.size_mode" size="small" @update:model-value="setSizeMode">
-              <el-radio-button label="smart">智能</el-radio-button>
-              <el-radio-button label="manual">手动</el-radio-button>
-              <el-radio-button label="fit">适应</el-radio-button>
-              <el-radio-button label="original">原图</el-radio-button>
+              <el-radio-button value="smart">智能</el-radio-button>
+              <el-radio-button value="manual">手动</el-radio-button>
+              <el-radio-button value="fit">适应</el-radio-button>
+              <el-radio-button value="original">原图</el-radio-button>
             </el-radio-group>
             <div class="field-hint">{{ layoutAwareRecommendation?.reason }}</div>
           </el-form-item>
@@ -451,8 +451,8 @@
 
             <div class="page-scale-bar">
               <el-radio-group v-model="scaleScope" size="small">
-                <el-radio-button label="all" title="修改全局比例会清除所有本页覆盖">全局（重置局部）</el-radio-button>
-                <el-radio-button label="current">本页</el-radio-button>
+                <el-radio-button value="all" title="修改全局比例会清除所有本页覆盖">全局（重置局部）</el-radio-button>
+                <el-radio-button value="current">本页</el-radio-button>
               </el-radio-group>
 
               <template v-if="scaleScope === 'all'">
@@ -1126,7 +1126,7 @@ function hasCellCaption(img) {
 }
 
 .recommendation-title {
-  font-weight: 650;
+  font-weight: 600;
   color: var(--docsy-text-strong);
   flex: 0 0 auto;
 }
@@ -1157,7 +1157,7 @@ function hasCellCaption(img) {
 .section-head h4 {
   margin: 0;
   font-size: 13px;
-  font-weight: 680;
+  font-weight: 700;
   color: var(--docsy-text-strong);
 }
 

@@ -487,7 +487,7 @@ onBeforeUnmount(() => {
 .brand-caption {
   color: rgba(255, 255, 255, 0.44);
   font-size: 9px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.13em;
   text-transform: uppercase;
 }
@@ -676,7 +676,7 @@ onBeforeUnmount(() => {
     'PingFang SC',
     sans-serif;
   font-size: 15px;
-  font-weight: 720;
+  font-weight: 700;
   color: var(--docsy-text-strong);
 }
 
@@ -747,7 +747,7 @@ onBeforeUnmount(() => {
   transform: translateY(8px);
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1120px) {
   .app-aside {
     width: 78px !important;
   }

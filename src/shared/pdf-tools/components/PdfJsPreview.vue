@@ -191,7 +191,7 @@ async function loadDocument(path, reloadKey) {
   const pdfjsLib = await loadPdfJs()
   const loadingTask = pdfjsLib.getDocument({
     data,
-    enableXfa: true,
+    enableXfa: false,
   })
   const doc = await loadingTask.promise
   doc.__docsyKey = cacheKey

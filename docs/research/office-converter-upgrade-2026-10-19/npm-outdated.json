@@ -1,0 +1,87 @@
+{
+  "@tauri-apps/api": {
+    "current": "2.11.0",
+    "wanted": "2.12.4",
+    "latest": "2.12.4"
+  },
+  "@tauri-apps/cli": {
+    "current": "2.11.2",
+    "wanted": "2.12.3",
+    "latest": "2.12.3"
+  },
+  "@tauri-apps/plugin-dialog": {
+    "current": "2.7.1",
+    "wanted": "2.8.3",
+    "latest": "2.8.3"
+  },
+  "@tauri-apps/plugin-fs": {
+    "current": "2.5.1",
+    "wanted": "2.7.1",
+    "latest": "2.7.1"
+  },
+  "@tauri-apps/plugin-shell": {
+    "current": "2.3.5",
+    "wanted": "2.5.0",
+    "latest": "2.5.0"
+  },
+  "@vitejs/plugin-vue": {
+    "current": "6.0.8",
+    "wanted": "6.0.10",
+    "latest": "6.0.10"
+  },
+  "element-plus": {
+    "current": "2.14.1",
+    "wanted": "2.14.7",
+    "latest": "2.14.7"
+  },
+  "eslint": {
+    "current": "10.7.0",
+    "wanted": "10.13.0",
+    "latest": "10.13.0"
+  },
+  "eslint-plugin-vue": {
+    "current": "10.9.2",
+    "wanted": "10.11.1",
+    "latest": "10.11.1"
+  },
+  "mermaid": {
+    "current": "11.17.2",
+    "wanted": "11.17.2",
+    "latest": "12.2.0"
+  },
+  "pdfjs-dist": {
+    "current": "6.1.200",
+    "wanted": "6.4.299",
+    "latest": "6.4.299"
+  },
+  "pinia": {
+    "current": "2.3.1",
+    "wanted": "2.3.1",
+    "latest": "4.1.0"
+  },
+  "prettier": {
+    "current": "3.9.5",
+    "wanted": "3.9.10",
+    "latest": "3.9.10"
+  },
+  "vite": {
+    "current": "7.3.6",
+    "wanted": "7.3.7",
+    "latest": "8.3.4"
+  },
+  "vitest": {
+    "current": "4.1.8",
+    "wanted": "4.1.12",
+    "latest": "5.0.5"
+  },
+  "vue": {
+    "current": "3.5.35",
+    "wanted": "3.5.44",
+    "latest": "3.5.44"
+  },
+  "vue-router": {
+    "current": "4.6.4",
+    "wanted": "4.6.4",
+    "latest": "5.4.0"
+  }
+}

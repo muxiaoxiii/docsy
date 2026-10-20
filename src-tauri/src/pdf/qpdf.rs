@@ -56,6 +56,18 @@ pub fn inspect(path: &str) -> Result<InspectResult> {
 }
 
 fn is_encrypted(path: &str) -> Result<bool> {
+    if let Ok(bytes) = std::fs::read(path) {
+        match pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)) {
+            Ok(doc) => return Ok(doc.security().is_some()),
+            Err(
+                pdfcraft_cos::CosError::NeedsPassword
+                | pdfcraft_cos::CosError::WrongPassword
+                | pdfcraft_cos::CosError::Security(_),
+            ) => return Ok(true),
+            Err(_) => {}
+        }
+    }
+
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let mut cmd = crate::external::hidden_command(&bin);
@@ -90,6 +102,60 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
             output_path: input.display().to_string(),
             skipped: true,
         });
+    }
+
+    // 原生优先：直接移除空用户密码文档的编辑/权限密码（/Encrypt 字典），无需外置 qpdf
+    if let Ok(bytes) = std::fs::read(input) {
+        match pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)) {
+            Ok(mut doc) => {
+                if pdfcraft_organize::page_count(&doc).is_ok() {
+                    doc.remove_encryption();
+                    if let Ok(saved) =
+                        pdfcraft_cos::write_full(&doc, &pdfcraft_cos::SaveOptions::default())
+                    {
+                        let target_candidate = unique_output_path(input, "_unlocked");
+                        let parent = target_candidate
+                            .parent()
+                            .unwrap_or_else(|| Path::new("."));
+                        let sibling_temp = crate::util::fs::sibling_temp_path(
+                            &target_candidate,
+                            "pdfcraft-unlock",
+                        );
+                        let sibling_guard =
+                            crate::util::fs::TempPathGuard::new(sibling_temp.clone());
+                        if std::fs::write(&sibling_temp, &saved).is_ok() {
+                            let stem = target_candidate
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unlocked");
+                            let ext = target_candidate
+                                .extension()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("pdf");
+                            if let Ok(published) = crate::util::fs::copy_unique_with_stem(
+                                sibling_guard.path(),
+                                parent,
+                                stem,
+                                ext,
+                            ) {
+                                return Ok(UnlockResult {
+                                    output_path: published.display().to_string(),
+                                    skipped: false,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Err(
+                pdfcraft_cos::CosError::NeedsPassword | pdfcraft_cos::CosError::WrongPassword,
+            ) => {
+                if crate::external::QpdfTool.binary_path().is_err() {
+                    anyhow::bail!("该 PDF 设有打开密码（用户密码），无法在无密码情况下直接移除权限限制");
+                }
+            }
+            Err(_) => {}
+        }
     }
 
     let qpdf = crate::external::QpdfTool;
@@ -135,6 +201,14 @@ pub fn merge_with_state(
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let output_path = unique_available_path(Path::new(output));
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("创建合并输出目录失败: {}", parent.display()))?;
+        }
+    }
+    let sibling_temp = crate::util::fs::sibling_temp_path(&output_path, "docsy-qpdf-merge");
+    let sibling_guard = crate::util::fs::TempPathGuard::new(sibling_temp);
 
     // Convert Word files to temp PDF guards if present
     let mut temp_converted_guards: Vec<crate::util::fs::TempPathGuard> = Vec::new();
@@ -179,7 +253,7 @@ pub fn merge_with_state(
             }
         }
     }
-    cmd.arg("--").arg(&output_path);
+    cmd.arg("--").arg(sibling_guard.path());
 
     let output = run_cancellable("合并", cmd)?;
     if !status_is_success(&output.status) {
@@ -189,6 +263,18 @@ pub fn merge_with_state(
             crate::external::command_failure_detail(&output)
         );
     }
+
+    if let Some(first_input) = resolved_inputs.first() {
+        let _ = crate::pdf::metadata::migrate_first_input_metadata(
+            Path::new(first_input),
+            sibling_guard.path(),
+            true,
+            true,
+        );
+    }
+
+    crate::util::fs::replace_file(sibling_guard.path(), &output_path)
+        .with_context(|| format!("发布合并文件失败: {}", output_path.display()))?;
 
     Ok(output_path.display().to_string())
 }
@@ -271,6 +357,15 @@ pub fn extract_pages(
     pages: &[u32],
     output_dir: Option<&str>,
 ) -> Result<PdfOutputResult> {
+    extract_pages_with_target(input, pages, output_dir, None)
+}
+
+pub fn extract_pages_with_target(
+    input: &str,
+    pages: &[u32],
+    output_dir: Option<&str>,
+    target_output_path: Option<&Path>,
+) -> Result<PdfOutputResult> {
     if pages.is_empty() {
         anyhow::bail!("缺少要提取的页码");
     }
@@ -288,7 +383,25 @@ pub fn extract_pages(
 
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let output_path = unique_output_path_in_dir(input_path, output_dir, "_pages");
+    let output_path = if let Some(target) = target_output_path {
+        if let Some(parent) = target.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("创建提取输出目录失败: {}", parent.display()))?;
+            }
+        }
+        unique_output_path(target, "")
+    } else {
+        unique_output_path_in_dir(input_path, output_dir, "_pages")
+    };
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let sibling_temp = crate::util::fs::sibling_temp_path(&output_path, "docsy-qpdf-extract");
+    let sibling_guard = crate::util::fs::TempPathGuard::new(sibling_temp);
+
     let mut command = crate::external::hidden_command(&bin);
     command.arg("--empty").arg("--pages");
 
@@ -316,7 +429,7 @@ pub fn extract_pages(
     }
 
     command.arg(input_path).arg(ranges.join(","));
-    command.arg("--").arg(&output_path);
+    command.arg("--").arg(sibling_guard.path());
 
     let command_output = run_cancellable("页面提取", command)?;
     if !status_is_success(&command_output.status) {
@@ -326,9 +439,16 @@ pub fn extract_pages(
             crate::external::command_failure_detail(&command_output)
         );
     }
-    if !output_path.exists() {
-        anyhow::bail!("qpdf 未生成页面提取输出文件");
-    }
+
+    let _ = crate::pdf::metadata::migrate_first_input_metadata(
+        input_path,
+        sibling_guard.path(),
+        true,
+        true,
+    );
+
+    crate::util::fs::replace_file(sibling_guard.path(), &output_path)
+        .with_context(|| format!("发布提取文件失败: {}", output_path.display()))?;
 
     let input_size = std::fs::metadata(input_path)?.len();
     let output_size = std::fs::metadata(&output_path)?.len();
@@ -422,6 +542,23 @@ pub fn optimize_in_place(input: &str) -> Result<OptimizeResult> {
 // Legacy backups used transient object numbers. Refuse to rewrite them until
 // restored, rather than retaining bytes which can no longer restore the fonts.
 pub(crate) fn validate_recovery_backup(input: &Path) -> Result<()> {
+    if let Ok(bytes) = std::fs::read(input) {
+        if let Ok(doc) = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)) {
+            if doc.security().is_some() {
+                // fall through to qpdf check
+            } else {
+                if let Some(text) = pdfcraft_organize::info(&doc, "DocsyAntiCopyBackup") {
+                    let raw = text.strip_prefix("u:").unwrap_or(&text);
+                    let backup = serde_json::from_str::<serde_json::Value>(raw).ok();
+                    if backup.as_ref().and_then(|data| data["version"].as_u64()) != Some(2) {
+                        anyhow::bail!("此 PDF 含旧版防复制恢复备份，重写会改变字体编号。请先执行“恢复原始文字映射”，再优化或重新防复制；原文件未修改。");
+                    }
+                }
+                return Ok(());
+            }
+        }
+    }
+
     let trailer = super::chunked::read_qpdf_object(input, "trailer", "trailer")?;
     let info = match trailer.get("/Info") {
         Some(serde_json::Value::String(reference)) => {
@@ -442,9 +579,38 @@ pub(crate) fn validate_recovery_backup(input: &Path) -> Result<()> {
     Ok(())
 }
 
+fn rebuild_pages_native(input_path: &Path, output_path: &Path) -> Result<()> {
+    crate::operations::check_current_cancelled()?;
+    let bytes = std::fs::read(input_path)?;
+    let doc = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes))
+        .map_err(|e| anyhow::anyhow!("pdfcraft 解析失败: {e}"))?;
+    if doc.security().is_some() {
+        anyhow::bail!("受保护的 PDF 交由 qpdf 处理");
+    }
+    crate::operations::check_current_cancelled()?;
+    let out_bytes = pdfcraft_cos::write_full(&doc, &pdfcraft_cos::SaveOptions::default())
+        .map_err(|e| anyhow::anyhow!("pdfcraft 无损重写失败: {e}"))?;
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(output_path, out_bytes)?;
+    Ok(())
+}
+
 /// Rewrite the original document, retaining its catalog, Info and recovery data.
 fn rebuild_pages(input_path: &Path, output_path: &Path) -> Result<()> {
     validate_recovery_backup(input_path)?;
+    match rebuild_pages_native(input_path, output_path) {
+        Ok(()) => return Ok(()),
+        Err(err) => {
+            let _ = std::fs::remove_file(output_path);
+            if crate::operations::check_current_cancelled().is_err() {
+                return Err(err);
+            }
+        }
+    }
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let mut cmd = crate::external::hidden_command(&bin);
@@ -531,6 +697,23 @@ fn unique_available_path(path: &Path) -> PathBuf {
 }
 
 pub fn page_count(input: &str) -> Result<u32> {
+    if let Ok(bytes) = std::fs::read(input) {
+        if let Ok(doc) = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)) {
+            if let Ok(count) = pdfcraft_organize::page_count(&doc) {
+                if count > 0 {
+                    return u32::try_from(count).context("PDF 页数超过支持范围");
+                }
+            }
+        }
+    }
+
+    if let Ok(doc) = lopdf::Document::load(input) {
+        let count = doc.get_pages().len();
+        if count > 0 {
+            return u32::try_from(count).context("PDF 页数超过支持范围");
+        }
+    }
+
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
     let mut cmd = crate::external::hidden_command(&bin);

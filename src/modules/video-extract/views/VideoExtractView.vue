@@ -3,7 +3,7 @@
     <template #header-actions>
       <el-button type="success" :loading="extracting" :disabled="analyzingSelection || !videoPath || !ffmpegStatus.available || (settings.timestamp.enabled && !ffmpegStatus.has_drawtext)" @click="extractFrames">开始抽帧</el-button>
     </template>
-    <div class="extract-layout" :class="{ 'settings-collapsed': settingsCollapsed }">
+    <div ref="extractLayoutRef" class="extract-layout" :class="{ 'settings-collapsed': settingsCollapsed }" :style="extractLayoutStyle">
       <!-- Left: Settings -->
       <div class="extract-settings">
         <!-- FFmpeg Status -->
@@ -225,6 +225,15 @@
         </div>
       </div>
 
+      <div
+        v-if="!settingsCollapsed"
+        class="extract-resizer"
+        role="separator"
+        aria-label="调整抽帧设置与结果区域宽度"
+        aria-orientation="vertical"
+        @pointerdown="startSettingsResize"
+      />
+
       <!-- Right: Results -->
       <div class="extract-results">
         <div class="results-header">
@@ -281,7 +290,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onBeforeUnmount, onDeactivated, onActivated, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, onDeactivated, onActivated, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -336,10 +345,44 @@ const analysisSettings = reactive({
   overlapMaxPercent: 10,
 })
 const settingsCollapsed = ref(false)
+const settingsPanelWidth = ref(382)
+const extractLayoutRef = ref(null)
+let stopSettingsResize = null
+const extractLayoutStyle = computed(() =>
+  settingsCollapsed.value
+    ? {}
+    : { gridTemplateColumns: `minmax(280px, ${settingsPanelWidth.value}px) 8px minmax(0, 1fr)` },
+)
 const preference = useWorkspacePreferences('video-extract.workspace', {
   settings,
   analysisSettings,
+  settingsPanelWidth,
 })
+
+function clampSettingsPanelWidth(value) {
+  return Math.min(520, Math.max(280, Number(value) || 382))
+}
+
+function startSettingsResize(event) {
+  if (event.button !== 0 || !extractLayoutRef.value) return
+  event.preventDefault()
+  const rect = extractLayoutRef.value.getBoundingClientRect()
+  const update = (pointerEvent) => {
+    settingsPanelWidth.value = clampSettingsPanelWidth(pointerEvent.clientX - rect.left)
+  }
+  const finish = () => {
+    window.removeEventListener('pointermove', update)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    stopSettingsResize = null
+  }
+  stopSettingsResize?.()
+  stopSettingsResize = finish
+  window.addEventListener('pointermove', update)
+  window.addEventListener('pointerup', finish, { once: true })
+  window.addEventListener('pointercancel', finish, { once: true })
+  update(event)
+}
 
 const extracting = ref(false)
 const analyzingSelection = ref(false)
@@ -1039,6 +1082,30 @@ useWindowFileDrop({
   display: none;
 }
 
+.extract-resizer {
+  align-self: stretch;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent 2px,
+    var(--docsy-border-subtle) 2px,
+    var(--docsy-border-subtle) 6px,
+    transparent 6px
+  );
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.extract-resizer:hover {
+  background: linear-gradient(
+    90deg,
+    transparent 2px,
+    var(--docsy-primary) 2px,
+    var(--docsy-primary) 6px,
+    transparent 6px
+  );
+}
+
 .extract-settings {
   min-width: 0;
   overflow-y: auto;
@@ -1116,7 +1183,7 @@ useWindowFileDrop({
 
 .section-title {
   font-size: 14px;
-  font-weight: 680;
+  font-weight: 700;
   color: var(--docsy-text-strong);
   margin-bottom: 10px;
 }
@@ -1261,7 +1328,7 @@ useWindowFileDrop({
   line-height: 1.55;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1180px) {
   :deep(.workspace-content) {
     overflow: auto;
   }
@@ -1280,6 +1347,10 @@ useWindowFileDrop({
 
   .extract-results {
     min-height: clamp(440px, 62dvh, 560px);
+  }
+
+  .extract-resizer {
+    display: none;
   }
 }
 </style>

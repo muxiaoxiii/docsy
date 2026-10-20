@@ -170,8 +170,8 @@
       <div class="proxy-selection-row">
         <span class="label">首选下载通道：</span>
         <el-radio-group v-model="settings.selected_gh_proxy" @change="saveSettings">
-          <el-radio-button label="auto">自动选择最快 / 智能回退</el-radio-button>
-          <el-radio-button label="direct">直连 GitHub (官方源)</el-radio-button>
+          <el-radio-button value="auto">自动选择最快 / 智能回退</el-radio-button>
+          <el-radio-button value="direct">直连 GitHub (官方源)</el-radio-button>
         </el-radio-group>
       </div>
 

@@ -1,0 +1,134 @@
+[
+  {
+    "name": "normal_widget",
+    "pages": 1,
+    "view": [
+      0,
+      0,
+      400,
+      400
+    ],
+    "rotate": 0,
+    "userUnit": 1,
+    "width": 400,
+    "height": 400,
+    "textItems": []
+  },
+  {
+    "name": "rotated_ap",
+    "pages": 1,
+    "view": [
+      20,
+      30,
+      380,
+      370
+    ],
+    "rotate": 90,
+    "userUnit": 2,
+    "width": 680,
+    "height": 720,
+    "textItems": []
+  },
+  {
+    "name": "missing_ap",
+    "pages": 1,
+    "view": [
+      0,
+      0,
+      400,
+      400
+    ],
+    "rotate": 0,
+    "userUnit": 1,
+    "width": 400,
+    "height": 400,
+    "textItems": []
+  },
+  {
+    "name": "consecutive-text",
+    "pages": 1,
+    "view": [
+      0,
+      0,
+      400,
+      600
+    ],
+    "rotate": 0,
+    "userUnit": 1,
+    "width": 400,
+    "height": 600,
+    "textItems": [
+      {
+        "str": "AB",
+        "width": 16.008,
+        "height": 12,
+        "transform": [
+          12,
+          0,
+          0,
+          12,
+          30,
+          70
+        ]
+      }
+    ]
+  },
+  {
+    "name": "winansi-text",
+    "pages": 1,
+    "view": [
+      0,
+      0,
+      400,
+      600
+    ],
+    "rotate": 0,
+    "userUnit": 1,
+    "width": 400,
+    "height": 600,
+    "textItems": [
+      {
+        "str": "é",
+        "width": 6.672,
+        "height": 12,
+        "transform": [
+          12,
+          0,
+          0,
+          12,
+          30,
+          70
+        ]
+      }
+    ]
+  },
+  {
+    "name": "extract-inherited-geometry",
+    "pages": 1,
+    "view": [
+      0,
+      0,
+      400,
+      600
+    ],
+    "rotate": 0,
+    "userUnit": 1,
+    "width": 400,
+    "height": 600,
+    "textItems": [
+      {
+        "str": "VISIBLE",
+        "width": 45.35999999999999,
+        "height": 12,
+        "transform": [
+          12,
+          0,
+          0,
+          12,
+          30,
+          70
+        ]
+      }
+    ]
+  }
+]

@@ -5,14 +5,17 @@
     </div>
     <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
       <el-tab-pane label="PDF 解锁" name="unlock" lazy>
-        <ToolWorkspaceShell title="PDF 解锁" description="移除 PDF 文件的密码保护，原文件旁会生成已解锁副本。">
+        <ToolWorkspaceShell title="PDF 解锁" description="移除 PDF 文件的密码保护，原文件旁会生成已解锁副本。" :hide-toolbar="!unlockFiles.length">
           <template #toolbar>
-            <el-button type="primary" plain :disabled="unlocking || unlockInspecting" @click="selectUnlockFiles">添加 PDF 文件</el-button>
+            <el-button v-if="unlockFiles.length" type="primary" plain :disabled="unlocking || unlockInspecting" @click="selectUnlockFiles">添加 PDF 文件</el-button>
           </template>
           <FileQueuePanel
+            fill
+            empty-action-label="添加 PDF 文件"
             :items="unlockFiles"
             :busy="unlocking || unlockInspecting"
             empty-text="选择一个或多个需要解锁的 PDF 文件"
+            @empty-action="selectUnlockFiles"
             @clear="clearUnlockFiles"
             @remove="removeUnlockFile"
           >
@@ -37,16 +40,20 @@
       <el-tab-pane label="PDF 合并" name="merge" lazy>
         <ToolWorkspaceShell
           title="PDF 合并"
+          :hide-toolbar="!mergeFiles.length"
           description="按列表顺序合并多个 PDF 或 Word 文档；Word 文档会自动转为 PDF 后合并；合并时会压平页面注释和电子签章外观以便打印，不保留签章证书和交互。"
         >
           <template #toolbar>
-            <el-button type="primary" plain :disabled="merging" @click="selectMergeFiles">添加文件</el-button>
+            <el-button v-if="mergeFiles.length" type="primary" plain :disabled="merging" @click="selectMergeFiles">添加文件</el-button>
           </template>
           <FileQueuePanel
+            fill
+            empty-action-label="添加文件"
             :items="mergeFiles"
             :busy="merging"
             sortable
             empty-text="添加需要合并的 PDF 或 Word 文档（支持 .pdf、.docx、.doc）"
+            @empty-action="selectMergeFiles"
             @clear="clearMergeFiles"
             @remove="removeMergeFile"
             @reorder="reorderMergeFiles"
@@ -103,8 +110,8 @@
             <el-button type="primary" plain :disabled="extractingPages" @click="selectExtractFile">选择 PDF 文件</el-button>
             <el-button :disabled="!extractFile || extractingPages" @click="selectExtractOutputDir">选择输出文件夹</el-button>
           </template>
-          <div v-if="extractFile" class="path-line">{{ extractFile }}</div>
-          <div v-if="extractOutputDir" class="path-line">{{ extractOutputDir }}</div>
+          <div v-if="extractFile" class="path-line"><span class="path-badge">源文件</span><span>{{ extractFile }}</span></div>
+          <div v-if="extractOutputDir" class="path-line"><span class="path-badge">输出目录</span><span>{{ extractOutputDir }}</span></div>
           <div v-if="extractFile" class="simple-tool-form">
             <el-input v-model="extractPageText" :disabled="extractingPages" placeholder="例如：3,7,12-15" clearable @keyup.enter="doExtractPages">
               <template #prepend>页码</template>
@@ -114,6 +121,7 @@
           </div>
           <WorkspaceEmptyState
             v-else
+            class="extract-empty"
             title="等待选择 PDF"
             description="选择文件后，可以输入单页或连续页码范围并导出。"
           />
@@ -134,15 +142,19 @@
       <el-tab-pane label="PDF 压缩" name="compress" lazy>
         <ToolWorkspaceShell
           title="PDF 压缩整理"
+          :hide-toolbar="!compressFiles.length"
           description="默认只做无损结构整理；需要进一步压缩图片时再单独开启，扫描件不会被默认重编码。"
         >
           <template #toolbar>
-            <el-button type="primary" plain :disabled="compressing" @click="selectCompressFiles">添加 PDF 文件</el-button>
+            <el-button v-if="compressFiles.length" type="primary" plain :disabled="compressing" @click="selectCompressFiles">添加 PDF 文件</el-button>
           </template>
           <FileQueuePanel
+            fill
+            empty-action-label="添加 PDF 文件"
             :items="compressFiles"
             :busy="compressing"
             empty-text="添加或拖入 PDF，调整下方设置后点击“开始压缩”；结果保存在源文件夹"
+            @empty-action="selectCompressFiles"
             @clear="clearCompressFiles"
             @remove="removeCompressFile"
           >
@@ -154,7 +166,7 @@
               }}</span>
             </template>
           </FileQueuePanel>
-          <div v-if="compressSummary" class="path-line">{{ compressSummary }}</div>
+          <div v-if="compressSummary" class="path-line path-line--summary">{{ compressSummary }}</div>
           <template #actions>
             <div class="compress-options">
 
@@ -180,8 +192,8 @@
             <el-button :disabled="!splitFile || splittingMerged" @click="selectSplitOutputDir">选择输出文件夹</el-button>
             <el-button :disabled="!splitFile || splittingMerged" @click="addSplitRange">添加页段</el-button>
           </template>
-          <div v-if="splitFile" class="path-line">{{ splitFile }}</div>
-          <div v-if="splitOutputDir" class="path-line">{{ splitOutputDir }}</div>
+          <div v-if="splitFile" class="path-line"><span class="path-badge">源文件</span><span>{{ splitFile }}</span></div>
+          <div v-if="splitOutputDir" class="path-line"><span class="path-badge">输出目录</span><span>{{ splitOutputDir }}</span></div>
 
           <div v-if="splitFile" ref="splitMainRef" :inert="splittingMerged" class="split-main" :style="splitGridStyle">
             <section class="split-list-panel">
@@ -371,15 +383,19 @@
       <el-tab-pane label="PDF 防复制" name="anti-ocr" lazy>
         <ToolWorkspaceShell
           title="PDF 防复制"
+          :hide-toolbar="!antiOcrFiles.length"
           description="防止 PDF 文字被复制提取。保留视觉效果，干扰文字选择和复制。"
         >
           <template #toolbar>
-            <el-button type="primary" plain :disabled="antiOcrProcessing" @click="selectAntiOcrFiles">添加 PDF 文件</el-button>
+            <el-button v-if="antiOcrFiles.length" type="primary" plain :disabled="antiOcrProcessing" @click="selectAntiOcrFiles">添加 PDF 文件</el-button>
           </template>
           <FileQueuePanel
+            fill
+            empty-action-label="添加 PDF 文件"
             :items="antiOcrFiles"
             :busy="antiOcrProcessing"
             empty-text="选择一个或多个 PDF 文件进行防复制检测"
+            @empty-action="selectAntiOcrFiles"
             @clear="clearAntiOcrFiles"
             @remove="removeAntiOcrFile"
           >
@@ -413,7 +429,8 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
 import { ElMessage, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
@@ -440,7 +457,27 @@ import {
   setRangeStart,
 } from '../../../core/pdfUtils.js'
 
-const activeTab = ref('unlock')
+const PDF_TABS = new Set(['unlock', 'merge', 'extract', 'compress', 'split', 'anti-ocr'])
+const currentInstance = getCurrentInstance()
+const route = currentInstance ? useRoute() : null
+const router = currentInstance ? useRouter() : null
+const tabFromRoute = (tab) => (PDF_TABS.has(tab) ? tab : 'unlock')
+const activeTab = ref(tabFromRoute(route?.params?.tab))
+
+watch(
+  () => route?.params?.tab,
+  (tab) => {
+    const next = tabFromRoute(tab)
+    if (next !== activeTab.value) activeTab.value = next
+  },
+)
+
+watch(activeTab, (tab) => {
+  if (!route || !router) return
+  const param = tab === 'unlock' ? undefined : tab
+  if (route.params.tab === param) return
+  router.replace({ name: 'pdf-tools', params: param ? { tab: param } : {} })
+})
 const pdfDragging = ref(false)
 const splitReorder = usePointerReorder({
   itemCount: () => splitRanges.value.length,
@@ -835,12 +872,27 @@ async function doMerge() {
     const output = await open({ directory: true })
     if (output) {
       const outputPath = `${output}/merged.pdf`
+      for (const file of mergeFiles.value) {
+        file.statusText = isWordPath(file.path) && !file.outputPath ? '转换并合并中…' : '合并中…'
+        file.statusType = 'warning'
+      }
       const result = await tauriCallSafe('merge_pdfs', {
-        inputs: mergeFiles.value.map((file) => file.path),
+        inputs: mergeFiles.value.map((file) => file.outputPath || file.path),
         output: outputPath,
         duplexSeparate: duplexSeparate.value,
       })
-      if (result.ok) mergeOutputPath.value = result.data?.output_path || result.data || outputPath
+      if (result.ok) {
+        mergeOutputPath.value = result.data?.output_path || result.data || outputPath
+        for (const file of mergeFiles.value) {
+          file.statusText = '已合并'
+          file.statusType = 'success'
+        }
+      } else {
+        for (const file of mergeFiles.value) {
+          file.statusText = '合并失败'
+          file.statusType = 'danger'
+        }
+      }
       result.ok
         ? ElMessage.success('合并完成')
         : ElMessage.error(userFacingError(result.error, '合并失败，请确认文件未损坏且未被其他程序占用'))
@@ -1353,26 +1405,25 @@ onBeforeUnmount(() => {
 }
 
 :deep(.pdf-tabs .workspace-toolbar) {
-  min-height: clamp(46px, 5.8dvh, 52px);
-  margin-block: clamp(8px, 1.5dvh, 12px);
-  padding-block: clamp(7px, 1.2dvh, 9px);
-  padding-inline: 12px;
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-radius);
-  background: color-mix(in srgb, var(--docsy-surface-muted) 68%, var(--docsy-surface-elevated));
+  min-height: 40px;
+  margin-block: clamp(8px, 1.5dvh, 12px) 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 :deep(.pdf-tabs .workspace-content) {
-  margin-top: 0;
-  padding: clamp(12px, 2.4dvh, 16px);
-  background: color-mix(in srgb, var(--docsy-surface-elevated) 82%, var(--docsy-canvas));
+  margin-top: clamp(8px, 1.5dvh, 12px);
+  padding: 0;
+  background: transparent;
 }
 
 :deep(.pdf-tabs .workspace-actions) {
   min-height: clamp(50px, 6.5dvh, 58px);
   margin-top: clamp(8px, 1.5dvh, 12px);
-  padding-block: clamp(10px, 1.5dvh, 12px);
-  padding-inline: 16px;
+  padding-block: clamp(10px, 1.5dvh, 12px) 0;
+  padding-inline: 2px;
   box-shadow: none;
 }
 
@@ -1436,9 +1487,39 @@ h3 {
 }
 
 .path-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 0 0 8px;
+  border: 0;
+  border-radius: var(--docsy-radius);
+  background: color-mix(in srgb, var(--docsy-surface-muted) 52%, transparent);
   color: var(--docsy-text);
-  font-size: 13px;
-  margin: 6px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.path-line > span:last-child {
+  min-width: 0;
+}
+
+.path-line--summary {
+  margin-top: 10px;
+  background: var(--docsy-primary-soft);
+  color: var(--docsy-text-strong);
+  font-weight: 500;
+}
+
+.path-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--docsy-surface-elevated);
+  color: var(--docsy-text-muted);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .path-hint {
@@ -1451,8 +1532,9 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 520px;
+  max-width: 540px;
   margin-top: 12px;
+  padding: 0 2px;
 }
 
 .split-options {
@@ -1467,6 +1549,7 @@ h3 {
   display: grid;
   gap: 0;
   align-items: start;
+  margin-top: 4px;
 }
 
 .split-list-panel,
@@ -1480,6 +1563,10 @@ h3 {
 
 .split-preview {
   margin-left: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
 }
 
 .split-resizer {
@@ -1517,10 +1604,10 @@ h3 {
   align-items: center;
   gap: 8px 14px;
   margin-bottom: 10px;
-  padding: 11px 13px;
+  padding: 10px 13px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
-  background: var(--docsy-surface-muted);
+  background: var(--docsy-surface-elevated);
 }
 
 .split-option-note {
@@ -1538,16 +1625,20 @@ h3 {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 12px;
-  margin-bottom: 8px;
-  color: var(--docsy-text);
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--docsy-border-subtle);
+  color: var(--docsy-text-strong);
   font-size: 13px;
+  font-weight: 600;
 }
 
 .split-preview-status {
-  margin-top: 4px;
+  margin-top: 3px;
   color: var(--docsy-text-muted);
   font-size: 12px;
+  font-weight: 400;
   line-height: 1.4;
 }
 
@@ -1555,8 +1646,12 @@ h3 {
   display: flex;
   width: 100%;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   justify-content: flex-start;
+}
+
+.split-preview-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .split-preview-pages {
@@ -1572,6 +1667,10 @@ h3 {
 
 .split-empty {
   min-height: 100%;
+}
+
+.extract-empty {
+  flex: 1;
 }
 
 .file-item {
@@ -1620,7 +1719,7 @@ h3 {
   font-size: 13px;
   color: var(--docsy-text-muted);
   margin-bottom: 12px;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .anti-copy-stats {
   display: flex;
@@ -1647,11 +1746,18 @@ h3 {
   background: #fef2f2;
   color: var(--el-color-danger);
 }
+.compress-options {
+  display: flex;
+  align-items: center;
+  gap: 10px 18px;
+  flex-wrap: wrap;
+  margin-right: auto;
+}
 .compress-level-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
+  margin: 0;
 }
 .compress-level-label {
   font-size: 13px;

@@ -1,0 +1,50 @@
+{
+  "unit_leaf-a4-before": {
+    "image_size": [
+      1191,
+      1684
+    ],
+    "blue_bbox": [
+      436,
+      682,
+      754,
+      1001
+    ]
+  },
+  "unit_leaf-a4": {
+    "image_size": [
+      1191,
+      1684
+    ],
+    "blue_bbox": [
+      236,
+      902,
+      554,
+      1221
+    ]
+  },
+  "unit_parent-a4-before": {
+    "image_size": [
+      596,
+      842
+    ],
+    "blue_bbox": [
+      218,
+      341,
+      376,
+      500
+    ]
+  },
+  "unit_parent-a4": {
+    "image_size": [
+      596,
+      842
+    ],
+    "blue_bbox": [
+      118,
+      451,
+      276,
+      610
+    ]
+  }
+}

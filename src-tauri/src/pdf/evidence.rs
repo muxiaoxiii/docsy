@@ -5,7 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::external::ExternalTool;
 use crate::sort_utils::natural_cmp;
 
 use super::fnv1a_hash;
@@ -236,12 +235,12 @@ pub fn build_group_pdfs(
     let evidence_dir = Path::new(&args.root).join("_evidence_output");
     fs::create_dir_all(&evidence_dir)?;
 
-    let qpdf_bin = crate::external::QpdfTool.binary_path()?;
-
     let mut results = Vec::new();
     let mut failed_conversions = Vec::new();
+    let mut failed_groups = Vec::new();
 
     for group in &args.groups {
+        crate::operations::check_current_cancelled()?;
         let group_name = &group.name;
         let group_id = &group.id;
 
@@ -281,27 +280,38 @@ pub fn build_group_pdfs(
             safe_file_stem(group_name),
             fnv1a_hash(group_id)
         ));
-        merge_pdfs_with_qpdf(&qpdf_bin, &pdf_paths, &group_output)?;
-
-        let page_count = qpdf_page_count(&qpdf_bin, &group_output.display().to_string())?;
-
-        results.push(serde_json::json!({
-            "groupId": group_id,
-            "name": group_name,
-            "outputPath": group_output.display().to_string(),
-            "pageCount": page_count,
-            "conversionFailures": failed_conversions
-                .iter()
-                .filter(|item| item["groupId"].as_str() == Some(group_id.as_str()))
-                .cloned()
-                .collect::<Vec<_>>(),
-        }));
+        match merge_pdfs_print(&pdf_paths, &group_output, Some(conversion_state)) {
+            Ok((merged_path, page_count)) => {
+                results.push(serde_json::json!({
+                    "groupId": group_id,
+                    "name": group_name,
+                    "outputPath": merged_path.display().to_string(),
+                    "pageCount": page_count,
+                    "conversionFailures": failed_conversions
+                        .iter()
+                        .filter(|item| item["groupId"].as_str() == Some(group_id.as_str()))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                }));
+            }
+            Err(err) => {
+                if crate::operations::check_current_cancelled().is_err() {
+                    return Err(err);
+                }
+                failed_groups.push(serde_json::json!({
+                    "groupId": group_id,
+                    "name": group_name,
+                    "reason": err.to_string(),
+                }));
+            }
+        }
     }
 
     Ok(serde_json::json!({
         "evidenceDir": evidence_dir.display().to_string(),
         "results": results,
         "failedConversions": failed_conversions,
+        "failedGroups": failed_groups,
     }))
 }
 
@@ -334,8 +344,6 @@ pub fn merge_all(args: &MergeAllArgs) -> Result<String> {
             .to_string()
     });
 
-    let qpdf_bin = crate::external::QpdfTool.binary_path()?;
-
     let inputs: Vec<String> = args.group_pdfs.clone();
 
     let renamed_paths = if let Some(ref ident) = args.identity {
@@ -350,48 +358,40 @@ pub fn merge_all(args: &MergeAllArgs) -> Result<String> {
         renamed_paths
     };
 
-    merge_pdfs_with_qpdf(&qpdf_bin, &overlaid_paths, Path::new(&output_path_str))?;
+    let (merged_path, _) =
+        merge_pdfs_print(&overlaid_paths, Path::new(&output_path_str), None)?;
 
-    Ok(output_path_str)
+    Ok(merged_path.display().to_string())
 }
 
-fn merge_pdfs_with_qpdf(qpdf_bin: &Path, inputs: &[String], output: &Path) -> Result<()> {
+fn merge_pdfs_print(
+    inputs: &[String],
+    output: &Path,
+    conversion_state: Option<&Arc<ConversionState>>,
+) -> Result<(PathBuf, u32)> {
     if inputs.is_empty() {
         anyhow::bail!("没有可合并的 PDF");
     }
 
-    let mut command = crate::external::hidden_command(qpdf_bin);
-    // Keep the evidence merge aligned with the standalone PDF merge: flatten
-    // the existing appearance first, then apply the lossless structural
-    // optimization so its resources are not mistaken for unreachable data.
-    super::qpdf::add_merge_args(&mut command);
-    let output_result = command
-        .arg("--empty")
-        .arg("--pages")
-        .args(inputs)
-        .arg("--")
-        .arg(output)
-        .output()?;
-
-    if !super::qpdf::status_is_success(&output_result.status) {
-        let detail = crate::external::command_failure_detail(&output_result);
-        anyhow::bail!("qpdf 合并失败: {detail}");
-    }
-
-    Ok(())
-}
-
-fn qpdf_page_count(qpdf_bin: &Path, path: &str) -> Result<u32> {
-    let output = crate::external::hidden_command(qpdf_bin)
-        .arg("--show-npages")
-        .arg(path)
-        .output()?;
-    if !super::qpdf::status_is_success(&output.status) {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("qpdf 读取页数失败 {}: {}", path, stderr.trim());
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.trim().parse::<u32>()?)
+    let policy = super::backend::policy::OutputPolicy {
+        merge_policy: super::backend::policy::MergePolicy::Print,
+        duplex_separate: false,
+        ..Default::default()
+    };
+    let req = super::backend::MergeRequest {
+        inputs: inputs.to_vec(),
+        output_path: output.to_path_buf(),
+        policy,
+        preferred_backend: None,
+        conversion_state: conversion_state.cloned(),
+    };
+    let res = super::backend::dispatch_merge(&req).map_err(|err| anyhow::anyhow!("{err}"))?;
+    let total_pages = if res.total_pages > 0 {
+        res.total_pages
+    } else {
+        super::qpdf::page_count(&res.output_path.to_string_lossy())?
+    };
+    Ok((res.output_path, total_pages))
 }
 
 fn apply_identity_rename(
@@ -530,16 +530,6 @@ fn apply_overlay_batch(
         .context("构建旧版证据页眉页脚任务失败")?;
     let result = header_footer::batch_overlay(&jobs)?;
 
-    if !result.failed.is_empty() {
-        let details = result
-            .failed
-            .iter()
-            .map(|failure| format!("{}: {}", failure.path, failure.message))
-            .collect::<Vec<_>>()
-            .join("；");
-        anyhow::bail!("旧版证据页眉页脚处理失败: {details}");
-    }
-
     let output_paths: Vec<String> = result
         .results
         .iter()
@@ -547,6 +537,15 @@ fn apply_overlay_batch(
         .collect();
 
     if output_paths.is_empty() && !inputs.is_empty() {
+        if !result.failed.is_empty() {
+            let details = result
+                .failed
+                .iter()
+                .map(|failure| format!("{}: {}", failure.path, failure.message))
+                .collect::<Vec<_>>()
+                .join("；");
+            anyhow::bail!("旧版证据页眉页脚处理失败: {details}");
+        }
         anyhow::bail!("旧版证据页眉页脚处理未生成任何输出文件");
     }
 

@@ -192,3 +192,42 @@ SOFTWARE.
       or other liability obligations and/or rights consistent with this
       License.
 ```
+
+## PdfCraft（基于 upstream commit `4db6ac4ae2448df6389d8bb0bc54db6ba175721c` 的修改版）
+
+- 来源：vendored 于 `src-tauri/vendor/pdfcraft`
+- 上游项目：https://github.com/storytold/pdfcraft
+- 许可证：MIT License OR Apache License 2.0
+- 版权：Copyright (c) 2024-2026 Storytold
+- 详细说明与补丁记录：见 `src-tauri/vendor/pdfcraft/VENDOR.md`
+
+用于 PDF 原生合并、单页与多页提取、元数据解析以及表单/批注外观压平。Docsy 包含以下本地安全及兼容性补丁：
+1. `pdfcraft_cos`: 宽松解析兼容，损坏 xref/trailer 及缺少 startxref 标记容错恢复。
+2. `pdfcraft_organize`: 修正 ISO 32000-1 规范下 UserUnit 属性非继承行为，防止页面尺寸与正文坐标错位。
+3. `pdfcraft_organize`: 页面提取与合并时保留 NeedAppearances 字段，防止旧版表单外观固化。
+
+许可证全文见上文 Apache License 2.0 及下述 MIT License 原文：
+
+```text
+MIT License
+
+Copyright (c) 2024-2026 Storytold
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

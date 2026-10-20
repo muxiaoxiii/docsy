@@ -1,0 +1,121 @@
+{
+  "date": "2026-10-19",
+  "timezone": "Asia/Shanghai",
+  "scope": "PDF source review and isolated native probes; no application implementation",
+  "docsy_head": "51931b2676b8c0debb1eb06b49ced81350506eb7",
+  "docsy_reviewed_source_sha256": {
+    "src-tauri/Cargo.toml": "ea71a5add0947e2ac8fe427713721df36b26343553c00c30ee6e4b65b3466e18",
+    "src-tauri/src/pdf/qpdf.rs": "200fc8b79f8624f1c3e844627fc6edead348fdf038147ef43ea12d6e69b9e439",
+    "src-tauri/src/pdf/chunked.rs": "1f7a35dd7d184ea7335614e5fd5b915a9a337213ec5175ec1e454b3d26341bb9",
+    "src-tauri/src/pdf/compress.rs": "d9d40d2ba1368073d40e64a5a979aa36e953b74bbd9638f73d5a5b6b6e8d5e00",
+    "src-tauri/src/pdf/overlay_pdf.rs": "274be8c9ede8c66a7c59c52c1f88d89459f991c4cc7cd6dd6a2dcdf988e52d19",
+    "src-tauri/src/pdf/artifacts.rs": "24be84ce83188a5debce4986a7129624fd427ab4d3735a6c70ad2d70ac936070",
+    "src-tauri/src/pdf/page_info.rs": "b8107e3b150c785098ee2c6de6a7eb07a54783490bbfd666ae871d52f33c11e7",
+    "src-tauri/src/pdf/anti_ocr.rs": "103b533e0f045888199fd8d72843f1d93286c1d1ee3bedaa0da3343987147ff7",
+    "src-tauri/src/pdf/bookmarks.rs": "b472677a4956ab38ebf8dacba5b28f5b2aa91703ca3f749ab24b537c138432a1",
+    "src-tauri/src/pdf/preview.rs": "e1c97e09f6f6c3a32d5545c3355552640486da8723f74ffcbaa5dce940f3aa8c",
+    "src-tauri/src/markdown/pdf_to_md.rs": "d7cef6f91864d9de2ef2a83bb446c182f71680ed855b5ed233b8ccae5f020fb2",
+    "src-tauri/src/util/fs.rs": "52f5b32169f3af952f700d3b8073e1fb3ca7a8ce2b95427c244e22c98c42752f",
+    "src-tauri/src/pdf/word_convert.rs": "fc47bdba17988f77ba1691fdcfd164bebc1f9e16104c17b28a98d6bd489ef8cb",
+    "src/shared/pdf-tools/components/PdfJsPreview.vue": "fa8d8a4b12279dd82aaa4cc07622e01f4b83f2f3b435dae3df514849a6d61001"
+  },
+  "upstream": {
+    "pdfcraft": {
+      "commit": "4db6ac4ae2448df6389d8bb0bc54db6ba175721c",
+      "remote": "https://github.com/storytold/pdfcraft.git"
+    },
+    "craft-libs": {
+      "commit": "ae2f796b673f29cf3161f36eb6a8933f0a3fe028",
+      "remote": "https://github.com/storytold/craft-libs.git"
+    },
+    "pdf_oxide": {
+      "commit": "ad49c4cb3638dc950a29350ef882161372fde473",
+      "remote": "https://github.com/yfedoseev/pdf_oxide.git"
+    }
+  },
+  "tools": {
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "qpdf": "qpdf version 12.4.1",
+    "poppler": "pdftoppm version 26.09.0"
+  },
+  "checks": [
+    {
+      "command": "cargo test --locked -p pdfcraft-cos -p pdfcraft-organize -p pdfcraft-edit -p pdfcraft-optimize --lib",
+      "exit_code": 0,
+      "summary": [
+        "     Running unittests src/lib.rs (target/debug/deps/pdfcraft_cos-1594c0b439596034)",
+        "test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s",
+        "     Running unittests src/lib.rs (target/debug/deps/pdfcraft_edit-f8bbec0304b383c3)",
+        "test result: ok. 185 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s",
+        "     Running unittests src/lib.rs (target/debug/deps/pdfcraft_optimize-f27d57df4b518005)",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "     Running unittests src/lib.rs (target/debug/deps/pdfcraft_organize-13266e5db0e5c4d3)",
+        "test result: ok. 134 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ],
+      "log_sha256": "31f7576d98f224a0ace0a3ca91d8dcf29ec2fad031d45c6173bd5f25499e669d"
+    },
+    {
+      "command": "cargo test --locked -p pdfcraft-optimize --test optimize",
+      "exit_code": 0,
+      "summary": [
+        "     Running tests/optimize.rs (target/debug/deps/optimize-0a2b10f01eb4e9b9)",
+        "test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.16s"
+      ],
+      "log_sha256": "f361288a46a7fd532c47618200a2c24a8b170fc89d7dca65a671bb600bc58bf8"
+    }
+  ],
+  "probe": {
+    "command": "cargo run --locked -p pdfcraft-organize --example docsy_probe -- <probe-data>",
+    "exit_code": 0,
+    "stdout": [
+      "source A pages=2",
+      "source B pages=1",
+      "merged pages=3 renamed_fields=[(\"common_name\", \"common_name-1\")]"
+    ],
+    "qpdf_baseline": "qpdf --empty --pages input-A.pdf input-B.pdf -- qpdf-merged.pdf",
+    "render_dpi": 72,
+    "rendered_pages": 11,
+    "pixel_comparisons": 8,
+    "pixel_identical": 8,
+    "visual_review": "11-page contact sheet inspected",
+    "profile": "structural merge, not Docsy print/annotation flatten profile"
+  },
+  "observed_limits": [
+    "Custom Info is not copied by the tested combine/extract paths",
+    "The tested extract_pages output drops source outline and attachments",
+    "No benchmarks, large-file, native app, Windows, signature or actual stamp-flatten verification",
+    "PDF Oxide and craft-pdf assessed from source only; not compiled or tested independently"
+  ],
+  "source_review_inventory": {
+    "pdfcraft": [
+      "Cargo.toml",
+      "crates/cos/README.md",
+      "crates/cos/src/lib.rs",
+      "crates/organize/src/lib.rs",
+      "crates/organize/src/import.rs",
+      "crates/organize/src/tests.rs",
+      "crates/content/README.md",
+      "crates/edit/src/lib.rs",
+      "crates/optimize/src/lib.rs",
+      "crates/optimize/README.md",
+      "crates/engine/Cargo.toml",
+      "crates/engine/src/optimizer.rs",
+      "crates/automation/src/tools.rs",
+      "docs/architecture.md",
+      "docs/gaps.md"
+    ],
+    "craft-libs": [
+      "Cargo.toml",
+      "crates/pdf/Cargo.toml",
+      "crates/pdf/README.md",
+      "crates/atomic/README.md",
+      "crates/atomic/src/lib.rs"
+    ],
+    "pdf_oxide": [
+      "Cargo.toml",
+      "src/lib.rs",
+      "src/document.rs (selected public entry points)",
+      "src/editor/document_editor.rs (selected merge/read/write entry points)"
+    ]
+  }
+}

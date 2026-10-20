@@ -264,7 +264,7 @@ onBeforeUnmount(() => {
 .section-heading h2 {
   margin: 0;
   font-size: 16px;
-  font-weight: 720;
+  font-weight: 700;
   color: var(--docsy-text-strong);
 }
 
@@ -351,7 +351,7 @@ onBeforeUnmount(() => {
 
 .card-copy strong {
   font-size: 15px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .card-arrow {

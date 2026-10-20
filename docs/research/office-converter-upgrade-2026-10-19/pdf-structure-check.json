@@ -1,0 +1,72 @@
+[
+  {
+    "engine": "minipdf",
+    "alias": "input-a",
+    "qpdf_check_exit": 0
+  },
+  {
+    "engine": "minipdf",
+    "alias": "input-b-doc2x",
+    "qpdf_check_exit": 0
+  },
+  {
+    "engine": "minipdf",
+    "alias": "input-c",
+    "qpdf_check_exit": 0
+  },
+  {
+    "engine": "minipdf",
+    "alias": "input-d-doc2x",
+    "qpdf_check_exit": 0
+  },
+  {
+    "engine": "office2pdf",
+    "alias": "input-a",
+    "qpdf_check_exit": 0
+  },
+  {
+    "engine": "office2pdf",
+    "alias": "input-b-doc2x",
+    "qpdf_check_exit": 0
+  },
+  {
+    "engine": "office2pdf",
+    "alias": "input-c",
+    "qpdf_check_exit": 0
+  },
+  {
+    "engine": "office2pdf",
+    "alias": "input-d-doc2x",
+    "qpdf_check_exit": 0
+  },
+  {
+    "engine": "word",
+    "alias": "input-a",
+    "qpdf_check_exit": 3
+  },
+  {
+    "engine": "word",
+    "alias": "input-b-doc2x",
+    "qpdf_check_exit": 3
+  },
+  {
+    "engine": "word",
+    "alias": "input-b",
+    "qpdf_check_exit": 3
+  },
+  {
+    "engine": "word",
+    "alias": "input-c",
+    "qpdf_check_exit": 3
+  },
+  {
+    "engine": "word",
+    "alias": "input-d-doc2x",
+    "qpdf_check_exit": 3
+  },
+  {
+    "engine": "word",
+    "alias": "input-d",
+    "qpdf_check_exit": 3
+  }
+]

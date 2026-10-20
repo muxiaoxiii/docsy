@@ -1,0 +1,532 @@
+[
+  {
+    "file": "inputs/bookmark_encrypted.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "inputs/bookmark_plain.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "inputs/highlight_no_ap.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": [
+      {
+        "subtype": "Highlight",
+        "flags": 4,
+        "hasAppearance": false
+      }
+    ]
+  },
+  {
+    "file": "inputs/stale_widget.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": [
+      {
+        "subtype": "Widget",
+        "flags": 4,
+        "hasAppearance": true
+      }
+    ]
+  },
+  {
+    "file": "inputs/stamp_norotate.pdf",
+    "width": 220,
+    "height": 200,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": [
+      {
+        "subtype": "Stamp",
+        "flags": 20,
+        "hasAppearance": true
+      }
+    ]
+  },
+  {
+    "file": "inputs/stamp_opacity.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": [
+      {
+        "subtype": "Stamp",
+        "flags": 4,
+        "hasAppearance": true
+      }
+    ]
+  },
+  {
+    "file": "inputs/unit_leaf.pdf",
+    "width": 320,
+    "height": 320,
+    "userUnit": 2,
+    "view": [
+      20,
+      30,
+      180,
+      190
+    ],
+    "annotations": []
+  },
+  {
+    "file": "inputs/unit_parent.pdf",
+    "width": 160,
+    "height": 160,
+    "userUnit": 1,
+    "view": [
+      20,
+      30,
+      180,
+      190
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/bookmark_encrypted-bookmarks-before.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/bookmark_encrypted-bookmarks.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/bookmark_encrypted-qpdf.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/bookmark_plain-bookmarks-before.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/bookmark_plain-bookmarks.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/bookmark_plain-qpdf.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/highlight_no_ap-backend-2.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/highlight_no_ap-backend.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/highlight_no_ap-native.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/highlight_no_ap-qpdf.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": [
+      {
+        "subtype": "Highlight",
+        "flags": 4,
+        "hasAppearance": false
+      }
+    ]
+  },
+  {
+    "file": "outputs/stale_widget-backend-2.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stale_widget-backend.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stale_widget-native.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stale_widget-qpdf.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": [
+      {
+        "subtype": "Widget",
+        "flags": 4,
+        "hasAppearance": true
+      }
+    ]
+  },
+  {
+    "file": "outputs/stamp_norotate-backend-2.pdf",
+    "width": 220,
+    "height": 200,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stamp_norotate-backend.pdf",
+    "width": 220,
+    "height": 200,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stamp_norotate-native.pdf",
+    "width": 220,
+    "height": 200,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stamp_norotate-qpdf.pdf",
+    "width": 220,
+    "height": 200,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stamp_opacity-backend-2.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stamp_opacity-backend.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stamp_opacity-native.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/stamp_opacity-qpdf.pdf",
+    "width": 200,
+    "height": 220,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      200,
+      220
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/unit_leaf-a4-before.pdf",
+    "width": 1190.56,
+    "height": 1683.78,
+    "userUnit": 2,
+    "view": [
+      0,
+      0,
+      595.28,
+      841.89
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/unit_leaf-a4.pdf",
+    "width": 1190.56,
+    "height": 1683.78,
+    "userUnit": 2,
+    "view": [
+      0,
+      0,
+      595.28,
+      841.89
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/unit_leaf-combined.pdf",
+    "width": 320,
+    "height": 320,
+    "userUnit": 2,
+    "view": [
+      20,
+      30,
+      180,
+      190
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/unit_leaf-qpdf.pdf",
+    "width": 320,
+    "height": 320,
+    "userUnit": 2,
+    "view": [
+      20,
+      30,
+      180,
+      190
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/unit_parent-a4-before.pdf",
+    "width": 595.28,
+    "height": 841.89,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      595.28,
+      841.89
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/unit_parent-a4.pdf",
+    "width": 595.28,
+    "height": 841.89,
+    "userUnit": 1,
+    "view": [
+      0,
+      0,
+      595.28,
+      841.89
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/unit_parent-combined.pdf",
+    "width": 320,
+    "height": 320,
+    "userUnit": 2,
+    "view": [
+      20,
+      30,
+      180,
+      190
+    ],
+    "annotations": []
+  },
+  {
+    "file": "outputs/unit_parent-qpdf.pdf",
+    "width": 160,
+    "height": 160,
+    "userUnit": 1,
+    "view": [
+      20,
+      30,
+      180,
+      190
+    ],
+    "annotations": []
+  }
+]

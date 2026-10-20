@@ -1,0 +1,28 @@
+[
+  {
+    "engine": "auto",
+    "events": [
+      "backend",
+      "pdfjs"
+    ],
+    "error": ""
+  },
+  {
+    "engine": "pdfjs",
+    "events": [
+      "pdfjs"
+    ],
+    "error": ""
+  },
+  {
+    "engine": "backend",
+    "events": [
+      "backend",
+      [
+        "error",
+        "预览渲染失败：Error: pdftoppm unavailable"
+      ]
+    ],
+    "error": "预览渲染失败：Error: pdftoppm unavailable"
+  }
+]

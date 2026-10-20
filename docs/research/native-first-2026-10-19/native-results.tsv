@@ -1,0 +1,31 @@
+flatten	as_checkbox	OK	drawn=1	before=(1, 1, 1)	after=(0, 0, 0)
+crypto	crypto_aes128	none	ERR	the document is protected by a password
+crypto	crypto_aes128	wrong	ERR	the password is incorrect
+crypto	crypto_aes128	user	OK	pages=1	unencrypted=true
+crypto	crypto_aes128	owner	OK	pages=1	unencrypted=true
+crypto	crypto_aes256	none	ERR	the document is protected by a password
+crypto	crypto_aes256	wrong	ERR	the password is incorrect
+crypto	crypto_aes256	user	OK	pages=1	unencrypted=true
+crypto	crypto_aes256	owner	OK	pages=1	unencrypted=true
+crypto	crypto_empty_aes256	none	OK	pages=1	unencrypted=true
+crypto	crypto_empty_aes256	wrong	ERR	the password is incorrect
+crypto	crypto_empty_aes256	user	ERR	the password is incorrect
+crypto	crypto_empty_aes256	owner	OK	pages=1	unencrypted=true
+crypto	crypto_rc4	none	ERR	the document is protected by a password
+crypto	crypto_rc4	wrong	ERR	the password is incorrect
+crypto	crypto_rc4	user	OK	pages=1	unencrypted=true
+crypto	crypto_rc4	owner	OK	pages=1	unencrypted=true
+flatten	hidden	OK	drawn=0	before=(1, 1, 1)	after=(1, 1, 1)
+flatten	invisible	OK	drawn=1	before=(1, 1, 1)	after=(0, 0, 0)
+flatten	missing_ap	OK	drawn=0	before=(1, 1, 1)	after=(1, 1, 1)
+flatten	no_view	OK	drawn=0	before=(1, 1, 1)	after=(1, 1, 1)
+flatten	normal_widget	OK	drawn=1	before=(1, 1, 1)	after=(0, 0, 0)
+repair	repair_bad_startxref	OK	pages=1	reconstructed=true	log=["cross-reference data unreadable (syntax error at byte 0: expected xref table or stream); rebuilding from object headers", "rebuilt cross-reference index from 8 object headers"]
+repair	repair_missing_xref	OK	pages=1	reconstructed=true	log=["cross-reference data unreadable (syntax error at byte 851: no startxref); rebuilding from object headers", "rebuilt cross-reference index from 8 object headers"]
+flatten	rotated_ap	OK	drawn=1	before=(1, 1, 1)	after=(0, 0, 0)
+flatten	stale_widget	OK	drawn=1	before=(1, 1, 1)	after=(0, 0, 0)
+flatten	watermark	OK	drawn=0	before=(1, 0, 0)	after=(1, 0, 0)
+flatten	zero_bbox	OK	drawn=0	before=(1, 1, 1)	after=(0, 0, 0)
+gc	unreachable_removed=true	reachable_kept=true
+resources	full_save_keeps_unused=true	extract_without_do_keeps_unused=true	extract_with_do_prunes_unused=true
+bookmarks	count=1	chinese_title=true	page=Some(0)

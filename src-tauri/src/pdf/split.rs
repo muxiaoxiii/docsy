@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::path::Path;
-
-use crate::external::ExternalTool;
+use std::path::{Path, PathBuf};
 
 use super::{safe_file_stem, unique_output_path};
 
@@ -105,10 +103,26 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
     }
     std::fs::create_dir_all(&args.output_dir).context("创建拆分输出目录失败")?;
 
-    let total_pages = super::qpdf::page_count(&args.input_path)?;
+    let mut _temp_guards: Vec<crate::util::fs::TempPathGuard> = Vec::new();
+    let effective_input_path = if super::word_convert::is_word_file(&args.input_path) {
+        let temp_pdf = crate::util::fs::temp_named_path("docsy_split_word", "pdf");
+        let state = std::sync::Arc::new(crate::ConversionState::new());
+        let converted = super::word_convert::convert_word_to_pdf_file(
+            &args.input_path,
+            &temp_pdf,
+            &state,
+        )
+        .context("拆分前转换 Word 文档为 PDF 失败")?;
+        _temp_guards.push(crate::util::fs::TempPathGuard::new(temp_pdf));
+        converted
+    } else {
+        args.input_path.clone()
+    };
+
+    let total_pages = super::qpdf::page_count(&effective_input_path)?;
     let mut warnings = validate_split_layout(&args.items, total_pages);
     let blank_pages = if args.remove_blank_pages {
-        detect_blank_pages(&args.input_path)?
+        detect_blank_pages(&effective_input_path)?
     } else {
         BTreeSet::new()
     };
@@ -122,7 +136,7 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
         .any(|t| t.source.as_deref() == Some("artifact"));
     let inspection = if has_artifact_targets {
         Some(super::artifacts::inspect_meaningful_header_footer_artifacts(
-            Path::new(&args.input_path),
+            Path::new(&effective_input_path),
             0,
         )?)
     } else {
@@ -194,10 +208,9 @@ pub fn split_merged(args: &SplitMergedArgs) -> Result<SplitMergedResult> {
         }
     }
 
-    let mut current_source = args.input_path.clone();
+    let mut current_source = effective_input_path;
     let mut total_removed_headers = 0;
     let mut total_removed_footers = 0;
-    let mut _temp_guards: Vec<crate::util::fs::TempPathGuard> = Vec::new();
 
     if artifact_plan.remove_header || artifact_plan.remove_footer {
         if let Some((path, stats)) = super::artifacts::edit_header_footer_artifacts_to_temp(
@@ -318,8 +331,6 @@ fn extract_range(
     item: &SplitRange,
     blank_pages: &BTreeSet<u32>,
 ) -> Result<(String, usize)> {
-    let qpdf = crate::external::QpdfTool;
-    let bin = qpdf.binary_path()?;
     let output_path = unique_output_path(Path::new(output_dir), &safe_file_stem(&item.name), "pdf");
 
     // 页段内排除空白页；若空白页占了整段（不会发生），回退保留全部页。
@@ -327,36 +338,25 @@ fn extract_range(
         .filter(|page| !blank_pages.contains(page))
         .collect();
     let total_in_range = (item.page_end - item.page_start + 1) as usize;
-    let (selection, removed_blank_pages) = if kept.is_empty() || kept.len() == total_in_range {
-        (format!("{}-{}", item.page_start, item.page_end), 0)
+    let (pages, removed_blank_pages) = if kept.is_empty() || kept.len() == total_in_range {
+        ((item.page_start..=item.page_end).collect::<Vec<u32>>(), 0)
     } else {
         let removed = total_in_range - kept.len();
-        (
-            kept.iter()
-                .map(|page| page.to_string())
-                .collect::<Vec<_>>()
-                .join(","),
-            removed,
-        )
+        (kept, removed)
     };
 
-    // 与压缩输出一致：按页重建时顺手做结构优化，丢弃不可达对象
-    let mut cmd = crate::external::hidden_command(&bin);
-    super::qpdf::add_optimization_args(&mut cmd);
-    cmd.arg("--empty")
-        .arg("--pages")
-        .arg(input_path)
-        .arg(selection)
-        .arg("--")
-        .arg(&output_path);
-    let output = cmd.output().context("执行 qpdf 页段拆分失败")?;
+    let req = super::backend::ExtractRequest {
+        input_path: PathBuf::from(input_path),
+        pages,
+        output_dir: Some(PathBuf::from(output_dir)),
+        output_path: Some(output_path),
+        preferred_backend: None,
+    };
+    let res = super::backend::dispatch_extract(&req)
+        .map_err(|err| anyhow::anyhow!("页段拆分失败: {err}"))?;
 
-    if !super::qpdf::status_is_success(&output.status) {
-        let detail = crate::external::command_failure_detail(&output);
-        anyhow::bail!("qpdf 页段拆分失败: {detail}");
-    }
     Ok((
-        output_path.to_string_lossy().to_string(),
+        res.output_path.to_string_lossy().to_string(),
         removed_blank_pages,
     ))
 }
@@ -533,14 +533,9 @@ mod tests {
         assert_eq!(item.page_end - item.page_start + 1 - kept.len() as u32, 2);
     }
 
-    /// 端到端：真实 qpdf 拆分时移除空白页。依赖 qpdf 二进制，未安装时跳过。
+    /// 端到端：拆分时移除空白页（优先原生 pdfcraft 后端，无需依赖外置 qpdf）。
     #[test]
     fn split_merged_removes_blank_pages_end_to_end() {
-        let qpdf = crate::external::QpdfTool;
-        if qpdf.binary_path().is_err() {
-            return;
-        }
-
         use lopdf::{content::Operation, dictionary, Object, Stream};
         let mut doc = lopdf::Document::with_version("1.7");
         let pages_id = doc.add_object(dictionary! {});

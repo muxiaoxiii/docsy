@@ -1,0 +1,9 @@
+[package]
+name = "pdfcraft-content"
+description = "Content streams (ISO 32000-2 §7.8, §8–9): operators with source spans, inline images, serializer, matrices"
+version = "0.9.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+pdfcraft-cos = { path = "../cos", version = "0.9.0" }

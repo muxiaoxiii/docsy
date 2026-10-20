@@ -29,6 +29,16 @@ docs/*
 !docs/pdf-markdown-converter-design.md
 !docs/PDF页眉页脚编号规则与预设方案.md
 !docs/VIDEO_FRAME_SELECTION_REFACTOR.md
+!docs/pdf-engine-research-2026-10-19.md
+!docs/pdf-engine-implementation-plan.md
+!docs/pdf-engine-implementation-report-2026-10-19.md
+!docs/pdf-native-first-code-review-2026-10-19.md
+!docs/office-converters-and-upgrade-review-2026-10-19.md
+!docs/research/
+docs/research/*
+!docs/research/pdf-engine-2026-10-19/
+!docs/research/native-first-2026-10-19/
+!docs/research/office-converter-upgrade-2026-10-19/
 Archived/
 
 # 下载站安装包（由同步脚本从 GitHub Releases 拉取，不纳入仓库）
@@ -61,6 +71,8 @@ site/scripts/verify-structure.sh
 /image-paddler-prototype/
 /output/
 /release-candidate/
+/review-output/
+src-tauri/review-output/
 !docs/STOP_RELEASE_1.0.8.md
 
 # Local historical review

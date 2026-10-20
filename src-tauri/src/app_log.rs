@@ -32,11 +32,23 @@ pub struct FrontendLogEntry {
     pub context: Option<Value>,
 }
 
+static LOG_WRITE_LOCK: LazyLock<std::sync::Mutex<()>> =
+    LazyLock::new(|| std::sync::Mutex::new(()));
+
 pub fn log_dir() -> Result<PathBuf, String> {
-    let mut dir = dirs::data_dir().ok_or("无法解析应用数据目录")?;
-    dir.push("Docsy");
-    dir.push("logs");
-    Ok(dir)
+    #[cfg(test)]
+    {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("docsy-test-logs-{}", std::process::id()));
+        Ok(dir)
+    }
+    #[cfg(not(test))]
+    {
+        let mut dir = dirs::data_dir().ok_or("无法解析应用数据目录")?;
+        dir.push("Docsy");
+        dir.push("logs");
+        Ok(dir)
+    }
 }
 
 pub fn log_file_path() -> Result<PathBuf, String> {
@@ -313,11 +325,6 @@ fn write_result(
     context: Option<Value>,
     operation_id: Option<&str>,
 ) -> Result<(), String> {
-    let path = log_file_path()?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建日志目录失败：{e}"))?;
-    }
-
     let mut line = json!({
         "ts": Local::now().to_rfc3339(),
         "level": level,
@@ -328,18 +335,65 @@ fn write_result(
     if let Some(op_id) = operation_id {
         line["op"] = Value::String(op_id.to_string());
     }
+    let mut payload = serde_json::to_vec(&line).map_err(|e| format!("序列化日志失败：{e}"))?;
+    payload.push(b'\n');
 
+    let _guard = LOG_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let path = log_file_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建日志目录失败：{e}"))?;
+    }
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
         .map_err(|e| format!("打开日志文件失败：{e}"))?;
-    writeln!(file, "{line}").map_err(|e| format!("写入日志失败：{e}"))
+    file.write_all(&payload)
+        .map_err(|e| format!("写入日志失败：{e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_log_writes_never_interleave_json_lines() {
+        let mut handles = Vec::new();
+        for thread_idx in 0..8 {
+            handles.push(std::thread::spawn(move || {
+                for step in 0..25 {
+                    debug(
+                        "batch",
+                        "使用 filenameTemplate 生成文件名",
+                        json!({
+                            "index": thread_idx,
+                            "token_count": step,
+                        }),
+                    );
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("log writer thread panicked");
+        }
+
+        let path = log_file_path().expect("resolve test log path");
+        let content = fs::read_to_string(&path).expect("read test log file");
+        let mut parsed_count = 0;
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let val: Value =
+                serde_json::from_str(line).expect("every log line must be valid non-interleaved JSON");
+            assert!(val.get("ts").is_some());
+            assert!(val.get("level").is_some());
+            parsed_count += 1;
+        }
+        assert!(parsed_count >= 200);
+    }
 
     #[test]
     fn redacts_windows_and_macos_document_paths_without_losing_error_text() {

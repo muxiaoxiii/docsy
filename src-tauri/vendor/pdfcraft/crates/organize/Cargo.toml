@@ -1,0 +1,11 @@
+[package]
+name = "pdfcraft-organize"
+description = "Page and document-structure edits: rotate, delete, move, insert pages; document info"
+version = "0.9.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+pdfcraft-content = { path = "../content", version = "0.9.0" }
+pdfcraft-cos = { path = "../cos", version = "0.9.0" }
+thiserror = "2"

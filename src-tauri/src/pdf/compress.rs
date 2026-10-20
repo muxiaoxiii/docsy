@@ -222,9 +222,11 @@ fn placement_dpi(pixel_w: u32, pixel_h: u32, ctm: &Matrix) -> Option<f64> {
     Some(dpi_x.max(dpi_y))
 }
 
-/// 解析每页内容流，跟踪 q/Q/cm 维护 CTM，统计每张图片被放置时的最大有效 DPI。
+/// 解析每页内容流，跟踪 q/Q/cm 维护 CTM，统计每张图片被放置时的有效 DPI。
+/// 对于具有多处不同显示尺寸的共享图片，取最小 DPI（即视觉尺寸最大、像素需求最高的一处），
+/// 确保降采样时大尺寸展示不会被过度劣化。
 /// 解析失败的页/表单直接跳过（保守起见不降采样）。
-fn collect_effective_dpi(
+pub fn collect_effective_dpi(
     doc: &Document,
     image_ids: &[ObjectId],
     progress: &mut dyn FnMut(CompressProgress),
@@ -235,6 +237,7 @@ fn collect_effective_dpi(
     }
     let pages = doc.get_pages();
     let page_total = pages.len();
+    let mut ancestor_forms = std::collections::HashSet::new();
     for (page_index, (_, page_id)) in pages.into_iter().enumerate() {
         crate::operations::check_current_cancelled()?;
         progress(CompressProgress::item(
@@ -259,12 +262,14 @@ fn collect_effective_dpi(
             IDENTITY,
             &mut dpi_map,
             0,
+            &mut ancestor_forms,
         );
     }
     Ok(dpi_map)
 }
 
-/// 扫描一段内容流（页面或 Form XObject），depth 控制 Form 递归层数（仅一层）。
+/// 扫描一段内容流（页面或 Form XObject），depth 控制 Form 递归层数（最多 8 层），
+/// ancestor_forms 跟踪调用链路防止自引用或相互递归导致死循环。
 fn scan_content_stream(
     doc: &Document,
     operations: &[lopdf::content::Operation],
@@ -272,6 +277,7 @@ fn scan_content_stream(
     base_ctm: Matrix,
     dpi_map: &mut HashMap<ObjectId, f64>,
     depth: u32,
+    ancestor_forms: &mut std::collections::HashSet<ObjectId>,
 ) {
     let mut ctm = base_ctm;
     let mut stack: Vec<Matrix> = Vec::new();
@@ -303,15 +309,29 @@ fn scan_content_stream(
                             if let Some(dpi) = placement_dpi(w, h, &ctm) {
                                 if let Ok(obj_id) = xobject_id(doc, resources, name) {
                                     let entry = dpi_map.entry(obj_id).or_insert(dpi);
-                                    if dpi > *entry {
+                                    // 取多用途中的最小 DPI（即视觉最大用途的 DPI，对应最大像素需求）
+                                    if dpi < *entry {
                                         *entry = dpi;
                                     }
                                 }
                             }
                         }
                     }
-                    Ok(Object::Name(subtype)) if subtype == b"Form" && depth == 0 => {
-                        recurse_form_xobject(doc, stream, ctm, dpi_map, depth);
+                    Ok(Object::Name(subtype)) if subtype == b"Form" && depth < 8 => {
+                        if let Ok(form_id) = xobject_id(doc, resources, name) {
+                            if !ancestor_forms.contains(&form_id) {
+                                ancestor_forms.insert(form_id);
+                                recurse_form_xobject(
+                                    doc,
+                                    stream,
+                                    ctm,
+                                    dpi_map,
+                                    depth,
+                                    ancestor_forms,
+                                );
+                                ancestor_forms.remove(&form_id);
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -321,13 +341,14 @@ fn scan_content_stream(
     }
 }
 
-/// 递归进入 Form XObject 一层：CTM 左乘其 /Matrix，用其自身 /Resources 解析引用。
+/// 递归进入 Form XObject：CTM 左乘其 /Matrix，用其自身 /Resources 解析引用，深度上限为 8 层。
 fn recurse_form_xobject(
     doc: &Document,
     stream: &lopdf::Stream,
     ctm: Matrix,
     dpi_map: &mut HashMap<ObjectId, f64>,
     depth: u32,
+    ancestor_forms: &mut std::collections::HashSet<ObjectId>,
 ) {
     let form_matrix = stream
         .dict
@@ -355,6 +376,7 @@ fn recurse_form_xobject(
         form_ctm,
         dpi_map,
         depth + 1,
+        ancestor_forms,
     );
 }
 
@@ -1076,4 +1098,20 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+}
+
+pub fn review_dpi(doc: &Document) -> Result<HashMap<ObjectId, f64>> {
+    collect_effective_dpi(doc, &collect_image_xobjects(doc), &mut |_| {})
+}
+
+pub fn review_compress(input: &std::path::Path, output: &std::path::Path, dpi: u32) -> Result<()> {
+    compress_pdf_whole(
+        input,
+        output,
+        &CompressOptions {
+            jpeg_quality: 75,
+            target_dpi: dpi,
+        },
+        &mut |_| {},
+    )
 }

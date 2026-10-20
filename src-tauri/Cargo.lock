@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "docsy"
-version = "1.0.10"
+version = "1.1.1"
 dependencies = [
  "allsorts",
  "anyhow",
@@ -1042,6 +1042,8 @@ dependencies = [
  "lopdf",
  "office_oxide",
  "open",
+ "pdfcraft-cos",
+ "pdfcraft-organize",
  "printpdf",
  "pulldown-cmark",
  "quick-xml 0.37.5",
@@ -3268,6 +3270,50 @@ dependencies = [
  "hmac",
  "password-hash",
  "sha2",
+]
+
+[[package]]
+name = "pdfcraft-content"
+version = "0.9.0"
+dependencies = [
+ "pdfcraft-cos",
+]
+
+[[package]]
+name = "pdfcraft-cos"
+version = "0.9.0"
+dependencies = [
+ "pdfcraft-crypt",
+ "pdfcraft-filters",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "pdfcraft-crypt"
+version = "0.9.0"
+dependencies = [
+ "aes",
+ "md-5",
+ "sha2",
+ "stringprep",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "pdfcraft-filters"
+version = "0.9.0"
+dependencies = [
+ "flate2",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "pdfcraft-organize"
+version = "0.9.0"
+dependencies = [
+ "pdfcraft-content",
+ "pdfcraft-cos",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

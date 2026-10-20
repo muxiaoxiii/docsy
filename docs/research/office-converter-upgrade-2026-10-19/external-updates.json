@@ -1,0 +1,30 @@
+{
+  "qpdf_latest": {
+    "source": "https://api.github.com/repos/qpdf/qpdf/releases/latest",
+    "tag": "v12.4.2",
+    "version": null,
+    "published_at": "2026-09-27T00:01:39Z",
+    "error": null
+  },
+  "poppler_windows_latest": {
+    "source": "https://api.github.com/repos/oschwartz10612/poppler-windows/releases/latest",
+    "tag": "v26.09.0-0",
+    "version": null,
+    "published_at": "2026-09-15T15:51:10Z",
+    "error": null
+  },
+  "doc2x_npm": {
+    "source": "https://registry.npmjs.org/@jitword%2Fdoc2docx-darwin-arm64/latest",
+    "tag": null,
+    "version": "0.1.0",
+    "published_at": null,
+    "error": null
+  },
+  "managed_manifest": {
+    "source": "https://github.com/muxiaoxiii/docsy/releases/download/toolchain-v1/tools-manifest.json",
+    "tag": null,
+    "version": null,
+    "published_at": null,
+    "error": "curl: (56) The requested URL returned error: 404\n"
+  }
+}

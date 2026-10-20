@@ -515,9 +515,86 @@ pub(crate) fn load_pages_metadata(input: &Path) -> Result<Vec<(u32, Vec<String>)
         .collect())
 }
 
+fn detect_blank_pages_native(input: &Path) -> Result<BTreeSet<u32>> {
+    let bytes = std::fs::read(input)?;
+    let doc = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes))
+        .map_err(|e| anyhow::anyhow!("pdfcraft 解析失败: {e}"))?;
+    if doc.security().is_some() {
+        anyhow::bail!("受保护的 PDF 交由 qpdf 分析");
+    }
+    let pages = pdfcraft_organize::walk(&doc)
+        .map_err(|e| anyhow::anyhow!("收集页面失败: {e}"))?;
+    let mut blank = BTreeSet::new();
+    for (idx, (page_ref, page_attrs)) in pages.into_iter().enumerate() {
+        let number = (idx + 1) as u32;
+        let existing = page_attrs.get(b"Contents").cloned().or_else(|| {
+            doc.get(page_ref)
+                .as_dict()
+                .and_then(|d| d.get(b"Contents").cloned())
+        });
+        let refs: Vec<pdfcraft_cos::ObjRef> = match existing {
+            None => {
+                blank.insert(number);
+                continue;
+            }
+            Some(pdfcraft_cos::Object::Ref(r)) => match &*doc.get(r) {
+                pdfcraft_cos::Object::Stream(_) => vec![r],
+                pdfcraft_cos::Object::Array(arr) => {
+                    arr.iter().filter_map(pdfcraft_cos::Object::as_ref).collect()
+                }
+                _ => continue,
+            },
+            Some(pdfcraft_cos::Object::Array(arr)) => {
+                arr.iter().filter_map(pdfcraft_cos::Object::as_ref).collect()
+            }
+            _ => continue,
+        };
+        if refs.is_empty() {
+            blank.insert(number);
+            continue;
+        }
+        let mut has_visible = false;
+        let mut decode_failed = false;
+        for r in refs {
+            let stream_obj = doc.get(r);
+            let pdfcraft_cos::Object::Stream(stream) = &*stream_obj else {
+                decode_failed = true;
+                break;
+            };
+            let Ok(decoded) = stream.decoded() else {
+                decode_failed = true;
+                break;
+            };
+            match lopdf::content::Content::decode(&decoded) {
+                Ok(content) => {
+                    if content
+                        .operations
+                        .iter()
+                        .any(super::split::operation_is_visible)
+                    {
+                        has_visible = true;
+                        break;
+                    }
+                }
+                Err(_) => {
+                    decode_failed = true;
+                    break;
+                }
+            }
+        }
+        if !has_visible && !decode_failed {
+            blank.insert(number);
+        }
+    }
+    Ok(blank)
+}
+
 /// 流式检测空白页：只加载各页内容流，不载入图像/XObject 等大对象。
 /// 判定与整档 lopdf 路径一致：无文本/图像/矢量可见算子即空白；解析失败保守视为有内容。
 pub(crate) fn detect_blank_pages_streaming(input: &Path) -> Result<BTreeSet<u32>> {
+    if let Ok(blank) = detect_blank_pages_native(input) {
+        return Ok(blank);
+    }
     let pages = load_pages_metadata(input)?;
     let mut content_refs: Vec<String> = Vec::new();
     let mut page_contents: Vec<(u32, Vec<String>)> = Vec::with_capacity(pages.len());

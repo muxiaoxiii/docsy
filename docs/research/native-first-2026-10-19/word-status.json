@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-19",
+  "tests": {
+    "word_convert_output_safety": 5,
+    "doc2docx": 5,
+    "docx_template_engine": 3,
+    "docx_to_md": 7
+  },
+  "total_passed": 20,
+  "failed": 0,
+  "doc2x_sidecar_exists": true,
+  "doc2x_fixture_exists": true,
+  "actual_doc2x_conversion_test_executed": true,
+  "word_convert_sha256": "1c1be47983ea392c0fa5db0eb7782b8b4063b517aa64e6253a7229c04cf6a378",
+  "word_convert_matches_1_0_10_source": true,
+  "prior_word_pdf_probe": {
+    "exit_code": 0,
+    "output_exists": true,
+    "error": "",
+    "qpdf_check_exit": 3
+  },
+  "office_conversion_rerun_this_turn": false,
+  "limits": [
+    "Tests do not establish visual fidelity for all Word documents",
+    "No Windows WPS or Linux LibreOffice acceptance this turn",
+    "No Wordcraft layout engine integrated"
+  ]
+}

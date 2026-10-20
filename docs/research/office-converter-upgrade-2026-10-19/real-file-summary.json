@@ -1,0 +1,140 @@
+{
+  "scope": "Four local private files, anonymized aliases. A/B originals; C/D new-header copies. B/D native converters consume doc2x-produced DOCX. No client text or file names included.",
+  "office2pdf_version": "0.9.1",
+  "office2pdf_release_commit": "7893fe96341a11504abba6428cf2614b3821c733",
+  "office2pdf_source_inspected": "70ebaa0a6d8c06e9fbf68408fe7db4cc1f0c78b2",
+  "minipdf_source": "b34f3a41c86c1127d6504df0629fd62c1449e144",
+  "minipdf_profile": "release",
+  "original_hashes_unchanged": true,
+  "measurements": {
+    "input-a.docx": {
+      "fields": {
+        "FORMTEXT": 1,
+        "FORMCHECKBOX": 17,
+        "PAGE": 2
+      },
+      "sections": [
+        {
+          "title_page": true,
+          "headers": [
+            "first"
+          ]
+        }
+      ],
+      "outputs": {
+        "word": {
+          "pages": 5
+        },
+        "office2pdf": {
+          "pages": 6
+        },
+        "minipdf": {
+          "pages": 8
+        }
+      }
+    },
+    "input-b-doc2x.docx": {
+      "fields": {
+        "PAGE": 2,
+        "FORMTEXT": 7,
+        "FORMCHECKBOX": 18
+      },
+      "sections": [
+        {
+          "title_page": true,
+          "headers": [
+            "first"
+          ]
+        }
+      ],
+      "outputs": {
+        "word": {
+          "pages": 10,
+          "distinctive_formtext_default_hits": 5
+        },
+        "office2pdf": {
+          "pages": 10,
+          "distinctive_formtext_default_hits": 1
+        },
+        "minipdf": {
+          "pages": 14,
+          "distinctive_formtext_default_hits": 1
+        }
+      },
+      "distinctive_formtext_defaults": 5
+    },
+    "input-c.docx": {
+      "fields": {
+        "FORMTEXT": 1,
+        "FORMCHECKBOX": 17,
+        "PAGE": 2
+      },
+      "sections": [
+        {
+          "title_page": true,
+          "headers": [
+            "default",
+            "first"
+          ]
+        }
+      ],
+      "outputs": {
+        "word": {
+          "pages": 5
+        },
+        "office2pdf": {
+          "pages": 6
+        },
+        "minipdf": {
+          "pages": 8
+        }
+      }
+    },
+    "input-d-doc2x.docx": {
+      "fields": {
+        "PAGE": 2,
+        "FORMTEXT": 7,
+        "FORMCHECKBOX": 18
+      },
+      "sections": [
+        {
+          "title_page": true,
+          "headers": [
+            "even",
+            "default",
+            "first"
+          ]
+        }
+      ],
+      "outputs": {
+        "word": {
+          "pages": 10,
+          "distinctive_formtext_default_hits": 5
+        },
+        "office2pdf": {
+          "pages": 10,
+          "distinctive_formtext_default_hits": 1
+        },
+        "minipdf": {
+          "pages": 14,
+          "distinctive_formtext_default_hits": 1
+        }
+      },
+      "distinctive_formtext_defaults": 5
+    },
+    "input-b.doc": {
+      "outputs": {
+        "word": {
+          "pages": 10
+        }
+      }
+    },
+    "input-d.doc": {
+      "outputs": {
+        "word": {
+          "pages": 10
+        }
+      }
+    }
+  }
+}

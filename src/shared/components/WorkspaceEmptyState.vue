@@ -106,7 +106,7 @@ const resolvedTitle = computed(() => {
 .workspace-empty-state strong {
   color: var(--docsy-text-strong);
   font-size: 14px;
-  font-weight: 680;
+  font-weight: 700;
 }
 
 .workspace-empty-state p {

@@ -1,6 +1,6 @@
 [package]
 name = "docsy"
-version = "1.0.10"
+version = "1.1.1"
 description = "Docsy - 轻量文档处理工具箱"
 authors = ["木小樨 <muxiaoxi>"]
 edition = "2021"
@@ -50,6 +50,8 @@ quick-xml = { version = "0.37", features = ["serialize", "encoding"] }
 calamine = { version = "0.26", features = ["dates"] }
 rust_xlsxwriter = "0.80"
 htmd = "0.5"
+pdfcraft-cos = { path = "vendor/pdfcraft/crates/cos" }
+pdfcraft-organize = { path = "vendor/pdfcraft/crates/organize" }
 
 [features]
 default = ["custom-protocol"]
