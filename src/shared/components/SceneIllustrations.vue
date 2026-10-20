@@ -84,7 +84,7 @@
         <!-- Heavy weight badge -->
         <g transform="translate(25, 76)">
           <rect width="50" height="20" rx="4" fill="#334155" />
-          <text x="25" y="14" font-size="9" font-weight="bold" fill="#ffffff" text-anchor="middle">24.8 MB</text>
+          <text x="25" y="14" font-size="9" font-weight="bold" fill="#ffffff" text-anchor="middle">原文件</text>
         </g>
       </svg>
       <!-- Target: Feather-light streamlined document -->
@@ -97,7 +97,7 @@
         <g transform="translate(20, 68)">
           <rect width="60" height="24" rx="12" fill="#10b981" />
           <path d="M 12,12 L 18,5 L 17,11 L 22,11 L 14,19 L 15,13 Z" fill="#fef08a" />
-          <text x="36" y="16" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">-72%</text>
+          <text x="36" y="16" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">压缩结果</text>
         </g>
       </svg>
     </template>
@@ -118,7 +118,7 @@
       <svg v-else viewBox="0 0 100 120" class="illus-svg" fill="none">
         <rect x="14" y="12" width="72" height="96" rx="6" fill="#f8fafc" stroke="#0284c7" stroke-width="2" />
         <!-- Watermark diagonal text -->
-        <text x="50" y="55" font-size="10" font-weight="bold" fill="#0284c7" opacity="0.22" text-anchor="middle" transform="rotate(-30 50 55)">DOCSY SECURE</text>
+        <text x="50" y="55" font-size="10" font-weight="bold" fill="#0284c7" opacity="0.22" text-anchor="middle" transform="rotate(-30 50 55)">DOCSY</text>
         <line x1="24" y1="32" x2="72" y2="32" stroke="#bae6fd" stroke-width="2.5" stroke-linecap="round" />
         <line x1="24" y1="44" x2="64" y2="44" stroke="#bae6fd" stroke-width="2.5" stroke-linecap="round" />
         <line x1="24" y1="56" x2="68" y2="56" stroke="#bae6fd" stroke-width="2.5" stroke-linecap="round" />
@@ -155,7 +155,7 @@
         <!-- Red round court evidence seal -->
         <circle cx="72" cy="74" r="13" stroke="#e11d48" stroke-width="2" fill="#fff1f2" />
         <circle cx="72" cy="74" r="10" stroke="#e11d48" stroke-width="1" stroke-dasharray="2 2" fill="none" />
-        <text x="72" y="78" font-size="7" font-weight="bold" fill="#e11d48" text-anchor="middle">证据印</text>
+        <text x="72" y="78" font-size="7" font-weight="bold" fill="#e11d48" text-anchor="middle">页段</text>
         <!-- Page Number Pill -->
         <rect x="14" y="86" width="30" height="10" rx="3" fill="#f1f5f9" />
         <text x="29" y="94" font-size="6" fill="#475569" text-anchor="middle">P.001</text>
@@ -189,7 +189,7 @@
         <text x="24" y="80" font-size="8" fill="#475569">2026-10-20</text>
         <!-- Red Authorized Stamp -->
         <circle cx="68" cy="84" r="12" stroke="#dc2626" stroke-width="1.8" fill="#fef2f2" opacity="0.9" />
-        <text x="68" y="88" font-size="7" font-weight="bold" fill="#dc2626" text-anchor="middle">已盖章</text>
+        <text x="68" y="88" font-size="7" font-weight="bold" fill="#dc2626" text-anchor="middle">已填充</text>
       </svg>
     </template>
 
@@ -275,11 +275,15 @@
         <line x1="24" y1="70" x2="70" y2="70" stroke="#cbd5e1" stroke-width="2.5" stroke-linecap="round" />
       </svg>
     </template>
+    <SceneMotionAccent v-if="active" :scene="scene" />
   </div>
 </template>
 
 <script setup>
+import SceneMotionAccent from './SceneMotionAccent.vue'
+
 defineProps({
+  active: { type: Boolean, default: false },
   scene: { type: String, default: 'generic' },
   type: { type: String, default: 'source', validator: (v) => ['source', 'target'].includes(v) },
 })
@@ -287,6 +291,7 @@ defineProps({
 
 <style scoped>
 .scene-illustration {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
@@ -308,6 +313,8 @@ defineProps({
 }
 
 .sparkle-dot {
+  transform-box: fill-box;
+  transform-origin: center;
   animation: pulse-sparkle 1.8s ease-in-out infinite alternate;
 }
 

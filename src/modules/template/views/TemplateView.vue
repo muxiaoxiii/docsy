@@ -1,6 +1,6 @@
 <template>
   <div class="template-view">
-    <el-tabs v-model="activeTab" tab-position="left" class="template-tabs">
+    <el-tabs v-model="activeTab" :tab-position="tabPosition" class="template-tabs">
       <el-tab-pane label="制作模板" name="build">
         <ToolWorkspaceShell title="制作模板" description="导入标黄 Word，确认字段后保存到模板库。">
         <TemplateBuildTab
@@ -229,12 +229,15 @@
 </template>
 
 <script setup>
+import { useResponsiveTabs } from '../../../shared/composables/useResponsiveTabs.js'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import TemplateBuildTab from '../components/TemplateBuildTab.vue'
 import TemplateRenderTab from '../components/TemplateRenderTab.vue'
 import TemplateHistoryTab from '../components/TemplateHistoryTab.vue'
 import TemplateSettingsTab from '../components/TemplateSettingsTab.vue'
 import { useTemplateState } from '../composables/useTemplateState.js'
+
+const tabPosition = useResponsiveTabs()
 
 const {
   // Core state

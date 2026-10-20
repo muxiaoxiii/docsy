@@ -186,3 +186,11 @@ defineProps({
   }
 }
 </style>
+
+<style scoped>
+.workspace-toolbar :deep(.el-button + .el-button),
+.workspace-header-actions :deep(.el-button + .el-button),
+.workspace-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.workspace-toolbar :deep(.el-button-group .el-button + .el-button),
+.workspace-actions :deep(.el-button-group .el-button + .el-button) { margin-left: -1px; }
+</style>

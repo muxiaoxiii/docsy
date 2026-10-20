@@ -8,7 +8,7 @@
       </div>
       <div class="hero-art">
         <button class="doclet-stage" type="button" aria-label="和 Doclet 打个招呼" @click="greetDoclet">
-          <DocletSprite :size="208" :motion="petMotion" />
+          <DocletSprite :size="208" :motion="petMotion" :gaze-tracking="!greetingVisible" />
           <span class="doclet-greeting" :class="{ 'is-visible': greetingVisible }" aria-live="polite">{{ greetingVisible ? petGreeting : '' }}</span>
         </button>
       </div>
@@ -49,6 +49,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import DocletSprite from '../../shared/components/DocletSprite.vue'
+import { docletMotionDuration } from '../../shared/docletVideoAssets.js'
+import { randomDocletMotion } from '../../shared/docletInteractions.js'
 import { getHomeCards } from '../../core/moduleRegistry.js'
 import { tauriCallSafe } from '../../core/tauriBridge.js'
 import evidenceIconUrl from '../../assets/icons/evidence.svg?url'
@@ -63,11 +65,17 @@ const petMotion = ref('greet')
 const greetingVisible = ref(false)
 const petGreeting = ref('')
 let greetingTimer
-let greetingIndex = 0
+let previousGreeting = 'greet'
 const greetings = [
   { motion: 'greet', text: '我在呢，慢慢来。' },
   { motion: 'celebrate', text: '收到，给你打气！' },
-  { motion: 'look', text: '下一份文档，我陪你。' },
+  { motion: 'review', text: '我再仔细看看。' },
+  { motion: 'working', text: '认真记下来。' },
+  { motion: 'error', text: '咦？再检查一下。' },
+  { motion: 'waiting', text: '我想一想。' },
+  { motion: 'wink', text: '交给我吧。' },
+  { motion: 'stretch', text: '抬抬头，放松一下。' },
+  { motion: 'yawn', text: '忙久了，也记得休息。' },
 ]
 function settleDoclet() {
   petMotion.value = 'idle'
@@ -75,11 +83,12 @@ function settleDoclet() {
 }
 function greetDoclet() {
   clearTimeout(greetingTimer)
-  const greeting = greetings[greetingIndex++ % greetings.length]
+  previousGreeting = randomDocletMotion(previousGreeting)
+  const greeting = greetings.find(item => item.motion === previousGreeting)
   petMotion.value = greeting.motion
   petGreeting.value = greeting.text
   greetingVisible.value = true
-  greetingTimer = window.setTimeout(settleDoclet, 3600)
+  greetingTimer = window.setTimeout(settleDoclet, docletMotionDuration(greeting.motion) + 180)
 }
 const settings = ref({
   menu_visibility: {},
@@ -230,10 +239,10 @@ onBeforeUnmount(() => {
 .doclet-stage:focus-visible { outline: 2px solid var(--docsy-primary); outline-offset: 6px; }
 .doclet-greeting {
   position: absolute;
-  bottom: 4px;
+  top: 4px;
   white-space: nowrap;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 12px 12px 12px 3px;
+  border-radius: var(--docsy-radius);
   padding: 8px 12px;
   font-size: 12px;
   color: var(--docsy-text-strong);

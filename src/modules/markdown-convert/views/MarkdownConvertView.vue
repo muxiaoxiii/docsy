@@ -1,18 +1,12 @@
 <template>
   <div class="markdown-convert-view" :class="{ 'is-file-dragging': dragging }">
     <div v-if="dragging" class="document-drop-overlay">
-      <div class="document-drop-message">松开以添加 Markdown、Office 或 PDF 文件</div>
+      <div class="document-drop-message">松开以添加 Markdown、Office、HTML 或 PDF 文件</div>
     </div>
 
-    <ToolWorkspaceShell
-      title="MD 转换"
-      description="Markdown、Office 与 PDF 文本层互转；生成的 Word、Excel 和演示文稿均可继续编辑。"
-      :hide-toolbar="!files.length"
-    >
+    <ToolWorkspaceShell title="MD 转换" :description="MARKDOWN_CONVERSION_DESCRIPTION" :hide-toolbar="!files.length">
       <template #toolbar>
-        <el-button type="primary" plain :disabled="converting" @click="selectFiles">
-          添加文件
-        </el-button>
+        <el-button type="primary" plain :disabled="converting" @click="selectFiles"> 添加文件 </el-button>
         <el-button type="success" :loading="converting" :disabled="!hasPendingFiles" @click="runQueue">
           开始转换
         </el-button>
@@ -30,53 +24,47 @@
             <div class="title-group">
               <div class="title-with-badge">
                 <h3>文件互转</h3>
-                <span class="direction-badge">MD ⇄ Office / PDF</span>
+                <el-tooltip
+                  :content="markdownMediaHint(fileOfficeFormat, docxStyleHint)"
+                  placement="top"
+                  :show-after="180"
+                  :trigger="['hover', 'focus', 'click']"
+                >
+                  <button type="button" class="feature-pill" aria-label="公式与图表支持说明">
+                    <el-icon><Compass /></el-icon>
+                    <span>公式与图表</span>
+                  </button>
+                </el-tooltip>
+                <span class="direction-badge">MD ⇄ Office / HTML · PDF → MD</span>
               </div>
-              <p class="panel-desc">Office / PDF 自动转 Markdown，Markdown 转出为排版文书</p>
+              <p class="panel-desc">{{ PDF_CONVERSION_LIMIT }}<HelpTooltip :content="OFFICE_EXTRACTION_LIMIT" /></p>
             </div>
           </div>
 
           <!-- Format & Style Toolbar -->
           <div class="format-toolbar">
             <div class="format-group">
-              <span class="field-label">转出格式</span>
-              <el-radio-group v-model="fileOfficeFormat" :disabled="converting" size="default">
-                <el-radio-button value="docx">Word</el-radio-button>
-                <el-radio-button value="xlsx">Excel</el-radio-button>
-                <el-radio-button value="pptx">PowerPoint</el-radio-button>
-                <el-radio-button value="html">网页</el-radio-button>
+              <span class="field-label">MD 转出</span>
+              <el-radio-group v-model="fileOfficeFormat" :disabled="converting" size="small">
+                <el-radio-button v-for="option in MARKDOWN_OUTPUT_FORMATS" :key="option.value" :value="option.value">{{
+                  option.label
+                }}</el-radio-button>
               </el-radio-group>
             </div>
 
             <div v-if="fileOfficeFormat === 'docx'" class="style-group">
               <span class="field-label">版式</span>
-              <el-select v-model="docxStyle" :disabled="converting" class="style-select" size="default">
+              <el-select v-model="docxStyle" :disabled="converting" class="style-select" size="small">
                 <el-option label="通用专业版式" value="professional" />
                 <el-option label="法律文书版式" value="legal" />
                 <el-option label="紧凑工作版式" value="compact" />
               </el-select>
             </div>
-
-            <div class="feature-chips">
-              <el-tooltip
-                :content="
-                  fileOfficeFormat === 'docx'
-                    ? `${docxStyleHint} · 公式自动生成可编辑公式，Mermaid 代码块自动嵌入图表`
-                    : '支持数学公式与图表自动渲染生成'
-                "
-                placement="top"
-              >
-                <span class="feature-pill">
-                  <el-icon><Compass /></el-icon>
-                  <span>公式与图表</span>
-                </span>
-              </el-tooltip>
-            </div>
           </div>
 
           <!-- PDF Page Range Settings (appears only when PDF present) -->
           <div v-if="hasPdfInQueue" class="pdf-convert-note">
-            <span class="pdf-note-title">PDF 文本层提取：</span>
+            <span class="pdf-note-title">PDF → Markdown（仅文本层）：</span>
             <div class="pdf-page-range">
               <span class="option-label">页码范围（留空为全文）：</span>
               <el-input-number
@@ -102,13 +90,7 @@
           </div>
 
           <!-- Main File Queue with Lively Empty Scene -->
-          <FileQueuePanel
-            fill
-            :items="files"
-            :busy="converting"
-            @clear="clearFiles"
-            @remove="removeFile"
-          >
+          <FileQueuePanel fill :items="files" :busy="converting" @clear="clearFiles" @remove="removeFile">
             <!-- Custom Rich Scene for Empty State -->
             <template #empty>
               <MdConvertScene
@@ -144,7 +126,7 @@
                 size="small"
                 :loading="copyingPath === item.path"
                 :disabled="converting"
-                title="复制为富文本和纯文本（Foxmail 自动用富文本，微信自动用纯文本）"
+                title="同时复制富文本和纯文本，粘贴效果取决于目标软件。"
                 @click="copyMarkdownFile(item)"
               >
                 复制
@@ -165,7 +147,7 @@
           <!-- Subtle Bottom Footer: Compact Encoding Setting -->
           <div class="panel-bottom-bar">
             <div class="encoding-compact-setting">
-              <span class="compact-label">编码</span>
+              <span class="compact-label">编码<HelpTooltip content="默认自动识别，极少数旧编码可手动切换。" /></span>
               <el-select
                 v-model="inputEncoding"
                 :disabled="converting"
@@ -183,7 +165,6 @@
                 <el-option label="韩文 (EUC-KR)" value="euc-kr" />
                 <el-option label="西欧 (Windows-1252)" value="windows-1252" />
               </el-select>
-              <span class="encoding-subtle-hint">默认自动识别，极少数旧编码可手动切换</span>
             </div>
 
             <div v-if="summary" class="summary-badge">
@@ -213,11 +194,14 @@
             <div class="title-group">
               <div class="title-with-badge">
                 <h3>粘贴 Markdown</h3>
-                <span v-if="pasteText.trim()" class="char-count-badge">
-                  {{ pasteText.length }} 字符
-                </span>
+                <span v-if="pasteText.trim()" class="char-count-badge"> {{ pasteText.length }} 字符 </span>
               </div>
-              <p class="panel-desc">适合临时内容，无需保存为 .md 文件；可一键生成文档或复制到邮件/聊天</p>
+              <p class="panel-desc">
+                生成 Word / Excel / PPT / HTML，或复制到邮件与聊天<HelpTooltip
+                  :content="markdownMediaHint(pasteFormat, docxStyleHint)"
+                  label="公式与图表"
+                />
+              </p>
             </div>
 
             <el-button
@@ -247,11 +231,13 @@
             <div class="format-toolbar compact">
               <div class="format-group">
                 <span class="field-label">转出格式</span>
-                <el-radio-group v-model="pasteFormat" :disabled="pasteConverting" size="default">
-                  <el-radio-button value="docx">Word</el-radio-button>
-                  <el-radio-button value="xlsx">Excel</el-radio-button>
-                  <el-radio-button value="pptx">PowerPoint</el-radio-button>
-                  <el-radio-button value="html">网页</el-radio-button>
+                <el-radio-group v-model="pasteFormat" :disabled="pasteConverting" size="small">
+                  <el-radio-button
+                    v-for="option in MARKDOWN_OUTPUT_FORMATS"
+                    :key="option.value"
+                    :value="option.value"
+                    >{{ option.label }}</el-radio-button
+                  >
                 </el-radio-group>
               </div>
 
@@ -261,7 +247,7 @@
                   v-model="docxStyle"
                   :disabled="pasteConverting || converting"
                   class="style-select"
-                  size="default"
+                  size="small"
                 >
                   <el-option label="通用专业版式" value="professional" />
                   <el-option label="法律文书版式" value="legal" />
@@ -290,13 +276,13 @@
                     <el-dropdown-item command="rich">
                       <div class="dropdown-item-meta">
                         <strong>复制为富文本</strong>
-                        <small>适用于 Foxmail / 邮件客户端（保留表格、加粗与样式）</small>
+                        <small>复制富文本；表格与样式的保留取决于目标软件</small>
                       </div>
                     </el-dropdown-item>
                     <el-dropdown-item command="plain">
                       <div class="dropdown-item-meta">
                         <strong>复制为纯文本</strong>
-                        <small>适用于 微信 / 聊天窗口（自动去除 Markdown 符号）</small>
+                        <small>复制预览中的纯文本</small>
                       </div>
                     </el-dropdown-item>
                   </el-dropdown-menu>
@@ -310,13 +296,13 @@
                 size="default"
                 @click="convertPastedText"
               >
-                {{ pasteConverting ? (pasteProgress || '转换中…') : '生成文件' }}
+                {{ pasteConverting ? pasteProgress || '转换中…' : '生成文件' }}
               </el-button>
             </div>
 
             <div class="clipboard-explanation">
               <span class="clip-tag">双模复制</span>
-              <span>Foxmail / 邮件自动呈现富文本排版，微信 / 聊天自动使用整洁纯文本</span>
+              <span>同时复制富文本与纯文本，粘贴格式由目标软件决定</span>
             </div>
 
             <el-alert v-if="pasteWarning" :title="pasteWarning" type="warning" :closable="false" show-icon />
@@ -333,6 +319,14 @@
 </template>
 
 <script setup>
+import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
+import {
+  MARKDOWN_OUTPUT_FORMATS,
+  MARKDOWN_CONVERSION_DESCRIPTION,
+  PDF_CONVERSION_LIMIT,
+  OFFICE_EXTRACTION_LIMIT,
+  markdownMediaHint,
+} from '../composables/conversionCapabilities.js'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { ArrowDown, Compass, CopyDocument } from '@element-plus/icons-vue'
@@ -410,7 +404,7 @@ const convertGridStyle = computed(() => {
 })
 
 function clampPastePanelRatio(value) {
-  return Math.min(0.65, Math.max(0.30, Number(value) || 0.48))
+  return Math.min(0.65, Math.max(0.3, Number(value) || 0.48))
 }
 
 function setPastePanelRatio(value) {
@@ -517,7 +511,7 @@ function directionTag(path, outputFormat = fileOfficeFormat.value) {
     return `MD→${{ docx: 'Word', xlsx: 'Excel', pptx: 'PowerPoint', html: 'HTML' }[outputFormat] || 'Office'}`
   }
   const extension = extensionOf(path)
-  if (extension === 'pdf') return 'PDF→MD'
+  if (extension === 'pdf') return 'PDF 文本层→MD'
   if (htmlExtensions.includes(extension)) return 'HTML→MD'
   if (extension === 'epub') return 'EPUB→MD'
   if (['xls', 'xlsx', 'xlsm', 'xlsb'].includes(extension)) return 'Excel→MD'
@@ -530,7 +524,10 @@ async function selectFiles() {
   const selected = await open({
     multiple: true,
     filters: [
-      { name: 'Markdown / Office / HTML / PDF', extensions: [...markdownExtensions, ...officeExtensions, ...htmlExtensions, ...pdfExtensions] },
+      {
+        name: 'Markdown / Office / HTML / PDF',
+        extensions: [...markdownExtensions, ...officeExtensions, ...htmlExtensions, ...pdfExtensions],
+      },
     ],
   })
   if (!selected) return
@@ -691,11 +688,7 @@ async function copyPastedMarkdown(mode) {
   try {
     await copyMarkdownContent(text, mode)
     triggerCelebration()
-    ElMessage.success(
-      mode === 'plain'
-        ? '已复制为纯文本，可直接粘贴到微信 / 聊天窗口'
-        : '已复制为富文本，可直接粘贴到 Foxmail / 邮件编辑器',
-    )
+    ElMessage.success(mode === 'plain' ? '已复制纯文本' : '已复制富文本，粘贴效果取决于目标软件')
   } catch (err) {
     ElMessage.error(userFacingError(err, '复制失败，请检查剪贴板权限'))
   }
@@ -713,7 +706,7 @@ async function copyMarkdownFile(item) {
     }
     await copyMarkdownContent(text, 'rich')
     triggerCelebration()
-    ElMessage.success('已复制为富文本+纯文本，可直接粘贴到 Foxmail 或微信')
+    ElMessage.success('已复制富文本与纯文本，粘贴格式由目标软件决定')
   } catch (err) {
     ElMessage.error(userFacingError(err, '复制失败，请检查文件编码或剪贴板权限'))
   } finally {
@@ -767,7 +760,7 @@ async function openOutput(item) {
 async function handleDroppedPaths(paths) {
   const accepted = [...new Set((paths || []).filter(isConvertiblePath))]
   if (!accepted.length) {
-    ElMessage.warning('请拖入 Markdown、Office 或 PDF 文件')
+    ElMessage.warning('请拖入 Markdown、Office、HTML 或 PDF 文件；PDF 仅提取已有文本层。')
     return
   }
   if (accepted.length < (paths || []).length) ElMessage.warning('已忽略不支持的文件')
@@ -852,8 +845,8 @@ defineExpose({
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .title-group {
@@ -864,6 +857,7 @@ defineExpose({
 
 .title-with-badge {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -880,7 +874,7 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   padding: 1.5px 7px;
-  border-radius: 999px;
+  border-radius: var(--docsy-radius);
   font-size: 11px;
   font-weight: 600;
   background: color-mix(in srgb, var(--docsy-primary) 10%, transparent);
@@ -890,7 +884,7 @@ defineExpose({
 
 .char-count-badge {
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   font-size: 11px;
   font-family: var(--docsy-font-mono, monospace);
   color: var(--docsy-text-muted);
@@ -919,17 +913,17 @@ defineExpose({
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 14px;
-  padding: 8px 10px;
+  gap: 6px 12px;
+  padding: 6px 8px;
   margin-bottom: 10px;
-  border-radius: var(--docsy-radius-sm);
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   border: 1px solid var(--docsy-border-subtle);
 }
 
 .format-toolbar.compact {
-  padding: 8px 10px;
-  margin-bottom: 10px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
 }
 
 .format-group,
@@ -950,24 +944,21 @@ defineExpose({
   width: 140px;
 }
 
-.feature-chips {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-}
-
 .feature-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--docsy-radius);
   font-size: 11.5px;
   color: var(--docsy-text-muted);
   background: var(--docsy-surface-elevated);
   border: 1px solid var(--docsy-border-subtle);
   cursor: help;
-  transition: all 0.2s ease;
+  line-height: 1.4;
+  transition:
+    color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .feature-pill:hover {
@@ -983,7 +974,7 @@ defineExpose({
   gap: 8px 12px;
   padding: 7px 10px;
   margin-bottom: 10px;
-  border-radius: var(--docsy-radius-sm);
+  border-radius: var(--docsy-radius);
   background: color-mix(in srgb, var(--docsy-primary) 6%, transparent);
   border-left: 3px solid var(--docsy-primary);
   font-size: 12px;
@@ -1142,10 +1133,12 @@ defineExpose({
   font-size: 13px;
   line-height: 1.6;
   padding: 12px 14px;
-  border-radius: var(--docsy-radius-sm);
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface);
   border-color: var(--docsy-border-subtle);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .paste-editor-wrapper :deep(.el-textarea__inner:focus) {
@@ -1213,7 +1206,7 @@ defineExpose({
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
-  border-radius: var(--docsy-radius-sm);
+  border-radius: var(--docsy-radius);
   background: color-mix(in srgb, var(--docsy-primary) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--docsy-primary) 20%, transparent);
   font-size: 12px;

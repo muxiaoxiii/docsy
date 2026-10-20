@@ -1,13 +1,13 @@
 <template>
   <!-- 根元素为普通纵向容器，不再由使用方挂 grid class；
        每个区块独立一张网格，区块内 v-if 行增删只重排本区块，避免整体跳动 -->
-  <div class="hf-rule-fields">
+  <div class="hf-rule-fields compact-options">
     <section class="hf-section">
       <div class="rule-item section-label">
         <strong>页眉文字</strong>
         <div class="section-actions">
           <el-switch v-model="headerInsertEnabledModel" size="small" />
-          <el-button size="small" circle :disabled="!headerInsertEnabled" @click="addGroup">
+          <el-button size="small" aria-label="添加页眉规则" title="添加页眉规则" :disabled="!headerInsertEnabled" @click="addGroup">
             <el-icon><Plus /></el-icon>
           </el-button>
           <UndoRedoButtons
@@ -77,7 +77,7 @@
             </el-select>
           </div>
           <div v-if="headerMode === 'per_file'" class="rule-item">
-            <label>序号起始</label>
+            <label>序号起始<HelpTooltip :content="headerNumberingSourceModel === 'default' ? '跟随全局，选择单独设置后可修改。' : '仅覆盖本规则。'" /></label>
             <el-input-number
               v-model="effectiveHeaderSeqStartModel"
               :min="0"
@@ -86,9 +86,6 @@
               controls-position="right"
               :disabled="headerNumberingSourceModel === 'default'"
             />
-            <span class="field-hint">{{
-              headerNumberingSourceModel === 'default' ? '跟随全局，选择单独设置后可修改' : '仅覆盖本规则'
-            }}</span>
           </div>
           <div v-if="headerMode === 'custom'" class="rule-item">
             <label>页眉文本</label>
@@ -132,7 +129,7 @@
             margin-label="距顶"
           />
           <div class="rule-item page-range-row">
-            <label>添加范围</label>
+            <label>添加范围<HelpTooltip content="结束页填 0，表示一直添加到文档末页。" /></label>
             <div class="page-range-inputs">
               <el-checkbox v-model="headerAllPages" size="small">全部页面</el-checkbox>
               <template v-if="!headerAllPages">
@@ -151,7 +148,6 @@
                   size="small"
                   controls-position="right"
                 />
-                <span class="field-hint">结束页 0 = 全部</span>
               </template>
             </div>
           </div>
@@ -164,7 +160,7 @@
         <strong>页脚文字</strong>
         <div class="section-actions">
           <el-switch v-model="footerInsertEnabledModel" size="small" />
-          <el-button size="small" circle :disabled="!footerInsertEnabled" @click="addFooterTextGroup">
+          <el-button size="small" aria-label="添加页脚规则" title="添加页脚规则" :disabled="!footerInsertEnabled" @click="addFooterTextGroup">
             <el-icon><Plus /></el-icon>
           </el-button>
           <UndoRedoButtons
@@ -237,7 +233,7 @@
             margin-label="距底"
           />
           <div class="rule-item page-range-row">
-            <label>添加范围</label>
+            <label>添加范围<HelpTooltip content="结束页填 0，表示一直添加到文档末页。" /></label>
             <div class="page-range-inputs">
               <el-checkbox v-model="footerTextAllPages" size="small">全部页面</el-checkbox>
               <template v-if="!footerTextAllPages">
@@ -256,7 +252,6 @@
                   size="small"
                   controls-position="right"
                 />
-                <span class="field-hint">结束页 0 = 全部</span>
               </template>
             </div>
           </div>
@@ -269,7 +264,7 @@
         <strong>页码</strong>
         <div class="section-actions">
           <el-switch v-model="pageNumberEnabledModel" size="small" />
-          <el-button size="small" circle :disabled="!pageNumberEnabled" @click="addPageNumberGroup">
+          <el-button size="small" aria-label="添加页码规则" title="添加页码规则" :disabled="!pageNumberEnabled" @click="addPageNumberGroup">
             <el-icon><Plus /></el-icon>
           </el-button>
           <UndoRedoButtons
@@ -308,9 +303,8 @@
         </div>
         <div class="hf-section-grid">
           <div class="rule-item">
-            <label>页码起始</label>
+            <label>页码起始<HelpTooltip content="总页数随起始页码自动偏移。" /></label>
             <el-input-number v-model="pageStartModel" :min="1" :max="999999" controls-position="right" />
-            <span class="field-hint">总页数随起始自动偏移</span>
           </div>
           <div class="rule-item">
             <label>连续方式</label>
@@ -403,6 +397,7 @@
 </template>
 
 <script setup>
+import HelpTooltip from '../../components/HelpTooltip.vue'
 import { computed, watch } from 'vue'
 import { Plus, InfoFilled, ArrowRight } from '@element-plus/icons-vue'
 import TextPlacementFields from './TextPlacementFields.vue'
@@ -975,7 +970,7 @@ function removePageNumberGroup(id) {
 .hf-rule-fields {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 /* 单个区块：标题/整宽元素/网格纵向排列 */
 .hf-section {
@@ -986,17 +981,17 @@ function removePageNumberGroup(id) {
 /* 区块内部网格：v-if 行增删只重排本区块，不影响其它区块 */
 .hf-section-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 238px), 1fr));
+  gap: 6px 12px;
   align-items: start;
 }
 /* 网格内每个选项项：统一结构和对齐 */
 .hf-section-grid :deep(.rule-item) {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 58px;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 28px;
 }
 .hf-section-grid :deep(.rule-item label) {
   font-size: 12px;
@@ -1080,6 +1075,7 @@ function removePageNumberGroup(id) {
 }
 .page-range-inputs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
 }
@@ -1134,4 +1130,11 @@ function removePageNumberGroup(id) {
   line-height: 1.4;
   margin-top: -2px;
 }
+</style>
+
+<style scoped>
+.hf-section-grid :deep(.rule-item > :is(.el-input, .el-select, .el-input-number)) { width: 100%; min-width: 0; }
+.hf-section-grid :deep(.rule-item > label) { display: inline-flex; align-items: center; }
+.section-label { min-height: 28px; margin-top: 0; padding-top: 6px; }
+.hf-section { gap: 6px; }
 </style>

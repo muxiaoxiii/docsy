@@ -28,6 +28,16 @@ describe('MD 公式与图表转换', () => {
       expect(result.ok).toBe(true)
     }
   })
+  it.each([
+    ['convert_markdown', { input: '/a.md', outputFormat: 'pdf' }],
+    ['convert_markdown_text', { text: '# 标题', format: 'pdf' }],
+  ])('%s 的 PDF 输出在读取、渲染及导出之前被拒绝', async (command, args) => {
+    const result = await convertWithMedia(command, args)
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('不支持导出 PDF')
+    expect(tauriCallSafe).not.toHaveBeenCalled()
+    expect(renderMarkdownMedia).not.toHaveBeenCalled()
+  })
   it('普通文本不调用图形渲染器', async () => {
     tauriCallSafe.mockResolvedValueOnce({ ok: true, data: { items: [] } }).mockResolvedValueOnce({ ok: true })
     await convertWithMedia('convert_markdown', { input: '/a.md' })

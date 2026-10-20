@@ -1,0 +1,50 @@
+/* Opt-in layout primitives. Keep related actions together when a toolbar wraps. */
+.control-cluster {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.control-cluster > .el-button + .el-button,
+.action-row > .el-button + .el-button { margin-left: 0; }
+.action-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.toolbar-caption { flex: none; color: var(--docsy-text-muted); font-size: 11px; }
+.control-cluster > .el-button-group { display: inline-flex; flex: none; }
+.control-cluster > .el-input-number--small { width: 96px; }
+.control-cluster > .el-input-number--small,
+.control-cluster > .el-button--small,
+.control-cluster > .el-button-group { vertical-align: middle; }
+.control-cluster > .el-input-number--small,
+.control-cluster > .el-button--small,
+.control-cluster > .el-button-group > .el-button--small { --el-component-size-small: 24px; }
+.form-label-help { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+
+/* Top tabs preserve the working width in small windows. The library handles
+   tab scrolling and arrow-key navigation using its actual top orientation. */
+:is(.pdf-tabs, .evidence-tabs, .template-tabs).el-tabs--top {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+:is(.pdf-tabs, .evidence-tabs, .template-tabs).el-tabs--top > .el-tabs__header {
+  flex: none;
+  margin: 0;
+  padding: 4px 12px 0;
+  background: var(--docsy-surface-muted);
+}
+:is(.pdf-tabs, .evidence-tabs, .template-tabs).el-tabs--top > .el-tabs__content {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* Compact settings keep a readable label and a usable control on the same row. */
+.compact-options {
+  --el-component-size: 28px;
+  --el-component-size-small: 24px;
+  --el-font-size-base: 12px;
+}
+.compact-options .el-form-item { margin-bottom: 8px; }
+.compact-options .el-form-item__label { align-items: center; font-size: 12px; }
+.compact-options .el-form-item__content { min-width: 0; }

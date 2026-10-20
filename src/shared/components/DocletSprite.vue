@@ -2,13 +2,13 @@
   <span
     ref="root"
     class="doclet-sprite"
-    :class="{ 'is-paused': !inView || !pageVisible }"
+    :class="{ 'is-paused': !motionActive }"
     :style="{ width: size + 'px', height: Math.round((size * 13) / 12) + 'px' }"
     aria-hidden="true"
   >
-    <!-- Modern High-FPS Vector SVG Mascot Engine -->
+    <!-- Experimental vector engine stays opt-in; the original Doclet is the default. -->
     <DocletSvgMascot
-      v-if="engine !== 'raster'"
+      v-if="engine === 'svg'"
       :size="size"
       :motion="motion"
       :look-x="lookX"
@@ -16,7 +16,26 @@
       :interactive="interactive"
     />
 
-    <!-- Fallback Legacy Raster Spritesheet (if explicitly requested) -->
+    <canvas
+      v-else-if="gazeEnabled && !videoFailed"
+      ref="gazeCanvas"
+      class="doclet-sprite__gaze"
+      :style="gazeSize"
+    />
+
+    <!-- Pre-keyed Gemini footage, decoded only while this mascot is visible. -->
+    <img
+      v-else-if="engine === 'video' && !videoFailed"
+      :key="motion"
+      class="doclet-sprite__video"
+      :src="motionActive ? videoAsset.animation : videoAsset.poster"
+      alt=""
+      decoding="async"
+      draggable="false"
+      @error="videoFailed = true"
+    />
+
+    <!-- Original sprite remains available if the derived asset cannot load. -->
     <span v-else :key="motion" class="doclet-sprite__pose" :class="`doclet-sprite__pose--${motion}`">
       <span
         class="doclet-sprite__frames"
@@ -28,7 +47,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { DOCLET_MOTIONS, docletVideoAsset } from '../docletVideoAssets.js'
+import { useDocletGaze } from '../composables/useDocletGaze.js'
+import { useMotionActivity } from '../composables/useMotionActivity.js'
 import spritesheet from '../../assets/doclet-v2-spritesheet.webp'
 import DocletSvgMascot from './DocletSvgMascot.vue'
 
@@ -49,18 +71,27 @@ const props = defineProps({
     type: String,
     default: 'idle',
     validator: (value) =>
-      ['idle', 'greet', 'celebrate', 'error', 'waiting', 'working', 'review', 'look'].includes(value),
+      DOCLET_MOTIONS.includes(value),
   },
-  engine: { type: String, default: 'svg', validator: (v) => ['svg', 'raster'].includes(v) },
+  engine: { type: String, default: 'video', validator: (v) => ['svg', 'raster', 'video'].includes(v) },
+  gazeTracking: { type: Boolean, default: true },
   lookX: { type: Number, default: null },
   lookY: { type: Number, default: null },
-  interactive: { type: Boolean, default: true },
+  interactive: { type: Boolean, default: false },
 })
 
+const videoFailed = ref(false)
+const videoAsset = computed(() => docletVideoAsset(props.motion))
+watch(() => props.motion, () => { videoFailed.value = false })
 const root = ref(null)
-const inView = ref(false)
-const pageVisible = ref(true)
-let observer
+const { active: motionActive } = useMotionActivity(root)
+const gazeEnabled = computed(() => motionActive.value && props.engine === 'video' && ['idle', 'look', 'waiting'].includes(props.motion) && props.gazeTracking)
+const gazeCanvas = ref(null)
+useDocletGaze(root, gazeCanvas, gazeEnabled, () => { videoFailed.value = true })
+const gazeSize = computed(() => {
+  const height = Math.round(props.size * 13 / 12)
+  return { width: `${height * .8}px`, height: `${height}px` }
+})
 
 const frameStyle = computed(() => {
   const action = motions[props.motion] || motions.idle
@@ -74,27 +105,6 @@ const frameStyle = computed(() => {
   }
 })
 
-function updateVisibility() {
-  pageVisible.value = !document.hidden
-}
-
-onMounted(() => {
-  updateVisibility()
-  document.addEventListener('visibilitychange', updateVisibility)
-  if (typeof window.IntersectionObserver !== 'undefined') {
-    observer = new window.IntersectionObserver((entries) => {
-      inView.value = entries[0]?.isIntersecting ?? false
-    })
-    observer.observe(root.value)
-  } else {
-    inView.value = true
-  }
-})
-
-onBeforeUnmount(() => {
-  observer?.disconnect()
-  document.removeEventListener('visibilitychange', updateVisibility)
-})
 </script>
 
 <style scoped>
@@ -104,6 +114,14 @@ onBeforeUnmount(() => {
   justify-content: center;
   flex: none;
   position: relative;
+}
+.doclet-sprite__gaze { display: block; flex: none; pointer-events: none; }
+.doclet-sprite__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
 }
 .doclet-sprite__frames {
   display: block;
@@ -115,7 +133,7 @@ onBeforeUnmount(() => {
   background-position: 0 var(--doclet-row);
   animation: doclet-frames var(--doclet-duration) steps(var(--doclet-steps), end) infinite;
 }
-.doclet-sprite__pose { display: block; width: 100%; height: 100%; transform-origin: 50% 90%; }
+.doclet-sprite__pose { overflow: hidden; display: block; width: 100%; height: 100%; transform-origin: 50% 90%; }
 .doclet-sprite__pose--greet { animation: doclet-greet 1.4s ease-in-out 2; }
 .doclet-sprite__pose--celebrate { animation: doclet-hop 1.2s ease-in-out 2; }
 .doclet-sprite__pose--error { animation: doclet-tilt 1.6s ease-in-out; }
@@ -139,5 +157,11 @@ onBeforeUnmount(() => {
 @keyframes doclet-tilt {
   0%, 100% { transform: rotate(0); }
   40%, 65% { transform: rotate(-6deg); }
+}
+</style>
+
+<style scoped>
+@media (prefers-reduced-motion: reduce) {
+  .doclet-sprite__frames, .doclet-sprite__pose { animation: none !important; }
 }
 </style>

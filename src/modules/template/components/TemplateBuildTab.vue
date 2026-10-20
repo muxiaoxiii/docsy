@@ -128,15 +128,19 @@
           <strong>{{ configuredFieldCount }} 个字段</strong>
           <span>{{ requiredBuildFieldCount }} 个必填 · {{ specialFieldCount }} 个特殊类型</span>
         </div>
-        <div class="template-build-actions">
-          <el-button :disabled="!documentText" @click="$emit('update:showDocumentText', !showDocumentText)">
+        <div class="template-build-actions action-row">
+<div class="control-cluster" role="group" aria-label="全文与模板预览">
+<el-button-group>
+<el-button :disabled="!documentText" @click="$emit('update:showDocumentText', !showDocumentText)">
             {{ showDocumentText ? '收起全文' : '查看全文' }}
-          </el-button>
-          <el-button :disabled="!documentText" @click="$emit('update:showTemplatePreview', !showTemplatePreview)">
+          </el-button><el-button :disabled="!documentText" @click="$emit('update:showTemplatePreview', !showTemplatePreview)">
             {{ showTemplatePreview ? '收起预览' : '模板预览' }}
           </el-button>
-          <el-button :disabled="!undoStack.length" @click="$emit('undo-last-action')">撤销</el-button>
-          <el-button
+</el-button-group>
+</div><div class="control-cluster" role="group" aria-label="编辑历史">
+<el-button :disabled="!undoStack.length" @click="$emit('undo-last-action')">撤销</el-button>
+</div><div class="control-cluster" role="group" aria-label="保存模板">
+<el-button
             v-if="editingLibraryTemplatePath"
             :disabled="!fieldRows.length"
             type="warning"
@@ -144,8 +148,7 @@
             @click="$emit('save-template', true)"
           >
             覆盖保存
-          </el-button>
-          <el-button
+          </el-button><el-button
             :disabled="!fieldRows.length"
             :type="editingLibraryTemplatePath ? 'primary' : 'success'"
             :loading="saving"
@@ -153,6 +156,7 @@
           >
             {{ editingLibraryTemplatePath ? '另存为' : '保存模板' }}
           </el-button>
+</div>
         </div>
       </div>
 
@@ -1656,4 +1660,11 @@ p {
     max-width: none;
   }
 }
+</style>
+
+<style scoped>
+.template-build-actions { gap: 8px 16px; justify-content: flex-end; }
+.selection-tools :deep(.el-button + .el-button),
+.panel-actions :deep(.el-button + .el-button),
+.reference-actions :deep(.el-button + .el-button) { margin-left: 0; }
 </style>

@@ -3,6 +3,7 @@
     class="md-convert-scene"
     :class="{
       'is-converting': converting,
+      'is-motion-paused': !motionActive,
       'is-dragging': dragging,
       'is-celebrating': celebrating,
     }"
@@ -12,9 +13,6 @@
       ref="sceneStageRef"
       class="scene-stage"
       :class="{ 'is-nodding': nodActive }"
-      :style="{ '--look-x': lookX, '--look-y': lookY }"
-      @pointermove="handlePointerMove"
-      @pointerleave="handlePointerLeave"
       @pointerdown="handlePointerDown"
     >
       <!-- Ambient Glow Behind Stage -->
@@ -64,15 +62,9 @@
             stroke-dasharray="4 4"
             class="flow-track"
           />
-          <circle r="3" class="flow-particle particle-1">
-            <animateMotion path="M 10 20 C 40 5, 80 35, 110 20" dur="2s" repeatCount="indefinite" />
-          </circle>
-          <circle r="2.5" class="flow-particle particle-2">
-            <animateMotion path="M 10 20 C 40 5, 80 35, 110 20" dur="2s" begin="0.7s" repeatCount="indefinite" />
-          </circle>
-          <circle r="2" class="flow-particle particle-3">
-            <animateMotion path="M 10 20 C 40 5, 80 35, 110 20" dur="2s" begin="1.4s" repeatCount="indefinite" />
-          </circle>
+          <circle v-if="converting" r="3" class="flow-particle particle-1 flow-css-dot" />
+          <circle v-if="converting" r="2.5" class="flow-particle particle-2 flow-css-dot" />
+          <circle v-if="converting" r="2" class="flow-particle particle-3 flow-css-dot" />
         </svg>
 
         <!-- Dynamic Floating Glyphs during converting -->
@@ -86,7 +78,7 @@
 
       <!-- Mascot Doclet with Dynamic Motion -->
       <div class="scene-mascot">
-        <DocletSvgMascot :size="112" :motion="mascotMotion" :look-x="lookX" :look-y="lookY" />
+        <DocletSprite :interactive="false" :size="112" :motion="mascotMotion" :gaze-tracking="!nodActive" />
       </div>
 
       <!-- Right Floating Converted Document Card -->
@@ -120,11 +112,11 @@
           <span class="pulse-ring" />
           <strong class="converting-title">{{ progressText || 'Doclet 正在排版生成文档…' }}</strong>
         </div>
-        <p class="converting-desc">正在自动渲染排版样式、表格与数学公式</p>
+        <p class="converting-desc">根据输入类型提取文字，或按所选格式生成文件</p>
       </template>
       <template v-else>
         <strong class="scene-title">选择或拖入文档</strong>
-        <p class="scene-desc">支持 Word、Excel、PPT、PDF 与 Markdown 互转，转换后保存在源文件旁</p>
+        <p class="scene-desc">{{ MARKDOWN_SCENE_DESCRIPTION }}</p>
         <div class="scene-actions">
           <el-button type="primary" plain size="default" class="select-btn" @click="$emit('select-files')">
             添加文件
@@ -136,8 +128,11 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import DocletSvgMascot from '../../../shared/components/DocletSvgMascot.vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
+import { MARKDOWN_SCENE_DESCRIPTION } from '../composables/conversionCapabilities.js'
+import { useMotionActivity } from '../../../shared/composables/useMotionActivity.js'
+import DocletSprite from '../../../shared/components/DocletSprite.vue'
+import { useDocletClickAction } from '../../../shared/composables/useDocletClickAction.js'
 
 const props = defineProps({
   converting: { type: Boolean, default: false },
@@ -150,29 +145,20 @@ const props = defineProps({
 defineEmits(['select-files'])
 
 const sceneStageRef = ref(null)
-const lookX = ref(null)
-const lookY = ref(null)
-const nodActive = ref(false)
+const { active: motionActive, reduced } = useMotionActivity(sceneStageRef)
+const interactionTimers = new Set()
+function later(callback, delay) {
+  const timer = setTimeout(() => { interactionTimers.delete(timer); callback() }, delay)
+  interactionTimers.add(timer)
+}
+onBeforeUnmount(() => interactionTimers.forEach(clearTimeout))
+const { motion: clickMotion, play: playClickMotion } = useDocletClickAction()
+const nodActive = computed(() => Boolean(clickMotion.value))
 const ripples = ref([])
 
-function handlePointerMove(e) {
-  if (!sceneStageRef.value) return
-  const rect = sceneStageRef.value.getBoundingClientRect()
-  const centerX = rect.left + rect.width / 2
-  const centerY = rect.top + rect.height / 2
-  const maxDist = Math.max(rect.width, rect.height) / 2
-  const dx = (e.clientX - centerX) / (maxDist || 1)
-  const dy = (e.clientY - centerY) / (maxDist || 1)
-  lookX.value = Number(Math.max(-1, Math.min(1, dx)).toFixed(3))
-  lookY.value = Number(Math.max(-1, Math.min(1, dy)).toFixed(3))
-}
-
-function handlePointerLeave() {
-  lookX.value = null
-  lookY.value = null
-}
-
 function handlePointerDown(e) {
+  if (props.converting || props.celebrating || props.dragging) return
+  if (reduced.value || !motionActive.value || e.button !== 0 || ripples.value.length >= 6) return
   if (!sceneStageRef.value) return
   const rect = sceneStageRef.value.getBoundingClientRect()
   const x = Math.round(e.clientX - rect.left)
@@ -181,21 +167,18 @@ function handlePointerDown(e) {
   const glyphs = ['✨', '✦', '📝', '📊', '🌐']
   const randomGlyph = glyphs[Math.floor(Math.random() * glyphs.length)]
   ripples.value.push({ id, x, y, glyph: randomGlyph })
-  setTimeout(() => {
+  later(() => {
     ripples.value = ripples.value.filter((r) => r.id !== id)
   }, 850)
 
-  nodActive.value = true
-  setTimeout(() => {
-    nodActive.value = false
-  }, 420)
+  playClickMotion()
 }
 
 const mascotMotion = computed(() => {
   if (props.celebrating) return 'celebrate'
-  if (props.converting) return 'review'
+  if (props.converting) return 'working'
   if (props.dragging) return 'greet'
-  if (nodActive.value) return 'greet'
+  if (nodActive.value) return clickMotion.value
   return 'look'
 })
 
@@ -658,7 +641,7 @@ const formatGlyph = computed(() => {
 .select-btn {
   font-weight: 600;
   padding: 8px 20px;
-  border-radius: var(--docsy-radius-sm);
+  border-radius: var(--docsy-radius);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -751,4 +734,25 @@ const formatGlyph = computed(() => {
     box-shadow: 0 0 0 0 transparent;
   }
 }
+</style>
+
+<style scoped>
+.doc-card-md, .doc-card-office { animation-iteration-count: 1; }
+.flow-css-dot { animation: docsy-stream-dot 2.2s linear infinite; }
+.flow-css-dot:nth-of-type(2) { animation-delay: -.73s; }
+.flow-css-dot:nth-of-type(3) { animation-delay: -1.46s; }
+@keyframes docsy-stream-dot {
+  0% { transform: translate(10px, 20px); opacity: 0; }
+  15% { opacity: 1; }
+  35% { transform: translate(42px, 17px); }
+  65% { transform: translate(78px, 23px); }
+  85% { opacity: 1; }
+  100% { transform: translate(110px, 20px); opacity: 0; }
+}
+.md-convert-scene:not(.is-converting) :is(.stream-flow-line, .flow-track) { animation: none; }
+.md-convert-scene.is-dragging .doc-card-md { animation: none; transform: translateY(-8px) rotate(-6deg) scale(1.04); }
+.md-convert-scene.is-dragging .doc-card-office { animation: none; transform: translateY(-4px) rotate(5deg); }
+.md-convert-scene.is-celebrating .doc-card-office { animation: docsy-result-arrive 460ms cubic-bezier(.2,.9,.3,1.2) 1; }
+@keyframes docsy-result-arrive { from { opacity: .4; translate: -8px 4px; scale: .94; } to { opacity: 1; translate: 0 0; scale: 1; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>

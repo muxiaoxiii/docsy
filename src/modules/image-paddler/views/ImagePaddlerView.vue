@@ -2,7 +2,7 @@
   <ToolWorkspaceShell title="图片排版" description="将图片批量排版为 A4 文档">
     <div ref="layoutRef" class="paddler-layout">
       <div class="settings-panel" :style="settingsPanelStyle">
-        <el-form label-width="72px" size="small">
+        <el-form class="compact-options" label-width="90px" size="small">
           <div class="settings-group-title">页面</div>
 
           <el-form-item :label="isFrameSequence ? '来源' : '素材'">
@@ -37,23 +37,23 @@
             </el-radio-group>
           </el-form-item>
 
-          <el-form-item label="输出目录">
+          <el-form-item>
+            <template #label><span class="form-label-help">输出目录<HelpTooltip :content="settings.output_dir ? '本次所有文档保存到所选目录，并记住此选择。' : '合并输出保存在首张图片所在目录；分文件夹输出各自保存。'" /></span></template>
             <div class="output-directory-control">
               <el-input :model-value="settings.output_dir" readonly placeholder="默认：素材目录下的 _docsy_image_out" :title="settings.output_dir || '素材目录下的 _docsy_image_out'" />
               <div class="source-actions">
                 <el-button :disabled="generating" @click="chooseOutputDirectory">选择文件夹</el-button>
                 <el-button v-if="settings.output_dir" :disabled="generating" text @click="settings.output_dir = ''">恢复默认</el-button>
               </div>
-              <div class="field-hint">{{ settings.output_dir ? '本次所有文档保存到所选目录，并记住此选择。' : '合并输出保存在首张图片所在目录；分文件夹输出各自保存。' }}</div>
             </div>
           </el-form-item>
 
-          <el-form-item v-if="settings.output_format === 'docx'" label="排版">
+          <el-form-item v-if="settings.output_format === 'docx'">
+            <template #label><span class="form-label-help">排版<HelpTooltip content="表格模式支持图片并排；段落模式仅按上下一列输出，不支持边框。复杂分页请在 Word/WPS 中核对。" /></span></template>
             <el-radio-group v-model="settings.use_table" size="small">
               <el-radio-button :value="true">表格</el-radio-button>
               <el-radio-button :value="false">段落</el-radio-button>
             </el-radio-group>
-            <div class="field-hint">{{ settings.use_table ? '可并排' : '仅上下' }}</div>
           </el-form-item>
 
           <el-form-item label="方向">
@@ -71,7 +71,8 @@
 
           <div class="settings-group-title">每页布局</div>
 
-          <el-form-item label="张数">
+          <el-form-item>
+            <template #label><span class="form-label-help">张数<HelpTooltip content="每页按所选张数排版，末页可以不足。" /></span></template>
             <el-radio-group
               :model-value="settings.images_per_page"
               size="small"
@@ -84,7 +85,6 @@
                 :value="option.value"
               >{{ option.value === 'custom' ? '自定' : option.value }}</el-radio-button>
             </el-radio-group>
-            <div class="field-hint">末页可不足</div>
           </el-form-item>
 
           <el-form-item label="网格">
@@ -109,7 +109,8 @@
             <div class="field-hint">{{ layoutGrid.rows }}×{{ layoutGrid.cols }} · {{ perPage }} 张/页</div>
           </el-form-item>
 
-          <el-form-item v-if="settings.images_per_page === 'custom'" label="行列">
+          <el-form-item v-if="settings.images_per_page === 'custom'">
+            <template #label><span class="form-label-help">行列<HelpTooltip :content="`行 × 列 = 每页 ${perPage} 张；段落模式按上下一列输出。`" /></span></template>
             <div class="inline-controls">
               <el-input-number
                 :model-value="settings.custom_rows"
@@ -131,7 +132,6 @@
             </div>
           </el-form-item>
 
-          <div v-if="settings.images_per_page === 'custom' && isFlowLayout" class="field-hint">行 × 列 = 每页 {{ perPage }} 张；段落按上下一列输出。</div>
           <el-form-item label="顺序">
             <el-select v-model="settings.order_mode" size="small" :disabled="isFlowLayout || perPage <= 1">
               <el-option label="Z 字" value="z" />
@@ -225,10 +225,10 @@
             </div>
           </el-form-item>
 
-          <div v-if="isFlowLayout" class="field-hint">段落模式不支持边框；复杂分页请在 Word/WPS 中核对。</div>
           <div class="settings-group-title">标题说明</div>
 
-          <el-form-item label="标题">
+          <el-form-item>
+            <template #label><span class="form-label-help">标题<HelpTooltip content="标题间距只移动文字；超出单元格时会提示冲突，可调整图片比例。" /></span></template>
             <div class="filename-panel">
               <div class="filename-panel-row">
                 <el-switch v-model="settings.show_filename" size="small" active-text="显示" />
@@ -261,7 +261,6 @@
                 />
                 <span class="unit-label">mm</span>
               </div>
-              <div class="field-hint">间距只移动文字；超出单元格时会提示冲突，可调整图片比例。</div>
               <div class="filename-panel-row">
                 <el-select v-model="settings.filename_font_family" size="small" :disabled="!settings.show_filename" class="font-select">
                   <el-option label="无衬线" value="sans" />
@@ -433,19 +432,25 @@
             <div class="section-head">
               <div class="page-nav-group">
                 <h4>预览</h4>
-                <div class="page-nav-controls">
-                  <el-button size="small" text :disabled="currentPageIndex <= 0" @click="prevPage">‹</el-button>
+                <div class="page-nav-controls control-cluster" role="group" aria-label="预览翻页">
+                  <el-button-group>
+                    <el-button size="small" aria-label="上一页" :disabled="currentPageIndex <= 0" @click="prevPage">‹</el-button>
+                    <el-button size="small" aria-label="下一页" :disabled="currentPageIndex >= totalPages - 1" @click="nextPage">›</el-button>
+                  </el-button-group>
                   <span class="page-indicator">{{ currentPageIndex + 1 }}/{{ totalPages }}</span>
-                  <el-button size="small" text :disabled="currentPageIndex >= totalPages - 1" @click="nextPage">›</el-button>
                 </div>
               </div>
-              <div class="preview-toolbar">
-                <el-button size="small" type="success" :loading="generating" :disabled="analyzing || !includedImages.length" @click="handleStartGenerate">生成文档</el-button>
+              <div class="preview-toolbar action-row">
                 <span>{{ previewImages.length }} 图</span>
-                <el-button size="small" text @click="adjustPageZoom(-10)">−</el-button>
-                <el-slider v-model="pageZoom" :min="20" :max="200" :step="5" class="zoom-slider" />
-                <el-button size="small" text @click="adjustPageZoom(10)">+</el-button>
-                <span class="zoom-value">{{ pageZoom }}%</span>
+                <div class="control-cluster" role="group" aria-label="预览缩放">
+                  <el-button-group>
+                    <el-button size="small" aria-label="缩小预览" @click="adjustPageZoom(-10)">−</el-button>
+                    <el-button size="small" aria-label="放大预览" @click="adjustPageZoom(10)">+</el-button>
+                  </el-button-group>
+                  <el-slider v-model="pageZoom" :min="20" :max="200" :step="5" class="zoom-slider" aria-label="预览缩放比例" />
+                  <span class="zoom-value">{{ pageZoom }}%</span>
+                </div>
+                <el-button class="preview-generate-action" size="small" type="success" :loading="generating" :disabled="analyzing || !includedImages.length" @click="handleStartGenerate">生成文档</el-button>
               </div>
             </div>
 
@@ -641,6 +646,7 @@
   </ToolWorkspaceShell>
 </template>
 <script setup>
+import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { computed, ref } from 'vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import ReorderableImageGrid from '../../../shared/components/ReorderableImageGrid.vue'
@@ -847,8 +853,8 @@ function hasCellCaption(img) {
 }
 
 .settings-group-title {
-  margin: 10px 0 6px;
-  padding-top: 6px;
+  margin: 8px 0 4px;
+  padding-top: 4px;
   border-top: 1px dashed var(--docsy-border-subtle);
   font-size: 12px;
   font-weight: 700;
@@ -862,7 +868,7 @@ function hasCellCaption(img) {
 }
 
 .settings-panel :deep(.el-form-item) {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .settings-panel :deep(.el-form-item__content) {
@@ -1427,5 +1433,22 @@ function hasCellCaption(img) {
   .filename-rule-keep {
     grid-template-columns: 64px minmax(0, 1fr) auto;
   }
+}
+</style>
+
+<style scoped>
+.section-head { flex-wrap: wrap; gap: 8px 12px; }
+.preview-toolbar { margin-left: auto; }
+.preview-generate-action { margin-left: 10px; }
+.source-actions > :deep(.el-button + .el-button),
+.generated-actions > :deep(.el-button + .el-button) { margin-left: 0; }
+.settings-panel :deep(.el-form-item__label) { align-items: center; }
+</style>
+
+<style scoped>
+@media (max-width: 800px) {
+  .paddler-layout { display: flex; flex-direction: column; flex: 0 0 auto; height: auto; overflow: visible; }
+  .settings-panel, .result-panel { width: 100% !important; max-height: none; overflow: visible; }
+  .result-panel { min-height: 320px; }
 }
 </style>

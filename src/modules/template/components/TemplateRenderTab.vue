@@ -1202,8 +1202,8 @@ p {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .field-section-heading h3 {
@@ -1221,8 +1221,8 @@ p {
 
 .template-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 8px;
 }
 
 .fill-field-card {
@@ -1230,7 +1230,7 @@ p {
   display: grid;
   gap: 8px;
   min-width: 0;
-  padding: 12px 12px 40px;
+  padding: 10px 10px 36px;
   border: 1px solid var(--docsy-border-subtle);
   border-left: 3px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
@@ -1688,4 +1688,13 @@ p {
     justify-content: flex-start;
   }
 }
+</style>
+
+<style scoped>
+.fill-command-actions :deep(.el-button + .el-button),
+.template-card-actions :deep(.el-button + .el-button),
+.actions :deep(.el-button + .el-button) { margin-left: 0; }
+.fill-command-actions { align-items: center; gap: 8px; }
+.template-card-actions { align-items: center; gap: 6px; }
+.template-card-actions :deep(.el-button--danger) { margin-left: auto; }
 </style>

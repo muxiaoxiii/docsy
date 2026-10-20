@@ -46,7 +46,7 @@ const resolvedMotion = computed(() => props.motion || (/检测|分析|扫描|读
   margin-bottom: 52px;
   padding: 12px 14px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 14px 14px 14px 4px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   box-shadow: var(--docsy-shadow-soft);
   overflow-wrap: anywhere;

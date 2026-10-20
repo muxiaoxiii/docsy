@@ -3,7 +3,7 @@
     <div v-if="pdfDragging" class="pdf-drop-overlay">
       <div class="pdf-drop-message">{{ activeTab === 'merge' ? '松开以添加 PDF 或 Word 文件' : '松开以添加 PDF 文件' }}</div>
     </div>
-    <el-tabs v-model="activeTab" tab-position="left" class="pdf-tabs">
+    <el-tabs v-model="activeTab" :tab-position="tabPosition" class="pdf-tabs">
       <el-tab-pane label="PDF 解锁" name="unlock" lazy>
         <ToolWorkspaceShell title="PDF 解锁" description="移除 PDF 文件的密码保护，原文件旁会生成已解锁副本。" :hide-toolbar="!unlockFiles.length">
           <template #toolbar>
@@ -88,9 +88,7 @@
           <template #actions>
             <div class="merge-options">
               <el-checkbox v-model="duplexSeparate" :disabled="merging">双面打印分隔模式</el-checkbox>
-              <span class="merge-option-hint"
-                >文件页数为奇数时在末尾补一页空白，让每份文件独立占满双面打印的整张纸</span
-              >
+              <HelpTooltip label="双面打印分隔" content="文件页数为奇数时在末尾补一页空白，让每份文件独立占满双面打印的整张纸，起印页始终在正面。" />
             </div>
             <el-button
               type="success"
@@ -318,19 +316,22 @@
                     >
                   </div>
                 </div>
-                <div class="split-preview-actions">
-                  <el-button size="small" :disabled="splitPreviewPage <= 1" @click="moveSplitPreviewPage(-1)"
+                <div class="split-preview-actions action-row">
+<div class="control-cluster" role="group" aria-label="预览翻页">
+<span class="toolbar-caption">浏览</span><el-button-group>
+<el-button size="small" :disabled="splitPreviewPage <= 1" @click="moveSplitPreviewPage(-1)"
                     >上一页</el-button
-                  >
-                  <el-input-number v-model="splitPreviewPage" :min="1" :max="splitPreviewMaxPage" size="small" />
-                  <el-button
+                  ><el-button
                     size="small"
                     :disabled="splitPreviewPage >= splitPreviewMaxPage"
                     @click="moveSplitPreviewPage(1)"
                     >下一页</el-button
                   >
-                  <el-button size="small" type="primary" plain @click="splitFromCurrentPage">从本页拆</el-button>
-                  <el-button
+</el-button-group><el-input-number v-model="splitPreviewPage" :min="1" :max="splitPreviewMaxPage" size="small" aria-label="预览页码" />
+</div>
+<div class="control-cluster" role="group" aria-label="拆分页段">
+<span class="toolbar-caption">拆分</span><el-button-group>
+<el-button size="small" type="primary" plain @click="splitFromCurrentPage">从本页拆</el-button><el-button
                     size="small"
                     type="primary"
                     plain
@@ -338,13 +339,18 @@
                     @click="splitFromPreviousPage"
                     >从上一页拆</el-button
                   >
-                  <el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitStart"
+</el-button-group>
+</div>
+<div class="control-cluster" role="group" aria-label="设置页段边界">
+<el-button-group>
+<el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitStart"
                     >设为起始页</el-button
-                  >
-                  <el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitEnd"
+                  ><el-button size="small" :disabled="!selectedSplitRange" @click="setSelectedSplitEnd"
                     >设为结束页</el-button
                   >
-                  <el-button
+</el-button-group>
+</div>
+<el-button
                     size="small"
                     :disabled="!showSplitNextPreview && splitPreviewPage >= splitPreviewMaxPage"
                     :aria-pressed="showSplitNextPreview"
@@ -445,6 +451,8 @@
 </template>
 
 <script setup>
+import { useResponsiveTabs } from '../../../shared/composables/useResponsiveTabs.js'
+import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
@@ -473,6 +481,8 @@ import {
   setRangeEnd,
   setRangeStart,
 } from '../../../core/pdfUtils.js'
+
+const tabPosition = useResponsiveTabs()
 
 const PDF_TABS = new Set(['unlock', 'merge', 'extract', 'compress', 'split', 'anti-ocr'])
 const currentInstance = getCurrentInstance()
@@ -1847,4 +1857,10 @@ h3 {
   color: var(--docsy-text-muted);
   margin-left: 8px;
 }
+</style>
+
+<style scoped>
+.split-preview-actions { align-items: center; gap: 8px 14px; }
+.split-preview-actions :deep(.el-button-group .el-button + .el-button) { margin-left: -1px; }
+.merge-options { display: flex; align-items: center; gap: 2px; }
 </style>

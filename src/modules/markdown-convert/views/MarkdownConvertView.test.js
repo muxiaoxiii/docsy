@@ -20,6 +20,15 @@ describe('MD 转换队列操作一致性', () => {
     expect(tauriCallSafe).toHaveBeenCalledWith('convert_markdown', { input: '/a.md', inputEncoding: 'auto', outputDir: null, docEngine: null, outputFormat: 'xlsx', docxStyle: 'legal' })
     expect(state.files.value[0].directionTag).toContain('Excel')
   })
+  it('PDF 输入仅走文本层提取路径，不走 Markdown 导出器', async () => {
+    const state = View.setup({}, { expose: vi.fn() })
+    await state.loadFiles(['/a.pdf'])
+    expect(state.files.value[0].directionTag).toBe('PDF 文本层→MD')
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { output_path: '/a.md' } })
+    await state.runQueue()
+    expect(tauriCallSafe).toHaveBeenCalledWith('convert_pdf_text_layer', expect.objectContaining({ input: '/a.pdf' }))
+    expect(tauriCallSafe.mock.calls.some(([command]) => command === 'convert_markdown')).toBe(false)
+  })
   it('运行中保留整个列表，取消的项目可以再次执行', async () => {
     const state = View.setup({}, { expose: vi.fn() })
     await state.loadFiles(['/a.md', '/b.md'])

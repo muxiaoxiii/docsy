@@ -186,23 +186,21 @@
 
       <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title">页面处理</div>
-        <div class="rule-grid">
+        <div class="rule-grid compact-options">
           <div class="rule-item">
-            <label>A4 规范化</label>
+            <label>A4 规范化<HelpTooltip content="小页补白到 A4，大页等比缩小" /></label>
             <el-switch v-model="normalizeA4" active-text="启用" inactive-text="关闭" />
-            <span class="field-hint">小页补白到 A4，大页等比缩小</span>
           </div>
           <div class="rule-item">
-            <label>A4 纸张方向</label>
+            <label>A4 纸张方向<HelpTooltip content="只决定 A4 纸张方向，不改变原内容朝向" /></label>
             <el-select v-model="a4Orientation" :disabled="!normalizeA4">
               <el-option label="保持原页方向" value="preserve" />
               <el-option label="纵向" value="portrait" />
               <el-option label="横向" value="landscape" />
             </el-select>
-            <span class="field-hint">只决定 A4 纸张方向，不改变原内容朝向</span>
           </div>
           <div class="rule-item">
-            <label>内容旋转</label>
+            <label>内容旋转<HelpTooltip content="默认不旋转；自动模式选择能保留更大内容的方向" /></label>
             <el-select v-model="a4ContentRotation" :disabled="!normalizeA4">
               <el-option label="不旋转" value="none" />
               <el-option label="自动适配纸张" value="auto" />
@@ -210,10 +208,9 @@
               <el-option label="逆时针 90°" value="counterclockwise" />
               <el-option label="旋转 180°" value="180" />
             </el-select>
-            <span class="field-hint">默认不旋转；自动模式选择能保留更大内容的方向</span>
           </div>
           <div class="rule-item">
-            <label>内容安全边距</label>
+            <label>安全边距（mm）<HelpTooltip content="mm，默认四周保留 10 mm；内容过大时等比缩小" /></label>
             <el-input-number
               v-model="a4ContentMarginMm"
               :disabled="!normalizeA4"
@@ -222,16 +219,14 @@
               :step="1"
               :precision="1"
             />
-            <span class="field-hint">mm，默认四周保留 10 mm；内容过大时等比缩小</span>
           </div>
           <div class="rule-item">
             <label>删除批注对象</label>
             <el-switch v-model="removeAnnotations" active-text="启用" inactive-text="关闭" />
           </div>
           <div class="rule-item">
-            <label>优化体积</label>
+            <label>优化体积<HelpTooltip content="无损重建：导入先优化加快处理，导出结果就地收尾；原件不动" /></label>
             <el-switch v-model="optimizeSizeEnabled" active-text="启用" inactive-text="关闭" />
-            <span class="field-hint">无损重建：导入先优化加快处理，导出结果就地收尾；原件不动</span>
           </div>
         </div>
       </div>
@@ -338,7 +333,7 @@
 
       <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title">输出</div>
-        <div class="rule-grid">
+        <div class="rule-grid compact-options">
           <div class="rule-item">
             <label>输出模式</label>
             <el-select v-model="outputMode">
@@ -353,7 +348,7 @@
           </div>
           <div v-if="outputMode !== 'files_only'" class="rule-item duplex-item">
             <el-checkbox v-model="duplexSeparate">双面打印分隔模式</el-checkbox>
-            <span class="field-hint">证据页数为奇数时在末尾补一页空白，起印页始终在正面</span>
+            <HelpTooltip label="双面打印分隔" content="证据页数为奇数时在末尾补一页空白，起印页始终在正面。" />
           </div>
           <div v-if="outputMode === 'files_only'" class="rule-item">
             <el-checkbox v-model="fileSuffixEnabled">添加后缀</el-checkbox>
@@ -502,7 +497,7 @@
           <div class="block-title">输出文件夹 <el-button size="small" @click="selectMergedImportOutputDir">更改</el-button></div>
           <p class="path-text">{{ mergedImportPlan.outputDir }}</p>
           <div class="block-title">文件命名</div>
-          <div class="rule-grid">
+          <div class="rule-grid compact-options">
             <div class="rule-item">
               <label>前缀</label>
               <el-input v-model="splitNamePrefix" placeholder="可选" />
@@ -927,7 +922,7 @@
         <WorkspaceEmptyState
           scene="evidence"
           title="导入待编排证据文件"
-          description="支持批量导入 PDF 或 Word 证据材料，自动编制案卷目录、添加规范印章与流水页码。"
+          description="导入 PDF 或 Word 证据材料，划分页段并配置纸张、页码与页眉页脚，再导出 PDF。"
         >
           <template #actions>
             <el-button
@@ -1051,16 +1046,21 @@
         </div>
         <div v-if="activePreviewFilePath" class="preview-controls">
           <div v-if="mergedImportPlan" class="merged-preview-toolbar">
-            <div class="merged-preview-primary-row">
-              <el-button size="small" :disabled="mergedBatchBusy || mergedImportPlan.splitRequest || !canUndoMergedImport" @click="undoMergedImportEdit">撤销</el-button>
-              <el-button size="small" :disabled="mergedBatchBusy || mergedImportPlan.splitRequest || !canRedoMergedImport" @click="redoMergedImportEdit">重做</el-button>
-              <el-button size="small" :disabled="previewPage <= 1" @click="movePreviewPage(-1)">上一页</el-button>
-              <el-input-number v-model="previewPage" :min="1" :max="previewMaxPage" size="small" />
-              <el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)"
+            <div class="merged-preview-primary-row action-row">
+<div class="control-cluster" role="group" aria-label="预览翻页">
+<span class="toolbar-caption">浏览</span><el-button-group>
+<el-button size="small" :disabled="previewPage <= 1" @click="movePreviewPage(-1)">上一页</el-button><el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)"
                 >下一页</el-button
               >
-              <el-button size="small" :disabled="!activePreviewFilePath" @click="refreshPreview">重新渲染</el-button>
-              <el-button
+</el-button-group><el-input-number v-model="previewPage" :min="1" :max="previewMaxPage" size="small" aria-label="预览页码" />
+</div>
+<div class="control-cluster" role="group" aria-label="撤销与重做">
+<el-button-group>
+<el-button size="small" :disabled="mergedBatchBusy || mergedImportPlan.splitRequest || !canUndoMergedImport" @click="undoMergedImportEdit">撤销</el-button><el-button size="small" :disabled="mergedBatchBusy || mergedImportPlan.splitRequest || !canRedoMergedImport" @click="redoMergedImportEdit">重做</el-button>
+</el-button-group>
+</div>
+<div class="control-cluster" role="group" aria-label="预览显示">
+<el-button size="small" :disabled="!activePreviewFilePath" @click="refreshPreview">重新渲染</el-button><el-button
                 size="small"
                 :disabled="!activePreviewFilePath || (!showNextPagePreview && previewPage >= previewMaxPage)"
                 :aria-pressed="showNextPagePreview"
@@ -1068,33 +1068,40 @@
               >
                 {{ showNextPagePreview ? '隐藏下一页预览' : '显示下一页预览' }}
               </el-button>
+</div>
             </div>
-            <fieldset class="merged-preview-secondary-row" :disabled="!mergedImportPlan.detectionAttempted || mergedImportPlan.splitRequest || mergedBatchBusy">
-              <el-button
-                size="small"
-                :disabled="!canMergeCurrentMergedImportRange"
-                @click="mergeCurrentMergedImportRangeIntoPrevious"
-                >合并到上段</el-button
-              >
-              <el-button
+            <fieldset class="merged-preview-secondary-row" :disabled="!mergedImportPlan.detectionAttempted || mergedImportPlan.splitRequest || mergedBatchBusy"><legend class="toolbar-caption">编辑页段</legend>
+<div class="control-cluster" role="group" aria-label="拆分页段">
+<el-button-group>
+<el-button
                 size="small"
                 type="primary"
                 plain
                 :disabled="previewPage <= 1"
                 @click="splitMergedImportFromPreviousPage"
                 >从上一页拆</el-button
-              >
-              <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeStart"
-                >设为起始页</el-button
-              >
-              <el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd"
-                >设为结束页</el-button
-              >
-              <el-button size="small" type="primary" plain @click="addMergedImportRangeFromPage">添加新页段</el-button>
-              <el-button size="small" type="primary" plain @click="splitMergedImportFromCurrentPage"
+              ><el-button size="small" type="primary" plain @click="splitMergedImportFromCurrentPage"
                 >从本页拆</el-button
               >
-            </fieldset>
+</el-button-group>
+</div>
+<div class="control-cluster" role="group" aria-label="设置页段边界">
+<el-button-group>
+<el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeStart"
+                >设为起始页</el-button
+              ><el-button size="small" :disabled="!selectedMergedImportRange" @click="setSelectedMergedRangeEnd"
+                >设为结束页</el-button
+              >
+</el-button-group>
+</div>
+<div class="control-cluster" role="group" aria-label="合并与新增页段">
+<el-button
+                size="small"
+                :disabled="!canMergeCurrentMergedImportRange"
+                @click="mergeCurrentMergedImportRangeIntoPrevious"
+                >合并到上段</el-button
+              ><el-button size="small" type="primary" plain @click="addMergedImportRangeFromPage">添加新页段</el-button>
+</div></fieldset>
           </div>
           <div v-else class="preview-utility-actions">
             <el-input-number
@@ -1195,6 +1202,7 @@
 </template>
 
 <script setup>
+import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
@@ -4603,8 +4611,8 @@ h3 {
 .rule-block {
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
-  padding: 14px 16px;
-  margin-bottom: 14px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
   background: color-mix(in srgb, var(--docsy-surface-muted) 58%, var(--docsy-surface-elevated));
 }
 
@@ -4886,8 +4894,8 @@ h3 {
 
 .rule-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 6px 12px;
   align-items: start;
 }
 
@@ -5649,4 +5657,31 @@ h3 {
     display: none;
   }
 }
+</style>
+
+<style scoped>
+.merged-preview-secondary-row { display: flex; flex-wrap: wrap; gap: 8px 14px; padding-top: 8px; border-top: 1px solid var(--docsy-border-subtle); }
+.merged-preview-secondary-row legend { padding-right: 8px; }
+.merged-preview-primary-row { gap: 8px 14px; }
+.merged-preview-toolbar :deep(.el-button-group .el-button + .el-button) { margin-left: -1px; }
+.rule-item > label { display: inline-flex; align-items: center; }
+.duplex-item { display: flex; flex-direction: row; align-items: center; gap: 2px; }
+</style>
+
+<style scoped>
+.hf-panel > .section-head { flex-wrap: wrap; }
+.hf-panel > .section-head > div:first-child { flex: 1 1 240px; min-width: 0; }
+.hf-panel > .section-head > .section-actions { flex: 0 1 auto; align-items: center; }
+</style>
+
+<style scoped>
+.rule-grid > .rule-item:has(> label) {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 28px;
+}
+.rule-grid > .rule-item:has(> label) > :is(.el-input, .el-select, .el-input-number) { width: 100%; min-width: 0; }
+.rule-grid > .rule-item:not(:has(> label)) { min-height: 28px; }
 </style>

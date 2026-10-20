@@ -21,7 +21,7 @@ export default {
   homeCards: [
     {
       title: 'MD 转换',
-      description: 'Markdown 与 Word、Excel、PowerPoint 等 Office 文档互转',
+      description: 'Markdown 与 Office/HTML 互转，PDF 文本层提取为 Markdown',
       route: 'markdown-convert',
       icon: 'Document',
     },

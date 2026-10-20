@@ -1,6 +1,10 @@
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { markdownOutputError } from './conversionCapabilities.js'
 
 export async function convertWithMedia(command, args, onProgress = () => {}) {
+  const format = command === 'convert_markdown_text' ? args.format : args.outputFormat
+  const formatError = markdownOutputError(format ?? 'docx')
+  if (formatError) return { ok: false, error: formatError }
   const prepared = await tauriCallSafe(
     'prepare_markdown_media',
     command === 'convert_markdown_text'

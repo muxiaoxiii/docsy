@@ -1,0 +1,81 @@
+/* Motion vocabulary: short responses to actions, no perpetual idle effects.
+   Keep these after component styles via specificity; never animate layout in a loop. */
+:root {
+  --motion-fast: 140ms;
+  --motion-normal: 220ms;
+  --motion-enter: 300ms;
+  --motion-ease: cubic-bezier(.2, .75, .25, 1);
+  --motion-spring: cubic-bezier(.2, .9, .3, 1.2);
+}
+
+/* Controls across every workspace. Translate/scale keep existing transforms intact. */
+:where(.el-button, .sidebar-toggle, .footer-btn, .queue-drag-handle) {
+  transition: translate var(--motion-fast) var(--motion-ease),
+    scale var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) ease, border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+:where(.el-button, .sidebar-toggle, .footer-btn):not(:disabled, .is-disabled, .is-loading):active {
+  scale: .97;
+  translate: 0 1px;
+}
+:where(.el-button) > .el-icon:not(.is-loading) {
+  transition: translate var(--motion-normal) var(--motion-spring);
+}
+@media (hover: hover) and (pointer: fine) {
+  .el-button:not(:disabled, .is-disabled, .is-loading):hover > .el-icon:not(.is-loading) { translate: 0 -1px; }
+  .sidebar-menu .el-menu-item:hover .menu-icon { translate: 0 -2px; rotate: -5deg; }
+  .queue-item:hover .queue-item-actions { translate: -2px 0; }
+  .el-upload-dragger:hover .el-icon { translate: 0 -4px; }
+}
+
+/* Navigation and headings. No view remounting: cached workspaces keep their state. */
+.app-aside { transition: width var(--motion-normal) var(--motion-ease); }
+.sidebar-menu .menu-icon { transition: translate var(--motion-normal) var(--motion-spring), rotate var(--motion-normal) ease; }
+.sidebar-menu .el-menu-item { transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease; }
+.sidebar-menu .el-menu-item.is-active::before { animation: docsy-nav-mark 240ms var(--motion-spring) both; transform-origin: center; }
+.page-title { display: inline-block; }
+.docsy-label-enter-active, .docsy-label-leave-active { transition: opacity 120ms ease, transform 120ms var(--motion-ease); }
+.docsy-label-enter-from { opacity: 0; transform: translateY(5px); }
+.docsy-label-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* Feedback inside forms and toolbars. */
+.el-input__wrapper, .el-select__wrapper, .el-textarea__inner {
+  transition: box-shadow var(--motion-fast) ease, background-color var(--motion-fast) ease;
+}
+.el-switch__core .el-switch__action { transition: left 200ms var(--motion-spring), background-color 140ms ease; }
+.el-checkbox__inner { transition: background-color 140ms ease, border-color 140ms ease; }
+.el-checkbox__input.is-checked .el-checkbox__inner::after { animation: docsy-check-in 180ms var(--motion-ease) both; }
+.el-radio__input.is-checked .el-radio__inner::after { animation: docsy-radio-in 180ms var(--motion-spring) both; }
+.el-tabs__active-bar { transition: transform var(--motion-normal) var(--motion-ease), width var(--motion-normal) var(--motion-ease); }
+.el-progress-bar__inner { transition: width 300ms var(--motion-ease), background-color 200ms ease; }
+.el-tag { animation: docsy-tag-in 180ms var(--motion-ease) both; }
+.queue-item-actions, .el-upload-dragger .el-icon { transition: translate var(--motion-normal) var(--motion-spring); }
+.el-upload-dragger { transition: border-color 160ms ease, background-color 160ms ease; }
+.el-upload-dragger.is-dragover .el-icon { translate: 0 -5px; }
+
+/* Queue animation is bounded to small lists by the component. */
+.queue-row-enter-active, .queue-row-leave-active { transition: opacity 180ms ease, transform 220ms var(--motion-ease); }
+.queue-row-enter-from { opacity: 0; transform: translateY(7px); }
+.queue-row-leave-to { opacity: 0; transform: translateX(12px); }
+.queue-list { position: relative; }
+.queue-row-leave-active { position: absolute; width: 100%; box-sizing: border-box; }
+.queue-row-move { transition: transform 240ms var(--motion-ease); }
+
+/* Visibility gate for SVGs, CSS animations, and cached surfaces. */
+.is-motion-paused, .is-motion-paused *, .is-motion-paused::before,
+.is-motion-paused::after, .is-motion-paused *::before, .is-motion-paused *::after {
+  animation-play-state: paused !important;
+}
+@keyframes docsy-nav-mark { from { transform: scaleY(.2); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
+@keyframes docsy-check-in { from { opacity: 0; scale: .5; } to { opacity: 1; scale: 1; } }
+@keyframes docsy-radio-in { from { opacity: 0; scale: .4; } to { opacity: 1; scale: 1; } }
+@keyframes docsy-tag-in { from { opacity: 0; translate: 0 3px; } to { opacity: 1; translate: 0 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

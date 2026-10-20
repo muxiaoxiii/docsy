@@ -8,7 +8,13 @@
     </div>
 
     <el-scrollbar v-if="items.length" class="queue-scrollbar" :max-height="maxHeight">
-      <div class="queue-list">
+      <TransitionGroup
+        tag="div"
+        name="queue-row"
+        class="queue-list"
+        :css="items.length <= 40"
+        :move-class="items.length <= 40 ? 'queue-row-move' : 'queue-row-static'"
+      >
         <article
           v-for="(item, index) in items"
           :key="itemKey(item, index)"
@@ -45,7 +51,7 @@
             </slot>
           </div>
         </article>
-      </div>
+      </TransitionGroup>
     </el-scrollbar>
 
     <div v-else class="queue-empty">

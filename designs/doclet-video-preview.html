@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Doclet · 视频动作预览</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f7f5ed;color:#203e38;font-family:system-ui,sans-serif}main{max-width:1000px;margin:50px auto;padding:24px}h1{font-size:28px;margin-bottom:10px}p{line-height:1.7;color:#63736b}nav{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}button{font:inherit;padding:9px 15px;border:1px solid #ccd5cb;border-radius:8px;background:#fff;color:#203e38;cursor:pointer}button[aria-pressed=true]{background:#355b50;color:white}.stage{display:flex;align-items:center;justify-content:center;min-height:440px;border:1px solid #ccd5cb;border-radius:16px;background-color:#faf9f3;background-image:conic-gradient(#e7e6de 25%,transparent 0 50%,#e7e6de 0 75%,transparent 0);background-size:24px 24px}.stage.dark{background-color:#223730;background-image:conic-gradient(#30473e 25%,transparent 0 50%,#30473e 0 75%,transparent 0)}.detail{display:flex;justify-content:space-between;align-items:center;gap:16px}small{color:#63736b}
+</style>
+</head>
+<body><main><h1>Doclet · 视频动作</h1><p>从 Gemini 原始绿幕视频提取，保留原来的纸张头、蓝绿色围巾与随身文具。等待时跟随鼠标，点击 Doclet 随机播放其他动作，完成后恢复跟随。可切换底色检查透明边缘。</p><div id="app"></div><p>首页打招呼、处理时书写、检测时阅读、完成时庆祝；环顾会跟随鼠标方向；眨眼、抬头和打哈欠也已接入首页互动。</p></main>
+<script type="module">
+import { createApp, h, ref, onBeforeUnmount } from 'vue'
+import { docletMotionDuration } from '/src/shared/docletVideoAssets.js'
+import { randomDocletMotion } from '/src/shared/docletInteractions.js'
+import DocletSprite from '/src/shared/components/DocletSprite.vue'
+const actions={idle:'空闲等待（跟随鼠标）',greet:'打招呼',review:'阅读检查',working:'书写处理',error:'惊讶',celebrate:'庆祝',waiting:'等待',look:'左右环顾（跟随鼠标）',stretch:'抬头伸展',wink:'眨眼',yawn:'打哈欠'}
+createApp({setup(){const selected=ref('idle'),dark=ref(false),replay=ref(0),tracking=ref(true)
+let timer, previousAction=''
+function playNext(){
+ clearTimeout(timer)
+ const motion=randomDocletMotion(previousAction)
+ previousAction=motion
+ selected.value=motion;tracking.value=false;replay.value++
+ timer=setTimeout(()=>{selected.value='idle';tracking.value=true;replay.value++},docletMotionDuration(motion)+180)
+}
+onBeforeUnmount(()=>clearTimeout(timer))
+return()=>[
+ h('nav',Object.entries(actions).map(([key,label])=>h('button',{'aria-pressed':selected.value===key,onClick:()=>{clearTimeout(timer);selected.value=key;replay.value++}},label))),
+ h('div',{class:['stage',{dark:dark.value}],role:'button',tabindex:0,'aria-label':'点击 Doclet 随机播放其他动作，完成后恢复鼠标跟随',onClick:playNext,onKeydown:event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();playNext()}}},[h(DocletSprite,{key:`${selected.value}-${replay.value}`,motion:selected.value,size:320,gazeTracking:tracking.value})]),
+ h('div',{class:'detail'},[h('p',actions[selected.value]), ...(['idle','look','waiting'].includes(selected.value)?[h('button',{onClick:()=>{tracking.value=!tracking.value}},tracking.value?'切换动作播放':'切换鼠标跟随')]:[]),h('button',{onClick:()=>{dark.value=!dark.value}},dark.value?'切换浅色背景':'切换深色背景')])
+]}}).mount('#app')
+</script>
+</body></html>

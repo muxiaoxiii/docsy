@@ -10,19 +10,24 @@
         'is-celebrating': motion === 'celebrate',
         'is-reviewing': motion === 'review' || motion === 'working',
         'is-hovered': isHovered,
+        'is-motion-paused': !motionActive,
+        'is-interactive': interactive,
       },
     ]"
     :style="{
       width: `${size}px`,
-      height: `${Math.round(size * 1.125)}px`,
+      height: `${Math.round(size * 13 / 12)}px`,
       '--mascot-look-x': currentLookX,
       '--mascot-look-y': currentLookY,
     }"
-    role="img"
+    :role="interactive ? 'button' : 'img'"
+    :tabindex="interactive ? 0 : undefined"
     :aria-label="`Doclet 吉祥物 (${motion})`"
     @mouseenter="handleMouseEnter"
     @mouseleave="handleMouseLeave"
     @click="handleClick"
+    @keydown.enter.prevent="handleClick"
+    @keydown.space.prevent="handleClick"
   >
     <svg
       class="mascot-svg"
@@ -32,44 +37,44 @@
     >
       <defs>
         <!-- Soft Ground Shadow Gradient -->
-        <radialGradient id="doclet-shadow-grad" cx="50%" cy="50%" r="50%">
+        <radialGradient :id="`${svgId}-doclet-shadow-grad`" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stop-color="#051c3d" stop-opacity="0.18" />
           <stop offset="100%" stop-color="#051c3d" stop-opacity="0" />
         </radialGradient>
 
         <!-- Body Main Gradient -->
-        <linearGradient id="doclet-body-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient :id="`${svgId}-doclet-body-grad`" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="#ffffff" />
           <stop offset="70%" stop-color="#f5f7fb" />
           <stop offset="100%" stop-color="#e3e9f3" />
         </linearGradient>
 
         <!-- Ear Inner Gradient -->
-        <linearGradient id="doclet-ear-inner-left" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient :id="`${svgId}-doclet-ear-inner-left`" x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stop-color="#38c2d8" />
           <stop offset="100%" stop-color="#1ea0b4" />
         </linearGradient>
-        <linearGradient id="doclet-ear-inner-right" x1="100%" y1="0%" x2="0%" y2="100%">
+        <linearGradient :id="`${svgId}-doclet-ear-inner-right`" x1="100%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="#38c2d8" />
           <stop offset="100%" stop-color="#1ea0b4" />
         </linearGradient>
 
         <!-- Pupil Gradient -->
-        <radialGradient id="doclet-pupil-grad" cx="40%" cy="35%" r="65%">
+        <radialGradient :id="`${svgId}-doclet-pupil-grad`" cx="40%" cy="35%" r="65%">
           <stop offset="0%" stop-color="#0d325a" />
           <stop offset="75%" stop-color="#021a36" />
           <stop offset="100%" stop-color="#010e1e" />
         </radialGradient>
 
         <!-- Tech Visor / Scan Beam -->
-        <linearGradient id="doclet-scan-beam" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient :id="`${svgId}-doclet-scan-beam`" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="#22a9bd" stop-opacity="0" />
           <stop offset="50%" stop-color="#22a9bd" stop-opacity="0.4" />
           <stop offset="100%" stop-color="#22a9bd" stop-opacity="0" />
         </linearGradient>
 
         <!-- Eye Clip Paths for Smooth Vector Blinking -->
-        <clipPath id="left-eye-clip">
+        <clipPath :id="`${svgId}-left-eye-clip`">
           <ellipse
             cx="58"
             cy="62"
@@ -77,7 +82,7 @@
             :ry="leftEyeRy"
           />
         </clipPath>
-        <clipPath id="right-eye-clip">
+        <clipPath :id="`${svgId}-right-eye-clip`">
           <ellipse
             cx="102"
             cy="62"
@@ -94,7 +99,7 @@
         cy="166"
         :rx="shadowRx"
         :ry="shadowRy"
-        fill="url(#doclet-shadow-grad)"
+        :fill="`url(#${svgId}-doclet-shadow-grad)`"
       />
 
       <!-- Whole Body Animated Floating Wrapper -->
@@ -110,7 +115,7 @@
           <!-- Torso Base -->
           <path
             d="M 50,96 C 42,112 44,142 55,150 C 66,158 94,158 105,150 C 116,142 118,112 110,96 Z"
-            fill="url(#doclet-body-grad)"
+            :fill="`url(#${svgId}-doclet-body-grad)`"
             stroke="#cfd8e5"
             stroke-width="1.5"
           />
@@ -148,7 +153,7 @@
           <g class="ear-left">
             <path
               d="M 46,30 C 35,16 26,2 32,-2 C 38,-4 50,8 56,22 Z"
-              fill="url(#doclet-body-grad)"
+              :fill="`url(#${svgId}-doclet-body-grad)`"
               stroke="#02274e"
               stroke-width="2.5"
               stroke-linejoin="round"
@@ -156,7 +161,7 @@
             <!-- Ear Inner Glow -->
             <path
               d="M 43,24 C 36,14 31,4 34,2 C 37,1 44,9 48,18 Z"
-              fill="url(#doclet-ear-inner-left)"
+              :fill="`url(#${svgId}-doclet-ear-inner-left)`"
             />
           </g>
 
@@ -164,7 +169,7 @@
           <g class="ear-right">
             <path
               d="M 114,30 C 125,16 134,2 128,-2 C 122,-4 110,8 104,22 Z"
-              fill="url(#doclet-body-grad)"
+              :fill="`url(#${svgId}-doclet-body-grad)`"
               stroke="#02274e"
               stroke-width="2.5"
               stroke-linejoin="round"
@@ -172,7 +177,7 @@
             <!-- Ear Inner Glow -->
             <path
               d="M 117,24 C 124,14 129,4 126,2 C 123,1 116,9 112,18 Z"
-              fill="url(#doclet-ear-inner-right)"
+              :fill="`url(#${svgId}-doclet-ear-inner-right)`"
             />
           </g>
         </g>
@@ -187,7 +192,7 @@
           <!-- Head Contour -->
           <path
             d="M 36,54 C 36,28 54,16 80,16 C 106,16 124,28 124,54 C 124,84 114,104 80,104 C 46,104 36,84 36,54 Z"
-            fill="url(#doclet-body-grad)"
+            :fill="`url(#${svgId}-doclet-body-grad)`"
             stroke="#02274e"
             stroke-width="2.6"
             stroke-linejoin="round"
@@ -204,21 +209,21 @@
               cx="58"
               cy="62"
               rx="14"
-              ry="17"
+              :ry="leftEyeRy"
               fill="#ffffff"
               stroke="#02274e"
               stroke-width="2"
             />
 
             <!-- Left Eye Pupil with Dynamic 60fps Tracking -->
-            <g clip-path="url(#left-eye-clip)">
+            <g :clip-path="`url(#${svgId}-left-eye-clip)`"><g class="pupil-track" :style="pupilStyle">
               <!-- Pupil Body -->
               <ellipse
                 :cx="leftPupilX"
                 :cy="leftPupilY"
                 :rx="pupilRx"
                 :ry="pupilRy"
-                fill="url(#doclet-pupil-grad)"
+                :fill="`url(#${svgId}-doclet-pupil-grad)`"
               />
               <!-- Iris Cyan Rim -->
               <ellipse
@@ -247,6 +252,7 @@
               />
             </g>
 
+            </g>
             <!-- Left Eye Closed Arc (Visible during Blink) -->
             <path
               v-if="isLeftClosed"
@@ -262,21 +268,21 @@
               cx="102"
               cy="62"
               rx="14"
-              ry="17"
+              :ry="rightEyeRy"
               fill="#ffffff"
               stroke="#02274e"
               stroke-width="2"
             />
 
             <!-- Right Eye Pupil with Dynamic 60fps Tracking -->
-            <g clip-path="url(#right-eye-clip)">
+            <g :clip-path="`url(#${svgId}-right-eye-clip)`"><g class="pupil-track" :style="pupilStyle">
               <!-- Pupil Body -->
               <ellipse
                 :cx="rightPupilX"
                 :cy="rightPupilY"
                 :rx="pupilRx"
                 :ry="pupilRy"
-                fill="url(#doclet-pupil-grad)"
+                :fill="`url(#${svgId}-doclet-pupil-grad)`"
               />
               <!-- Iris Cyan Rim -->
               <ellipse
@@ -305,6 +311,7 @@
               />
             </g>
 
+            </g>
             <!-- Right Eye Closed Arc (Visible during Blink or Wink) -->
             <path
               v-if="isRightClosed"
@@ -355,7 +362,7 @@
           <!-- Review Visor / Holographic HUD when Reviewing -->
           <g v-if="motion === 'review' || motion === 'working'" class="hud-scanner">
             <line x1="42" y1="62" x2="118" y2="62" stroke="#22a9bd" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.65" />
-            <rect x="40" y="52" width="80" height="20" rx="3" fill="url(#doclet-scan-beam)" />
+            <rect x="40" y="52" width="80" height="20" rx="3" :fill="`url(#${svgId}-doclet-scan-beam)`" />
           </g>
         </g>
       </g>
@@ -369,7 +376,8 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, useId } from 'vue'
+import { useMotionActivity } from '../composables/useMotionActivity.js'
 
 const props = defineProps({
   size: { type: Number, default: 120 },
@@ -385,22 +393,29 @@ const props = defineProps({
   interactive: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['click', 'nod'])
+const emit = defineEmits(['click'])
+const svgId = `doclet-${useId()}`
 
 const rootRef = ref(null)
+const { active: motionActive } = useMotionActivity(rootRef)
 
 // Smoothed 60fps tracking coordinates (-1 to 1)
 const currentLookX = ref(0)
 const currentLookY = ref(0)
 let targetLookX = 0
 let targetLookY = 0
-let animFrameId = null
+
 
 // Blinking & Winking State Machine
 const isBlinking = ref(false)
 const isWinking = ref(false)
 const isHovered = ref(false)
-let blinkTimer = null
+const timers = new Set()
+function later(callback, delay) {
+  const timer = setTimeout(() => { timers.delete(timer); callback() }, delay)
+  timers.add(timer)
+  return timer
+}
 
 // Click burst particles
 const clickBursts = ref([])
@@ -411,13 +426,15 @@ watch(
   ([x, y]) => {
     if (x !== null && x !== undefined) targetLookX = Math.max(-1, Math.min(1, x))
     if (y !== null && y !== undefined) targetLookY = Math.max(-1, Math.min(1, y))
+    if (x == null) targetLookX = 0
+    if (y == null) targetLookY = 0
   },
   { immediate: true }
 )
 
 // Global or container pointer move handler
 function handleGlobalPointerMove(e) {
-  if (!props.trackPointer || !rootRef.value) return
+  if (!motionActive.value || !props.trackPointer || !rootRef.value || e.pointerType === 'touch') return
   if (props.lookX !== null && props.lookX !== undefined) return
 
   const rect = rootRef.value.getBoundingClientRect()
@@ -430,42 +447,28 @@ function handleGlobalPointerMove(e) {
 
   targetLookX = Math.max(-1, Math.min(1, dx * 1.5))
   targetLookY = Math.max(-1, Math.min(1, dy * 1.5))
+  currentLookX.value = targetLookX
+  currentLookY.value = targetLookY
 }
 
 function handlePointerLeaveWindow() {
   if (props.lookX !== null && props.lookX !== undefined) return
   targetLookX = 0
   targetLookY = 0
+  currentLookX.value = 0
+  currentLookY.value = 0
 }
 
-// 60FPS LERP Smooth Loop
-function startRafLoop() {
-  function tick() {
-    // Smooth easing factor 0.14 for buttery responsive eye motion
-    const ease = 0.14
-    currentLookX.value += (targetLookX - currentLookX.value) * ease
-    currentLookY.value += (targetLookY - currentLookY.value) * ease
-
-    animFrameId = window.requestAnimationFrame(tick)
-  }
-  animFrameId = window.requestAnimationFrame(tick)
-}
-
-// Blinking loop (natural random blink every 3~5 seconds)
-function scheduleNextBlink() {
-  const delay = 2800 + Math.random() * 2600
-  blinkTimer = setTimeout(() => {
-    if (props.motion !== 'celebrate' && !isWinking.value) {
-      isBlinking.value = true
-      setTimeout(() => {
-        isBlinking.value = false
-        scheduleNextBlink()
-      }, 160)
-    } else {
-      scheduleNextBlink()
-    }
-  }, delay)
-}
+// Only update on input. CSS interpolates transforms; there is no idle JS frame loop.
+watch(
+  () => [props.lookX, props.lookY, motionActive.value],
+  () => {
+    if (!motionActive.value) return
+    currentLookX.value = targetLookX
+    currentLookY.value = targetLookY
+  },
+  { immediate: true },
+)
 
 function handleMouseEnter() {
   isHovered.value = true
@@ -479,14 +482,16 @@ function handleClick(e) {
   if (!props.interactive) return
   emit('click', e)
 
+  if (!motionActive.value) return
   // Trigger wink
   isWinking.value = true
-  setTimeout(() => {
+  later(() => {
     isWinking.value = false
   }, 320)
 
   // Emit burst particles
-  const glyphs = ['✨', '✦', '💫', '🎉', '💖']
+  if (clickBursts.value.length >= 8) return
+  const glyphs = ['✦', '✧', '·', '+']
   for (let i = 0; i < 4; i++) {
     const id = Date.now() + Math.random()
     const angle = (Math.PI * 2 * i) / 4 + (Math.random() - 0.5) * 0.5
@@ -499,7 +504,7 @@ function handleClick(e) {
       y,
       glyph: glyphs[Math.floor(Math.random() * glyphs.length)],
     })
-    setTimeout(() => {
+    later(() => {
       clickBursts.value = clickBursts.value.filter((p) => p.id !== id)
     }, 700)
   }
@@ -507,26 +512,11 @@ function handleClick(e) {
 
 // ================= Reactive Calculations =================
 // Pupil Coordinates (clamped within sclera)
-const leftPupilX = computed(() => {
-  const base = 58
-  const offset = currentLookX.value * 5.8
-  return Number((base + offset).toFixed(2))
-})
-const leftPupilY = computed(() => {
-  const base = 62
-  const offset = currentLookY.value * 5.0
-  return Number((base + offset).toFixed(2))
-})
-const rightPupilX = computed(() => {
-  const base = 102
-  const offset = currentLookX.value * 5.8
-  return Number((base + offset).toFixed(2))
-})
-const rightPupilY = computed(() => {
-  const base = 62
-  const offset = currentLookY.value * 5.0
-  return Number((base + offset).toFixed(2))
-})
+const leftPupilX = 58
+const rightPupilX = 102
+const leftPupilY = 62
+const rightPupilY = 62
+const pupilStyle = computed(() => ({ transform: `translate(${currentLookX.value * 5.8}px, ${currentLookY.value * 5}px)` }))
 
 const pupilRx = computed(() => (props.motion === 'review' ? 7 : 7.6))
 const pupilRy = computed(() => (props.motion === 'review' ? 8.5 : 9.5))
@@ -548,17 +538,15 @@ const shadowRx = computed(() => 36 + Math.abs(currentLookX.value) * 2)
 const shadowRy = computed(() => 6)
 
 onMounted(() => {
-  startRafLoop()
-  scheduleNextBlink()
   window.addEventListener('pointermove', handleGlobalPointerMove, { passive: true })
-  window.addEventListener('pointerleave', handlePointerLeaveWindow)
+  document.documentElement.addEventListener('pointerleave', handlePointerLeaveWindow)
 })
 
 onBeforeUnmount(() => {
-  if (animFrameId) window.cancelAnimationFrame(animFrameId)
-  if (blinkTimer) clearTimeout(blinkTimer)
+  timers.forEach(clearTimeout)
+  timers.clear()
   window.removeEventListener('pointermove', handleGlobalPointerMove)
-  window.removeEventListener('pointerleave', handlePointerLeaveWindow)
+  document.documentElement.removeEventListener('pointerleave', handlePointerLeaveWindow)
 })
 </script>
 
@@ -567,7 +555,7 @@ onBeforeUnmount(() => {
   display: inline-block;
   position: relative;
   user-select: none;
-  cursor: pointer;
+  cursor: default;
   filter: drop-shadow(0 4px 12px rgba(10, 30, 60, 0.08));
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -696,5 +684,26 @@ onBeforeUnmount(() => {
     opacity: 0;
     transform: translateY(-16px) scale(0.9);
   }
+}
+</style>
+
+<style scoped>
+.doclet-svg-mascot.is-interactive { cursor: pointer; }
+.doclet-svg-mascot:focus-visible { outline: 2px solid var(--docsy-primary, #22a9bd); outline-offset: 4px; border-radius: 12px; }
+.pupil-track, .head-face-group, .ears-group { transition: transform 180ms cubic-bezier(.2,.75,.25,1); }
+.eyes-container { transform-origin: 80px 62px; animation: doclet-blink 5.4s infinite; }
+@keyframes doclet-blink { 0%, 44%, 48%, 100% { transform: scaleY(1); } 46% { transform: scaleY(.07); } }
+/* A greeting and a celebration settle, rather than bouncing indefinitely. */
+.motion--greet .arm-right { animation-iteration-count: 3; }
+.is-celebrating .body-float-wrapper { animation-iteration-count: 2; }
+.motion--waiting .head-face-group { rotate: -6deg; transform-origin: 80px 90px; }
+.motion--waiting .arm-left { transform: translate(10px, -13px) rotate(-12deg); }
+.motion--error .body-float-wrapper { animation: doclet-no 480ms ease-in-out 1; }
+.motion--error .ears-group { rotate: -8deg; transform-origin: 80px 24px; }
+@keyframes doclet-no { 0%,100% { transform: translateX(0); } 25%,75% { transform: translateX(-3px); } 50% { transform: translateX(3px); } }
+.motion--working .arm-right { transform-origin: 112px 110px; animation: doclet-write 850ms ease-in-out infinite; }
+@keyframes doclet-write { 0%,100% { transform: rotate(-12deg) translate(-3px, -3px); } 50% { transform: rotate(8deg) translate(0, -5px); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 </style>

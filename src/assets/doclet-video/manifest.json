@@ -1,0 +1,109 @@
+{
+  "fps": 24,
+  "size": [
+    320,
+    400
+  ],
+  "processing": "green dominance alpha matte; green spill suppression; fixed crop; Lanczos resize",
+  "clips": {
+    "idle": {
+      "source": "designs/videos/gemini_generated_video_22a52a2a.mp4",
+      "sha256": "9d4c065d624f12fde6b12f62eb3855e60f1b553c850a8c50d0c4db2579aa7638",
+      "start": 0,
+      "end": 1.125,
+      "frames": 27,
+      "loop": 0,
+      "bytes": 380118
+    },
+    "greet": {
+      "source": "designs/videos/gemini_generated_video_22a52a2a.mp4",
+      "sha256": "9d4c065d624f12fde6b12f62eb3855e60f1b553c850a8c50d0c4db2579aa7638",
+      "start": 1.125,
+      "end": 2.5,
+      "frames": 33,
+      "loop": 1,
+      "bytes": 492200
+    },
+    "review": {
+      "source": "designs/videos/gemini_generated_video_22a52a2a.mp4",
+      "sha256": "9d4c065d624f12fde6b12f62eb3855e60f1b553c850a8c50d0c4db2579aa7638",
+      "start": 2.625,
+      "end": 3.5,
+      "frames": 21,
+      "loop": 0,
+      "bytes": 276960
+    },
+    "working": {
+      "source": "designs/videos/gemini_generated_video_22a52a2a.mp4",
+      "sha256": "9d4c065d624f12fde6b12f62eb3855e60f1b553c850a8c50d0c4db2579aa7638",
+      "start": 3.75,
+      "end": 4.8333333333,
+      "frames": 26,
+      "loop": 0,
+      "bytes": 343866
+    },
+    "error": {
+      "source": "designs/videos/gemini_generated_video_22a52a2a.mp4",
+      "sha256": "9d4c065d624f12fde6b12f62eb3855e60f1b553c850a8c50d0c4db2579aa7638",
+      "start": 5.125,
+      "end": 6,
+      "frames": 21,
+      "loop": 1,
+      "bytes": 303196
+    },
+    "celebrate": {
+      "source": "designs/videos/gemini_generated_video_22a52a2a.mp4",
+      "sha256": "9d4c065d624f12fde6b12f62eb3855e60f1b553c850a8c50d0c4db2579aa7638",
+      "start": 6.125,
+      "end": 7.25,
+      "frames": 27,
+      "loop": 1,
+      "bytes": 385786
+    },
+    "waiting": {
+      "source": "designs/videos/gemini_generated_video_22a52a2a.mp4",
+      "sha256": "9d4c065d624f12fde6b12f62eb3855e60f1b553c850a8c50d0c4db2579aa7638",
+      "start": 7.25,
+      "end": 8.75,
+      "frames": 36,
+      "loop": 0,
+      "bytes": 508578
+    },
+    "look": {
+      "source": "designs/videos/gemini_generated_video_077e946b.mp4",
+      "sha256": "001353a578a9395551af4393a34e440865641e3982de14693fd09c0ae64c1b30",
+      "start": 0,
+      "end": 10,
+      "frames": 240,
+      "loop": 0,
+      "bytes": 3221912
+    },
+    "stretch": {
+      "source": "designs/videos/gemini_generated_video_8ac082e1.mp4",
+      "sha256": "e0373893f62f7d464af5b2cd41df4fec4ad3811cbe827be47855866627607137",
+      "start": 0.75,
+      "end": 3.125,
+      "frames": 57,
+      "loop": 1,
+      "bytes": 772864
+    },
+    "wink": {
+      "source": "designs/videos/gemini_generated_video_8ac082e1.mp4",
+      "sha256": "e0373893f62f7d464af5b2cd41df4fec4ad3811cbe827be47855866627607137",
+      "start": 4.5,
+      "end": 6.3333333333,
+      "frames": 44,
+      "loop": 1,
+      "bytes": 628930
+    },
+    "yawn": {
+      "source": "designs/videos/gemini_generated_video_8ac082e1.mp4",
+      "sha256": "e0373893f62f7d464af5b2cd41df4fec4ad3811cbe827be47855866627607137",
+      "start": 6.875,
+      "end": 9.375,
+      "frames": 60,
+      "loop": 1,
+      "bytes": 788386
+    }
+  }
+}

@@ -1,16 +1,16 @@
 <template>
-  <span class="history-btns" :class="{ compact }">
+  <el-button-group class="history-btns" :class="{ compact }" aria-label="编辑历史">
     <el-tooltip content="撤销 (Ctrl+Z)" :show-after="500" placement="top">
-      <el-button link :size="compact ? 'small' : 'small'" :disabled="!canUndo" @click.stop="$emit('undo')">
+      <el-button size="small" aria-label="撤销" :disabled="!canUndo" @click.stop="$emit('undo')">
         <el-icon :size="iconSize"><RefreshLeft /></el-icon>
       </el-button>
     </el-tooltip>
     <el-tooltip content="重做 (Ctrl+Shift+Z)" :show-after="500" placement="top">
-      <el-button link :size="compact ? 'small' : 'small'" :disabled="!canRedo" @click.stop="$emit('redo')">
+      <el-button size="small" aria-label="重做" :disabled="!canRedo" @click.stop="$emit('redo')">
         <el-icon :size="iconSize"><RefreshRight /></el-icon>
       </el-button>
     </el-tooltip>
-  </span>
+  </el-button-group>
 </template>
 
 <script setup>
@@ -32,7 +32,7 @@ const iconSize = computed(() => (props.compact ? 12 : 14))
 .history-btns {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
 }
 .history-btns.compact {
   margin-left: 4px;

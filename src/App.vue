@@ -63,13 +63,15 @@
             {{ sidebarCollapsed ? '›' : '‹' }}
           </button>
           <div class="page-heading">
-            <span class="page-title">{{ currentPageTitle }}</span>
+            <Transition name="docsy-label" mode="out-in">
+              <span :key="currentPageTitle" class="page-title">{{ currentPageTitle }}</span>
+            </Transition>
             <span class="page-context">本地文档处理工作台</span>
           </div>
         </div>
         <span class="app-version">v{{ version }}</span>
       </el-header>
-      <el-main class="app-main">
+      <el-main ref="mainRef" class="app-main">
         <router-view v-slot="{ Component, route: currentRoute }">
           <keep-alive :max="2">
             <component :is="Component" v-if="currentRoute.meta.keepAlive" :key="currentRoute.name" />
@@ -94,7 +96,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Setting, InfoFilled } from '@element-plus/icons-vue'
 import { getMenuItems } from './core/moduleRegistry.js'
@@ -113,6 +115,19 @@ import templateIconUrl from './assets/icons/template.svg?url'
 
 const router = useRouter()
 const route = useRoute()
+const mainRef = ref(null)
+let pageEntrance
+watch(() => route.name, async () => {
+  await nextTick()
+  pageEntrance?.cancel()
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.hidden) return
+  pageEntrance = mainRef.value?.$el?.animate?.(
+    [{ opacity: 0.45, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }],
+    { duration: 240, easing: 'cubic-bezier(.2,.75,.25,1)' },
+  )
+})
+onBeforeUnmount(() => pageEntrance?.cancel())
+
 const appStore = useAppStore()
 
 const menuItems = computed(() => getMenuItems(appStore.settings))

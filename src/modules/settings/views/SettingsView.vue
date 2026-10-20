@@ -60,19 +60,21 @@
           </div>
           <div class="tool-desc">{{ tool.description }}</div>
           <div v-if="tool.probeState === 'error'" class="install-hint">{{ tool.probeError }}</div>
-          <div class="tool-actions">
+          <div class="tool-actions action-row">
             <el-button size="small" :loading="tool.checking" @click="checkTool(tool)">检测此工具</el-button>
             <el-button
               v-if="tool.status.available && tool.status.managed && tool.autoInstall"
               size="small"
               type="danger"
+              text
+              class="remove-tool-action"
               :loading="tool.removing"
               @click="removeManagedTool(tool)"
             >
               清除此工具
             </el-button>
           </div>
-          <div class="tool-actions" v-if="!tool.status.available">
+          <div class="tool-actions action-row" v-if="!tool.status.available">
             <span class="install-hint">{{ tool.status.install_hint }}</span>
             <el-button
               v-if="tool.autoInstall"
@@ -127,17 +129,17 @@
       <template #header>
         <span>应用设置</span>
       </template>
-      <el-form label-width="120px">
-        <el-form-item label="LibreOffice 路径">
+      <el-form class="compact-options" label-width="132px" size="small">
+        <el-form-item>
+          <template #label><span class="form-label-help">LibreOffice 路径<HelpTooltip content="用于 DOC/DOCX 转 PDF；留空时自动检测本机安装路径。" /></span></template>
           <el-input v-model="settings.libreoffice_path" placeholder="留空则自动检测" />
-          <span class="form-hint">用于 DOC/DOCX 转 PDF</span>
         </el-form-item>
-        <el-form-item label="工具清单地址">
+        <el-form-item>
+          <template #label><span class="form-label-help">工具清单地址<HelpTooltip content="用于 qpdf、Poppler、FFmpeg 在线安装。留空使用默认清单，也可填写镜像或内网清单地址。" /></span></template>
           <el-input
             v-model="settings.tool_manifest_url"
             placeholder="留空使用默认清单；国内环境可填写 Gitee、对象存储或内网清单地址"
           />
-          <span class="form-hint">用于 qpdf、Poppler、FFmpeg 在线安装</span>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="saveSettings">保存设置</el-button>
@@ -291,6 +293,7 @@
 </template>
 
 <script setup>
+import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import { computed, ref, reactive, onMounted, onUnmounted } from 'vue'
 import { openExternalUrl, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
@@ -788,7 +791,7 @@ onUnmounted(() => {
 
 <style scoped>
 .settings-section {
-  margin-bottom: clamp(14px, 2dvh, 18px);
+  margin-bottom: 10px;
   border-color: var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
@@ -920,13 +923,13 @@ onUnmounted(() => {
 }
 
 .settings-section :deep(.el-card__header) {
-  padding-block: clamp(12px, 1.8dvh, 16px);
+  padding-block: 10px;
   padding-inline: 18px;
   background: color-mix(in srgb, var(--docsy-surface-muted) 72%, transparent);
 }
 
 .settings-section :deep(.el-card__body) {
-  padding-block: clamp(14px, 2dvh, 18px);
+  padding-block: 12px;
   padding-inline: 18px;
   overflow: visible;
 }
@@ -1143,4 +1146,16 @@ onUnmounted(() => {
     width: auto !important;
   }
 }
+</style>
+
+<style scoped>
+.tool-item { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.tool-info { flex-wrap: wrap; min-height: 24px; }
+.tool-actions { gap: 8px; }
+.tool-actions > .install-hint { flex-basis: 100%; }
+.tool-actions + .tool-actions { margin-top: 0; }
+.tool-actions > .remove-tool-action { margin-left: auto; }
+.card-header-actions :deep(.el-button + .el-button),
+.menu-order-actions :deep(.el-button + .el-button),
+.diag-actions :deep(.el-button + .el-button) { margin-left: 0; }
 </style>

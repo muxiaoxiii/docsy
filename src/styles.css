@@ -34,6 +34,7 @@
   --docsy-shadow-panel: 0 8px 24px rgba(48, 41, 32, 0.045);
   --docsy-shadow-soft: 0 4px 14px rgba(48, 41, 32, 0.032);
   --docsy-radius: 8px;
+  --docsy-radius-sm: var(--docsy-radius);
   --docsy-panel-radius: var(--docsy-radius);
   --docsy-focus-ring: rgba(71, 119, 108, 0.42);
 
@@ -155,6 +156,8 @@ select {
   .el-dialog,
   .el-message-box,
   .el-notification,
+  .el-message,
+  .el-popper,
   .el-table,
   .el-upload-dragger,
   .el-input__wrapper,

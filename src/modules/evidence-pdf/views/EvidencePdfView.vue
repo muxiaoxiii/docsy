@@ -1,6 +1,6 @@
 <template>
   <div class="evidence-pdf-view">
-    <el-tabs v-model="activeTab" tab-position="left" class="evidence-tabs">
+    <el-tabs v-model="activeTab" :tab-position="tabPosition" class="evidence-tabs">
       <el-tab-pane label="分项证据合并" name="merge" lazy>
         <EvidencePdfWorkbench workflow="merge" />
       </el-tab-pane>
@@ -84,6 +84,7 @@
 </template>
 
 <script setup>
+import { useResponsiveTabs } from '../../../shared/composables/useResponsiveTabs.js'
 import { openPath } from '../../../core/tauriBridge.js'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
@@ -94,6 +95,8 @@ import evidenceIconUrl from '../../../assets/icons/evidence.svg?url'
 import { moveItem } from '../../../shared/components/reorderableItems.js'
 import { useEvidenceFolder } from '../../../shared/pdf-tools/composables/useEvidenceFolder.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
+
+const tabPosition = useResponsiveTabs()
 
 const activeTab = ref('merge')
 const { evidenceFolder, evidenceGroups, scanning, building, conversionFailures, evidenceOutputDir, selectEvidenceFolder, scanEvidence, buildEvidence } = useEvidenceFolder()

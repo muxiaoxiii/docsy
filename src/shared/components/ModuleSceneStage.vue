@@ -5,6 +5,7 @@
       `scene--${resolvedScene}`,
       {
         'is-processing': busy || processing,
+        'is-motion-paused': !motionActive,
         'is-dragging': dragging,
         'is-celebrating': celebrating,
       },
@@ -16,11 +17,8 @@
     <div
       ref="stageCanvasRef"
       class="stage-canvas"
-      :class="{ 'is-nodding': nodActive, 'is-interacting': isInteracting }"
-      :style="{ '--look-x': lookX, '--look-y': lookY }"
+      :class="{ 'is-nodding': nodActive }"
       aria-hidden="true"
-      @pointermove="handlePointerMove"
-      @pointerleave="handlePointerLeave"
       @pointerdown="handlePointerDown"
     >
       <!-- Ambient Glow Behind Stage -->
@@ -44,7 +42,7 @@
           <span class="card-sub-icon">{{ sceneMeta.sourceIcon }}</span>
         </div>
         <div class="card-content-preview">
-          <SceneIllustrations :scene="resolvedScene" type="source" />
+          <SceneIllustrations :scene="resolvedScene" type="source" :active="busy || processing" />
         </div>
         <div class="card-dogear" />
       </div>
@@ -59,15 +57,9 @@
             stroke-dasharray="4 4"
             class="stream-flow-line"
           />
-          <circle r="3" class="stream-dot dot-1">
-            <animateMotion path="M 10 20 C 40 6, 80 34, 110 20" dur="2.2s" repeatCount="indefinite" />
-          </circle>
-          <circle r="2.4" class="stream-dot dot-2">
-            <animateMotion path="M 10 20 C 40 6, 80 34, 110 20" dur="2.2s" begin="0.75s" repeatCount="indefinite" />
-          </circle>
-          <circle r="2" class="stream-dot dot-3">
-            <animateMotion path="M 10 20 C 40 6, 80 34, 110 20" dur="2.2s" begin="1.5s" repeatCount="indefinite" />
-          </circle>
+          <circle v-if="busy || processing" r="3" class="stream-dot dot-1 flow-css-dot" />
+          <circle v-if="busy || processing" r="2.4" class="stream-dot dot-2 flow-css-dot" />
+          <circle v-if="busy || processing" r="2" class="stream-dot dot-3 flow-css-dot" />
         </svg>
 
         <!-- Floating glyphs when processing -->
@@ -85,7 +77,7 @@
 
       <!-- Doclet Mascot in Center -->
       <div class="stage-mascot">
-        <DocletSvgMascot :size="112" :motion="mascotMotion" :look-x="lookX" :look-y="lookY" />
+        <DocletSprite :interactive="false" :size="112" :motion="mascotMotion" :gaze-tracking="!nodActive" />
       </div>
 
       <!-- Right Target Result Card -->
@@ -95,7 +87,7 @@
           <span class="card-sub-icon">{{ sceneMeta.targetIcon }}</span>
         </div>
         <div class="card-content-preview">
-          <SceneIllustrations :scene="resolvedScene" type="target" />
+          <SceneIllustrations :scene="resolvedScene" type="target" :active="busy || processing" />
         </div>
         <div class="card-dogear" />
       </div>
@@ -133,8 +125,10 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import DocletSvgMascot from './DocletSvgMascot.vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
+import { useMotionActivity } from '../composables/useMotionActivity.js'
+import DocletSprite from './DocletSprite.vue'
+import { useDocletClickAction } from '../composables/useDocletClickAction.js'
 import SceneIllustrations from './SceneIllustrations.vue'
 
 const props = defineProps({
@@ -172,32 +166,20 @@ defineEmits(['action'])
 const resolvedScene = computed(() => props.scene || 'generic')
 
 const stageCanvasRef = ref(null)
-const lookX = ref(null)
-const lookY = ref(null)
-const isInteracting = ref(false)
-const nodActive = ref(false)
+const { active: motionActive, reduced } = useMotionActivity(stageCanvasRef)
+const interactionTimers = new Set()
+function later(callback, delay) {
+  const timer = setTimeout(() => { interactionTimers.delete(timer); callback() }, delay)
+  interactionTimers.add(timer)
+}
+onBeforeUnmount(() => interactionTimers.forEach(clearTimeout))
+const { motion: clickMotion, play: playClickMotion } = useDocletClickAction()
+const nodActive = computed(() => Boolean(clickMotion.value))
 const ripples = ref([])
 
-function handlePointerMove(e) {
-  if (!stageCanvasRef.value) return
-  const rect = stageCanvasRef.value.getBoundingClientRect()
-  const centerX = rect.left + rect.width / 2
-  const centerY = rect.top + rect.height / 2
-  const maxDist = Math.max(rect.width, rect.height) / 2
-  const dx = (e.clientX - centerX) / (maxDist || 1)
-  const dy = (e.clientY - centerY) / (maxDist || 1)
-  lookX.value = Number(Math.max(-1, Math.min(1, dx)).toFixed(3))
-  lookY.value = Number(Math.max(-1, Math.min(1, dy)).toFixed(3))
-  isInteracting.value = true
-}
-
-function handlePointerLeave() {
-  lookX.value = null
-  lookY.value = null
-  isInteracting.value = false
-}
-
 function handlePointerDown(e) {
+  if (props.busy || props.processing || props.celebrating || props.dragging) return
+  if (reduced.value || !motionActive.value || e.button !== 0 || ripples.value.length >= 6) return
   if (!stageCanvasRef.value) return
   const rect = stageCanvasRef.value.getBoundingClientRect()
   const x = Math.round(e.clientX - rect.left)
@@ -206,22 +188,19 @@ function handlePointerDown(e) {
   const glyphs = sceneMeta.value?.glyphs?.length ? sceneMeta.value.glyphs : ['✨', '✦', '📑', '🎉', '💫']
   const randomGlyph = glyphs[Math.floor(Math.random() * glyphs.length)]
   ripples.value.push({ id, x, y, glyph: randomGlyph })
-  setTimeout(() => {
+  later(() => {
     ripples.value = ripples.value.filter((r) => r.id !== id)
   }, 850)
 
   // 触发 Doclet 快乐点头回应
-  nodActive.value = true
-  setTimeout(() => {
-    nodActive.value = false
-  }, 420)
+  playClickMotion()
 }
 
 const mascotMotion = computed(() => {
   if (props.celebrating) return 'celebrate'
-  if (props.busy || props.processing) return 'review'
+  if (props.busy || props.processing) return ['pdf-merge', 'pdf-compress', 'template', 'image-paddler'].includes(resolvedScene.value) ? 'working' : 'review'
   if (props.dragging) return 'greet'
-  if (nodActive.value) return 'greet'
+  if (nodActive.value) return clickMotion.value
   return 'look'
 })
 
@@ -245,9 +224,9 @@ const SCENE_CONFIGS = {
     targetIcon: '📑',
     glyphs: ['📎', '📑', '🔗', '✦'],
     busyTitle: 'Doclet 正在装订合并文档…',
-    busyDesc: '规范压平注释，整齐编排书脊与双面打印分隔页',
+    busyDesc: '按所选顺序合并文档，并应用已设置的合并选项',
     defaultTitle: '添加需要合并的文档',
-    defaultDesc: '支持按顺序合并多个 PDF 或 Word 文档，自动转换排版并生成单一合订本',
+    defaultDesc: '按顺序合并 PDF；Word 文件需先转换为 PDF',
     actionLabel: '添加文件',
   },
   'pdf-compress': {
@@ -259,7 +238,7 @@ const SCENE_CONFIGS = {
     busyTitle: 'Doclet 正在智能压缩文档…',
     busyDesc: '重采样高清图片、精简冗余对象并保留文字矢量精度',
     defaultTitle: '拖入大体积 PDF 文件',
-    defaultDesc: '高效压缩文档体积，支持大幅降低传输与存储占用，不丢失排版清晰度',
+    defaultDesc: '按所选参数压缩 PDF；体积变化和图片清晰度取决于原文件与压缩设置',
     actionLabel: '添加文件',
   },
   'pdf-anticopy': {
@@ -269,9 +248,9 @@ const SCENE_CONFIGS = {
     targetIcon: '🛡️',
     glyphs: ['🛡️', '🔒', '✨', '✦'],
     busyTitle: 'Doclet 正在注入安全防复制层…',
-    busyDesc: '重构字形矢量轮廓，彻底杜绝文本抓取与随意盗用',
+    busyDesc: '按所选模式处理文本，降低直接复制或提取文字的便利性',
     defaultTitle: '添加需保护的 PDF 文档',
-    defaultDesc: '应用独家矢量防复制技术，肉眼阅读完全无损，复制粘贴呈现乱码',
+    defaultDesc: '按所选模式限制直接复制；无法保证阻止截图或 OCR，处理后请核对阅读效果',
     actionLabel: '添加文件',
   },
   'pdf-extract': {
@@ -281,7 +260,7 @@ const SCENE_CONFIGS = {
     targetIcon: '🎯',
     glyphs: ['✂️', '🎯', '📄', '✦'],
     busyTitle: 'Doclet 正在定向提取页面…',
-    busyDesc: '分离选定页码并完整保留页面资源与书签结构',
+    busyDesc: '按指定页码范围生成新的 PDF 文件',
     defaultTitle: '选择需要提取的 PDF',
     defaultDesc: '支持灵活输入单页或连续页码范围（如 3, 7, 12-15），独立快速导出',
     actionLabel: '选择 PDF 文件',
@@ -292,10 +271,10 @@ const SCENE_CONFIGS = {
     targetBadge: '证据册',
     targetIcon: '⚖️',
     glyphs: ['⚖️', '📜', '🔖', '✦'],
-    busyTitle: 'Doclet 正在编排印章与流水页码…',
-    busyDesc: '生成证据目录、编制流水页码与规范红蓝印章',
+    busyTitle: 'Doclet 正在处理证据页段…',
+    busyDesc: '按所选页段、纸张及页眉页脚规则处理证据材料',
     defaultTitle: '导入证据 PDF 或材料',
-    defaultDesc: '智能拆分连续合并证据，或批量导入证据材料生成规范案卷与流水页码',
+    defaultDesc: '导入材料后划分页段，设置纸张、页码和页眉页脚，再导出 PDF',
     actionLabel: '选择证据文件',
   },
   template: {
@@ -325,13 +304,13 @@ const SCENE_CONFIGS = {
   'video-extract': {
     sourceBadge: '源视频',
     sourceIcon: '🎬',
-    targetBadge: '高光快照',
+    targetBadge: '帧图片',
     targetIcon: '📸',
     glyphs: ['🎬', '⏱️', '⚡', '✦'],
     busyTitle: 'Doclet 正在扫描视频时间轴…',
-    busyDesc: '按指定间隔或关键帧截取无损清晰画面',
+    busyDesc: '按设置的频率或时间间隔提取视频帧',
     defaultTitle: '选择或拖入视频文件',
-    defaultDesc: '精准提取视频序列帧或高光画面，支持时间轴自选与批量导出',
+    defaultDesc: '设置时间范围、抽帧频率或间隔，批量导出图片',
     actionLabel: '选择视频',
   },
   generic: {
@@ -877,7 +856,7 @@ const sceneMeta = computed(() => SCENE_CONFIGS[resolvedScene.value] || SCENE_CON
 .stage-cta-btn {
   padding: 8px 22px;
   font-weight: 600;
-  border-radius: var(--docsy-radius-sm, 6px);
+  border-radius: var(--docsy-radius);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--docsy-primary) 18%, transparent);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -915,4 +894,25 @@ const sceneMeta = computed(() => SCENE_CONFIGS[resolvedScene.value] || SCENE_CON
   font-weight: 700;
   color: var(--docsy-primary);
 }
+</style>
+
+<style scoped>
+.source-card, .target-card { animation-iteration-count: 1; }
+.flow-css-dot { animation: docsy-stream-dot 2.2s linear infinite; }
+.flow-css-dot:nth-of-type(2) { animation-delay: -.73s; }
+.flow-css-dot:nth-of-type(3) { animation-delay: -1.46s; }
+@keyframes docsy-stream-dot {
+  0% { transform: translate(10px, 20px); opacity: 0; }
+  15% { opacity: 1; }
+  35% { transform: translate(42px, 17px); }
+  65% { transform: translate(78px, 23px); }
+  85% { opacity: 1; }
+  100% { transform: translate(110px, 20px); opacity: 0; }
+}
+.module-scene-stage:not(.is-processing) :is(.stream-flow-line, .flow-track) { animation: none; }
+.module-scene-stage.is-dragging .source-card { animation: none; transform: translateY(-8px) rotate(-6deg) scale(1.04); }
+.module-scene-stage.is-dragging .target-card { animation: none; transform: translateY(-4px) rotate(5deg); }
+.module-scene-stage.is-celebrating .target-card { animation: docsy-result-arrive 460ms cubic-bezier(.2,.9,.3,1.2) 1; }
+@keyframes docsy-result-arrive { from { opacity: .4; translate: -8px 4px; scale: .94; } to { opacity: 1; translate: 0 0; scale: 1; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>

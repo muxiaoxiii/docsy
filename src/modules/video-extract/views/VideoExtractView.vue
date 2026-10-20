@@ -85,15 +85,16 @@
         <!-- Extraction Settings -->
         <div class="section-block">
           <div class="section-title">抽帧设置</div>
-          <el-form label-width="90px" size="default" :disabled="extracting || analyzingSelection">
-            <el-form-item label="输出文件夹">
-              <div class="path-picker">
+          <el-form class="compact-options" label-width="100px" size="small" :disabled="extracting || analyzingSelection">
+            <el-form-item>
+              <template #label><span class="form-label-help">输出文件夹<HelpTooltip content="未选择输出文件夹时，默认保存到视频所在文件夹。" /></span></template>
+              <div class="path-picker output-path-control">
+                <el-input :model-value="settings.outputDir" readonly placeholder="默认：视频所在文件夹" :title="settings.outputDir || '视频所在文件夹'" aria-label="输出文件夹路径" />
                 <el-button @click="selectOutputDir">选择</el-button>
                 <el-button v-if="settings.outputDir" text type="danger" @click="settings.outputDir = ''"
                   >清除</el-button
                 >
               </div>
-              <div class="path-hint">{{ settings.outputDir || '默认保存到视频所在文件夹' }}</div>
             </el-form-item>
 
             <el-form-item label="文件名前缀">
@@ -118,13 +119,13 @@
               <el-input-number v-model="settings.interval" :min="0.1" :max="3600" :step="1" :precision="1" />
             </el-form-item>
 
-            <el-form-item label="时间范围">
+            <el-form-item>
+              <template #label><span class="form-label-help">时间范围<HelpTooltip content="留空则处理全片；可输入时:分:秒，也可直接输入秒数。" /></span></template>
               <div class="time-range-inputs">
                 <el-input v-model="settings.startTime" placeholder="开始，如 01:30:00" clearable />
                 <span>至</span>
                 <el-input v-model="settings.endTime" placeholder="结束，如 01:35:00" clearable />
               </div>
-              <div class="path-hint">留空则处理全片；也可直接输入秒数。</div>
             </el-form-item>
 
             <el-form-item label="输出格式">
@@ -175,7 +176,7 @@
 
         <div class="section-block">
           <div class="section-title">智能筛选</div>
-          <el-form label-width="90px" size="default" :disabled="extracting || analyzingSelection">
+          <el-form class="compact-options" label-width="100px" size="small" :disabled="extracting || analyzingSelection">
             <el-form-item label="完成后分析">
               <el-switch v-model="analysisSettings.autoAnalyze" />
             </el-form-item>
@@ -246,10 +247,10 @@
           <el-tag v-if="algorithmVersion" size="small" type="info">
             {{ algorithmVersion.includes('opencv') ? '本地多信号 + OpenCV 增强' : '本地多信号引擎' }}
           </el-tag>
-          <el-button v-if="resultImages.length" size="small" @click="settingsCollapsed = !settingsCollapsed">
+          <el-button v-if="resultImages.length" size="small" text :aria-expanded="!settingsCollapsed" @click="settingsCollapsed = !settingsCollapsed">
             {{ settingsCollapsed ? '显示抽帧设置' : '收起抽帧设置' }}
           </el-button>
-          <el-button size="small" :disabled="extracting || analyzingSelection" @click="selectExistingResultDirectory">导入已有图片文件夹</el-button>
+          <el-button class="import-results-action" size="small" type="primary" plain :disabled="extracting || analyzingSelection" @click="selectExistingResultDirectory">导入已有图片文件夹</el-button>
         </div>
 
         <WorkspaceEmptyState
@@ -304,6 +305,7 @@
 </template>
 
 <script setup>
+import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { ref, reactive, computed, onBeforeUnmount, onDeactivated, onActivated, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
@@ -1123,7 +1125,7 @@ useWindowFileDrop({
 .extract-settings {
   min-width: 0;
   overflow-y: auto;
-  padding-block: clamp(16px, 3.1dvh, 22px) clamp(20px, 3.9dvh, 28px);
+  padding-block: 12px 14px;
   padding-inline: 18px;
   border-right: 1px solid var(--docsy-border-subtle);
   background: var(--docsy-surface-elevated);
@@ -1186,8 +1188,8 @@ useWindowFileDrop({
 }
 
 .section-block {
-  margin-bottom: clamp(14px, 2.8dvh, 20px);
-  padding-bottom: clamp(14px, 2.8dvh, 20px);
+  margin-bottom: 10px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--docsy-border-subtle);
 }
 
@@ -1199,7 +1201,7 @@ useWindowFileDrop({
   font-size: 14px;
   font-weight: 700;
   color: var(--docsy-text-strong);
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .status-row {
@@ -1367,4 +1369,13 @@ useWindowFileDrop({
     display: none;
   }
 }
+</style>
+
+<style scoped>
+.output-path-control { width: 100%; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.output-path-control :deep(.el-input) { flex: 1; min-width: 100px; }
+.output-path-control :deep(.el-button + .el-button) { margin-left: 0; }
+.results-header :deep(.el-button + .el-button) { margin-left: 0; }
+.import-results-action { flex: none; }
+.time-range-inputs { align-items: center; }
 </style>
