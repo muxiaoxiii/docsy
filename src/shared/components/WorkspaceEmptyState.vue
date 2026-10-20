@@ -1,31 +1,56 @@
 <template>
   <section
     class="workspace-empty-state"
-    :class="[{ compact }, `is-${state}`]"
+    :class="[{ compact }, `is-${state}`, { 'has-scene': shouldUseScene }]"
     :role="state === 'error' ? 'alert' : 'status'"
     :aria-live="state === 'error' ? 'assertive' : 'polite'"
     :aria-busy="state === 'loading'"
   >
-    <DocletSprite v-if="mascot && !compact" :size="104" :motion="state === 'loading' ? 'working' : state === 'error' ? 'error' : 'waiting'" />
-    <span
-      v-else
-      class="empty-state-icon"
-      :style="{ '--empty-icon-url': `url(&quot;${iconUrl || defaultIconUrl}&quot;)` }"
-      aria-hidden="true"
-    ></span>
-    <strong>{{ resolvedTitle }}</strong>
-    <p v-if="description">{{ description }}</p>
-    <span v-if="state === 'loading'" class="empty-state-progress" aria-hidden="true"></span>
-    <div v-if="$slots.actions" class="empty-state-actions">
-      <slot name="actions" />
-    </div>
+    <!-- Rich Animated Module Scene Stage for Full Workspaces -->
+    <ModuleSceneStage
+      v-if="shouldUseScene"
+      :scene="effectiveScene"
+      :busy="state === 'loading'"
+      :celebrating="celebrating"
+      :dragging="dragging"
+      :title="resolvedTitle"
+      :description="description"
+      :show-action="Boolean($slots.actions)"
+    >
+      <template #actions>
+        <slot name="actions" />
+      </template>
+    </ModuleSceneStage>
+
+    <!-- Compact / Fallback Minimal Empty State -->
+    <template v-else>
+      <DocletSprite
+        v-if="mascot && !compact"
+        :size="104"
+        :motion="state === 'loading' ? 'review' : state === 'error' ? 'error' : 'look'"
+      />
+      <span
+        v-else
+        class="empty-state-icon"
+        :style="{ '--empty-icon-url': `url(&quot;${iconUrl || defaultIconUrl}&quot;)` }"
+        aria-hidden="true"
+      ></span>
+      <strong>{{ resolvedTitle }}</strong>
+      <p v-if="description">{{ description }}</p>
+      <span v-if="state === 'loading'" class="empty-state-progress" aria-hidden="true"></span>
+      <div v-if="$slots.actions" class="empty-state-actions">
+        <slot name="actions" />
+      </div>
+    </template>
   </section>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import defaultIconUrl from '../../assets/icons/documents.svg?url'
 import DocletSprite from './DocletSprite.vue'
+import ModuleSceneStage from './ModuleSceneStage.vue'
 
 const props = defineProps({
   mascot: { type: Boolean, default: true },
@@ -50,6 +75,40 @@ const props = defineProps({
     default: 'empty',
     validator: (value) => ['empty', 'loading', 'error'].includes(value),
   },
+  scene: {
+    type: String,
+    default: '',
+  },
+  celebrating: {
+    type: Boolean,
+    default: false,
+  },
+  dragging: {
+    type: Boolean,
+    default: false,
+  },
+})
+
+const route = useRoute()
+
+const effectiveScene = computed(() => {
+  if (props.scene) return props.scene
+  const path = route?.path || ''
+  if (path.includes('/pdf/unlock')) return 'pdf-unlock'
+  if (path.includes('/pdf/merge')) return 'pdf-merge'
+  if (path.includes('/pdf/compress')) return 'pdf-compress'
+  if (path.includes('/pdf/anticopy')) return 'pdf-anticopy'
+  if (path.includes('/pdf/extract')) return 'pdf-extract'
+  if (path.includes('/evidence')) return 'evidence'
+  if (path.includes('/template')) return 'template'
+  if (path.includes('/image-paddler')) return 'image-paddler'
+  if (path.includes('/video-extract')) return 'video-extract'
+  if (path.includes('/markdown')) return 'markdown'
+  return 'generic'
+})
+
+const shouldUseScene = computed(() => {
+  return !props.compact && props.mascot && props.state !== 'error'
 })
 
 const resolvedTitle = computed(() => {
@@ -73,6 +132,11 @@ const resolvedTitle = computed(() => {
   border: 1px dashed var(--docsy-border-strong);
   border-radius: var(--docsy-panel-radius);
   background: color-mix(in srgb, var(--docsy-surface-muted) 76%, var(--docsy-surface-elevated));
+}
+
+.workspace-empty-state.has-scene {
+  padding: 16px 12px;
+  background: color-mix(in srgb, var(--docsy-surface-muted) 60%, var(--docsy-surface));
 }
 
 .workspace-empty-state.compact {

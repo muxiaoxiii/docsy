@@ -587,11 +587,21 @@
         </template>
         <WorkspaceEmptyState
           v-else
+          scene="image-paddler"
           class="result-empty-state"
           :icon-url="imageLayoutIconUrl"
-          :title="analyzing ? '正在分析图片' : '等待选择图片'"
-          :description="analyzing ? '读取尺寸中…' : '选择文件夹或图片后自动分析'"
-        />
+          :title="analyzing ? '正在分析图片' : '等待添加图片'"
+          :description="analyzing ? '读取尺寸并计算智能网格…' : '添加文件夹或图片后，Docsy 会自动计算黄金排版与白边预览'"
+        >
+          <template #actions>
+            <el-button type="primary" plain size="default" :disabled="analyzing" @click="addImages">
+              选择图片
+            </el-button>
+            <el-button size="default" :disabled="analyzing" @click="addFolders">
+              添加文件夹
+            </el-button>
+          </template>
+        </WorkspaceEmptyState>
       </div>
     </div>
 

@@ -17,6 +17,7 @@
       </el-descriptions>
       <WorkspaceEmptyState
         v-else
+        scene="template"
         class="template-empty-state"
         :icon-url="templateIconUrl"
         title="等待导入 Word"

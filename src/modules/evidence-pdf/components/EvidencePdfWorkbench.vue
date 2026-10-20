@@ -61,6 +61,7 @@
 
       <div v-if="workflowMode === 'split' && !mergedImportPlans.length && !mergedImportPlan && !overlayFiles.length" class="split-empty-block">
         <WorkspaceEmptyState
+          scene="evidence"
           title="导入合并证据 PDF"
           description="导入 PDF → 检测页段 → 核对名称与页段 → 确认拆分。"
         >
@@ -913,6 +914,29 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div
+        v-else-if="workflowMode !== 'split' && !overlayFiles.length"
+        class="evidence-empty-block"
+      >
+        <WorkspaceEmptyState
+          scene="evidence"
+          title="导入待编排证据文件"
+          description="支持批量导入 PDF 或 Word 证据材料，自动编制案卷目录、添加规范印章与流水页码。"
+        >
+          <template #actions>
+            <el-button
+              type="primary"
+              plain
+              :loading="importingEvidence"
+              :disabled="overlaying || batchRunning || importingEvidence"
+              @click="selectOverlayFiles"
+            >
+              {{ splitImportButtonText }}
+            </el-button>
+          </template>
+        </WorkspaceEmptyState>
+      </div>
     </section>
 
     <el-dialog v-model="headerFooterSettingsVisible" width="760px" destroy-on-close>

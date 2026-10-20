@@ -255,10 +255,11 @@
         <WorkspaceEmptyState
           v-if="extracting"
           class="result-empty-state"
+          scene="video-extract"
           state="loading"
           :icon-url="videoFramesIconUrl"
           title="正在抽帧"
-          description="Doclet 正在生成图片，完成后会在这里按顺序显示。"
+          description="Doclet 正在扫描视频时间轴并截取高清快照，完成后会在这里集中展示。"
         />
 
         <FrameSelectionWorkbench
@@ -280,10 +281,23 @@
         <WorkspaceEmptyState
           v-else
           class="result-empty-state"
+          scene="video-extract"
           :icon-url="videoFramesIconUrl"
-          title="等待抽帧结果"
-          description="选择视频并设置抽帧参数后，生成的图片会集中显示在这里。"
-        />
+          title="等待视频与抽帧设置"
+          description="选择视频并设置抽帧频率或时间间隔，Docsy 会自动提取高画质图片序列。"
+        >
+          <template #actions>
+            <el-button
+              type="primary"
+              plain
+              size="default"
+              :disabled="extracting || analyzingSelection"
+              @click="selectFile"
+            >
+              选择视频文件
+            </el-button>
+          </template>
+        </WorkspaceEmptyState>
       </div>
     </div>
   </ToolWorkspaceShell>

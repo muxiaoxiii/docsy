@@ -44,6 +44,7 @@
           </div>
           <WorkspaceEmptyState
             v-else
+            scene="evidence"
             :state="scanning ? 'loading' : 'empty'"
             :icon-url="evidenceIconUrl"
             :title="scanning ? '正在扫描证据文件夹' : evidenceFolder ? '尚未发现证据分组' : '等待选择证据文件夹'"

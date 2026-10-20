@@ -344,6 +344,7 @@ import { copyMarkdownContent, decodeMarkdownBytes } from '../composables/markdow
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import MdConvertScene from '../components/MdConvertScene.vue'
+import { withMinimumDuration, createCelebrationTrigger } from '../../../shared/animation.js'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { fileName, parentDir } from '../../../core/filePath.js'
 import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
@@ -366,7 +367,7 @@ const fileOfficeFormat = ref('docx')
 const inputEncoding = ref('auto')
 const docxStyle = ref('professional')
 const isResizing = ref(false)
-let celebrateTimer = null
+const triggerCelebration = createCelebrationTrigger(celebrating, 2400)
 
 const docxStyleHints = {
   professional: '宋体正文 + Times New Roman + 商务深蓝标题',
@@ -414,15 +415,6 @@ function clampPastePanelRatio(value) {
 
 function setPastePanelRatio(value) {
   pastePanelRatio.value = clampPastePanelRatio(value)
-}
-
-function triggerCelebration() {
-  if (celebrateTimer) clearTimeout(celebrateTimer)
-  celebrating.value = true
-  celebrateTimer = setTimeout(() => {
-    celebrating.value = false
-    celebrateTimer = null
-  }, 2800)
 }
 
 function startConvertResize(event) {
@@ -622,28 +614,30 @@ async function runQueue() {
       activeBackendOperationId.value = isPdf ? PDF_CONVERT_OPERATION_ID : ''
       let result
       try {
-        result = isPdf
-          ? await tauriCallSafe('convert_pdf_text_layer', {
-              input: item.path,
-              outputDir: null,
-              startPage: startPage || null,
-              endPage: endPage || null,
-            })
-          : await (isMarkdownPath(item.path) ? convertWithMedia : tauriCallSafe)(
-              'convert_markdown',
-              {
+        result = await withMinimumDuration(async () => {
+          return isPdf
+            ? await tauriCallSafe('convert_pdf_text_layer', {
                 input: item.path,
-                inputEncoding: inputEncoding.value,
                 outputDir: null,
-                docEngine: item.docEngine || null,
-                outputFormat: item.outputFormat,
-                docxStyle: item.docxStyle,
-              },
-              (current, total) => {
-                if (queueCancellation.cancelled.value) throw new Error('操作已取消')
-                item.statusText = total && current < total ? `正在渲染公式与图表 ${current}/${total}` : '转换中'
-              },
-            )
+                startPage: startPage || null,
+                endPage: endPage || null,
+              })
+            : await (isMarkdownPath(item.path) ? convertWithMedia : tauriCallSafe)(
+                'convert_markdown',
+                {
+                  input: item.path,
+                  inputEncoding: inputEncoding.value,
+                  outputDir: null,
+                  docEngine: item.docEngine || null,
+                  outputFormat: item.outputFormat,
+                  docxStyle: item.docxStyle,
+                },
+                (current, total) => {
+                  if (queueCancellation.cancelled.value) throw new Error('操作已取消')
+                  item.statusText = total && current < total ? `正在渲染公式与图表 ${current}/${total}` : '转换中'
+                },
+              )
+        }, 550)
       } finally {
         activeBackendOperationId.value = ''
       }
@@ -696,6 +690,7 @@ async function copyPastedMarkdown(mode) {
   if (!text || pasteConverting.value) return
   try {
     await copyMarkdownContent(text, mode)
+    triggerCelebration()
     ElMessage.success(
       mode === 'plain'
         ? '已复制为纯文本，可直接粘贴到微信 / 聊天窗口'
@@ -717,6 +712,7 @@ async function copyMarkdownFile(item) {
       return
     }
     await copyMarkdownContent(text, 'rich')
+    triggerCelebration()
     ElMessage.success('已复制为富文本+纯文本，可直接粘贴到 Foxmail 或微信')
   } catch (err) {
     ElMessage.error(userFacingError(err, '复制失败，请检查文件编码或剪贴板权限'))
@@ -732,19 +728,21 @@ async function convertPastedText() {
   pasteWarning.value = ''
   pasteProgress.value = '正在转换'
   try {
-    const result = await convertWithMedia(
-      'convert_markdown_text',
-      {
-        text: pasteText.value,
-        format: pasteFormat.value,
-        outputDir: null,
-        fileStem: pasteFileName.value.trim() || null,
-        docxStyle: pasteFormat.value === 'docx' ? docxStyle.value : null,
-      },
-      (current, total) => {
-        pasteProgress.value = total && current < total ? `正在渲染公式与图表 ${current}/${total}` : '正在转换'
-      },
-    )
+    const result = await withMinimumDuration(async () => {
+      return await convertWithMedia(
+        'convert_markdown_text',
+        {
+          text: pasteText.value,
+          format: pasteFormat.value,
+          outputDir: null,
+          fileStem: pasteFileName.value.trim() || null,
+          docxStyle: pasteFormat.value === 'docx' ? docxStyle.value : null,
+        },
+        (current, total) => {
+          pasteProgress.value = total && current < total ? `正在渲染公式与图表 ${current}/${total}` : '正在排版生成…'
+        },
+      )
+    }, 700)
     if (result.ok) {
       pasteOutputPath.value = String(result.data?.output_path || '')
       pasteWarning.value = String(result.data?.warning || '')
@@ -789,7 +787,7 @@ useWindowFileDrop({
 onMounted(() => void preference.start())
 onBeforeUnmount(() => {
   stopConvertResize?.()
-  if (celebrateTimer) clearTimeout(celebrateTimer)
+  triggerCelebration.cancel?.()
   void preference.stop()
 })
 

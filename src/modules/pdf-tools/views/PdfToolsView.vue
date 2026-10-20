@@ -11,6 +11,8 @@
           </template>
           <FileQueuePanel
             fill
+            scene="pdf-unlock"
+            :celebrating="unlockCelebrating"
             empty-action-label="添加 PDF 文件"
             :items="unlockFiles"
             :busy="unlocking || unlockInspecting"
@@ -48,6 +50,8 @@
           </template>
           <FileQueuePanel
             fill
+            scene="pdf-merge"
+            :celebrating="mergeCelebrating"
             empty-action-label="添加文件"
             :items="mergeFiles"
             :busy="merging"
@@ -121,10 +125,18 @@
           </div>
           <WorkspaceEmptyState
             v-else
+            scene="pdf-extract"
+            :celebrating="extractCelebrating"
             class="extract-empty"
             title="等待选择 PDF"
             description="选择文件后，可以输入单页或连续页码范围并导出。"
-          />
+          >
+            <template #actions>
+              <el-button type="primary" plain :disabled="extractingPages" @click="selectExtractFile">
+                选择 PDF 文件
+              </el-button>
+            </template>
+          </WorkspaceEmptyState>
           <template #actions>
             <el-button
               type="success"
@@ -150,6 +162,8 @@
           </template>
           <FileQueuePanel
             fill
+            scene="pdf-compress"
+            :celebrating="compressCelebrating"
             empty-action-label="添加 PDF 文件"
             :items="compressFiles"
             :busy="compressing"
@@ -391,6 +405,8 @@
           </template>
           <FileQueuePanel
             fill
+            scene="pdf-anticopy"
+            :celebrating="antiOcrCelebrating"
             empty-action-label="添加 PDF 文件"
             :items="antiOcrFiles"
             :busy="antiOcrProcessing"
@@ -440,6 +456,7 @@ import NextPageThumbnail from '../../../shared/pdf-tools/components/NextPageThum
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
+import { withMinimumDuration, createCelebrationTrigger } from '../../../shared/animation.js'
 import { splitRangeWarnings } from '../../../shared/pdf-tools/composables/usePdfSplitRanges.js'
 import { sizeSavingText, batchSummaryText } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
 import { getPdfPageCount, openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
@@ -479,6 +496,17 @@ watch(activeTab, (tab) => {
   router.replace({ name: 'pdf-tools', params: param ? { tab: param } : {} })
 })
 const pdfDragging = ref(false)
+const unlockCelebrating = ref(false)
+const mergeCelebrating = ref(false)
+const extractCelebrating = ref(false)
+const compressCelebrating = ref(false)
+const antiOcrCelebrating = ref(false)
+
+const triggerUnlockCelebration = createCelebrationTrigger(unlockCelebrating)
+const triggerMergeCelebration = createCelebrationTrigger(mergeCelebrating)
+const triggerExtractCelebration = createCelebrationTrigger(extractCelebrating)
+const triggerCompressCelebration = createCelebrationTrigger(compressCelebrating)
+const triggerAntiOcrCelebration = createCelebrationTrigger(antiOcrCelebrating)
 const splitReorder = usePointerReorder({
   itemCount: () => splitRanges.value.length,
   itemAttribute: 'data-split-reorder-index',
@@ -586,7 +614,10 @@ async function batchUnlock() {
       if (unlockCancellation.cancelled.value) break
       file.statusText = '处理中'
       file.statusType = 'warning'
-      const result = await tauriCallSafe('unlock_pdf', { input: file.path })
+      const result = await withMinimumDuration(
+        () => tauriCallSafe('unlock_pdf', { input: file.path }),
+        450,
+      )
       if (result.ok && !result.data.skipped) {
         file.outputPath = result.data.output_path
         file.statusText = '解锁成功'
@@ -606,7 +637,10 @@ async function batchUnlock() {
   } finally {
     unlocking.value = false
   }
-  if (successCount) ElMessage.success(`已解锁 ${successCount} 个文件`)
+  if (successCount) {
+    triggerUnlockCelebration()
+    ElMessage.success(`已解锁 ${successCount} 个文件`)
+  }
 }
 
 const unlockCancellation = useQueueCancellation()
@@ -770,9 +804,15 @@ async function processAntiCopy(removeProtection) {
       file.statusType = 'warning'
       const input = file.outputPath || file.path
       const output = `${parentDir(file.path)}/${stripPdf(file.name)}_${removeProtection ? 'restored' : 'anti_copy'}.pdf`
-      const result = await tauriCallSafe(removeProtection ? 'remove_anti_copy' : 'apply_anti_copy', {
-        input, output, ...(removeProtection ? {} : { method }),
-      })
+      const result = await withMinimumDuration(
+        () =>
+          tauriCallSafe(removeProtection ? 'remove_anti_copy' : 'apply_anti_copy', {
+            input,
+            output,
+            ...(removeProtection ? {} : { method }),
+          }),
+        500,
+      )
       if (!result.ok) {
         file.statusText = userFacingError(result.error, '处理失败')
         file.statusType = 'danger'
@@ -787,6 +827,9 @@ async function processAntiCopy(removeProtection) {
     }
   } finally {
     antiOcrProcessing.value = false
+  }
+  if (targets.length) {
+    triggerAntiOcrCelebration()
   }
 }
 
@@ -876,17 +919,22 @@ async function doMerge() {
         file.statusText = isWordPath(file.path) && !file.outputPath ? '转换并合并中…' : '合并中…'
         file.statusType = 'warning'
       }
-      const result = await tauriCallSafe('merge_pdfs', {
-        inputs: mergeFiles.value.map((file) => file.outputPath || file.path),
-        output: outputPath,
-        duplexSeparate: duplexSeparate.value,
-      })
+      const result = await withMinimumDuration(
+        () =>
+          tauriCallSafe('merge_pdfs', {
+            inputs: mergeFiles.value.map((file) => file.outputPath || file.path),
+            output: outputPath,
+            duplexSeparate: duplexSeparate.value,
+          }),
+        650,
+      )
       if (result.ok) {
         mergeOutputPath.value = result.data?.output_path || result.data || outputPath
         for (const file of mergeFiles.value) {
           file.statusText = '已合并'
           file.statusType = 'success'
         }
+        triggerMergeCelebration()
       } else {
         for (const file of mergeFiles.value) {
           file.statusText = '合并失败'
@@ -949,17 +997,25 @@ async function doExtractPages() {
     return
   }
   extractingPages.value = true
-  const result = await tauriCallSafe('extract_pdf_pages', {
-    input: extractFile.value,
-    pages,
-    outputDir: extractOutputDir.value || null,
-  })
-  extractingPages.value = false
-  if (result.ok) {
-    extractResultPath.value = result.data.output_path
-    ElMessage.success(`已导出：${result.data.output_path}`)
-  } else {
-    ElMessage.error(userFacingError(result.error, 'PDF 页面提取失败，请确认文件未损坏'))
+  try {
+    const result = await withMinimumDuration(
+      () =>
+        tauriCallSafe('extract_pdf_pages', {
+          input: extractFile.value,
+          pages,
+          outputDir: extractOutputDir.value || null,
+        }),
+      600,
+    )
+    if (result.ok) {
+      extractResultPath.value = result.data.output_path
+      triggerExtractCelebration()
+      ElMessage.success(`已导出：${result.data.output_path}`)
+    } else {
+      ElMessage.error(userFacingError(result.error, 'PDF 页面提取失败，请确认文件未损坏'))
+    }
+  } finally {
+    extractingPages.value = false
   }
 }
 
@@ -1039,11 +1095,15 @@ async function runCompressQueue() {
       item.status = 'processing'
       item.statusText = '压缩中'
       item.statusType = 'warning'
-      const result = await tauriCallSafe('compress_pdf', {
-        input: item.path,
-        outputDir: null,
-        level: imageReencode ? level : null,
-      })
+      const result = await withMinimumDuration(
+        () =>
+          tauriCallSafe('compress_pdf', {
+            input: item.path,
+            outputDir: null,
+            level: imageReencode ? level : null,
+          }),
+        500,
+      )
       if (result.ok) {
         const data = result.data || {}
         item.status = 'done'
@@ -1063,6 +1123,9 @@ async function runCompressQueue() {
     }
   } finally {
     compressing.value = false
+  }
+  if (processed.some((i) => i.status === 'done')) {
+    triggerCompressCelebration()
   }
   reportCompressSummary(processed)
 }
