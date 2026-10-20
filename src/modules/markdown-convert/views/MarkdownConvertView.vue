@@ -128,6 +128,18 @@
                 打开文件
               </el-button>
               <el-button
+                v-if="isMarkdownPath(item.path)"
+                link
+                type="primary"
+                size="small"
+                :loading="copyingPath === item.path"
+                :disabled="converting"
+                title="复制为富文本和纯文本（Foxmail 用富文本，微信自动用纯文本）"
+                @click="copyMarkdownFile(item)"
+              >
+                复制
+              </el-button>
+              <el-button
                 v-if="item.status !== 'processing'"
                 :disabled="converting"
                 link
@@ -168,7 +180,10 @@
           <p class="rich-media-hint">
             支持数学公式与 Mermaid 代码块。Word 优先使用可编辑公式；Excel / PowerPoint 的图形独立成表或成页。
           </p>
-          <div class="paste-actions">
+          <p class="clipboard-hint">
+            复制会同时写入富文本和纯文本：Foxmail / 邮件编辑器使用富文本，微信 / 聊天窗口使用纯文本。
+          </p>
+          <div class="paste-format-row">
             <el-radio-group v-model="pasteFormat" :disabled="pasteConverting">
               <el-radio-button value="docx">Word</el-radio-button>
               <el-radio-button value="xlsx">Excel</el-radio-button>
@@ -188,12 +203,26 @@
             <span v-if="pasteFormat === 'docx'" class="docx-style-hint">
               {{ docxStyleHint }}
             </span>
+          </div>
+          <div class="paste-submit-row">
             <el-input
               v-model="pasteFileName"
               placeholder="文件名（可选）"
               :disabled="pasteConverting"
               class="file-name-input"
             />
+            <el-dropdown trigger="click" @command="copyPastedMarkdown">
+              <el-button :disabled="pasteConverting || !pasteText.trim()">
+                复制
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="rich">复制为富文本（Foxmail / 邮件）</el-dropdown-item>
+                  <el-dropdown-item command="plain">复制为纯文本（微信 / 聊天）</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button
               type="success"
               :loading="pasteConverting"
@@ -216,10 +245,13 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { readFile } from '@tauri-apps/plugin-fs'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElNotification } from 'element-plus'
 import { convertWithMedia } from '../composables/convertWithMedia.js'
+import { copyMarkdownContent, decodeMarkdownBytes } from '../composables/markdownClipboard.js'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
@@ -238,6 +270,7 @@ const pasteConverting = ref(false)
 const pasteOutputPath = ref('')
 const pasteWarning = ref('')
 const pasteProgress = ref('')
+const copyingPath = ref('')
 const fileOfficeFormat = ref('docx')
 const inputEncoding = ref('auto')
 const docxStyle = ref('professional')
@@ -520,6 +553,40 @@ async function runQueue() {
   })
 }
 
+async function copyPastedMarkdown(mode) {
+  const text = pasteText.value.trim()
+  if (!text || pasteConverting.value) return
+  try {
+    await copyMarkdownContent(text, mode)
+    ElMessage.success(
+      mode === 'plain'
+        ? '已复制为纯文本，可直接粘贴到微信 / 聊天窗口'
+        : '已复制为富文本，可直接粘贴到 Foxmail / 邮件编辑器',
+    )
+  } catch (err) {
+    ElMessage.error(userFacingError(err, '复制失败，请检查剪贴板权限'))
+  }
+}
+
+async function copyMarkdownFile(item) {
+  if (!item?.path || copyingPath.value) return
+  copyingPath.value = item.path
+  try {
+    const bytes = await readFile(item.path)
+    const text = decodeMarkdownBytes(bytes, inputEncoding.value)
+    if (!text.trim()) {
+      ElMessage.warning('这个 Markdown 文件没有可复制的内容')
+      return
+    }
+    await copyMarkdownContent(text, 'rich')
+    ElMessage.success('已复制为富文本+纯文本，可直接粘贴到 Foxmail 或微信')
+  } catch (err) {
+    ElMessage.error(userFacingError(err, '复制失败，请检查文件编码或剪贴板权限'))
+  } finally {
+    copyingPath.value = ''
+  }
+}
+
 async function convertPastedText() {
   if (pasteConverting.value || !pasteText.value.trim()) return
   pasteConverting.value = true
@@ -776,16 +843,31 @@ onBeforeUnmount(() => {
   line-height: 1.45;
 }
 
-.paste-actions {
+.paste-format-row,
+.paste-submit-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.paste-format-row {
   margin-top: 12px;
+}
+
+.paste-submit-row {
+  margin-top: 10px;
 }
 
 .file-name-input {
   flex: 1 1 180px;
+}
+
+.clipboard-hint {
+  margin: 8px 0 0;
+  color: var(--docsy-text-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .result-line {

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -7,7 +7,12 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, UNIX_EPOCH};
+
+static WS_INITIALIZED: AtomicBool = AtomicBool::new(false);
+static WS_INIT_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Deserialize)]
 pub struct SaveMediaSessionArgs {
@@ -104,7 +109,6 @@ struct PreviousItem {
 
 pub fn get_preference(scope: &str) -> Result<Option<Value>> {
     let conn = open_db()?;
-    init_db(&conn)?;
     let raw: Option<String> = conn
         .query_row(
             "SELECT value_json FROM workspace_preferences WHERE scope = ?1",
@@ -118,7 +122,6 @@ pub fn get_preference(scope: &str) -> Result<Option<Value>> {
 
 pub fn set_preference(scope: &str, value: &Value) -> Result<()> {
     let conn = open_db()?;
-    init_db(&conn)?;
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO workspace_preferences(scope, value_json, updated_at)
@@ -133,7 +136,6 @@ pub fn set_preference(scope: &str, value: &Value) -> Result<()> {
 
 pub fn save_media_session(args: SaveMediaSessionArgs) -> Result<SavedMediaSession> {
     let mut conn = open_db()?;
-    init_db(&conn)?;
     let source = canonical_string(Path::new(&args.source_path));
     let paths = args
         .items
@@ -152,7 +154,7 @@ pub fn save_media_session(args: SaveMediaSessionArgs) -> Result<SavedMediaSessio
         .id
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| format!("media-{}", chrono::Utc::now().timestamp_millis()));
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
         "INSERT INTO workspace_sessions(
            id, module_id, source_path, source_key, file_count, total_size,
@@ -222,7 +224,6 @@ pub fn save_media_session(args: SaveMediaSessionArgs) -> Result<SavedMediaSessio
 
 pub fn find_media_session(args: FindMediaSessionArgs) -> Result<MediaSessionMatch> {
     let conn = open_db()?;
-    init_db(&conn)?;
     let source = canonical_string(Path::new(&args.source_path));
     let current = fingerprints_for_paths(&conn, &source, &args.paths)?;
     let key = source_key(&current);
@@ -536,16 +537,36 @@ fn canonical_string(path: &Path) -> String {
         .to_string()
 }
 
-fn open_db() -> Result<Connection> {
+fn ensure_db_initialized() -> Result<()> {
+    if WS_INITIALIZED.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    let _guard = WS_INIT_LOCK
+        .lock()
+        .map_err(|e| anyhow::anyhow!("Workspace DB init lock poisoned: {e}"))?;
+    if WS_INITIALIZED.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     let path = db_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let conn = Connection::open(path)?;
-    conn.busy_timeout(Duration::from_secs(5))?;
+    let conn = Connection::open(&path)?;
+    conn.busy_timeout(Duration::from_secs(10))?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
     )?;
+    init_db(&conn)?;
+    WS_INITIALIZED.store(true, Ordering::Release);
+    Ok(())
+}
+
+fn open_db() -> Result<Connection> {
+    ensure_db_initialized()?;
+    let path = db_path();
+    let conn = Connection::open(path)?;
+    conn.busy_timeout(Duration::from_secs(10))?;
+    conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")?;
     Ok(conn)
 }
 

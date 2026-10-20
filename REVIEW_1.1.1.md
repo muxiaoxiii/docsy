@@ -661,3 +661,124 @@ Gemini（Antigravity）已完成了报告中指出的全部 P0、P1 与关键 P2
 - `npm run build`：**通过（index 71 kB / gzip 27 kB）**
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib`：**446 passed / 0 failed / 15 ignored**
 - 1.1.1 候选版已具备正式发版要求。
+
+### 9.8 设置页“每块一个滚动条”修复（2026-10-20 11:02）
+
+用户截图里的问题确实是我上一轮引入的回归：
+
+- 上一轮把 `ToolWorkspaceShell` 的 `.workspace-content` 改成了 `display:flex; flex-direction:column`，本意是让空态和队列能撑满。
+- Element Plus 的 `.el-card` 默认是 flex column，`.el-card__body` 自带 `flex-grow:1; overflow:auto`；卡片作为 flex item 默认 `flex-shrink:1`，在内容超过可视高度时被压缩，于是**每个卡片内部都出现滚动条**。
+- 修复：
+  - `.workspace-content > * { flex-shrink: 0; }`，卡片恢复自然高度，由外层 `.workspace-content` 统一滚动。
+  - `.settings-section :deep(.el-card__body) { overflow: visible; }`，设置页卡片正文不再创建第二个滚动容器。
+- 验证：设置页 `.settings-section` 高度恢复自然值，`.el-card__body` 的 `scrollHeight` 与 `clientHeight` 一致；页面只剩最外层一根滚动条。`npm test` 39/330、lint 0、build 通过。
+
+![设置页：只保留外层一根滚动条](review-assets/1.1.1/after-settings.png)
+
+### 9.9 全路由滚动/溢出审计（2026-10-20 11:02）
+
+修复设置页后，用同一套 Playwright 在 **1440×960** 和 **1100×760** 下检查了全部 9 个路由的 `overflow:auto/scroll` 容器：
+
+| 页面 | 1440 审计结果 | 1100 审计结果 |
+|---|---|---|
+| 首页 / 关于 | 0 个内部滚动容器 | 0 |
+| 文档工具（PDF 合并） | 0 | 0 |
+| MD 转换 | 0 | 外层 `.workspace-content` 单层滚动（堆叠后正常） |
+| 文书模板 | 0 | 0 |
+| 证据处理 | 1 个：`.hf-panel` 工作台内部滚动 | 1 个：`.el-tab-pane` 单层滚动 |
+| 图片排版 | 1 个：左侧 `.settings-panel` 设置滚动 | 同左 |
+| 视频抽帧 | 1 个：左侧 `.extract-settings` 设置滚动 | 外层 `.workspace-content` 单层滚动 |
+| 设置 | 1 个：`.workspace-content` 外层滚动（卡片内部不再滚动） | 同左 |
+
+结论：
+
+- **不再出现“每个卡片一根滚动条”**；设置页只剩最外层一根。
+- 证据/图片/视频剩下的内部滚动是左右分栏工作台的单层设计（左侧设置或主工作台），不是嵌套卡片滚动。
+- 1100 最小窗口下 **无横向溢出**；MD、视频、证据按预期上下堆叠。
+- 全路由 console 无 Vue / Element Plus warning（设置页 mock 数据未提供 `check_external_tool` 时除外，真实后端会返回对象）。
+
+---
+
+## 10. Markdown 复制为“可粘贴内容”（2026-10-20）
+
+目标：不再只能生成 Word，而是直接复制文档内容；粘贴到 Foxmail 是带格式的富文本，粘贴到微信/聊天窗口是去掉 Markdown 标记的干净纯文本。
+
+### 10.1 原理：剪贴板本来就是多格式的
+
+- Windows 剪贴板可同时携带 `HTML Format`（CF_HTML）、`Rich Text Format`、`Unicode Text`。
+- macOS 剪贴板可同时携带 `public.html`、`public.rtf`、`public.utf8-plain-text`。
+- 我们一次写入 `text/html` + `text/plain` 两种表示，由目标应用自己选择：
+  - **Foxmail / 邮件编辑器**：取 HTML（或 RTF），保留标题、加粗、列表、表格。
+  - **微信 / 聊天输入框**：取纯文本，HTML 被忽略，所以不会出现 `#`、`**`、`| ---` 这些 Markdown 标记。
+- 因此不需要判断“当前粘贴到哪个应用”，也不需要分别做两套复制按钮；下拉里仍保留“仅纯文本”选项，给会误吃 HTML 的编辑器兜底。
+
+### 10.2 实际实现
+
+- 新增 [`markdownClipboard.js`](src/modules/markdown-convert/composables/markdownClipboard.js)：
+  - `marked` 解析 Markdown → HTML；
+  - 原始 HTML 一律转义，不让剪贴板携带 `<script>` 等可执行标记；
+  - 表格加 inline border/padding，邮件编辑器不依赖外部 CSS；
+  - 图片改为 `[图片：alt]`（本地路径粘到 Foxmail/微信本来就会失效）；
+  - 纯文本用 `marked.lexer` 逐 token 生成：标题去 `#`、加粗/斜体去标记、列表变 `•`/数字、表格变“字段：值；字段：值”、链接保留文字和 URL、代码块保留内容、公式去掉 `$…$` 外壳。
+- 新增 [`clipboard.js`](src/shared/clipboard.js)：
+  - 优先 `navigator.clipboard.write` + `ClipboardItem` 同时写 HTML/纯文本；
+  - WebView 不支持时回退到 `contentEditable` + `document.execCommand('copy')`；
+  - 仅纯文本用 `writeText` + textarea 回退。
+- MD 转换页：
+  - 粘贴区增加“复制”下拉：富文本（Foxmail）/ 纯文本（微信）；
+  - 文件队列中 Markdown 文件增加“复制”按钮，读取源文件并按当前编码解码后复制；
+  - 增加说明：“复制会同时写入富文本和纯文本”。
+- 新增依赖：`marked@16.4.2`（锁定在 package.json/package-lock）。
+
+### 10.3 验证
+
+- Chromium 实测剪贴板同时包含 `text/plain` 与 `text/html`；富文本含 `<strong>`/`<table>`，纯文本为：
+  ```text
+  标题
+
+  这是一段加粗和链接 (https://example.com)。
+
+  • 项目一
+  • 项目二
+
+  姓名：张三；金额：100
+  ```
+- 禁用 `navigator.clipboard` 后，`execCommand` 回退也能写出纯文本；富文本回退路径同样保留 HTML。
+- 新增 4 个单元测试（40 个文件 / 334 passed），覆盖纯文本清理、HTML 转义、表格展开、UTF-8/UTF-16 解码；lint 0、build 通过。
+- **仍需真机确认一次**：macOS WKWebView 与 Windows WebView2 对 `ClipboardItem`/`execCommand` 的权限行为可能与 Chromium 不同；如果真机拦截，再加一个 Rust `arboard::set_html(html, alt_text)` 命令兜底即可，接口已经按这个方向设计。
+
+![MD 转换：复制为富文本 / 纯文本](review-assets/1.1.1/after-markdown-copy.png)
+
+---
+
+## 11. GitHub 加速镜像备选扩充（2026-10-20）
+
+在原有 4 个内置候选之外，新增了 6 个社区镜像，测速结果会统一按延迟排序：
+
+| 候选 | 基址 |
+|---|---|
+| 直连 GitHub (Direct) | 官方 |
+| gh-proxy.com | `https://gh-proxy.com/` |
+| ghfast.top | `https://ghfast.top/` |
+| gh-proxy.net | `https://gh-proxy.net/` |
+| **ghproxy.net** | `https://ghproxy.net/` |
+| **ghproxy.cc** | `https://ghproxy.cc/` |
+| **gh.llkk.cc** | `https://gh.llkk.cc/` |
+| **github.moeyy.xyz** | `https://github.moeyy.xyz/` |
+| **ghproxy.cn** | `https://ghproxy.cn/` |
+| **gh-proxy.top** | `https://gh-proxy.top/` |
+| mirror.ghproxy.com | `https://mirror.ghproxy.com/` |
+
+实现位置：
+
+- [`managed.rs`](src-tauri/src/external/managed.rs:449) 抽出 `default_github_proxy_candidates()`，避免测试与测速逻辑各写一份列表；新增 `default_github_proxies_are_unique_and_https` 单测，保证名称/URL 不重复、全部 HTTPS、基址以 `/` 结尾。
+- [`SettingsView.vue`](src/modules/settings/views/SettingsView.vue:177) 增加说明：公共镜像由第三方提供，速度和可用性会变化；建议先测速，下载失败会自动回退官方源。
+- 下载失败回退逻辑保持不变：先按用户选择/自定义镜像，再回退官方源和 manifest mirrors。
+
+验证：
+
+- `cargo test --lib`：**447 passed / 15 ignored**；
+- 前端：**40 个文件 / 334 passed**，lint 0，build 通过；
+- 用 mock 测速结果渲染了 11 个候选卡片，可用/超时/HTTP 403 三种状态都能正常展示。
+
+![设置页：GitHub 加速镜像备选与测速结果](review-assets/1.1.1/after-proxy.png)

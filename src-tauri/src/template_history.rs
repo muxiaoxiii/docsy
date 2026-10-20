@@ -1,14 +1,19 @@
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::docx_template::{TemplateField, TemplateManifest};
 
 const TEMPLATE_COMMON_ID: &str = "__template_common__";
+
+static DB_INITIALIZED: AtomicBool = AtomicBool::new(false);
+static DB_INIT_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -77,10 +82,11 @@ pub fn record_template_seed(
 /// Delete every recorded fill run and its field values (history database only;
 /// templates and their files are untouched). Returns the number of deleted runs.
 pub fn clear_history() -> Result<usize> {
-    let conn = open_db()?;
-    init_db(&conn)?;
-    let deleted = conn.execute("DELETE FROM generation_runs", [])?;
-    conn.execute("DELETE FROM field_history", [])?;
+    let mut conn = open_db()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let deleted = tx.execute("DELETE FROM generation_runs", [])?;
+    tx.execute("DELETE FROM field_history", [])?;
+    tx.commit()?;
     Ok(deleted)
 }
 
@@ -93,30 +99,32 @@ pub fn merge_template_field_history(
     source_template_id: &str,
     target_template_id: &str,
 ) -> Result<usize> {
-    let conn = open_db()?;
-    init_db(&conn)?;
-    let mut stmt = conn.prepare(
-        "INSERT INTO field_history
-            (run_id, template_id, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at)
-         SELECT run_id, ?2, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at
-         FROM field_history AS src
-         WHERE src.template_id = ?1
-           AND src.field_name IN (SELECT DISTINCT field_name FROM field_history WHERE template_id = ?2)
-           AND NOT EXISTS (
-             SELECT 1 FROM field_history AS tgt
-             WHERE tgt.template_id = ?2
-               AND tgt.field_name = src.field_name
-               AND tgt.value_json = src.value_json
-               AND tgt.display_value = src.display_value
-           )",
-    )?;
-    let copied = stmt.execute(params![source_template_id, target_template_id])?;
+    let mut conn = open_db()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let copied = {
+        let mut stmt = tx.prepare(
+            "INSERT INTO field_history
+                (run_id, template_id, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at)
+             SELECT run_id, ?2, field_id, field_name, field_label, semantic_key, value_json, display_value, generated_at
+             FROM field_history AS src
+             WHERE src.template_id = ?1
+               AND src.field_name IN (SELECT DISTINCT field_name FROM field_history WHERE template_id = ?2)
+               AND NOT EXISTS (
+                 SELECT 1 FROM field_history AS tgt
+                 WHERE tgt.template_id = ?2
+                   AND tgt.field_name = src.field_name
+                   AND tgt.value_json = src.value_json
+                   AND tgt.display_value = src.display_value
+               )",
+        )?;
+        stmt.execute(params![source_template_id, target_template_id])?
+    };
+    tx.commit()?;
     Ok(copied)
 }
 
 pub fn list_database_entries() -> Result<Vec<Value>> {
     let conn = open_db()?;
-    init_db(&conn)?;
     let mut stmt = conn.prepare(
         "SELECT m.template_id, m.template_name, m.updated_at,
                 (SELECT COUNT(*) FROM field_history fh WHERE fh.template_id = m.template_id) as field_count
@@ -136,20 +144,21 @@ pub fn list_database_entries() -> Result<Vec<Value>> {
 }
 
 pub fn delete_database_entry(template_path: &str) -> Result<()> {
-    let conn = open_db()?;
-    init_db(&conn)?;
-    conn.execute(
+    let mut conn = open_db()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute(
         "DELETE FROM field_history WHERE template_id = (SELECT template_id FROM template_meta WHERE template_id = ?1)",
         [template_path],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM generation_runs WHERE template_id = (SELECT template_id FROM template_meta WHERE template_id = ?1)",
         [template_path],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM template_meta WHERE template_id = ?1",
         [template_path],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -161,13 +170,12 @@ pub fn record_history_run(
     source: &str,
 ) -> Result<()> {
     let mut conn = open_db()?;
-    init_db(&conn)?;
-    // 不改变 trashed 状态：已回收站的模板不应因历史记录写入而被恢复
-    ensure_template_meta(&conn, manifest, template_path)?;
     let now = chrono::Utc::now().to_rfc3339();
     let stored_values = canonical_history_values(manifest, values);
     let values_json = serde_json::to_string(&stored_values)?;
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // 不改变 trashed 状态：已回收站的模板不应因历史记录写入而被恢复
+    ensure_template_meta(&tx, manifest, template_path)?;
     tx.execute(
         "INSERT INTO generation_runs (template_id, template_name, template_path, output_path, generated_at, field_values, source)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -241,7 +249,6 @@ pub fn history_context(
     full_refresh: bool,
 ) -> Result<TemplateHistoryContext> {
     let conn = open_db()?;
-    init_db(&conn)?;
     let mut field_suggestions = HashMap::new();
     let mut semantic_suggestions = HashMap::new();
     let mut association_suggestions = HashMap::new();
@@ -281,7 +288,6 @@ pub fn history_context(
 
 pub fn list_generation_runs(limit: usize) -> Result<Vec<TemplateHistoryRun>> {
     let conn = open_db()?;
-    init_db(&conn)?;
     let limit = limit.clamp(1, 500) as i64;
     let mut stmt = conn.prepare(
         "SELECT runs.id,
@@ -394,7 +400,6 @@ fn query_run_field_summaries_for_runs(
 /// (used after restoring a template from trash, where the path may change).
 pub fn update_template_path(template_id: &str, new_path: &str) -> Result<()> {
     let conn = open_db()?;
-    init_db(&conn)?;
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE generation_runs SET template_path = ?2 WHERE template_id = ?1",
@@ -409,7 +414,6 @@ pub fn update_template_path(template_id: &str, new_path: &str) -> Result<()> {
 
 pub fn mark_template_trashed(template_id: &str, trashed: bool) -> Result<()> {
     let conn = open_db()?;
-    init_db(&conn)?;
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO template_meta (template_id, template_name, template_path, trashed, updated_at)
@@ -422,8 +426,7 @@ pub fn mark_template_trashed(template_id: &str, trashed: bool) -> Result<()> {
 
 pub fn delete_template_data(template_id: &str) -> Result<()> {
     let mut conn = open_db()?;
-    init_db(&conn)?;
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
         "DELETE FROM field_history WHERE template_id = ?1",
         params![template_id],
@@ -442,8 +445,7 @@ pub fn delete_template_data(template_id: &str) -> Result<()> {
 
 pub fn migrate_template_data_to_common(template_id: &str) -> Result<()> {
     let mut conn = open_db()?;
-    init_db(&conn)?;
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
         "UPDATE field_history
          SET template_id = ?2,
@@ -463,16 +465,34 @@ pub fn migrate_template_data_to_common(template_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn open_db() -> Result<Connection> {
+fn ensure_db_initialized() -> Result<()> {
+    if DB_INITIALIZED.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    let _guard = DB_INIT_LOCK
+        .lock()
+        .map_err(|e| anyhow::anyhow!("DB init lock poisoned: {e}"))?;
+    if DB_INITIALIZED.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     let path = db_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let conn = Connection::open(path)?;
-    conn.busy_timeout(Duration::from_secs(5))?;
-    // WAL allows concurrent readers (multiple windows) without write blocking;
-    // synchronous=NORMAL keeps durability with far fewer fsyncs.
+    let conn = Connection::open(&path)?;
+    conn.busy_timeout(Duration::from_secs(10))?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+    init_db(&conn)?;
+    DB_INITIALIZED.store(true, Ordering::Release);
+    Ok(())
+}
+
+fn open_db() -> Result<Connection> {
+    ensure_db_initialized()?;
+    let path = db_path();
+    let conn = Connection::open(path)?;
+    conn.busy_timeout(Duration::from_secs(10))?;
+    conn.execute_batch("PRAGMA synchronous=NORMAL;")?;
     Ok(conn)
 }
 
@@ -520,6 +540,7 @@ fn init_db(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_field_history_template_field ON field_history(template_id, field_id);
         CREATE INDEX IF NOT EXISTS idx_field_history_semantic ON field_history(semantic_key);
         CREATE INDEX IF NOT EXISTS idx_field_history_run ON field_history(run_id);
+        CREATE INDEX IF NOT EXISTS idx_field_history_template_field_id ON field_history(template_id, field_id);
         ",
     )?;
     ensure_field_history_id_column(conn)?;
@@ -537,15 +558,11 @@ fn ensure_field_history_id_column(conn: &Connection) -> Result<()> {
             "ALTER TABLE field_history ADD COLUMN field_id TEXT NOT NULL DEFAULT ''",
             [],
         )?;
+        conn.execute(
+            "UPDATE field_history SET field_id = field_name WHERE field_id = ''",
+            [],
+        )?;
     }
-    conn.execute(
-        "UPDATE field_history SET field_id = field_name WHERE field_id = ''",
-        [],
-    )?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_field_history_template_field_id ON field_history(template_id, field_id)",
-        [],
-    )?;
     Ok(())
 }
 
@@ -906,5 +923,24 @@ mod tests {
         };
         assert!(serde_json::to_value(context).is_ok());
         assert_eq!(manifest.template.id, "tpl");
+    }
+
+    #[test]
+    fn concurrent_db_reads_do_not_lock() {
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                std::thread::spawn(move || {
+                    if i % 2 == 0 {
+                        list_generation_runs(10).expect("list_generation_runs must not lock");
+                    } else {
+                        list_database_entries().expect("list_database_entries must not lock");
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            assert!(handle.join().is_ok());
+        }
     }
 }

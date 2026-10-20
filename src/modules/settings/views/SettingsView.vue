@@ -174,6 +174,9 @@
           <el-radio-button value="direct">直连 GitHub (官方源)</el-radio-button>
         </el-radio-group>
       </div>
+      <div class="proxy-note">
+        公共加速镜像由第三方提供，速度和可用性会变化；建议先“测试各节点延迟”，下载失败时 Docsy 会自动回退官方源。
+      </div>
 
       <!-- Proxy Latency Results -->
       <div v-if="proxyResults.length > 0" class="proxy-results-grid">
@@ -812,6 +815,13 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
+.proxy-note {
+  margin: -6px 0 14px;
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .proxy-results-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -918,6 +928,7 @@ onUnmounted(() => {
 .settings-section :deep(.el-card__body) {
   padding-block: clamp(14px, 2dvh, 18px);
   padding-inline: 18px;
+  overflow: visible;
 }
 
 .card-header {

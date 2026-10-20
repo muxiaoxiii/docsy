@@ -129,6 +129,10 @@ defineProps({
   overflow: auto;
 }
 
+.workspace-content > * {
+  flex-shrink: 0;
+}
+
 .workspace-actions {
   flex-shrink: 0;
   flex-wrap: wrap;

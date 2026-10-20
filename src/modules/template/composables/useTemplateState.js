@@ -537,6 +537,27 @@ export function useTemplateState() {
     buildFillPreview()
   }
 
+  watch(activeTab, (tab) => {
+    if (tab === 'history' && historyRuns.value.length === 0) {
+      void loadTemplateHistoryRuns()
+    } else if (tab === 'settings' && templateDatabase.value.length === 0) {
+      void loadTemplateDatabase()
+      void loadTemplateTrash()
+    } else if (tab === 'render' && templateLibrary.value.length === 0) {
+      void loadTemplateLibrary()
+    }
+  })
+
+  async function initTemplateData() {
+    await loadTemplateLibrary()
+    if (activeTab.value === 'history') {
+      await loadTemplateHistoryRuns()
+    } else if (activeTab.value === 'settings') {
+      await loadTemplateDatabase()
+      await loadTemplateTrash()
+    }
+  }
+
   onMounted(() => {
     document.addEventListener('selectionchange', rememberSourcePreviewSelection)
     document.addEventListener('pointerup', rememberSourcePreviewSelection)
@@ -546,9 +567,7 @@ export function useTemplateState() {
     } else if (shouldUseBuildUiDemo()) {
       applyBuildUiDemo()
     } else {
-      void loadTemplateLibrary()
-      void loadTemplateHistoryRuns()
-      void loadTemplateDatabase()
+      void initTemplateData()
     }
 
     registerSnapshotProvider('template', () => ({
@@ -569,7 +588,9 @@ export function useTemplateState() {
 
   function refreshLibraryAndHistory() {
     void loadTemplateLibrary()
-    void loadTemplateHistoryRuns()
+    if (activeTab.value === 'history') {
+      void loadTemplateHistoryRuns()
+    }
   }
 
   function setPreviewSampleValue(name, value) {

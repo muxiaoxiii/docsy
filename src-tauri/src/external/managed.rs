@@ -443,6 +443,25 @@ fn download_with_fallback(
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("没有可用的下载地址")))
 }
 
+/// Built-in community GitHub accelerators. Availability changes over time; the
+/// UI runs a short latency probe before the user selects one. Keep this list to
+/// schemes that accept a full GitHub URL after the base (e.g. base/https://...).
+fn default_github_proxy_candidates() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("直连 GitHub (Direct)", ""),
+        ("gh-proxy.com", "https://gh-proxy.com/"),
+        ("ghfast.top", "https://ghfast.top/"),
+        ("gh-proxy.net", "https://gh-proxy.net/"),
+        ("ghproxy.net", "https://ghproxy.net/"),
+        ("ghproxy.cc", "https://ghproxy.cc/"),
+        ("gh.llkk.cc", "https://gh.llkk.cc/"),
+        ("github.moeyy.xyz", "https://github.moeyy.xyz/"),
+        ("ghproxy.cn", "https://ghproxy.cn/"),
+        ("gh-proxy.top", "https://gh-proxy.top/"),
+        ("mirror.ghproxy.com", "https://mirror.ghproxy.com/"),
+    ]
+}
+
 pub fn test_all_github_proxies() -> Vec<GhProxySpeedResult> {
     let settings = crate::services::history::get_settings().unwrap_or_default();
 
@@ -453,38 +472,15 @@ pub fn test_all_github_proxies() -> Vec<GhProxySpeedResult> {
         is_custom: bool,
     }
 
-    let mut candidates = vec![
-        Candidate {
-            name: "直连 GitHub (Direct)".into(),
-            proxy_url: "".into(),
-            is_direct: true,
+    let mut candidates = default_github_proxy_candidates()
+        .into_iter()
+        .map(|(name, proxy_url)| Candidate {
+            name: name.to_string(),
+            proxy_url: proxy_url.to_string(),
+            is_direct: proxy_url.is_empty(),
             is_custom: false,
-        },
-        Candidate {
-            name: "gh-proxy.com".into(),
-            proxy_url: "https://gh-proxy.com/".into(),
-            is_direct: false,
-            is_custom: false,
-        },
-        Candidate {
-            name: "ghfast.top".into(),
-            proxy_url: "https://ghfast.top/".into(),
-            is_direct: false,
-            is_custom: false,
-        },
-        Candidate {
-            name: "gh-proxy.net".into(),
-            proxy_url: "https://gh-proxy.net/".into(),
-            is_direct: false,
-            is_custom: false,
-        },
-        Candidate {
-            name: "mirror.ghproxy.com".into(),
-            proxy_url: "https://mirror.ghproxy.com/".into(),
-            is_direct: false,
-            is_custom: false,
-        },
-    ];
+        })
+        .collect::<Vec<_>>();
 
     for custom in &settings.custom_gh_proxies {
         let trimmed = custom.trim();
@@ -1181,6 +1177,24 @@ mod tests {
         assert!(remove_managed_tool("../../../etc").is_err());
         assert!(remove_managed_tool("unknown_tool").is_err());
         assert!(remove_managed_tool("").is_err());
+    }
+
+    #[test]
+    fn default_github_proxies_are_unique_and_https() {
+        let proxies = default_github_proxy_candidates();
+        assert!(proxies.len() >= 10, "应保留直连和多个公共镜像");
+        let mut names = std::collections::HashSet::new();
+        let mut urls = std::collections::HashSet::new();
+        for (name, url) in proxies {
+            assert!(names.insert(name), "镜像名称重复: {name}");
+            if url.is_empty() {
+                assert_eq!(name, "直连 GitHub (Direct)");
+                continue;
+            }
+            assert!(url.starts_with("https://"), "镜像必须使用 HTTPS: {url}");
+            assert!(url.ends_with('/'), "镜像基址应以 / 结尾: {url}");
+            assert!(urls.insert(url), "镜像 URL 重复: {url}");
+        }
     }
 
     #[test]
