@@ -49,11 +49,13 @@
     </el-scrollbar>
 
     <div v-else class="queue-empty">
-      <WorkspaceEmptyState :compact="!fill" title="等待添加文件" :description="emptyText">
-        <template v-if="emptyActionLabel" #actions>
-          <el-button type="primary" plain @click="$emit('empty-action')">{{ emptyActionLabel }}</el-button>
-        </template>
-      </WorkspaceEmptyState>
+      <slot name="empty">
+        <WorkspaceEmptyState :compact="!fill" title="等待添加文件" :description="emptyText">
+          <template v-if="emptyActionLabel" #actions>
+            <el-button type="primary" plain @click="$emit('empty-action')">{{ emptyActionLabel }}</el-button>
+          </template>
+        </WorkspaceEmptyState>
+      </slot>
     </div>
   </section>
 </template>

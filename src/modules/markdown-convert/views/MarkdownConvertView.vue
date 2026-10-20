@@ -10,113 +10,123 @@
       :hide-toolbar="!files.length"
     >
       <template #toolbar>
-        <el-button type="primary" plain :disabled="converting" @click="selectFiles"
-          >添加 Markdown / Office / PDF 文件</el-button
-        >
+        <el-button type="primary" plain :disabled="converting" @click="selectFiles">
+          添加文件
+        </el-button>
         <el-button type="success" :loading="converting" :disabled="!hasPendingFiles" @click="runQueue">
           开始转换
         </el-button>
       </template>
 
-      <div ref="convertWorkspaceRef" class="convert-workspace" :style="convertGridStyle">
+      <div
+        ref="convertWorkspaceRef"
+        class="convert-workspace"
+        :class="{ 'is-resizing': isResizing }"
+        :style="convertGridStyle"
+      >
+        <!-- ── Left Panel: File Conversion ── -->
         <section class="conversion-panel file-panel">
-          <div class="panel-heading">
-            <div>
-              <h3>文件互转</h3>
-              <p>支持 Word、Excel、PowerPoint、OpenDocument、RTF、CSV、EPUB、PDF 与常见 Markdown 扩展名。</p>
+          <div class="panel-header-row">
+            <div class="title-group">
+              <div class="title-with-badge">
+                <h3>文件互转</h3>
+                <span class="direction-badge">MD ⇄ Office / PDF</span>
+              </div>
+              <p class="panel-desc">Office / PDF 自动转 Markdown，Markdown 转出为排版文书</p>
             </div>
-            <span class="direction-note">MD ↔ Office · PDF → MD</span>
           </div>
-          <p class="convert-direction-note">
-            Office / PDF 文件添加后自动转为 Markdown；Markdown 文件按下方格式转出。
-          </p>
-          <div class="file-convert-options">
-            <span class="option-label">Markdown 转出为</span>
-            <el-radio-group v-model="fileOfficeFormat" :disabled="converting">
-              <el-radio-button value="docx">Word</el-radio-button>
-              <el-radio-button value="xlsx">Excel</el-radio-button>
-              <el-radio-button value="pptx">PowerPoint</el-radio-button>
-              <el-radio-button value="html">网页 (.html)</el-radio-button>
-            </el-radio-group>
-            <el-select
-              v-if="fileOfficeFormat === 'docx'"
-              v-model="docxStyle"
-              :disabled="pasteConverting || converting"
-              class="style-select"
-            >
-              <el-option label="通用专业版式" value="professional" />
-              <el-option label="法律文书版式" value="legal" />
-              <el-option label="紧凑工作版式" value="compact" />
-            </el-select>
-            <span v-if="fileOfficeFormat === 'docx'" class="docx-style-hint">
-              {{ docxStyleHint }}
-            </span>
+
+          <!-- Format & Style Toolbar -->
+          <div class="format-toolbar">
+            <div class="format-group">
+              <span class="field-label">转出格式</span>
+              <el-radio-group v-model="fileOfficeFormat" :disabled="converting" size="default">
+                <el-radio-button value="docx">Word</el-radio-button>
+                <el-radio-button value="xlsx">Excel</el-radio-button>
+                <el-radio-button value="pptx">PowerPoint</el-radio-button>
+                <el-radio-button value="html">网页</el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <div v-if="fileOfficeFormat === 'docx'" class="style-group">
+              <span class="field-label">版式</span>
+              <el-select v-model="docxStyle" :disabled="converting" class="style-select" size="default">
+                <el-option label="通用专业版式" value="professional" />
+                <el-option label="法律文书版式" value="legal" />
+                <el-option label="紧凑工作版式" value="compact" />
+              </el-select>
+            </div>
+
+            <div class="feature-chips">
+              <el-tooltip
+                :content="
+                  fileOfficeFormat === 'docx'
+                    ? `${docxStyleHint} · 公式自动生成可编辑公式，Mermaid 代码块自动嵌入图表`
+                    : '支持数学公式与图表自动渲染生成'
+                "
+                placement="top"
+              >
+                <span class="feature-pill">
+                  <el-icon><Compass /></el-icon>
+                  <span>公式与图表</span>
+                </span>
+              </el-tooltip>
+            </div>
           </div>
-          <div class="file-convert-options">
-            <span class="option-label">Markdown 文件编码</span>
-            <el-select
-              v-model="inputEncoding"
-              :disabled="converting"
-              class="encoding-select"
-              aria-label="Markdown 文件编码"
-            >
-              <el-option label="自动（UTF-8 / UTF-16 BOM）" value="auto" />
-              <el-option label="UTF-8" value="utf-8" />
-              <el-option label="UTF-16 LE" value="utf-16le" />
-              <el-option label="UTF-16 BE" value="utf-16be" />
-              <el-option label="西欧 Windows-1252" value="windows-1252" />
-              <el-option label="日文 Shift-JIS" value="shift_jis" />
-              <el-option label="韩文 EUC-KR / CP949" value="euc-kr" />
-              <el-option label="简体中文 GB18030 / GBK" value="gb18030" />
-              <el-option label="繁体中文 Big5" value="big5" />
-            </el-select>
-            <span class="option-hint">支持多语言混排。旧编码需手动选择，适用于本批 Markdown 文件。</span>
-          </div>
-          <p class="rich-media-hint">
-            公式支持 $…$、$$…$$、\(…\)、\[…\]；Word 优先生成可编辑公式，不支持的结构回退为图片。Mermaid
-            代码块会嵌入图像。
-          </p>
-          <p v-if="['xlsx', 'pptx'].includes(fileOfficeFormat)" class="rich-media-hint">
-            Excel / PowerPoint 中，公式和图表以图片独立成表或成页。
-          </p>
+
+          <!-- PDF Page Range Settings (appears only when PDF present) -->
           <div v-if="hasPdfInQueue" class="pdf-convert-note">
-            <span>PDF 当前使用文本层提取，不会改写原件。</span>
-            <div v-if="hasPdfInQueue" class="pdf-page-range">
-              <span class="option-label">PDF 页段（本批所有 PDF，留空为全文）</span>
+            <span class="pdf-note-title">PDF 文本层提取：</span>
+            <div class="pdf-page-range">
+              <span class="option-label">页码范围（留空为全文）：</span>
               <el-input-number
                 v-model="pdfStartPage"
                 :min="1"
                 :precision="0"
                 placeholder="起始页"
                 :disabled="converting"
+                size="small"
                 controls-position="right"
               />
-              <span class="option-label">至</span>
+              <span class="option-sep">至</span>
               <el-input-number
                 v-model="pdfEndPage"
                 :min="1"
                 :precision="0"
                 placeholder="结束页"
                 :disabled="converting"
+                size="small"
                 controls-position="right"
               />
             </div>
           </div>
+
+          <!-- Main File Queue with Lively Empty Scene -->
           <FileQueuePanel
             fill
-            empty-action-label="添加文件"
             :items="files"
             :busy="converting"
-            empty-text="选择或拖入 Markdown、Office 或 PDF 文件，转换结果保存在源文件旁"
-            @empty-action="selectFiles"
             @clear="clearFiles"
             @remove="removeFile"
           >
+            <!-- Custom Rich Scene for Empty State -->
+            <template #empty>
+              <MdConvertScene
+                :converting="converting"
+                :dragging="dragging"
+                :celebrating="celebrating"
+                :progress-text="activeConvertingStatus"
+                :target-format="fileOfficeFormat"
+                @select-files="selectFiles"
+              />
+            </template>
+
             <template #meta="{ item }">
               <el-tag size="small" type="info">{{ item.directionTag }}</el-tag>
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
               <span v-if="item.warning" class="queue-warning">{{ item.warning }}</span>
             </template>
+
             <template #item-actions="{ item, index }">
               <el-button
                 v-if="item.status === 'done' && item.outputPath"
@@ -134,7 +144,7 @@
                 size="small"
                 :loading="copyingPath === item.path"
                 :disabled="converting"
-                title="复制为富文本和纯文本（Foxmail 用富文本，微信自动用纯文本）"
+                title="复制为富文本和纯文本（Foxmail 自动用富文本，微信自动用纯文本）"
                 @click="copyMarkdownFile(item)"
               >
                 复制
@@ -151,91 +161,170 @@
               </el-button>
             </template>
           </FileQueuePanel>
-          <div v-if="summary" class="result-line">{{ summary }}</div>
-        </section>
 
-        <div
-          class="convert-resizer"
-          role="separator"
-          aria-label="调整文件转换与粘贴 Markdown 区域宽度"
-          aria-orientation="vertical"
-          @pointerdown="startConvertResize"
-        />
+          <!-- Subtle Bottom Footer: Compact Encoding Setting -->
+          <div class="panel-bottom-bar">
+            <div class="encoding-compact-setting">
+              <span class="compact-label">编码</span>
+              <el-select
+                v-model="inputEncoding"
+                :disabled="converting"
+                size="small"
+                class="encoding-compact-select"
+                aria-label="Markdown 文件编码"
+              >
+                <el-option label="自动识别 (UTF-8 / BOM)" value="auto" />
+                <el-option label="简体中文 (GB18030 / GBK)" value="gb18030" />
+                <el-option label="UTF-8" value="utf-8" />
+                <el-option label="UTF-16 LE" value="utf-16le" />
+                <el-option label="UTF-16 BE" value="utf-16be" />
+                <el-option label="繁体中文 (Big5)" value="big5" />
+                <el-option label="日文 (Shift-JIS)" value="shift_jis" />
+                <el-option label="韩文 (EUC-KR)" value="euc-kr" />
+                <el-option label="西欧 (Windows-1252)" value="windows-1252" />
+              </el-select>
+              <span class="encoding-subtle-hint">默认自动识别，极少数旧编码可手动切换</span>
+            </div>
 
-        <section class="conversion-panel paste-panel">
-          <div class="panel-heading">
-            <div>
-              <h3>粘贴 Markdown</h3>
-              <p>适合临时内容，无需先保存为 .md 文件。</p>
+            <div v-if="summary" class="summary-badge">
+              <span>{{ summary }}</span>
             </div>
           </div>
-          <el-input
-            v-model="pasteText"
-            :disabled="pasteConverting"
-            type="textarea"
-            :rows="9"
-            resize="vertical"
-            placeholder="在此粘贴 Markdown 文本…"
-          />
-          <p class="rich-media-hint">
-            支持数学公式与 Mermaid 代码块。Word 优先使用可编辑公式；Excel / PowerPoint 的图形独立成表或成页。
-          </p>
-          <p class="clipboard-hint">
-            复制会同时写入富文本和纯文本：Foxmail / 邮件编辑器使用富文本，微信 / 聊天窗口使用纯文本。
-          </p>
-          <div class="paste-format-row">
-            <el-radio-group v-model="pasteFormat" :disabled="pasteConverting">
-              <el-radio-button value="docx">Word</el-radio-button>
-              <el-radio-button value="xlsx">Excel</el-radio-button>
-              <el-radio-button value="pptx">PowerPoint</el-radio-button>
-              <el-radio-button value="html">网页 (.html)</el-radio-button>
-            </el-radio-group>
-            <el-select
-              v-if="pasteFormat === 'docx'"
-              v-model="docxStyle"
-              :disabled="pasteConverting || converting"
-              class="style-select"
-            >
-              <el-option label="通用专业版式" value="professional" />
-              <el-option label="法律文书版式" value="legal" />
-              <el-option label="紧凑工作版式" value="compact" />
-            </el-select>
-            <span v-if="pasteFormat === 'docx'" class="docx-style-hint">
-              {{ docxStyleHint }}
-            </span>
+        </section>
+
+        <!-- ── Resizer Grip ── -->
+        <div
+          class="convert-resizer"
+          :class="{ 'is-resizing': isResizing }"
+          role="separator"
+          aria-label="拖拽调整左右分栏宽度"
+          @pointerdown="startConvertResize"
+        >
+          <div class="resizer-thumb">
+            <span class="grip-dot" />
+            <span class="grip-dot" />
+            <span class="grip-dot" />
           </div>
-          <div class="paste-submit-row">
-            <el-input
-              v-model="pasteFileName"
-              placeholder="文件名（可选）"
-              :disabled="pasteConverting"
-              class="file-name-input"
-            />
-            <el-dropdown trigger="click" @command="copyPastedMarkdown">
-              <el-button :disabled="pasteConverting || !pasteText.trim()">
-                复制
-                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="rich">复制为富文本（Foxmail / 邮件）</el-dropdown-item>
-                  <el-dropdown-item command="plain">复制为纯文本（微信 / 聊天）</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+        </div>
+
+        <!-- ── Right Panel: Paste Markdown ── -->
+        <section class="conversion-panel paste-panel">
+          <div class="panel-header-row">
+            <div class="title-group">
+              <div class="title-with-badge">
+                <h3>粘贴 Markdown</h3>
+                <span v-if="pasteText.trim()" class="char-count-badge">
+                  {{ pasteText.length }} 字符
+                </span>
+              </div>
+              <p class="panel-desc">适合临时内容，无需保存为 .md 文件；可一键生成文档或复制到邮件/聊天</p>
+            </div>
+
             <el-button
-              type="success"
-              :loading="pasteConverting"
-              :disabled="pasteConverting || !pasteText.trim()"
-              @click="convertPastedText"
+              v-if="pasteText"
+              link
+              size="small"
+              class="clear-text-btn"
+              :disabled="pasteConverting"
+              @click="pasteText = ''"
             >
-              {{ pasteConverting ? pasteProgress : '生成文件' }}
+              清空
             </el-button>
           </div>
-          <el-alert v-if="pasteWarning" :title="pasteWarning" type="warning" :closable="false" show-icon />
-          <div v-if="pasteOutputPath" class="result-line output-result">
-            <span>已生成：{{ pasteOutputPath }}</span>
-            <el-button link type="primary" size="small" @click="openPasteOutputDir">打开文件夹</el-button>
+
+          <!-- Textarea Editor Area -->
+          <div class="paste-editor-wrapper">
+            <el-input
+              v-model="pasteText"
+              :disabled="pasteConverting"
+              type="textarea"
+              placeholder="在此粘贴 Markdown 文本… 支持公式 $...$、表格、代码块与 Mermaid 图表"
+            />
+          </div>
+
+          <!-- Paste Controls & Actions -->
+          <div class="paste-footer-controls">
+            <div class="format-toolbar compact">
+              <div class="format-group">
+                <span class="field-label">转出格式</span>
+                <el-radio-group v-model="pasteFormat" :disabled="pasteConverting" size="default">
+                  <el-radio-button value="docx">Word</el-radio-button>
+                  <el-radio-button value="xlsx">Excel</el-radio-button>
+                  <el-radio-button value="pptx">PowerPoint</el-radio-button>
+                  <el-radio-button value="html">网页</el-radio-button>
+                </el-radio-group>
+              </div>
+
+              <div v-if="pasteFormat === 'docx'" class="style-group">
+                <span class="field-label">版式</span>
+                <el-select
+                  v-model="docxStyle"
+                  :disabled="pasteConverting || converting"
+                  class="style-select"
+                  size="default"
+                >
+                  <el-option label="通用专业版式" value="professional" />
+                  <el-option label="法律文书版式" value="legal" />
+                  <el-option label="紧凑工作版式" value="compact" />
+                </el-select>
+              </div>
+            </div>
+
+            <div class="paste-action-row">
+              <el-input
+                v-model="pasteFileName"
+                placeholder="文件名（可选）"
+                :disabled="pasteConverting"
+                class="file-name-input"
+                size="default"
+              />
+
+              <el-dropdown trigger="click" @command="copyPastedMarkdown">
+                <el-button :disabled="pasteConverting || !pasteText.trim()" size="default">
+                  <el-icon><CopyDocument /></el-icon>
+                  <span style="margin: 0 4px">复制</span>
+                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="rich">
+                      <div class="dropdown-item-meta">
+                        <strong>复制为富文本</strong>
+                        <small>适用于 Foxmail / 邮件客户端（保留表格、加粗与样式）</small>
+                      </div>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="plain">
+                      <div class="dropdown-item-meta">
+                        <strong>复制为纯文本</strong>
+                        <small>适用于 微信 / 聊天窗口（自动去除 Markdown 符号）</small>
+                      </div>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+
+              <el-button
+                type="success"
+                :loading="pasteConverting"
+                :disabled="pasteConverting || !pasteText.trim()"
+                size="default"
+                @click="convertPastedText"
+              >
+                {{ pasteConverting ? (pasteProgress || '转换中…') : '生成文件' }}
+              </el-button>
+            </div>
+
+            <div class="clipboard-explanation">
+              <span class="clip-tag">双模复制</span>
+              <span>Foxmail / 邮件自动呈现富文本排版，微信 / 聊天自动使用整洁纯文本</span>
+            </div>
+
+            <el-alert v-if="pasteWarning" :title="pasteWarning" type="warning" :closable="false" show-icon />
+
+            <div v-if="pasteOutputPath" class="paste-output-card">
+              <span class="output-path" :title="pasteOutputPath">已生成：{{ pasteOutputPath }}</span>
+              <el-button link type="primary" size="small" @click="openPasteOutputDir">打开文件夹</el-button>
+            </div>
           </div>
         </section>
       </div>
@@ -246,7 +335,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { readFile } from '@tauri-apps/plugin-fs'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, Compass, CopyDocument } from '@element-plus/icons-vue'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElNotification } from 'element-plus'
@@ -254,13 +343,15 @@ import { convertWithMedia } from '../composables/convertWithMedia.js'
 import { copyMarkdownContent, decodeMarkdownBytes } from '../composables/markdownClipboard.js'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
+import MdConvertScene from '../components/MdConvertScene.vue'
 import { useWindowFileDrop } from '../../../core/composables/useWindowFileDrop.js'
 import { fileName, parentDir } from '../../../core/filePath.js'
-import { openPath, tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
+import { openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 
 const files = ref([])
 const converting = ref(false)
+const celebrating = ref(false)
 const summary = ref('')
 const dragging = ref(false)
 const pasteText = ref('')
@@ -274,20 +365,26 @@ const copyingPath = ref('')
 const fileOfficeFormat = ref('docx')
 const inputEncoding = ref('auto')
 const docxStyle = ref('professional')
+const isResizing = ref(false)
+let celebrateTimer = null
+
 const docxStyleHints = {
   professional: '宋体正文 + Times New Roman + 商务深蓝标题',
   legal: '仿宋正文 + Times New Roman + 首行缩进两字符',
   compact: '宋体正文 + Times New Roman + 紧凑字号行距',
 }
 const docxStyleHint = computed(() => docxStyleHints[docxStyle.value] || '')
+
 const pdfStartPage = ref(null)
 const pdfEndPage = ref(null)
 const activeBackendOperationId = ref('')
-const pastePanelRatio = ref(0.55)
+const pastePanelRatio = ref(0.48)
 const convertWorkspaceRef = ref(null)
 let stopConvertResize = null
+
 const queueCancellation = useQueueCancellation()
 const PDF_CONVERT_OPERATION_ID = 'convert_pdf_text_layer:auto'
+
 const preference = useWorkspacePreferences('markdown-convert.workspace', {
   inputEncoding,
   fileOfficeFormat,
@@ -300,38 +397,76 @@ const hasPdfInQueue = computed(() => files.value.some((item) => extensionOf(item
 const hasPendingFiles = computed(() =>
   files.value.some((item) => ['pending', 'failed', 'cancelled'].includes(item.status)),
 )
+
+const activeConvertingStatus = computed(() => {
+  const current = files.value.find((f) => f.status === 'processing')
+  return current ? current.statusText : 'Doclet 正在排版生成文档…'
+})
+
 const convertGridStyle = computed(() => {
   const paste = Math.round(clampPastePanelRatio(pastePanelRatio.value) * 100)
-  return { gridTemplateColumns: `minmax(360px, ${100 - paste}fr) 10px minmax(360px, ${paste}fr)` }
+  return { gridTemplateColumns: `minmax(320px, ${100 - paste}fr) 14px minmax(320px, ${paste}fr)` }
 })
 
 function clampPastePanelRatio(value) {
-  return Math.min(0.65, Math.max(0.35, Number(value) || 0.55))
+  return Math.min(0.65, Math.max(0.30, Number(value) || 0.48))
 }
 
 function setPastePanelRatio(value) {
   pastePanelRatio.value = clampPastePanelRatio(value)
 }
 
+function triggerCelebration() {
+  if (celebrateTimer) clearTimeout(celebrateTimer)
+  celebrating.value = true
+  celebrateTimer = setTimeout(() => {
+    celebrating.value = false
+    celebrateTimer = null
+  }, 2800)
+}
+
 function startConvertResize(event) {
   if (event.button !== 0 || !convertWorkspaceRef.value) return
   event.preventDefault()
-  const rect = convertWorkspaceRef.value.getBoundingClientRect()
-  const update = (pointerEvent) => {
-    setPastePanelRatio((rect.right - pointerEvent.clientX) / Math.max(1, rect.width))
+  isResizing.value = true
+
+  const resizerEl = event.currentTarget
+  if (resizerEl?.setPointerCapture) {
+    try {
+      resizerEl.setPointerCapture(event.pointerId)
+    } catch {
+      // ignore
+    }
   }
-  const finish = () => {
+
+  const update = (pointerEvent) => {
+    if (!convertWorkspaceRef.value) return
+    const rect = convertWorkspaceRef.value.getBoundingClientRect()
+    if (rect.width <= 0) return
+    setPastePanelRatio((rect.right - pointerEvent.clientX) / rect.width)
+  }
+
+  const finish = (pointerEvent) => {
+    isResizing.value = false
+    if (resizerEl?.releasePointerCapture && pointerEvent?.pointerId) {
+      try {
+        resizerEl.releasePointerCapture(pointerEvent.pointerId)
+      } catch {
+        // ignore
+      }
+    }
     window.removeEventListener('pointermove', update)
     window.removeEventListener('pointerup', finish)
     window.removeEventListener('pointercancel', finish)
     stopConvertResize = null
+    void preference.save()
   }
+
   stopConvertResize?.()
-  stopConvertResize = finish
+  stopConvertResize = () => finish(event)
   window.addEventListener('pointermove', update)
   window.addEventListener('pointerup', finish, { once: true })
   window.addEventListener('pointercancel', finish, { once: true })
-  update(event)
 }
 
 const markdownExtensions = ['md', 'markdown', 'mdown', 'mkdn', 'mdwn', 'mdtxt']
@@ -416,7 +551,6 @@ async function loadFiles(paths) {
     files.value.filter((item) => ['pending', 'processing'].includes(item.status)).map((item) => item.path),
   )
   const candidates = [...new Set(paths)].filter((path) => isConvertiblePath(path) && !busy.has(path))
-  // 旧版 .doc 由后端默认 doc2x 自动转换，无需再询问引擎或要求手动另存。
   const accepted = candidates
 
   const items = accepted.map((path) => ({
@@ -540,12 +674,16 @@ async function runQueue() {
     converting.value = false
   }
   if (!processed.length) return
-  // 格式转换的输入/输出体积没有可比性，不沿用压缩场景的"共节省 xx"文案
   const done = processed.filter((item) => item.status === 'done')
   const failed = processed.filter((item) => item.status === 'failed')
   const cancelled = queueCancellation.cancelled.value || processed.some((item) => item.status === 'cancelled')
   summary.value = `${cancelled ? '转换已停止，已完成' : '转换完成'} ${done.length}/${processed.length}`
   if (failed.length) summary.value += `；失败：${failed.map((item) => item.name).join('、')}`
+
+  if (done.length > 0) {
+    triggerCelebration()
+  }
+
   ElNotification({
     type: failed.length ? 'warning' : cancelled ? 'info' : 'success',
     title: summary.value,
@@ -610,6 +748,7 @@ async function convertPastedText() {
     if (result.ok) {
       pasteOutputPath.value = String(result.data?.output_path || '')
       pasteWarning.value = String(result.data?.warning || '')
+      triggerCelebration()
       ElMessage.success(`转换完成：${pasteOutputPath.value}`)
     } else {
       ElMessage.error(userFacingError(result.error, '转换失败'))
@@ -649,191 +788,278 @@ useWindowFileDrop({
 
 onMounted(() => void preference.start())
 onBeforeUnmount(() => {
-  if (activeBackendOperationId.value) {
-    void tauriCallQuiet('cancel_operation', { operationId: activeBackendOperationId.value })
-  }
+  stopConvertResize?.()
+  if (celebrateTimer) clearTimeout(celebrateTimer)
   void preference.stop()
+})
+
+defineExpose({
+  files,
+  converting,
+  hasPendingFiles,
+  fileOfficeFormat,
+  docxStyle,
+  loadFiles,
+  runQueue,
+  clearFiles,
+  removeFile,
 })
 </script>
 
 <style scoped>
-.encoding-select {
-  width: 250px;
-  max-width: 100%;
-}
-.rich-media-hint {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--docsy-text-muted);
-  margin: 8px 0;
-}
 .markdown-convert-view {
   position: relative;
   height: 100%;
   min-height: 0;
 }
 
+/* ── Main Two-Column Workspace ── */
 .convert-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);
+  grid-template-columns: minmax(320px, 1.08fr) 14px minmax(320px, 0.92fr);
   gap: 0;
   min-height: 100%;
+  height: 100%;
 }
 
+.convert-workspace.is-resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.convert-workspace.is-resizing * {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.convert-workspace.is-resizing .convert-resizer {
+  pointer-events: auto !important;
+}
+
+/* ── Conversion Panel Shell ── */
 .conversion-panel {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  padding: clamp(14px, 2.8dvh, 18px);
+  padding: clamp(14px, 2.5dvh, 18px);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   box-shadow: var(--docsy-shadow-panel);
+  overflow: hidden;
 }
 
-.file-panel,
-.paste-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.convert-resizer {
-  align-self: stretch;
-  min-height: 420px;
-  margin-inline: 2px;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    transparent 3px,
-    var(--docsy-border-subtle) 3px,
-    var(--docsy-border-subtle) 7px,
-    transparent 7px
-  );
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.convert-resizer:hover {
-  background: linear-gradient(
-    90deg,
-    transparent 3px,
-    var(--docsy-primary) 3px,
-    var(--docsy-primary) 7px,
-    transparent 7px
-  );
-}
-
-.file-panel > :deep(.file-queue-panel) {
-  flex: 1;
-}
-
-.paste-panel :deep(.el-textarea) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-}
-
-.paste-panel :deep(.el-textarea__inner) {
-  flex: 1;
-  min-height: 220px;
-  resize: none;
-}
-
-.panel-heading {
+/* ── Panel Header Row ── */
+.panel-header-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: clamp(10px, 2.1dvh, 14px);
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.panel-heading h3 {
+.title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title-with-badge h3 {
   margin: 0;
   color: var(--docsy-text-strong);
   font-size: 15px;
   font-weight: 700;
+  letter-spacing: -0.2px;
 }
 
-.panel-heading p {
-  margin: 5px 0 0;
-  color: var(--docsy-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.direction-note {
-  flex: 0 0 auto;
-  color: var(--docsy-primary);
+.direction-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1.5px 7px;
+  border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  white-space: nowrap;
+  background: color-mix(in srgb, var(--docsy-primary) 10%, transparent);
+  color: var(--docsy-primary);
+  border: 1px solid color-mix(in srgb, var(--docsy-primary) 20%, transparent);
 }
 
-.convert-direction-note {
-  margin: 0 0 4px;
+.char-count-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--docsy-font-mono, monospace);
   color: var(--docsy-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.file-convert-options {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 10px 0;
-  border: 0;
-  border-bottom: 1px solid var(--docsy-border-subtle);
-  border-radius: 0;
-  background: transparent;
-}
-
-.file-convert-options:last-of-type {
-  border-bottom: 0;
-}
-
-.pdf-convert-note {
-  display: grid;
-  gap: 3px;
-  margin: 0 0 12px;
-  padding: 9px 11px;
-  color: var(--docsy-text-muted);
-  border-left: 3px solid var(--docsy-primary);
   background: var(--docsy-surface-muted);
+}
+
+.panel-desc {
+  margin: 0;
+  color: var(--docsy-text-muted);
   font-size: 12px;
   line-height: 1.45;
 }
 
-.pdf-page-range {
+.clear-text-btn {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+  padding: 0;
+}
+
+.clear-text-btn:hover {
+  color: var(--el-color-danger);
+}
+
+/* ── Format & Settings Toolbar ── */
+.format-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 10px 14px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border-radius: var(--docsy-radius-sm);
+  background: var(--docsy-surface-muted);
+  border: 1px solid var(--docsy-border-subtle);
+}
+
+.format-toolbar.compact {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.format-group,
+.style-group {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  margin-top: 4px;
 }
 
-.pdf-page-range .el-input-number {
-  width: 120px;
-}
-
-.option-label {
-  color: var(--docsy-text-muted);
+.field-label {
   font-size: 12px;
-}
-
-.option-hint {
+  font-weight: 500;
   color: var(--docsy-text-muted);
-  font-size: 11.5px;
-  line-height: 1.5;
+  white-space: nowrap;
 }
 
 .style-select {
-  width: 150px;
+  width: 140px;
 }
 
-.docx-style-hint {
+.feature-chips {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.feature-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
   color: var(--docsy-text-muted);
+  background: var(--docsy-surface-elevated);
+  border: 1px solid var(--docsy-border-subtle);
+  cursor: help;
+  transition: all 0.2s ease;
+}
+
+.feature-pill:hover {
+  color: var(--docsy-primary);
+  border-color: color-mix(in srgb, var(--docsy-primary) 30%, transparent);
+}
+
+/* ── PDF Convert Note ── */
+.pdf-convert-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 7px 10px;
+  margin-bottom: 10px;
+  border-radius: var(--docsy-radius-sm);
+  background: color-mix(in srgb, var(--docsy-primary) 6%, transparent);
+  border-left: 3px solid var(--docsy-primary);
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+}
+
+.pdf-note-title {
+  font-weight: 600;
+  color: var(--docsy-text-strong);
+}
+
+.pdf-page-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pdf-page-range .el-input-number {
+  width: 90px;
+}
+
+.option-sep {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+}
+
+/* ── File Queue Panel in Left Column ── */
+.file-panel > :deep(.file-queue-panel) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Left Panel Bottom Footer Bar ── */
+.panel-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--docsy-border-subtle);
+}
+
+.encoding-compact-setting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compact-label {
+  font-size: 11.5px;
+  color: var(--docsy-text-muted);
+  white-space: nowrap;
+}
+
+.encoding-compact-select {
+  width: 175px;
+}
+
+.encoding-subtle-hint {
   font-size: 11px;
-  line-height: 1.4;
+  color: var(--docsy-text-muted);
+  opacity: 0.8;
+}
+
+.summary-badge {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--docsy-primary);
+  background: color-mix(in srgb, var(--docsy-primary) 8%, transparent);
+  padding: 3px 8px;
+  border-radius: 4px;
 }
 
 .queue-warning {
@@ -843,78 +1069,190 @@ onBeforeUnmount(() => {
   line-height: 1.45;
 }
 
-.paste-format-row,
-.paste-submit-row {
+/* ── Center Resizer Divider ── */
+.convert-resizer {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  position: relative;
+  z-index: 5;
+  transition: background 0.2s ease;
+}
+
+.convert-resizer:hover,
+.convert-resizer.is-resizing {
+  background: color-mix(in srgb, var(--docsy-primary) 6%, transparent);
+}
+
+.resizer-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 6px;
+  height: 38px;
+  border-radius: 999px;
+  background: var(--docsy-border-strong);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.grip-dot {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--docsy-surface-elevated);
+}
+
+.convert-resizer:hover .resizer-thumb,
+.convert-resizer.is-resizing .resizer-thumb {
+  width: 8px;
+  height: 48px;
+  background: var(--docsy-primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--docsy-primary) 40%, transparent);
+}
+
+/* ── Right Panel: Paste Markdown ── */
+.paste-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.paste-editor-wrapper {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 220px;
+}
+
+.paste-editor-wrapper :deep(.el-textarea) {
+  display: flex;
+  flex: 1;
+  height: 100%;
+}
+
+.paste-editor-wrapper :deep(.el-textarea__inner) {
+  flex: 1;
+  height: 100% !important;
+  min-height: 200px;
+  resize: none;
+  font-family: var(--docsy-font-mono, monospace), system-ui;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  border-radius: var(--docsy-radius-sm);
+  background: var(--docsy-surface);
+  border-color: var(--docsy-border-subtle);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.paste-editor-wrapper :deep(.el-textarea__inner:focus) {
+  border-color: var(--docsy-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--docsy-primary) 16%, transparent);
+}
+
+.paste-footer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.paste-action-row {
+  display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.paste-format-row {
-  margin-top: 12px;
-}
-
-.paste-submit-row {
-  margin-top: 10px;
-}
-
 .file-name-input {
-  flex: 1 1 180px;
+  flex: 1 1 160px;
 }
 
-.clipboard-hint {
-  margin: 8px 0 0;
+.dropdown-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.dropdown-item-meta strong {
+  font-size: 13px;
+  color: var(--docsy-text-strong);
+}
+
+.dropdown-item-meta small {
+  font-size: 11px;
   color: var(--docsy-text-muted);
-  font-size: 11.5px;
-  line-height: 1.5;
 }
 
-.result-line {
-  margin-top: clamp(8px, 1.7dvh, 12px);
-  padding-block: clamp(8px, 1.8dvh, 10px);
-  padding-inline: 12px;
-  color: var(--docsy-text);
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-radius);
+.clipboard-explanation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+  line-height: 1.4;
+}
+
+.clip-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
   background: var(--docsy-surface-muted);
-  font-size: 12px;
-  line-height: 1.5;
+  border: 1px solid var(--docsy-border-subtle);
+  color: var(--docsy-primary);
+  white-space: nowrap;
 }
 
-.output-result {
+.paste-output-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--docsy-radius-sm);
+  background: color-mix(in srgb, var(--docsy-primary) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--docsy-primary) 20%, transparent);
+  font-size: 12px;
 }
 
-.output-result span {
+.output-path {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--docsy-text-strong);
 }
 
+/* ── Full Window Drop Overlay ── */
 .document-drop-overlay {
   position: absolute;
-  z-index: 20;
+  z-index: 50;
   display: grid;
   inset: 12px;
   pointer-events: none;
   border: 2px dashed var(--docsy-primary);
   border-radius: var(--docsy-radius);
-  background: color-mix(in srgb, var(--docsy-surface) 88%, transparent);
+  background: color-mix(in srgb, var(--docsy-surface) 90%, transparent);
   place-items: center;
 }
 
 .document-drop-message {
-  padding: 12px 18px;
+  padding: 12px 24px;
   color: var(--docsy-primary);
   border-radius: var(--docsy-radius);
   background: var(--docsy-primary-soft);
   font-size: 14px;
   font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
+/* ── Responsive Stacking ── */
 @media (max-width: 1180px) {
   .convert-workspace {
     grid-template-columns: 1fr !important;
