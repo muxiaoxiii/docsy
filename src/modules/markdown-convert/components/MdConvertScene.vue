@@ -86,9 +86,7 @@
 
       <!-- Mascot Doclet with Dynamic Motion -->
       <div class="scene-mascot">
-        <DocletSprite :size="108" :motion="mascotMotion" />
-        <!-- Soft Shadow under Doclet -->
-        <div class="mascot-shadow" />
+        <DocletSvgMascot :size="112" :motion="mascotMotion" :look-x="lookX" :look-y="lookY" />
       </div>
 
       <!-- Right Floating Converted Document Card -->
@@ -139,7 +137,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import DocletSprite from '../../../shared/components/DocletSprite.vue'
+import DocletSvgMascot from '../../../shared/components/DocletSvgMascot.vue'
 
 const props = defineProps({
   converting: { type: Boolean, default: false },
@@ -152,8 +150,8 @@ const props = defineProps({
 defineEmits(['select-files'])
 
 const sceneStageRef = ref(null)
-const lookX = ref(0)
-const lookY = ref(0)
+const lookX = ref(null)
+const lookY = ref(null)
 const nodActive = ref(false)
 const ripples = ref([])
 
@@ -170,8 +168,8 @@ function handlePointerMove(e) {
 }
 
 function handlePointerLeave() {
-  lookX.value = 0
-  lookY.value = 0
+  lookX.value = null
+  lookY.value = null
 }
 
 function handlePointerDown(e) {

@@ -1,18 +1,36 @@
 <template>
-  <span ref="root" class="doclet-sprite" :class="{ 'is-paused': !inView || !pageVisible }" :style="{ width: size + 'px', height: size * 13 / 12 + 'px' }" aria-hidden="true">
-    <span :key="motion" class="doclet-sprite__pose" :class="`doclet-sprite__pose--${motion}`">
-    <span
-      class="doclet-sprite__frames"
-      :class="`doclet-sprite__frames--${motion}`"
-      :style="frameStyle"
+  <span
+    ref="root"
+    class="doclet-sprite"
+    :class="{ 'is-paused': !inView || !pageVisible }"
+    :style="{ width: size + 'px', height: Math.round((size * 13) / 12) + 'px' }"
+    aria-hidden="true"
+  >
+    <!-- Modern High-FPS Vector SVG Mascot Engine -->
+    <DocletSvgMascot
+      v-if="engine !== 'raster'"
+      :size="size"
+      :motion="motion"
+      :look-x="lookX"
+      :look-y="lookY"
+      :interactive="interactive"
     />
+
+    <!-- Fallback Legacy Raster Spritesheet (if explicitly requested) -->
+    <span v-else :key="motion" class="doclet-sprite__pose" :class="`doclet-sprite__pose--${motion}`">
+      <span
+        class="doclet-sprite__frames"
+        :class="`doclet-sprite__frames--${motion}`"
+        :style="frameStyle"
+      />
     </span>
   </span>
 </template>
 
 <script setup>
-import spritesheet from '../../assets/doclet-v2-spritesheet.webp'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import spritesheet from '../../assets/doclet-v2-spritesheet.webp'
+import DocletSvgMascot from './DocletSvgMascot.vue'
 
 const motions = {
   idle: { row: 0, frames: 6, duration: 2.4 },
@@ -24,14 +42,26 @@ const motions = {
   review: { row: 8, frames: 6, duration: 2 },
   look: { row: 9, frames: 8, duration: 5.6 },
 }
+
 const props = defineProps({
   size: { type: Number, default: 144 },
-  motion: { type: String, default: 'idle', validator: value => ['idle', 'greet', 'celebrate', 'error', 'waiting', 'working', 'review', 'look'].includes(value) },
+  motion: {
+    type: String,
+    default: 'idle',
+    validator: (value) =>
+      ['idle', 'greet', 'celebrate', 'error', 'waiting', 'working', 'review', 'look'].includes(value),
+  },
+  engine: { type: String, default: 'svg', validator: (v) => ['svg', 'raster'].includes(v) },
+  lookX: { type: Number, default: null },
+  lookY: { type: Number, default: null },
+  interactive: { type: Boolean, default: true },
 })
+
 const root = ref(null)
 const inView = ref(false)
 const pageVisible = ref(true)
 let observer
+
 const frameStyle = computed(() => {
   const action = motions[props.motion] || motions.idle
   return {
@@ -43,14 +73,16 @@ const frameStyle = computed(() => {
     '--doclet-duration': `${action.duration}s`,
   }
 })
+
 function updateVisibility() {
   pageVisible.value = !document.hidden
 }
+
 onMounted(() => {
   updateVisibility()
   document.addEventListener('visibilitychange', updateVisibility)
   if (typeof window.IntersectionObserver !== 'undefined') {
-    observer = new window.IntersectionObserver(entries => {
+    observer = new window.IntersectionObserver((entries) => {
       inView.value = entries[0]?.isIntersecting ?? false
     })
     observer.observe(root.value)
@@ -58,6 +90,7 @@ onMounted(() => {
     inView.value = true
   }
 })
+
 onBeforeUnmount(() => {
   observer?.disconnect()
   document.removeEventListener('visibilitychange', updateVisibility)
@@ -66,7 +99,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .doclet-sprite {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   position: relative;
 }
@@ -104,80 +139,5 @@ onBeforeUnmount(() => {
 @keyframes doclet-tilt {
   0%, 100% { transform: rotate(0); }
   40%, 65% { transform: rotate(-6deg); }
-}
-.doclet-sprite__frames--look {
-  background-position: 0 -1404px;
-  animation: doclet-look-around 5.6s steps(1, end) infinite;
-}
-@keyframes doclet-look-around {
-  0%,
-  6.24% {
-    background-position: 0 -1404px;
-  }
-  6.25%,
-  12.49% {
-    background-position: -144px -1404px;
-  }
-  12.5%,
-  18.74% {
-    background-position: -288px -1404px;
-  }
-  18.75%,
-  24.99% {
-    background-position: -432px -1404px;
-  }
-  25%,
-  31.24% {
-    background-position: -576px -1404px;
-  }
-  31.25%,
-  37.49% {
-    background-position: -720px -1404px;
-  }
-  37.5%,
-  43.74% {
-    background-position: -864px -1404px;
-  }
-  43.75%,
-  49.99% {
-    background-position: -1008px -1404px;
-  }
-  50%,
-  56.24% {
-    background-position: 0 -1560px;
-  }
-  56.25%,
-  62.49% {
-    background-position: -144px -1560px;
-  }
-  62.5%,
-  68.74% {
-    background-position: -288px -1560px;
-  }
-  68.75%,
-  74.99% {
-    background-position: -432px -1560px;
-  }
-  75%,
-  81.24% {
-    background-position: -576px -1560px;
-  }
-  81.25%,
-  87.49% {
-    background-position: -720px -1560px;
-  }
-  87.5%,
-  93.74% {
-    background-position: -864px -1560px;
-  }
-  93.75%,
-  100% {
-    background-position: -1008px -1560px;
-  }
-}
-
-
-@media (prefers-reduced-motion: reduce) {
-  .doclet-sprite__frames, .doclet-sprite__pose { animation: none; }
 }
 </style>

@@ -44,69 +44,7 @@
           <span class="card-sub-icon">{{ sceneMeta.sourceIcon }}</span>
         </div>
         <div class="card-content-preview">
-          <!-- Unlock: Locked doc -->
-          <template v-if="resolvedScene === 'pdf-unlock'">
-            <div class="preview-line wide" />
-            <div class="lock-shield-badge">🔒</div>
-            <div class="preview-line medium" />
-          </template>
-          <!-- Merge: Multiple documents stacking -->
-          <template v-else-if="resolvedScene === 'pdf-merge'">
-            <div class="stacked-layer layer-1" />
-            <div class="stacked-layer layer-2" />
-            <div class="preview-line wide" />
-            <div class="preview-line short" />
-          </template>
-          <!-- Compress: Dense heavy file -->
-          <template v-else-if="resolvedScene === 'pdf-compress'">
-            <div class="preview-line wide" />
-            <div class="file-size-tag tag-heavy">100% · 24 MB</div>
-            <div class="preview-line medium" />
-          </template>
-          <!-- Anti-copy: Unprotected file -->
-          <template v-else-if="resolvedScene === 'pdf-anticopy'">
-            <div class="preview-line wide" />
-            <div class="preview-line medium" />
-            <div class="copy-warning-badge">⚠️ 未保护</div>
-          </template>
-          <!-- Extract: Multi-page document with selection -->
-          <template v-else-if="resolvedScene === 'pdf-extract'">
-            <div class="page-corner-tags">
-              <span>P1</span><span>P2</span><span class="highlight">P3</span>
-            </div>
-            <div class="preview-line wide" />
-          </template>
-          <!-- Evidence: Case files with record folder -->
-          <template v-else-if="resolvedScene === 'evidence'">
-            <div class="evidence-folder-tab">案卷材料</div>
-            <div class="preview-line wide" />
-            <div class="preview-line short" />
-          </template>
-          <!-- Template: Word doc with yellow highlight placeholders -->
-          <template v-else-if="resolvedScene === 'template'">
-            <div class="template-highlight-box">{客户名称}</div>
-            <div class="preview-line wide" />
-            <div class="template-highlight-box short">{签约日期}</div>
-          </template>
-          <!-- Image paddler: Photos -->
-          <template v-else-if="resolvedScene === 'image-paddler'">
-            <div class="polaroid-inner">
-              <span class="cam-lens">📷</span>
-            </div>
-          </template>
-          <!-- Video extract: Film strip -->
-          <template v-else-if="resolvedScene === 'video-extract'">
-            <div class="film-strip-preview">
-              <span class="film-hole" /><span class="film-hole" /><span class="film-hole" />
-            </div>
-            <div class="preview-line medium" />
-          </template>
-          <!-- Generic fallback -->
-          <template v-else>
-            <div class="preview-line wide" />
-            <div class="preview-line medium" />
-            <div class="preview-line short" />
-          </template>
+          <SceneIllustrations :scene="resolvedScene" type="source" />
         </div>
         <div class="card-dogear" />
       </div>
@@ -147,8 +85,7 @@
 
       <!-- Doclet Mascot in Center -->
       <div class="stage-mascot">
-        <DocletSprite :size="106" :motion="mascotMotion" />
-        <div class="mascot-ground-shadow" />
+        <DocletSvgMascot :size="112" :motion="mascotMotion" :look-x="lookX" :look-y="lookY" />
       </div>
 
       <!-- Right Target Result Card -->
@@ -158,69 +95,7 @@
           <span class="card-sub-icon">{{ sceneMeta.targetIcon }}</span>
         </div>
         <div class="card-content-preview">
-          <!-- Unlock: Unlocked PDF with green shield -->
-          <template v-if="resolvedScene === 'pdf-unlock'">
-            <div class="preview-line wide" />
-            <div class="unlocked-badge">🔓 已解除限制</div>
-            <div class="preview-line medium" />
-          </template>
-          <!-- Merge: Bound Book / Unified Doc -->
-          <template v-else-if="resolvedScene === 'pdf-merge'">
-            <div class="bound-spine" />
-            <div class="preview-line wide" />
-            <div class="preview-line medium" />
-            <div class="bound-tag">完整合订本</div>
-          </template>
-          <!-- Compress: Slimmed light file -->
-          <template v-else-if="resolvedScene === 'pdf-compress'">
-            <div class="preview-line wide" />
-            <div class="file-size-tag tag-slim">-68% · 7.6 MB</div>
-            <div class="preview-line medium" />
-          </template>
-          <!-- Anti-copy: Guard shield & watermark -->
-          <template v-else-if="resolvedScene === 'pdf-anticopy'">
-            <div class="shield-watermark">🛡️</div>
-            <div class="preview-line wide" />
-            <div class="secured-tag">防复制 / 防篡改</div>
-          </template>
-          <!-- Extract: Targeted single page -->
-          <template v-else-if="resolvedScene === 'pdf-extract'">
-            <div class="extracted-page-tag">导出页 3</div>
-            <div class="preview-line wide" />
-            <div class="preview-line medium" />
-          </template>
-          <!-- Evidence: Red sealed evidence page with page numbers -->
-          <template v-else-if="resolvedScene === 'evidence'">
-            <div class="evidence-header-tag">证据目录 · 第 1 卷</div>
-            <div class="preview-line wide" />
-            <div class="red-seal">证据印</div>
-            <div class="evidence-footer-tag">第 001 页 / 共 036 页</div>
-          </template>
-          <!-- Template: Generated Word -->
-          <template v-else-if="resolvedScene === 'template'">
-            <div class="template-filled-line">Docsy 科技有限公司</div>
-            <div class="preview-line wide" />
-            <div class="template-filled-line">2026 年 10 月 20 日</div>
-          </template>
-          <!-- Image paddler: Padded Photo with Border -->
-          <template v-else-if="resolvedScene === 'image-paddler'">
-            <div class="framed-photo-preview">
-              <div class="photo-inner-canvas" />
-            </div>
-          </template>
-          <!-- Video extract: Snapshot card -->
-          <template v-else-if="resolvedScene === 'video-extract'">
-            <div class="snapshot-frame">
-              <span class="timestamp-pill">00:01:24.500</span>
-            </div>
-            <div class="preview-line short" />
-          </template>
-          <!-- Generic fallback -->
-          <template v-else>
-            <div class="preview-line wide" />
-            <div class="preview-line medium" />
-            <div class="preview-line short" />
-          </template>
+          <SceneIllustrations :scene="resolvedScene" type="target" />
         </div>
         <div class="card-dogear" />
       </div>
@@ -259,7 +134,8 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import DocletSprite from './DocletSprite.vue'
+import DocletSvgMascot from './DocletSvgMascot.vue'
+import SceneIllustrations from './SceneIllustrations.vue'
 
 const props = defineProps({
   scene: {
@@ -296,8 +172,8 @@ defineEmits(['action'])
 const resolvedScene = computed(() => props.scene || 'generic')
 
 const stageCanvasRef = ref(null)
-const lookX = ref(0)
-const lookY = ref(0)
+const lookX = ref(null)
+const lookY = ref(null)
 const isInteracting = ref(false)
 const nodActive = ref(false)
 const ripples = ref([])
@@ -316,8 +192,8 @@ function handlePointerMove(e) {
 }
 
 function handlePointerLeave() {
-  lookX.value = 0
-  lookY.value = 0
+  lookX.value = null
+  lookY.value = null
   isInteracting.value = false
 }
 
