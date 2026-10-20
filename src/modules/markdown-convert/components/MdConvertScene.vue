@@ -8,9 +8,28 @@
     }"
   >
     <!-- Animation Stage -->
-    <div class="scene-stage">
-      <!-- Background Ambient Glow -->
+    <div
+      ref="sceneStageRef"
+      class="scene-stage"
+      :class="{ 'is-nodding': nodActive }"
+      :style="{ '--look-x': lookX, '--look-y': lookY }"
+      @pointermove="handlePointerMove"
+      @pointerleave="handlePointerLeave"
+      @pointerdown="handlePointerDown"
+    >
+      <!-- Ambient Glow Behind Stage -->
       <div class="stage-ambient-glow" />
+
+      <!-- Click Ripple Effects -->
+      <div
+        v-for="r in ripples"
+        :key="r.id"
+        class="click-ripple"
+        :style="{ left: `${r.x}px`, top: `${r.y}px` }"
+      >
+        <span class="ripple-wave" />
+        <span class="ripple-glyph">{{ r.glyph }}</span>
+      </div>
 
       <!-- Left Floating Markdown Card -->
       <div class="doc-card doc-card-md" :class="{ 'card-flying': converting }">
@@ -119,7 +138,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import DocletSprite from '../../../shared/components/DocletSprite.vue'
 
 const props = defineProps({
@@ -132,10 +151,53 @@ const props = defineProps({
 
 defineEmits(['select-files'])
 
+const sceneStageRef = ref(null)
+const lookX = ref(0)
+const lookY = ref(0)
+const nodActive = ref(false)
+const ripples = ref([])
+
+function handlePointerMove(e) {
+  if (!sceneStageRef.value) return
+  const rect = sceneStageRef.value.getBoundingClientRect()
+  const centerX = rect.left + rect.width / 2
+  const centerY = rect.top + rect.height / 2
+  const maxDist = Math.max(rect.width, rect.height) / 2
+  const dx = (e.clientX - centerX) / (maxDist || 1)
+  const dy = (e.clientY - centerY) / (maxDist || 1)
+  lookX.value = Number(Math.max(-1, Math.min(1, dx)).toFixed(3))
+  lookY.value = Number(Math.max(-1, Math.min(1, dy)).toFixed(3))
+}
+
+function handlePointerLeave() {
+  lookX.value = 0
+  lookY.value = 0
+}
+
+function handlePointerDown(e) {
+  if (!sceneStageRef.value) return
+  const rect = sceneStageRef.value.getBoundingClientRect()
+  const x = Math.round(e.clientX - rect.left)
+  const y = Math.round(e.clientY - rect.top)
+  const id = Date.now() + Math.random()
+  const glyphs = ['✨', '✦', '📝', '📊', '🌐']
+  const randomGlyph = glyphs[Math.floor(Math.random() * glyphs.length)]
+  ripples.value.push({ id, x, y, glyph: randomGlyph })
+  setTimeout(() => {
+    ripples.value = ripples.value.filter((r) => r.id !== id)
+  }, 850)
+
+  nodActive.value = true
+  setTimeout(() => {
+    nodActive.value = false
+  }, 420)
+}
+
 const mascotMotion = computed(() => {
   if (props.celebrating) return 'celebrate'
   if (props.converting) return 'review'
   if (props.dragging) return 'greet'
+  if (nodActive.value) return 'greet'
   return 'look'
 })
 
@@ -175,6 +237,56 @@ const formatGlyph = computed(() => {
   width: 100%;
   max-width: 460px;
   margin-bottom: 14px;
+  perspective: 750px;
+  cursor: pointer;
+}
+
+/* ── Click Ripple & Floating Glyphs ── */
+.click-ripple {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+  transform: translate(-50%, -50%);
+}
+
+.ripple-wave {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  margin-left: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--docsy-primary);
+  opacity: 0.85;
+  animation: ripple-grow 0.75s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+}
+
+@keyframes ripple-grow {
+  to {
+    width: 68px;
+    height: 68px;
+    margin-top: -34px;
+    margin-left: -34px;
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+.ripple-glyph {
+  position: absolute;
+  top: -8px;
+  left: 0;
+  font-size: 15px;
+  user-select: none;
+  animation: ripple-float-up 0.8s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+
+@keyframes ripple-float-up {
+  0% { transform: translate(-50%, 0) scale(0.6); opacity: 0; }
+  25% { transform: translate(-50%, -10px) scale(1.2); opacity: 1; }
+  100% { transform: translate(-50%, -32px) scale(0.8); opacity: 0; }
 }
 
 .stage-ambient-glow {
@@ -212,7 +324,17 @@ const formatGlyph = computed(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform: translate3d(calc(var(--look-x, 0) * 8px), calc(var(--look-y, 0) * 5px), 0) rotate(calc(var(--look-x, 0) * 6deg));
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.4, 1);
+}
+
+.is-nodding .scene-mascot {
+  animation: doclet-nod 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes doclet-nod {
+  0%, 100% { transform: translate3d(calc(var(--look-x, 0) * 8px), calc(var(--look-y, 0) * 5px), 0) scale(1); }
+  45% { transform: translate3d(calc(var(--look-x, 0) * 8px), calc(var(--look-y, 0) * 5px - 9px), 0) scale(1.08) rotate(calc(var(--look-x, 0) * 8deg)); }
 }
 
 .mascot-shadow {
@@ -242,15 +364,17 @@ const formatGlyph = computed(() => {
 }
 
 .doc-card-md {
-  transform: rotate(-5deg);
+  transform: translate3d(calc(var(--look-x, 0) * 4px), calc(var(--look-y, 0) * 3px), 0) rotateY(calc(var(--look-x, 0) * 10deg)) rotateX(calc(var(--look-y, 0) * -6deg)) rotate(-5deg);
   animation: card-float-left 4.2s ease-in-out infinite;
   background: linear-gradient(175deg, var(--docsy-surface-elevated) 60%, var(--docsy-surface-muted));
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.4, 1), box-shadow 0.3s ease;
 }
 
 .doc-card-office {
-  transform: rotate(5deg);
+  transform: translate3d(calc(var(--look-x, 0) * 4px), calc(var(--look-y, 0) * 3px), 0) rotateY(calc(var(--look-x, 0) * 10deg)) rotateX(calc(var(--look-y, 0) * -6deg)) rotate(5deg);
   animation: card-float-right 4.5s ease-in-out infinite;
   background: linear-gradient(175deg, var(--docsy-surface-elevated) 60%, var(--docsy-surface-muted));
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.4, 1), box-shadow 0.3s ease;
 }
 
 .md-convert-scene.is-dragging .doc-card-md {

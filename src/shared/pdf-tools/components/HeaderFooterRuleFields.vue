@@ -380,6 +380,17 @@
             :margin-label="pageNumberRegion === 'header' ? '距顶' : '距底'"
           />
           <div class="rule-item">
+            <label>双面装订对开</label>
+            <el-select v-model="pageNumberDuplexModeModel">
+              <el-option label="单面固定（不镜像）" value="none" />
+              <el-option label="长边翻页（左右外侧对开）" value="long-edge" />
+              <el-option label="短边翻页（对开翻转）" value="short-edge" />
+            </el-select>
+          </div>
+          <div v-if="pageNumberDuplexModeModel !== 'none'" class="duplex-page-hint">
+            长边翻页时偶数页自动翻转至对开外侧，防止页码装订进装订中缝
+          </div>
+          <div class="rule-item">
             <label>分段与例外</label>
             <el-button @click="$emit('editPageNumberRules')">
               设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
@@ -473,6 +484,7 @@ const props = defineProps({
   pageNumberMarginMm: { type: Number, required: true },
   pageNumberOffsetXMm: { type: Number, required: true },
   pageNumberColor: { type: String, required: true },
+  pageNumberDuplexMode: { type: String, default: 'none' },
   pageNumberOverrideCount: { type: Number, default: 0 },
   pageNumberShowTotal: { type: Boolean, default: true },
   pageNumberSamplePage: { type: Number, default: 1 },
@@ -529,6 +541,7 @@ const emit = defineEmits([
     'pageNumberMarginMm',
     'pageNumberOffsetXMm',
     'pageNumberColor',
+    'pageNumberDuplexMode',
   ].map((key) => `update:${key}`),
 ])
 
@@ -721,7 +734,8 @@ const pageNumberEnabledModel = model('pageNumberEnabled'),
   pageNumberFontFamilyModel = model('pageNumberFontFamily'),
   pageNumberMarginMmModel = model('pageNumberMarginMm'),
   pageNumberOffsetXMmModel = model('pageNumberOffsetXMm'),
-  pageNumberColorModel = model('pageNumberColor')
+  pageNumberColorModel = model('pageNumberColor'),
+  pageNumberDuplexModeModel = model('pageNumberDuplexMode')
 const pageNumberShowTotalModel = model('pageNumberShowTotal')
 const selectedHeaderGroup = computed(
   () => props.headerGroups.find((group) => group.id === props.selectedHeaderGroupId) || props.headerGroups[0] || null,
@@ -1108,5 +1122,16 @@ function removePageNumberGroup(id) {
   padding: 0 3px;
   border-radius: var(--docsy-radius);
   font-size: 11px;
+}
+.duplex-page-hint {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  color: var(--docsy-primary);
+  background: color-mix(in srgb, var(--docsy-primary) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--docsy-primary) 18%, transparent);
+  border-radius: 4px;
+  padding: 4px 8px;
+  line-height: 1.4;
+  margin-top: -2px;
 }
 </style>

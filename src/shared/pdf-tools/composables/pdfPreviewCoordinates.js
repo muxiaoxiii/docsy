@@ -26,13 +26,25 @@ export function cleanupZoneStyle(heightMm, pageInfo = DEFAULT_PAGE_INFO) {
   }
 }
 
-export function textOverlayStyle(kind, pageInfo = DEFAULT_PAGE_INFO, config = {}) {
+export function textOverlayStyle(kind, pageInfo = DEFAULT_PAGE_INFO, config = {}, pageNumber = 1) {
   const widthPt = pageInfo?.widthPt || DEFAULT_PAGE_INFO.widthPt
   const heightPt = pageInfo?.heightPt || DEFAULT_PAGE_INFO.heightPt
-  const align = config.align || 'center'
-  const offsetPercent = mmToPercent(config.offsetXMm || 0, widthPt)
-  // 与后端 compute_x 一致：水平边距用用户设置的 marginMm，不再用固定 36pt
-  const edgePercent = mmToPercent(config.marginMm || 0, widthPt)
+  let align = config.align || 'center'
+  let offsetXMm = config.offsetXMm || 0
+
+  // 双面打印对开页码：长边翻页 (long-edge) 或短边翻页 (short-edge) 且为偶数页时镜像对开
+  const isEvenPage = Number(pageNumber || 1) % 2 === 0
+  const duplex = config.duplexMode || 'none'
+  if (isEvenPage && (duplex === 'long-edge' || duplex === 'short-edge')) {
+    if (align === 'left') align = 'right'
+    else if (align === 'right') align = 'left'
+    offsetXMm = -offsetXMm
+  }
+
+  const offsetPercent = mmToPercent(offsetXMm, widthPt)
+  // 水平基准边距：优先使用独立的 marginXMm，未设置时默认 10mm；
+  // 严格与垂直的 marginMm（距底/距顶）解耦，彻底避免调整距底时沿 45 度对角线跑偏！
+  const edgePercent = mmToPercent(config.marginXMm ?? 10, widthPt)
   const yPercent =
     kind === 'header' ? mmToPercent(config.marginMm, heightPt) : 100 - mmToPercent(config.marginMm, heightPt)
 

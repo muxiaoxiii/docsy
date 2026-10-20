@@ -50,8 +50,10 @@ export function normalizePageNumberException(rule, index = 0) {
     'style',
     'template',
     'align',
+    'duplexMode',
     'region',
     'marginMm',
+    'marginXMm',
     'offsetXMm',
     'fontSize',
     'fontFamily',
@@ -211,8 +213,10 @@ function toOverlay(group, total, continuous) {
     fontSize: Number(group.rule.fontSize || 9),
     fontFamily: group.rule.fontFamily || 'auto',
     marginMm: Number(group.rule.marginMm || 10),
+    marginXMm: group.rule.marginXMm != null ? Number(group.rule.marginXMm) : undefined,
     offsetXMm: Number(group.rule.offsetXMm || 0),
     color: group.rule.color || '#000000',
+    duplexMode: group.rule.duplexMode || 'none',
   }
 }
 

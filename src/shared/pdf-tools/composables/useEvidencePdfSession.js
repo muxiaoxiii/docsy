@@ -718,6 +718,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             marginMm: pageNumberGroup.marginMm ?? rules.footerMarginMm ?? 10,
             offsetXMm: pageNumberGroup.offsetXMm ?? rules.footerOffsetXMm ?? 0,
             color: pageNumberGroup.color || rules.footerColor || '#000000',
+            duplexMode: pageNumberGroup.duplexMode || rules.pageNumberDuplexMode || 'none',
             exceptions: [
               ...(pageNumberGroup.exceptions || pageNumberGroup.overrides || []),
               ...pageNumberSharedExceptions,
@@ -786,6 +787,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
             marginMm: g.marginMm ?? rules.footerMarginMm ?? 10,
             offsetXMm: g.offsetXMm ?? rules.footerOffsetXMm ?? 0,
             color: g.color || rules.footerColor || '#000000',
+            duplexMode: g.duplexMode || rules.pageNumberDuplexMode || 'none',
             exceptions: [...(g.exceptions || g.overrides || []), ...pageNumberSharedExceptions],
           }),
         )
@@ -1231,6 +1233,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         marginMm: rules.pageNumberMarginMm || rules.footerMarginMm,
         offsetXmm: rules.pageNumberOffsetXMm ?? rules.footerOffsetXMm ?? 0,
         color: rules.pageNumberColor || rules.footerColor || '#000000',
+        duplexMode: rules.pageNumberDuplexMode || 'none',
         numberingDefaults: rules.numberingDefaults || createDefaultNumberingDefaults(),
         groups: rules.pageNumberGroups || [],
       },
@@ -1254,6 +1257,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
       outputRule: {
         outputDir,
         outputMode,
+        duplexSeparate: Boolean(rules.duplexSeparate),
         mergeAfterProcessing: outputMode !== 'files_only',
         mergeOutputPath,
       },
@@ -1263,6 +1267,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
       enabled: outputMode !== 'files_only',
       outputPath: mergeOutputPath,
       outputMode,
+      duplexSeparate: Boolean(rules.duplexSeparate),
     },
   }
 }

@@ -13,9 +13,29 @@
     :aria-label="title || '工作区空态场景'"
   >
     <!-- Animation Canvas Stage -->
-    <div class="stage-canvas" aria-hidden="true">
+    <div
+      ref="stageCanvasRef"
+      class="stage-canvas"
+      :class="{ 'is-nodding': nodActive, 'is-interacting': isInteracting }"
+      :style="{ '--look-x': lookX, '--look-y': lookY }"
+      aria-hidden="true"
+      @pointermove="handlePointerMove"
+      @pointerleave="handlePointerLeave"
+      @pointerdown="handlePointerDown"
+    >
       <!-- Ambient Glow Behind Stage -->
       <div class="stage-glow" />
+
+      <!-- Click Ripple Effects -->
+      <div
+        v-for="r in ripples"
+        :key="r.id"
+        class="click-ripple"
+        :style="{ left: `${r.x}px`, top: `${r.y}px` }"
+      >
+        <span class="ripple-wave" />
+        <span class="ripple-glyph">{{ r.glyph }}</span>
+      </div>
 
       <!-- Left Source Card -->
       <div class="scene-card source-card" :class="{ 'card-flying': busy || processing }">
@@ -238,7 +258,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import DocletSprite from './DocletSprite.vue'
 
 const props = defineProps({
@@ -275,10 +295,57 @@ defineEmits(['action'])
 
 const resolvedScene = computed(() => props.scene || 'generic')
 
+const stageCanvasRef = ref(null)
+const lookX = ref(0)
+const lookY = ref(0)
+const isInteracting = ref(false)
+const nodActive = ref(false)
+const ripples = ref([])
+
+function handlePointerMove(e) {
+  if (!stageCanvasRef.value) return
+  const rect = stageCanvasRef.value.getBoundingClientRect()
+  const centerX = rect.left + rect.width / 2
+  const centerY = rect.top + rect.height / 2
+  const maxDist = Math.max(rect.width, rect.height) / 2
+  const dx = (e.clientX - centerX) / (maxDist || 1)
+  const dy = (e.clientY - centerY) / (maxDist || 1)
+  lookX.value = Number(Math.max(-1, Math.min(1, dx)).toFixed(3))
+  lookY.value = Number(Math.max(-1, Math.min(1, dy)).toFixed(3))
+  isInteracting.value = true
+}
+
+function handlePointerLeave() {
+  lookX.value = 0
+  lookY.value = 0
+  isInteracting.value = false
+}
+
+function handlePointerDown(e) {
+  if (!stageCanvasRef.value) return
+  const rect = stageCanvasRef.value.getBoundingClientRect()
+  const x = Math.round(e.clientX - rect.left)
+  const y = Math.round(e.clientY - rect.top)
+  const id = Date.now() + Math.random()
+  const glyphs = sceneMeta.value?.glyphs?.length ? sceneMeta.value.glyphs : ['✨', '✦', '📑', '🎉', '💫']
+  const randomGlyph = glyphs[Math.floor(Math.random() * glyphs.length)]
+  ripples.value.push({ id, x, y, glyph: randomGlyph })
+  setTimeout(() => {
+    ripples.value = ripples.value.filter((r) => r.id !== id)
+  }, 850)
+
+  // 触发 Doclet 快乐点头回应
+  nodActive.value = true
+  setTimeout(() => {
+    nodActive.value = false
+  }, 420)
+}
+
 const mascotMotion = computed(() => {
   if (props.celebrating) return 'celebrate'
   if (props.busy || props.processing) return 'review'
   if (props.dragging) return 'greet'
+  if (nodActive.value) return 'greet'
   return 'look'
 })
 
@@ -435,6 +502,56 @@ const sceneMeta = computed(() => SCENE_CONFIGS[resolvedScene.value] || SCENE_CON
   width: 100%;
   max-width: 480px;
   margin-bottom: 20px;
+  perspective: 750px;
+  cursor: pointer;
+}
+
+/* ── Click Ripple & Particle Effects ── */
+.click-ripple {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+  transform: translate(-50%, -50%);
+}
+
+.ripple-wave {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  margin-left: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--docsy-primary);
+  opacity: 0.85;
+  animation: ripple-grow 0.75s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+}
+
+@keyframes ripple-grow {
+  to {
+    width: 68px;
+    height: 68px;
+    margin-top: -34px;
+    margin-left: -34px;
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+.ripple-glyph {
+  position: absolute;
+  top: -8px;
+  left: 0;
+  font-size: 15px;
+  user-select: none;
+  animation: ripple-float-up 0.8s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+
+@keyframes ripple-float-up {
+  0% { transform: translate(-50%, 0) scale(0.6); opacity: 0; }
+  25% { transform: translate(-50%, -10px) scale(1.2); opacity: 1; }
+  100% { transform: translate(-50%, -32px) scale(0.8); opacity: 0; }
 }
 
 .stage-glow {
@@ -479,13 +596,15 @@ const sceneMeta = computed(() => SCENE_CONFIGS[resolvedScene.value] || SCENE_CON
 }
 
 .source-card {
-  transform: translateY(0) rotate(-3.5deg);
+  transform: translate3d(calc(var(--look-x, 0) * 4px), calc(var(--look-y, 0) * 3px), 0) rotateY(calc(var(--look-x, 0) * 10deg)) rotateX(calc(var(--look-y, 0) * -6deg)) rotate(-3.5deg);
   animation: float-source 4.2s ease-in-out infinite;
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.4, 1), box-shadow 0.3s ease;
 }
 
 .target-card {
-  transform: translateY(0) rotate(3.5deg);
+  transform: translate3d(calc(var(--look-x, 0) * 4px), calc(var(--look-y, 0) * 3px), 0) rotateY(calc(var(--look-x, 0) * 10deg)) rotateX(calc(var(--look-y, 0) * -6deg)) rotate(3.5deg);
   animation: float-target 4.6s ease-in-out infinite 0.5s;
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.4, 1), box-shadow 0.3s ease;
 }
 
 .is-dragging .source-card {
@@ -823,6 +942,17 @@ const sceneMeta = computed(() => SCENE_CONFIGS[resolvedScene.value] || SCENE_CON
   display: flex;
   flex-direction: column;
   align-items: center;
+  transform: translate3d(calc(var(--look-x, 0) * 8px), calc(var(--look-y, 0) * 5px), 0) rotate(calc(var(--look-x, 0) * 6deg));
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.4, 1);
+}
+
+.is-nodding .stage-mascot {
+  animation: doclet-nod 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes doclet-nod {
+  0%, 100% { transform: translate3d(calc(var(--look-x, 0) * 8px), calc(var(--look-y, 0) * 5px), 0) scale(1); }
+  45% { transform: translate3d(calc(var(--look-x, 0) * 8px), calc(var(--look-y, 0) * 5px - 9px), 0) scale(1.08) rotate(calc(var(--look-x, 0) * 8deg)); }
 }
 
 .mascot-ground-shadow {

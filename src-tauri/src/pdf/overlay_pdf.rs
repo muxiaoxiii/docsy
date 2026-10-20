@@ -94,7 +94,13 @@ pub(crate) fn build_overlay_pdf(
             let use_embedded = super::overlay_font::requires_embedded_font(&text);
             let width_pt =
                 super::overlay_font::estimate_text_width(&text, use_embedded, config.font_size);
-            let x0_pt = super::overlay_font::compute_x(config, &text, use_embedded, size.width_pt);
+            let x0_pt = super::overlay_font::compute_x_with_page(
+                config,
+                &text,
+                use_embedded,
+                size.width_pt,
+                current_page,
+            );
             let x0_mm = x0_pt * 25.4 / 72.0;
             let width_mm = width_pt * 25.4 / 72.0;
             let x1_mm = x0_mm + width_mm;
@@ -217,6 +223,7 @@ mod tests {
             font_family: "auto".to_string(),
             font_size: 10.0,
             margin_mm: 10.0,
+            margin_x_mm: None,
             align: "center".to_string(),
             offset_x_mm: 0.0,
             color: "#000000".to_string(),
@@ -226,6 +233,7 @@ mod tests {
             number_offset: 0,
             number_total: None,
             artifact_kind: String::new(),
+            duplex_mode: None,
         }
     }
 
@@ -333,6 +341,7 @@ mod tests {
             font_family: "songti".to_string(),
             font_size: 10.0,
             margin_mm: 10.0,
+            margin_x_mm: None,
             align: "right".to_string(),
             offset_x_mm: 0.0,
             color: "#000000".to_string(),
@@ -342,6 +351,7 @@ mod tests {
             number_offset: 0,
             number_total: None,
             artifact_kind: "HeaderText".to_string(),
+            duplex_mode: None,
         };
         let (bytes, _warnings) = build_overlay_pdf(Some(&header), None, &[], &pages, 1, 1).unwrap();
 
@@ -439,6 +449,7 @@ mod tests {
             font_family: "auto".to_string(),
             font_size: 10.0,
             margin_mm: 10.0,
+            margin_x_mm: None,
             align: "right".to_string(),
             offset_x_mm: 0.0,
             color: "#000000".to_string(),
@@ -448,6 +459,7 @@ mod tests {
             number_offset: 0,
             number_total: None,
             artifact_kind: "HeaderText".to_string(),
+            duplex_mode: None,
         };
         let header = config("主页眉");
         let extra = config("页码");
@@ -488,6 +500,7 @@ mod tests {
             font_family: "auto".to_string(),
             font_size: 10.0,
             margin_mm: 10.0,
+            margin_x_mm: None,
             align: "right".to_string(),
             offset_x_mm: 50.0,
             color: "#000000".to_string(),
@@ -497,6 +510,7 @@ mod tests {
             number_offset: 0,
             number_total: None,
             artifact_kind: "FooterText".to_string(),
+            duplex_mode: None,
         };
         let (bytes, warnings) = build_overlay_pdf(None, Some(&footer), &[], &pages, 1, 1)
             .expect("overlay PDF should be generated");
@@ -538,6 +552,7 @@ mod tests {
             font_family: "songti".to_string(),
             font_size: 10.0,
             margin_mm: 10.0,
+            margin_x_mm: None,
             align: "right".to_string(),
             offset_x_mm: 0.0,
             color: "#000000".to_string(),
@@ -547,6 +562,7 @@ mod tests {
             number_offset: 0,
             number_total: None,
             artifact_kind: "FooterText".to_string(),
+            duplex_mode: None,
         };
 
         assert!(!overlay_applies_to_page(&config, 1));

@@ -316,6 +316,7 @@
           v-model:page-number-margin-mm="footerMarginMm"
           v-model:page-number-offset-x-mm="footerOffsetXMm"
           v-model:page-number-color="footerColor"
+          v-model:page-number-duplex-mode="pageNumberDuplexMode"
           :page-number-override-count="pageNumberKindExceptionCount"
           v-model:page-number-show-total="pageNumberShowTotal"
           :page-number-sample-page="previewSamplePage"
@@ -349,6 +350,10 @@
           <div class="rule-item merge-row">
             <label>合并文件名</label>
             <el-input v-model="mergeFileName" :disabled="outputMode === 'files_only'" />
+          </div>
+          <div v-if="outputMode !== 'files_only'" class="rule-item duplex-item">
+            <el-checkbox v-model="duplexSeparate">双面打印分隔模式</el-checkbox>
+            <span class="field-hint">证据页数为奇数时在末尾补一页空白，起印页始终在正面</span>
           </div>
           <div v-if="outputMode === 'files_only'" class="rule-item">
             <el-checkbox v-model="fileSuffixEnabled">添加后缀</el-checkbox>
@@ -994,6 +999,7 @@
         v-model:page-number-margin-mm="footerMarginMm"
         v-model:page-number-offset-x-mm="footerOffsetXMm"
         v-model:page-number-color="footerColor"
+        v-model:page-number-duplex-mode="pageNumberDuplexMode"
         :page-number-override-count="pageNumberKindExceptionCount"
         v-model:page-number-show-total="pageNumberShowTotal"
         :page-number-sample-page="previewSamplePage"
@@ -1786,6 +1792,13 @@ const footerColor = computed({
     selectedPageNumberGroup.value.color = v
   },
 })
+const pageNumberDuplexMode = computed({
+  get: () => selectedPageNumberGroup.value?.duplexMode || 'none',
+  set: (v) => {
+    if (selectedPageNumberGroup.value) selectedPageNumberGroup.value.duplexMode = v
+  },
+})
+const duplexSeparate = ref(false)
 // footerTextContent..footerTextColor are computed from selectedFooterTextGroup above
 const outputMode = ref('files_and_merge')
 const mergeFileName = ref('merged_evidence.pdf')
@@ -1815,6 +1828,7 @@ const workbenchPreference = useWorkspacePreferences(`evidence-pdf.workbench.${wo
   bookmarkRemoveExisting,
   outputMode,
   mergeFileName,
+  duplexSeparate,
   fileSuffixEnabled,
   fileSuffixText,
 })
@@ -2518,6 +2532,7 @@ const currentRules = computed(() => ({
   pageNumberMarginMm: footerMarginMm.value,
   pageNumberOffsetXMm: footerOffsetXMm.value,
   pageNumberColor: footerColor.value,
+  pageNumberDuplexMode: pageNumberDuplexMode.value,
   numberingDefaults: numberingDefaults.value,
   pageNumberShowTotal: pageNumberShowTotal.value,
   insertExceptions: insertHeaderFooterEnabled.value ? insertExceptions.value : [],
@@ -2525,6 +2540,7 @@ const currentRules = computed(() => ({
   selectedFooterTextGroupId: selectedFooterTextGroupId.value,
   selectedPageNumberGroupId: selectedPageNumberGroupId.value,
   outputMode: outputMode.value,
+  duplexSeparate: duplexSeparate.value,
   mergeAfterProcessing: outputMode.value !== 'files_only',
   mergeFileName: mergeFileName.value,
   fileSuffixEnabled: fileSuffixEnabled.value,

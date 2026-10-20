@@ -709,6 +709,7 @@ mod tests {
             font_family: "auto".to_string(),
             font_size: 10.0,
             margin_mm: 2.0,
+            margin_x_mm: None,
             align: "center".to_string(),
             offset_x_mm: 0.0,
             color: "#000000".to_string(),
@@ -718,6 +719,7 @@ mod tests {
             number_offset: 0,
             number_total: None,
             artifact_kind: "HeaderText".to_string(),
+            duplex_mode: None,
         };
         let (overlay, _) = build_overlay_pdf(Some(&header), None, &[], &page_infos, 1, 1).unwrap();
         let overlay_path = temp_named_path("docsy_normalize_overlay_layer", "pdf");

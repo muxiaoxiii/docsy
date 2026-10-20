@@ -376,7 +376,7 @@ pub(crate) fn append_overlay_text_ops(
     y = y.clamp(0.0, size.height_pt);
     let font_ref = overlay_font_ref(config, &text, embedded_fonts)?;
     let use_embedded = matches!(font_ref, OverlayFontRef::Embedded(_));
-    let mut x = compute_x(config, &text, use_embedded, size.width_pt);
+    let mut x = compute_x_with_page(config, &text, use_embedded, size.width_pt, current_page);
     // 横向溢出：估算宽度超出页宽时向左收拢到页内（含 left 对齐长文本、
     // right/center 对齐受 offset 或估算误差影响画出右缘两种情况）。
     let text_width = estimate_text_width(&text, use_embedded, config.font_size);
@@ -763,21 +763,48 @@ pub(crate) fn chinese_page_number(value: u32) -> String {
     }
 }
 
+pub(crate) fn compute_x_with_page(
+    config: &OverlayTextConfig,
+    text: &str,
+    use_cjk: bool,
+    page_width: f32,
+    current_page: u32,
+) -> f32 {
+    let text_width = estimate_text_width(text, use_cjk, config.font_size);
+    let mut align = config.align.as_str();
+    let mut offset_x = config.offset_x_mm;
+
+    // 双面打印对开页码：长边翻页 (long-edge) 或短边翻页 (short-edge) 且为偶数页时镜像对开
+    let is_even_page = current_page % 2 == 0;
+    let duplex = config.duplex_mode.as_deref().unwrap_or("none");
+    if is_even_page && (duplex == "long-edge" || duplex == "short-edge") {
+        align = match align {
+            "left" => "right",
+            "right" => "left",
+            other => other,
+        };
+        offset_x = -offset_x;
+    }
+
+    let offset = mm_to_pt(offset_x);
+    // 水平基准边距：优先使用用户配置的 margin_x_mm，未配置时默认为 10.0mm。
+    // 严格与垂直方向的 margin_mm (距底/距顶) 解耦，防止调距底时沿 45 度对角线跑偏！
+    let margin = mm_to_pt(config.margin_x_mm.unwrap_or(10.0));
+
+    match align {
+        "left" => (margin + offset).max(0.0),
+        "right" => (page_width - margin - text_width + offset).max(0.0),
+        _ => ((page_width - text_width) / 2.0 + offset).max(0.0),
+    }
+}
+
 pub(crate) fn compute_x(
     config: &OverlayTextConfig,
     text: &str,
     use_cjk: bool,
     page_width: f32,
 ) -> f32 {
-    let text_width = estimate_text_width(text, use_cjk, config.font_size);
-    let offset = mm_to_pt(config.offset_x_mm);
-    let margin = mm_to_pt(config.margin_mm);
-
-    match config.align.as_str() {
-        "left" => (margin + offset).max(0.0),
-        "right" => (page_width - margin - text_width + offset).max(0.0),
-        _ => ((page_width - text_width) / 2.0 + offset).max(0.0),
-    }
+    compute_x_with_page(config, text, use_cjk, page_width, 1)
 }
 
 pub(crate) fn estimate_text_width(text: &str, use_cjk: bool, font_size: f32) -> f32 {
@@ -842,6 +869,7 @@ mod tests {
             font_family: "auto".to_string(),
             font_size: 9.0,
             margin_mm: 10.0,
+            margin_x_mm: None,
             align: "center".to_string(),
             offset_x_mm: 0.0,
             color: "#000000".to_string(),
@@ -851,6 +879,7 @@ mod tests {
             number_offset: -2,
             number_total: Some(12),
             artifact_kind: "PageNumber".to_string(),
+            duplex_mode: None,
         };
         assert_eq!(expand_config_placeholders(&config, 5, 99), "-III-/XII");
     }
@@ -879,6 +908,7 @@ mod tests {
             font_family: "auto".to_string(),
             font_size: 10.0,
             margin_mm: 10.0,
+            margin_x_mm: None,
             align: "left".to_string(),
             offset_x_mm: 0.0,
             color: "#000000".to_string(),
@@ -888,12 +918,22 @@ mod tests {
             number_offset: 0,
             number_total: None,
             artifact_kind: String::new(),
+            duplex_mode: None,
         };
 
         assert!((compute_x(&config, "abc", false, 200.0) - mm_to_pt(10.0)).abs() < 0.01);
         config.align = "right".to_string();
         let expected = 200.0 - mm_to_pt(10.0) - estimate_text_width("abc", false, 10.0);
         assert!((compute_x(&config, "abc", false, 200.0) - expected).abs() < 0.01);
+
+        // 验证调整垂直 margin_mm (距底/距顶) 不会影响水平 X 坐标（杜绝对角线移动）
+        config.margin_mm = 35.0;
+        assert!((compute_x(&config, "abc", false, 200.0) - expected).abs() < 0.01);
+
+        // 验证双面打印对开镜像：偶数页右对齐自动反转到左侧
+        config.duplex_mode = Some("long-edge".to_string());
+        let even_page_x = compute_x_with_page(&config, "abc", false, 200.0, 2);
+        assert!((even_page_x - mm_to_pt(10.0)).abs() < 0.01);
     }
 
     #[test]

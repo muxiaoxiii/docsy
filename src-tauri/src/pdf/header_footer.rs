@@ -139,7 +139,7 @@ pub struct BookmarkConfig {
     pub page_index: u32,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OverlayTextConfig {
     pub text: String,
@@ -151,10 +151,14 @@ pub struct OverlayTextConfig {
     pub font_size: f32,
     #[serde(default = "default_margin_mm")]
     pub margin_mm: f32,
+    #[serde(default)]
+    pub margin_x_mm: Option<f32>,
     #[serde(default = "default_align")]
     pub align: String,
     #[serde(default)]
     pub offset_x_mm: f32,
+    #[serde(default)]
+    pub duplex_mode: Option<String>,
     #[serde(default = "default_text_color")]
     pub color: String,
     #[serde(default)]
@@ -1029,6 +1033,7 @@ mod tests {
             font_family: "songti".to_string(),
             font_size: 10.0,
             margin_mm: 10.0,
+            margin_x_mm: None,
             align: "right".to_string(),
             offset_x_mm: 0.0,
             color: "#000000".to_string(),
@@ -1038,6 +1043,7 @@ mod tests {
             number_offset: 0,
             number_total: None,
             artifact_kind: "HeaderText".to_string(),
+            duplex_mode: None,
         };
         let pages = BTreeSet::from([0_usize, 2, 3]);
 
@@ -1078,6 +1084,7 @@ mod tests {
                     font_family: "songti".to_string(),
                     font_size: 10.0,
                     margin_mm: 10.0,
+                    margin_x_mm: None,
                     align: "right".to_string(),
                     offset_x_mm: 0.0,
                     color: "#000000".to_string(),
@@ -1087,6 +1094,7 @@ mod tests {
                     number_offset: 0,
                     number_total: None,
                     artifact_kind: "HeaderText".to_string(),
+                    duplex_mode: None,
                 }),
                 footer: None,
                 extra_overlays: Vec::new(),
@@ -1187,6 +1195,7 @@ mod tests {
                     font_family: "auto".to_string(),
                     font_size: 10.0,
                     margin_mm: 2.0,
+                    margin_x_mm: None,
                     align: "center".to_string(),
                     offset_x_mm: 0.0,
                     color: "#000000".to_string(),
@@ -1196,6 +1205,7 @@ mod tests {
                     number_offset: 0,
                     number_total: None,
                     artifact_kind: "HeaderText".to_string(),
+                    duplex_mode: None,
                 }),
                 footer: None,
                 extra_overlays: Vec::new(),
@@ -1303,6 +1313,7 @@ mod tests {
                     font_family: "auto".to_string(),
                     font_size: 12.0,
                     margin_mm: 10.0,
+                    margin_x_mm: None,
                     align: "left".to_string(),
                     offset_x_mm: 10.0,
                     color: "#000000".to_string(),
@@ -1312,6 +1323,7 @@ mod tests {
                     number_offset: 0,
                     number_total: None,
                     artifact_kind: "HeaderText".to_string(),
+                    duplex_mode: None,
                 }],
                 bookmarks: Vec::new(),
                 bookmark_remove_existing: false,

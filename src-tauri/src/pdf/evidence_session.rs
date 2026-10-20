@@ -94,6 +94,7 @@ struct MergeSpec {
     enabled: bool,
     output_path: String,
     output_mode: String,
+    duplex_separate: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -282,6 +283,16 @@ fn extract_merge_from_args(args: &crate::commands::pdf::ApplyEvidencePdfRulesArg
             .and_then(Value::as_str)
             .unwrap_or("files_and_merge")
             .to_string(),
+        duplex_separate: merge_value
+            .get("duplexSeparate")
+            .or_else(|| {
+                args.session
+                    .as_ref()
+                    .and_then(|s| s.get("outputRule"))
+                    .and_then(|r| r.get("duplexSeparate"))
+            })
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -426,7 +437,7 @@ fn apply_merge_if_requested(
     }
     let policy = super::backend::policy::OutputPolicy {
         merge_policy: super::backend::policy::MergePolicy::Print,
-        duplex_separate: false,
+        duplex_separate: merge.duplex_separate,
         ..Default::default()
     };
     let req = super::backend::MergeRequest {
@@ -564,6 +575,7 @@ mod tests {
             enabled: true,
             output_path: "/tmp/final.pdf".to_string(),
             output_mode: "files_and_merge".to_string(),
+            duplex_separate: false,
         };
         let failed = vec![header_footer::HeaderFooterFailure {
             path: "/tmp/a.pdf".to_string(),
@@ -602,7 +614,8 @@ mod tests {
             merge: Some(json!({
                 "enabled": true,
                 "outputPath": "/tmp/out.pdf",
-                "outputMode": "merge_only"
+                "outputMode": "merge_only",
+                "duplexSeparate": true
             })),
             session: None,
             annotation_rule: None,
@@ -612,5 +625,6 @@ mod tests {
         assert!(merge.enabled);
         assert_eq!(merge.output_path, "/tmp/out.pdf");
         assert_eq!(merge.output_mode, "merge_only");
+        assert!(merge.duplex_separate);
     }
 }

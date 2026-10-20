@@ -42,6 +42,24 @@ describe('PDF preview coordinate helpers', () => {
     expect(footer.right).toBe(`${mmToPercent(10, 600)}%`)
     expect(footer.top).toBe(`${100 - mmToPercent(10, 800)}%`)
     expect(footer.fontSize).toBe('max(8px, 1.5cqw)')
+
+    // 验证距底增大时，仅纵向 top 改变，水平 right 保持不变（杜绝对角线移动）
+    const footerAdjusted = textOverlayStyle('footer', pageInfo, {
+      align: 'right',
+      marginMm: 25,
+      fontSize: 9,
+    })
+    expect(footerAdjusted.right).toBe(`${mmToPercent(10, 600)}%`)
+    expect(footerAdjusted.top).toBe(`${100 - mmToPercent(25, 800)}%`)
+
+    // 验证双面打印对开镜像：偶数页（第 2 页）居右自动反转为居左
+    const footerEven = textOverlayStyle('footer', pageInfo, {
+      align: 'right',
+      marginMm: 10,
+      duplexMode: 'long-edge',
+    }, 2)
+    expect(footerEven.left).toBe(`${mmToPercent(10, 600)}%`)
+    expect(footerEven.right).toBeUndefined()
   })
 
   it('scales overlay font size with the actual page width (异形页)', () => {
