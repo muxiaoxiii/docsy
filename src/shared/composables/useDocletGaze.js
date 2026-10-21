@@ -1,14 +1,14 @@
 import { onBeforeUnmount, onMounted, watch } from 'vue'
 import atlasUrl from '../../assets/doclet-video/gaze-atlas.webp'
 import { createGazeDriver } from './docletGazeDriver.js'
+import { GAZE_COMPASS } from './docletGazePoses.js'
 export { gazeDistance } from './docletGazeDriver.js'
-const circle = [8, 12, 17, 22, 26, 31, 36, 41, 56]
 export function gazePosition(x, y) {
   if (Math.hypot(x, y) < 0.18) return 0
   const angle = (Math.atan2(x, -y) + Math.PI * 2) % (Math.PI * 2)
   const sector = angle / (Math.PI / 4)
   const start = Math.floor(sector)
-  return (circle[start] + (circle[start + 1] - circle[start]) * (sector - start)) % 48
+  return (GAZE_COMPASS[start] + (GAZE_COMPASS[start + 1] - GAZE_COMPASS[start]) * (sector - start)) % 48
 }
 export function gazeFrame(x, y) { return Math.round(gazePosition(x, y)) % 48 }
 let sharedAtlas

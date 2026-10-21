@@ -1,3 +1,4 @@
+import { gazeSourceFrame } from './docletGazePoses.js'
 // No reactive state or DOM writes in the pointer/render loop.
 export function gazeDistance(from, to) {
   return ((to - from + 72) % 48) - 24
@@ -10,7 +11,7 @@ export function createGazeDriver({ draw, request, cancel }) {
   let painted = -1
   const interval = 1000 / 30
   function paint() {
-    const frame = Math.round(position * 5) % 240
+    const frame = gazeSourceFrame(position)
     if (frame !== painted) { draw(frame); painted = frame }
   }
   function tick(time) {

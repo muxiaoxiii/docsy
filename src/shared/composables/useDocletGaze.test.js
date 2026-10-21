@@ -7,7 +7,7 @@ describe('Doclet 视频视线方向', () => {
     expect(gazeFrame(.05, -.05)).toBe(0)
     expect(gazeFrame(1, 0)).toBe(17)
     expect(gazeFrame(-1, 0)).toBe(36)
-    expect(gazeFrame(0, -1)).toBe(8)
+    expect(gazeFrame(0, -1)).toBe(11)
     expect(gazeFrame(0, 1)).toBe(26)
   })
   it('保留细分姿态索引，跨接缝走较短路径', () => {
