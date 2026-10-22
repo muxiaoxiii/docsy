@@ -75,12 +75,30 @@ export async function tauriCall(command, args = {}) {
 }
 
 // Call Tauri without triggering Doclet animation — for use in batch loops
+function readableError(err) {
+  let message =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === 'object'
+        ? err.message || err.reason || JSON.stringify(err)
+        : String(err)
+  if (typeof message === 'string' && message.trimStart().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(message)
+      message = parsed.message || parsed.reason || message
+    } catch {
+      /* Plain text error. */
+    }
+  }
+  return String(message)
+}
+
 export async function tauriCallQuiet(command, args = {}) {
   try {
     const result = await invoke(command, args)
     return { ok: true, data: result }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = readableError(err)
     return { ok: false, error: message }
   }
 }
@@ -92,25 +110,7 @@ export async function tauriCallSafe(command, args = {}) {
     const result = await invoke(command, args)
     return { ok: true, data: result }
   } catch (err) {
-    // DocsyError 序列化为 JSON 对象 { kind, message/reason }，需提取可读消息
-    let message
-    if (err instanceof Error) {
-      message = err.message
-    } else if (typeof err === 'object' && err !== null) {
-      // Try structured DocsyError fields
-      message = err.message || err.reason || JSON.stringify(err)
-    } else {
-      message = String(err)
-    }
-    // If message is a JSON string (from anyhow_to_json_string), parse it
-    if (typeof message === 'string' && message.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(message)
-        message = parsed.message || parsed.reason || message
-      } catch {
-        /* not JSON, use as-is */
-      }
-    }
+    const message = readableError(err)
     const details = {
       message,
       stack: err instanceof Error ? err.stack : '',
@@ -145,7 +145,7 @@ export function getPdfPageCount(input) {
 }
 
 export function userFacingError(error, fallback = '操作失败', maxLength = 220) {
-  const message = String(error || '').trim()
+  const message = error ? readableError(error).trim() : ''
   if (!message) return fallback
 
   // Suppress noisy qpdf warnings that don't affect output

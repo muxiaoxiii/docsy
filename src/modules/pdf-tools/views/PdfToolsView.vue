@@ -47,6 +47,8 @@
         >
           <template #toolbar>
             <el-button v-if="mergeFiles.length" type="primary" plain :disabled="merging" @click="selectMergeFiles">添加文件</el-button>
+            <el-button v-if="mergeFiles.length > 1" :disabled="merging" @click="selectMergeOutputDir">{{ mergeOutputDir ? '更改输出目录' : '选择输出目录' }}</el-button>
+            <span v-if="mergeOutputDir" class="merge-directory" :title="mergeOutputDir">{{ mergeOutputDir }}</span>
           </template>
           <FileQueuePanel
             fill
@@ -666,6 +668,7 @@ const antiCopyCancellation = useQueueCancellation()
 const mergeFiles = ref([])
 const merging = ref(false)
 const mergeOutputPath = ref('')
+const mergeOutputDir = ref('')
 const extractResultPath = ref('')
 const splitResultDir = ref('')
 const duplexSeparate = ref(false)
@@ -879,6 +882,7 @@ async function addMergeFiles(paths) {
 
 function clearMergeFiles() {
   if (merging.value) return
+  mergeOutputDir.value = ''
   mergeOutputPath.value = ''
   mergeFiles.value = []
 }
@@ -937,6 +941,12 @@ async function selectManualMergePdf(item) {
   mergeOutputPath.value = ''
 }
 
+async function selectMergeOutputDir() {
+  if (merging.value) return
+  const selected = normalizeSelectedPath(await open({ directory: true }))
+  if (selected) { mergeOutputDir.value = selected; mergeOutputPath.value = '' }
+}
+
 async function doMerge() {
   if (merging.value || !mergeFiles.value.length) return
   if (mergeFiles.value.length === 1 && isPdfPath(mergeFiles.value[0].path)) return
@@ -948,8 +958,9 @@ async function doMerge() {
 
   merging.value = true
   try {
-    const output = await open({ directory: true })
+    const output = mergeOutputDir.value || normalizeSelectedPath(await open({ directory: true }))
     if (output) {
+      mergeOutputDir.value = output
       const outputPath = `${output}/merged.pdf`
       let failed = 0
       for (const file of mergeFiles.value) if (!await prepareMergeItem(file)) failed += 1
@@ -1884,6 +1895,7 @@ h3 {
   font-size: 12px;
   line-height: 1.4;
 }
+.merge-directory { max-width: min(420px, 45vw); color: var(--docsy-text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .merge-item-status {
   font-size: 12px;
   color: var(--docsy-text-muted);

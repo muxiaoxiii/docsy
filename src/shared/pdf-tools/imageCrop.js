@@ -3,7 +3,8 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 export function dragCrop(box, handle, dx, dy, minX = 0.01, minY = 0.01) {
   let [left, top, right, bottom] = box
   if (handle === 'move') {
-    const x = clamp(dx, -left, 1 - right), y = clamp(dy, -top, 1 - bottom)
+    const x = clamp(dx, -left, 1 - right),
+      y = clamp(dy, -top, 1 - bottom)
     return [left + x, top + y, right + x, bottom + y]
   }
   if (handle.includes('w')) left = clamp(left + dx, 0, right - minX)

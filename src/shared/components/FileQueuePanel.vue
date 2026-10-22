@@ -22,6 +22,7 @@
           :data-reorder-index="index"
           :class="[itemClasses(index), { 'is-selected': selectable && selectedIndex === index }]"
         >
+          <slot name="before-item" :item="item" :index="index" :dragging="dragFrom >= 0" :group-drop-target="groupDropTarget" />
           <button
             v-if="sortable"
             :disabled="busy"
@@ -30,9 +31,9 @@
             title="拖动调整顺序"
             aria-label="拖动调整顺序"
             @pointerdown.stop="!busy && start(index, $event)"
-            @pointermove.stop="move"
-            @pointerup.stop="finish"
-            @pointercancel.stop="reset"
+            @pointermove.stop="handleMove"
+            @pointerup.stop="handleFinish"
+            @pointercancel.stop="handleCancel"
           >
             <el-icon><Rank /></el-icon>
           </button>
@@ -75,11 +76,13 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { Rank } from '@element-plus/icons-vue'
 import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
 import WorkspaceEmptyState from './WorkspaceEmptyState.vue'
 
 const props = defineProps({
+  groupDropAttribute: { type: String, default: '' },
   selectable: { type: Boolean, default: false },
   selectedIndex: { type: Number, default: -1 },
   busy: { type: Boolean, default: false },
@@ -120,11 +123,25 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['clear', 'remove', 'reorder', 'empty-action', 'select'])
-const { start, move, finish, reset, itemClasses } = usePointerReorder({
+const emit = defineEmits(['clear', 'remove', 'reorder', 'empty-action', 'select', 'group-drop', 'group-hover'])
+const groupDropTarget = ref('')
+const { start, move, finish, reset, itemClasses, dragFrom } = usePointerReorder({
   itemCount: () => props.items.length,
   onReorder: (payload) => { if (!props.busy) emit('reorder', payload) },
 })
+
+function dropTarget(event) {
+  if (!props.groupDropAttribute || dragFrom.value < 0) return ''
+  return document.elementFromPoint(event.clientX, event.clientY)?.closest?.(`[${props.groupDropAttribute}]`)?.getAttribute(props.groupDropAttribute) || ''
+}
+function handleMove(event) { groupDropTarget.value = dropTarget(event); emit('group-hover', groupDropTarget.value); if (!groupDropTarget.value) move(event); else event.preventDefault() }
+function handleFinish(event) {
+  const target = dropTarget(event), from = dragFrom.value
+  groupDropTarget.value = ''; emit('group-hover', '')
+  if (target && !props.busy) { reset(); emit('group-drop', { from, target }) } else finish(event)
+}
+
+function handleCancel() { groupDropTarget.value = ''; emit('group-hover', ''); reset() }
 
 function itemLabel(item) {
   return String(item?.name || item?.path || '未知文件')

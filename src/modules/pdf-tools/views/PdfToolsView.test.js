@@ -167,11 +167,12 @@ describe('PDF 合并支持 DOCX 与 DOC 文档', () => {
     expect(tauriCallSafe.mock.calls.some(([command]) => command === 'merge_pdfs')).toBe(false)
     open.mockResolvedValueOnce('/manual/fail.pdf')
     await state.selectManualMergePdf(state.mergeFiles.value[0])
-    open.mockResolvedValueOnce('/out')
     tauriCallSafe.mockResolvedValue({ ok: true, data: '/out/merged.pdf' })
     await state.doMerge()
     expect(tauriCallSafe).toHaveBeenLastCalledWith('merge_pdfs', { inputs: ['/manual/fail.pdf', '/docs/page.pdf'], output: '/out/merged.pdf', duplexSeparate: false })
     expect(tauriCallSafe.mock.calls.filter(([command]) => command === 'convert_word_to_pdf')).toHaveLength(1)
+    expect(state.mergeOutputDir.value).toBe('/out')
+    expect(open).toHaveBeenCalledTimes(2)
   })
 
   it('图片先进入预览，确认后的 PDF 保持混排位置，取消时不添加图片', async () => {

@@ -6,13 +6,17 @@ export const DOCUMENT_FILTERS = [
   { name: '图片', extensions: IMAGE_DOCUMENT_EXTENSIONS },
 ]
 export function documentKind(path) {
-  const ext = String(path || '').split('.').at(-1).toLowerCase()
+  const ext = String(path || '')
+    .split('.')
+    .at(-1)
+    .toLowerCase()
   if (ext === 'pdf') return 'pdf'
   if (['docx', 'doc', 'docm'].includes(ext)) return 'word'
   if (IMAGE_DOCUMENT_EXTENSIONS.includes(ext)) return 'image'
   return null
 }
-export const MANUAL_PDF_HINT = '请用 Word 或 WPS 将原文档另存为 PDF，再选择转换后的 PDF 继续；原文件和已添加文件都会保留。'
+export const MANUAL_PDF_HINT =
+  '请用 Word 或 WPS 将原文档另存为 PDF，再选择转换后的 PDF 继续；原文件和已添加文件都会保留。'
 
 export async function convertImportDocument(path, invoke) {
   const kind = documentKind(path)
@@ -26,21 +30,27 @@ export async function convertImportDocument(path, invoke) {
 }
 
 /** Append imports without resetting existing page ranges, rules or ordering. */
-export function appendUniqueDocuments(existing, incoming, pathOf = item => item.path) {
-  const seen = new Set(existing.flatMap(item => [pathOf(item), item.sourcePath].filter(Boolean)))
-  return [...existing, ...incoming.filter(item => {
-    const paths = [pathOf(item), item.sourcePath].filter(Boolean)
-    if (paths.some(path => seen.has(path))) return false
-    paths.forEach(path => seen.add(path))
-    return true
-  })]
+export function appendUniqueDocuments(existing, incoming, pathOf = (item) => item.path) {
+  const seen = new Set(existing.flatMap((item) => [pathOf(item), item.sourcePath].filter(Boolean)))
+  return [
+    ...existing,
+    ...incoming.filter((item) => {
+      const paths = [pathOf(item), item.sourcePath].filter(Boolean)
+      if (paths.some((path) => seen.has(path))) return false
+      paths.forEach((path) => seen.add(path))
+      return true
+    }),
+  ]
 }
 
 /** Keep mixed-file order; consecutive images become a reviewed PDF batch. */
 export async function reviewImageImports(paths, review) {
   const result = []
   for (let index = 0; index < paths.length;) {
-    if (documentKind(paths[index]) !== 'image') { result.push(paths[index++]); continue }
+    if (documentKind(paths[index]) !== 'image') {
+      result.push(paths[index++])
+      continue
+    }
     const group = []
     while (index < paths.length && documentKind(paths[index]) === 'image') group.push(paths[index++])
     const pdf = await review(group)

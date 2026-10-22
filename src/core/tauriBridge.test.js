@@ -1,7 +1,20 @@
-import { describe, it, expect } from 'vitest'
-import { userFacingError } from './tauriBridge.js'
+import { describe, it, expect, vi } from 'vitest'
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
+import { invoke } from '@tauri-apps/api/core'
+import { userFacingError, tauriCallQuiet } from './tauriBridge.js'
 
 describe('Tauri Bridge', () => {
+  it('shows readable structured errors for quiet preview calls', async () => {
+    for (const error of [
+      { kind: 'unknown', message: '图片读取失败' },
+      '{"kind":"unknown","message":"图片读取失败"}',
+      new Error('{"kind":"unknown","message":"图片读取失败"}'),
+    ]) {
+      vi.mocked(invoke).mockRejectedValueOnce(error)
+      expect(await tauriCallQuiet('plan_image_pdf')).toEqual({ ok: false, error: '图片读取失败' })
+      expect(userFacingError(error)).toBe('图片读取失败')
+    }
+  })
   it('should define tauriCall interface', () => {
     // Verify the module exports exist
     const module = import('./tauriBridge.js')
