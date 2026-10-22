@@ -68,21 +68,32 @@ export function useDocletGaze(root, canvas, enabled, onError) {
             driver = createGazeDriver({
               request: (callback) => window.requestAnimationFrame(callback),
               cancel: (id) => window.cancelAnimationFrame(id),
-              draw: (frame) => {
+              draw: (frame, from, mix) => {
                 context.clearRect(0, 0, node.width, node.height)
                 const { columns, width, height } = GAZE_LAYOUT
-                const cell = GAZE_CELL.get(frame) ?? 0
-                context.drawImage(
-                  image,
-                  (cell % columns) * width,
-                  Math.floor(cell / columns) * height,
-                  width,
-                  height,
-                  0,
-                  0,
-                  node.width,
-                  node.height,
-                )
+                const paint = (pose, opacity) => {
+                  if (opacity <= 0) return
+                  const cell = GAZE_CELL.get(pose) ?? 0
+                  context.globalAlpha = opacity
+                  context.drawImage(
+                    image,
+                    (cell % columns) * width,
+                    Math.floor(cell / columns) * height,
+                    width,
+                    height,
+                    0,
+                    0,
+                    node.width,
+                    node.height,
+                  )
+                }
+                paint(from, 1 - mix)
+                // Add premultiplied pixels: a source-over crossfade lowers the
+                // overlapping white body's opacity and causes a visible flash.
+                context.globalCompositeOperation = 'lighter'
+                paint(frame, mix)
+                context.globalCompositeOperation = 'source-over'
+                context.globalAlpha = 1
               },
             })
             driver.start()

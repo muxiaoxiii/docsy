@@ -1026,29 +1026,91 @@ fn hex_lower(bytes: &[u8]) -> String {
 }
 
 pub fn find_on_path(binary: &str) -> Option<PathBuf> {
-    let command = if cfg!(windows) { "where" } else { "which" };
-    let mut command = super::hidden_command(command);
-    command.arg(binary);
-    let output = super::command_output_with_timeout(&mut command, Duration::from_secs(2)).ok()?;
-    if !output.status.success() {
-        return None;
+    let path = std::env::var_os("PATH")?;
+    find_in_directories(binary, std::env::split_paths(&path))
+}
+
+fn find_in_directories(
+    binary: &str,
+    directories: impl Iterator<Item = PathBuf>,
+) -> Option<PathBuf> {
+    // Do not spawn `where`/`which` for every PDF segment. A cold Windows
+    // process can exceed a short probe timeout and report an installed tool
+    // as missing; decoding its console output also corrupts Unicode paths.
+    let mut names = vec![std::ffi::OsString::from(binary)];
+    if cfg!(windows) && Path::new(binary).extension().is_none() {
+        let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+        names.extend(
+            extensions
+                .split(';')
+                .filter(|ext| !ext.is_empty())
+                .map(|ext| std::ffi::OsString::from(format!("{binary}{ext}"))),
+        );
     }
-    let path = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if path.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(path))
+    for directory in directories {
+        for name in &names {
+            let candidate = directory.join(name);
+            let Ok(metadata) = fs::metadata(&candidate) else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if metadata.permissions().mode() & 0o111 == 0 {
+                    continue;
+                }
+            }
+            return Some(candidate);
+        }
     }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_lookup_preserves_unicode_order_and_skips_directories() {
+        let root = crate::util::fs::temp_named_path("docsy-path-probe", "dir");
+        fs::create_dir_all(&root).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(root.clone()).unwrap();
+        let first = root.join("中文 工具");
+        let second = root.join("second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        let binary = if cfg!(windows) { "probe.exe" } else { "probe" };
+        fs::create_dir(first.join(binary)).unwrap();
+        fs::write(second.join(binary), b"fixture").unwrap();
+        make_executable(&second.join(binary)).unwrap();
+        let search = || vec![first.clone(), second.clone()].into_iter();
+        assert_eq!(
+            find_in_directories(binary, search()),
+            Some(second.join(binary))
+        );
+        fs::remove_dir(first.join(binary)).unwrap();
+        fs::write(first.join(binary), b"fixture").unwrap();
+        make_executable(&first.join(binary)).unwrap();
+        assert_eq!(
+            find_in_directories(binary, search()),
+            Some(first.join(binary))
+        );
+        assert_eq!(find_in_directories("missing-tool", search()), None);
+        #[cfg(windows)]
+        assert_eq!(
+            find_in_directories("probe", search()),
+            Some(first.join(binary))
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(first.join(binary), fs::Permissions::from_mode(0o644)).unwrap();
+            assert_eq!(find_in_directories(binary, vec![first].into_iter()), None);
+        }
+    }
 
     #[test]
     fn builds_platform_binary_name() {

@@ -7,7 +7,7 @@ function harness() {
   const callbacks = new Map(),
     drawn = []
   const driver = createGazeDriver({
-    draw: (frame) => drawn.push({ frame, time: now }),
+    draw: (frame, from, mix) => drawn.push({ frame, from, mix, time: now }),
     request: (callback) => {
       callbacks.set(++id, callback)
       return id
@@ -27,6 +27,20 @@ function harness() {
   return { driver, drawn, advance, callbacks }
 }
 describe('Doclet 正面转向片段', () => {
+  it('拼接处短暂补间保持原定时长，停稳与中途取消后都不残留半透明帧', () => {
+    const h = harness()
+    h.driver.aim('up-left')
+    h.advance(500)
+    expect(h.drawn.some((item) => item.mix > 0 && item.mix < 1)).toBe(true)
+    expect(h.drawn.at(-1).mix).toBe(1)
+    expect(h.drawn.at(-1).time).toBeLessThan(250)
+    h.driver.aim('down-right')
+    h.advance(130)
+    h.driver.aim(null)
+    h.advance(150)
+    expect(h.drawn.at(-1)).toMatchObject({ frame: layout.center, mix: 1 })
+    expect(h.callbacks.size).toBe(0)
+  })
   it('八个方向分别到达不同目标，斜向使用相邻短段，回正不绕圈', () => {
     const destinations = new Set()
     for (const [direction, route] of Object.entries(layout.routes)) {
@@ -44,6 +58,7 @@ describe('Doclet 正面转向片段', () => {
         h.drawn.slice(start).every((item) => item.frame === layout.center || route.back.includes(item.frame)),
       ).toBe(true)
       expect(h.callbacks.size).toBe(0)
+      expect(h.drawn.at(-1).mix).toBe(1)
     }
     expect(destinations.size).toBe(8)
   })
@@ -67,7 +82,7 @@ describe('Doclet 正面转向片段', () => {
     h.driver.aim('up')
     h.advance(2000)
     const transition = h.drawn.slice(start)
-    const center = transition.findIndex((item) => item.frame === layout.center)
+    const center = transition.findIndex((item) => item.frame === layout.routes.right.back.at(-1))
     expect(center).toBeGreaterThan(0)
     expect(transition.slice(0, center).every((item) => layout.routes.right.back.includes(item.frame))).toBe(true)
     expect(transition.slice(center + 1).map((item) => item.frame)).toEqual(layout.routes.up.out)
@@ -106,6 +121,6 @@ describe('Doclet 正面转向片段', () => {
     const frames = h.drawn.slice(start).map((item) => item.frame)
     expect(frames.at(-1)).toBe(layout.routes.left.out.at(-1))
     expect(frames.includes(layout.routes.right.out.at(-1))).toBe(false)
-    expect(frames.includes(layout.center)).toBe(true)
+    expect(frames.includes(layout.routes.right.back.at(-1))).toBe(true)
   })
 })

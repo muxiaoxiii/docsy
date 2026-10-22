@@ -180,16 +180,12 @@ jobs:
         run: cargo test
         working-directory: src-tauri
 
-      - name: Run stop-release Rust regressions on Windows
+      - name: Run Rust regressions on Windows
         # A test-runtime failure must block packaging rather than silently
         # bypass the regression gate. Exercise the package's actual target.
         if: runner.os == 'Windows'
         run: |
-          cargo test --locked --target ${{ matrix.rust-target }} --lib freeze
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --target ${{ matrix.rust-target }} --lib markdown
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --target ${{ matrix.rust-target }} --lib word_convert
+          cargo test --locked --target ${{ matrix.rust-target }} --lib
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         working-directory: src-tauri
 
@@ -215,6 +211,20 @@ jobs:
           DMG_PATH="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
           test -n "$DMG_PATH"
           hdiutil verify "$DMG_PATH"
+
+      - name: Verify Windows application manifest
+        if: runner.os == 'Windows' && inputs.checks_only != true
+        shell: pwsh
+        run: |
+          $mt = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin" -Filter mt.exe -Recurse | Where-Object FullName -Match '\\x64\\mt.exe$' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $mt) { throw 'Windows manifest tool is unavailable' }
+          $exe = Resolve-Path 'src-tauri/target/${{ matrix.rust-target }}/release/docsy.exe'
+          $manifest = Join-Path $env:RUNNER_TEMP 'docsy-release.manifest'
+          & $mt.FullName "-inputresource:$exe;#1" "-out:$manifest"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          [xml]$xml = Get-Content $manifest -Raw
+          $controls = $xml.GetElementsByTagName('assemblyIdentity') | Where-Object { $_.name -eq 'Microsoft.Windows.Common-Controls' -and $_.version -eq '6.0.0.0' }
+          if (-not $controls) { throw 'Common Controls v6 manifest is missing' }
 
       - name: Upload package
         if: inputs.checks_only != true
