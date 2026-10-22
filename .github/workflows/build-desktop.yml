@@ -2,6 +2,11 @@ name: Build desktop packages
 
 on:
   workflow_dispatch:
+    inputs:
+      checks_only:
+        description: Run checks without packaging or publishing
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -180,18 +185,6 @@ jobs:
         # bypass the regression gate. Exercise the package's actual target.
         if: runner.os == 'Windows'
         run: |
-          # Keep the runtime at least as new as the hosted MSVC compiler.
-          # https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
-          foreach ($arch in @('x64', 'x86')) {
-            $installer = Join-Path $env:RUNNER_TEMP "vc_redist.$arch.exe"
-            Invoke-WebRequest "https://aka.ms/vc14/vc_redist.$arch.exe" -OutFile $installer
-            $signature = Get-AuthenticodeSignature $installer
-            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
-              throw "Invalid Microsoft runtime signature: $arch"
-            }
-            $result = Start-Process $installer -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
-            if ($result.ExitCode -notin @(0, 1638, 3010)) { throw "VC runtime installation failed: $($result.ExitCode)" }
-          }
           cargo test --locked --target ${{ matrix.rust-target }} --lib freeze
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked --target ${{ matrix.rust-target }} --lib markdown
@@ -211,10 +204,11 @@ jobs:
           Get-Item "$env:WINDIR/System32/msvcp140.dll", "$env:WINDIR/System32/vcruntime140.dll", "$env:WINDIR/SysWOW64/msvcp140.dll", "$env:WINDIR/SysWOW64/vcruntime140.dll" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName) $($_.VersionInfo.FileVersion)" }
 
       - name: Build package
+        if: inputs.checks_only != true
         run: ${{ matrix.command }}
 
       - name: Verify macOS package
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.checks_only != true
         shell: bash
         run: |
           set -euo pipefail
@@ -223,6 +217,7 @@ jobs:
           hdiutil verify "$DMG_PATH"
 
       - name: Upload package
+        if: inputs.checks_only != true
         uses: actions/upload-artifact@v4
         with:
           name: docsy-${{ matrix.platform }}

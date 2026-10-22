@@ -27,6 +27,26 @@ function harness() {
   return { driver, drawn, advance, callbacks }
 }
 describe('Doclet 正面转向片段', () => {
+  it('八个方向分别到达不同目标，斜向使用相邻短段，回正不绕圈', () => {
+    const destinations = new Set()
+    for (const [direction, route] of Object.entries(layout.routes)) {
+      const h = harness()
+      h.driver.aim(direction)
+      h.advance(500)
+      destinations.add(h.drawn.at(-1).frame)
+      expect(h.drawn.at(-1).frame).toBe(route.out.at(-1))
+      expect(h.drawn.slice(1).every((item) => route.out.includes(item.frame))).toBe(true)
+      const start = h.drawn.length
+      h.driver.aim(null)
+      h.advance(150)
+      expect(h.drawn.at(-1).frame).toBe(layout.center)
+      expect(
+        h.drawn.slice(start).every((item) => item.frame === layout.center || route.back.includes(item.frame)),
+      ).toBe(true)
+      expect(h.callbacks.size).toBe(0)
+    }
+    expect(destinations.size).toBe(8)
+  })
   it('仅播放该方向的真实转向片段，停稳后不刷新，高刷新屏不重复画同一姿态', () => {
     const h = harness()
     h.driver.aim('right')

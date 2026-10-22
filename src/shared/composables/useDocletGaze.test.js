@@ -13,7 +13,9 @@ describe('Doclet 新素材图集', () => {
     expect(height).toBe(Math.ceil(GAZE_LAYOUT.frames.length / GAZE_LAYOUT.columns) * GAZE_LAYOUT.height)
     expect(width * height).toBeLessThan((1920 * 5760) / 2)
     expect(GAZE_CELL.size).toBe(GAZE_LAYOUT.frames.length)
-    const video = readFileSync(new URL(`../../../${GAZE_LAYOUT.source}`, import.meta.url))
-    expect(createHash('sha256').update(video).digest('hex')).toBe(GAZE_LAYOUT.sha256)
+    for (const source of GAZE_LAYOUT.sources) {
+      const video = readFileSync(new URL(`../../../${source.path}`, import.meta.url))
+      expect(createHash('sha256').update(video).digest('hex')).toBe(source.sha256)
+    }
   })
 })

@@ -4,7 +4,25 @@ fn main() {
     println!("cargo:rustc-check-cfg=cfg(docsy_opencv)");
     println!("cargo:rerun-if-changed=src/ffmpeg/opencv_enhancer.cpp");
     configure_embedded_opencv();
-    tauri_build::build()
+    let windows_msvc = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+    if windows_msvc {
+        // Use the linker for the shared manifest instead of embedding the same
+        // resource twice (winres on the application plus the linker on tests).
+        tauri_build::try_build(
+            tauri_build::Attributes::new()
+                .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest()),
+        )
+        .expect("Tauri build configuration failed");
+        // Tauri embeds a v6 Common Controls manifest in the application, but
+        // library test executables do not inherit that resource. Dialog/menu
+        // dependencies import TaskDialogIndirect, which comctl32 v5 lacks.
+        // Apply this to all final links so both unit and integration tests run.
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'");
+    } else {
+        tauri_build::build();
+    }
 }
 
 fn configure_embedded_opencv() {
