@@ -188,7 +188,7 @@
         <div class="block-title">页面处理</div>
         <div class="rule-grid compact-options">
           <div class="rule-item">
-            <label>A4 规范化<HelpTooltip content="小页补白到 A4，大页等比缩小" /></label>
+            <label>A4 规范化<HelpTooltip content="小页面居中补白到 A4，超过 A4 的页面才等比缩小；会尽量保留原 PDF 内容层。" /></label>
             <el-switch v-model="normalizeA4" active-text="启用" inactive-text="关闭" />
           </div>
           <div class="rule-item">
@@ -200,7 +200,7 @@
             </el-select>
           </div>
           <div class="rule-item">
-            <label>内容旋转<HelpTooltip content="默认不旋转；自动模式选择能保留更大内容的方向" /></label>
+            <label>内容旋转<HelpTooltip content="默认不旋转；自动模式选择能保留更大内容的方向。仅按当前选择执行，纸张方向本身不会触发内容旋转。" /></label>
             <el-select v-model="a4ContentRotation" :disabled="!normalizeA4">
               <el-option label="不旋转" value="none" />
               <el-option label="自动适配纸张" value="auto" />
@@ -350,7 +350,7 @@
             <el-checkbox v-model="duplexSeparate">双面打印分隔模式</el-checkbox>
             <HelpTooltip label="双面打印分隔" content="证据页数为奇数时在末尾补一页空白，起印页始终在正面。" />
           </div>
-          <div v-if="outputMode === 'files_only'" class="rule-item">
+          <div v-if="outputMode === 'files_only'" class="rule-item suffix-item">
             <el-checkbox v-model="fileSuffixEnabled">添加后缀</el-checkbox>
             <el-input
               v-model="fileSuffixText"
@@ -2317,12 +2317,6 @@ const firstFooterPreview = computed(() => {
 })
 const processingNotes = computed(() => {
   const notes = []
-  if (normalizeA4.value) {
-    notes.push('A4 规范化会把小页面居中补白到 A4，超过 A4 的页面才等比缩小；会尽量保留原 PDF 内容层')
-    if (a4ContentRotation.value !== 'none') {
-      notes.push('内容旋转仅按当前明确选择执行；纸张方向本身不会触发旋转')
-    }
-  }
   if (removeAnnotations.value) {
     notes.push('删除批注只处理评论、高亮等批注对象，已扁平化到正文的标记不会被对象删除')
   }
@@ -5665,7 +5659,9 @@ h3 {
 .merged-preview-primary-row { gap: 8px 14px; }
 .merged-preview-toolbar :deep(.el-button-group .el-button + .el-button) { margin-left: -1px; }
 .rule-item > label { display: inline-flex; align-items: center; }
-.duplex-item { display: flex; flex-direction: row; align-items: center; gap: 2px; }
+.duplex-item, .suffix-item { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 4px; }
+.suffix-item { flex-wrap: wrap; }
+.duplex-item > .el-checkbox, .suffix-item > .el-checkbox { flex: 0 0 auto; margin-right: 0; }
 </style>
 
 <style scoped>
@@ -5675,13 +5671,13 @@ h3 {
 </style>
 
 <style scoped>
-.rule-grid > .rule-item:has(> label) {
+.rule-grid > .rule-item:has(> label:not(.el-checkbox)) {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
   align-items: center;
   gap: 4px 8px;
   min-height: 28px;
 }
-.rule-grid > .rule-item:has(> label) > :is(.el-input, .el-select, .el-input-number) { width: 100%; min-width: 0; }
-.rule-grid > .rule-item:not(:has(> label)) { min-height: 28px; }
+.rule-grid > .rule-item:has(> label:not(.el-checkbox)) > :is(.el-input, .el-select, .el-input-number) { width: 100%; min-width: 0; }
+.rule-grid > .rule-item:not(:has(> label:not(.el-checkbox))) { min-height: 28px; }
 </style>
