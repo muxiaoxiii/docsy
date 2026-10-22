@@ -7,7 +7,7 @@
 *{box-sizing:border-box}body{margin:0;background:#f7f5ed;color:#203e38;font-family:system-ui,sans-serif}main{max-width:1000px;margin:50px auto;padding:24px}h1{font-size:28px;margin-bottom:10px}p{line-height:1.7;color:#63736b}nav{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}button{font:inherit;padding:9px 15px;border:1px solid #ccd5cb;border-radius:8px;background:#fff;color:#203e38;cursor:pointer}button[aria-pressed=true]{background:#355b50;color:white}.stage{display:flex;align-items:center;justify-content:center;min-height:440px;border:1px solid #ccd5cb;border-radius:16px;background-color:#faf9f3;background-image:conic-gradient(#e7e6de 25%,transparent 0 50%,#e7e6de 0 75%,transparent 0);background-size:24px 24px}.stage.dark{background-color:#223730;background-image:conic-gradient(#30473e 25%,transparent 0 50%,#30473e 0 75%,transparent 0)}.detail{display:flex;justify-content:space-between;align-items:center;gap:16px}small{color:#63736b}
 </style>
 </head>
-<body><main><h1>Doclet · 视频动作</h1><p>从 Gemini 原始绿幕视频提取，保留原来的纸张头、蓝绿色围巾与随身文具。等待时会看向鼠标停留约 0.3 秒的位置，点击 Doclet 随机播放其他动作，完成后恢复跟随。可切换底色检查透明边缘。</p><div id="app"></div><p>首页打招呼、处理时书写、检测时阅读、完成时庆祝；环顾会看向鼠标停留的方向；眨眼、抬头和打哈欠也已接入首页互动。</p></main>
+<body><main><h1>Doclet · 视频动作</h1><p>从 Gemini 原始绿幕视频提取，保留原来的纸张头、蓝绿色围巾与随身文具。等待时会看向鼠标停留约 0.3 秒的位置，按新素材从正面转向上、下、左、右，换向先回正，点击 Doclet 随机播放其他动作，完成后恢复跟随。可切换底色检查透明边缘。</p><div id="app"></div><p>首页打招呼、处理时书写、检测时阅读、完成时庆祝；跟随只使用新素材的四个明确方向，斜向取最近方向；眨眼、抬头和打哈欠也已接入首页互动。</p></main>
 <script type="module">
 import { createApp, h, ref, onBeforeUnmount } from 'vue'
 import { docletMotionDuration } from '/src/shared/docletVideoAssets.js'

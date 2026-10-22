@@ -1,54 +1,76 @@
-import { nearestGazePose } from './docletGazePoses.js'
+import { GAZE_LAYOUT } from './docletGazePoses.js'
 
-// A circular source clip cannot supply arbitrary radial turns. Transition only
-// between stable destination poses; never manufacture a path through that clip.
+// Each route is genuine center → direction → center footage. A new intent
+// replaces the old one; unrelated intermediate directions are never played.
 export function createGazeDriver({ draw, request, cancel }) {
-  let current = nearestGazePose(0, 0)
-  let destination = current
-  let pending = null
+  let direction = null
+  let target = null
+  let phase = 'center'
   let started = null
-  let lastPaint = null
-  const duration = 140
-  const interval = 1000 / 30
-
+  let offset = 0
+  let progress = 0
+  let pending = null
+  let painted = -1
+  const paint = (frame) => {
+    if (frame !== painted) {
+      draw(frame)
+      painted = frame
+    }
+  }
+  function begin(next, fraction = 0) {
+    phase = next
+    offset = fraction
+    progress = fraction
+    started = null
+  }
   function tick(time) {
     pending = null
+    if (phase === 'center') {
+      if (!target) return
+      direction = target
+      begin('out')
+    }
     started ??= time
-    if (lastPaint === null || time - lastPaint + 0.01 >= interval || time - started >= duration) {
-      lastPaint = time
-      const progress = Math.min(1, (time - started) / duration)
-      const blend = progress * progress * (3 - 2 * progress)
-      draw(destination, current, blend)
-      if (progress === 1) {
-        current = destination
-        started = null
-        lastPaint = null
-        return
+    const route = GAZE_LAYOUT.routes[direction]
+    const frames = route[phase]
+    const duration =
+      phase === 'out'
+        ? Math.max(320, ((frames.length - 1) * 1000) / 24)
+        : Math.max(200, ((frames.length - 1) * 1000) / 30)
+    progress = Math.min(1, offset + (time - started) / duration)
+    paint(frames[Math.min(frames.length - 1, Math.floor(progress * (frames.length - 1)))])
+    if (progress === 1) {
+      if (phase === 'out') {
+        if (target === direction) {
+          phase = 'hold'
+          return
+        }
+        begin('back')
+      } else {
+        phase = 'center'
+        direction = null
+        paint(GAZE_LAYOUT.center)
+        if (!target) return
       }
     }
     pending = request(tick)
   }
-
   return {
-    aim(target) {
-      const next = nearestGazePose(target.x, target.y, destination)
-      if (next === destination) return
-      // New stable intent replaces the old turn; no direction queue. If a
-      // transition is interrupted, retain its destination as the next origin.
-      current = destination
-      destination = next
-      started = null
-      lastPaint = null
-      if (pending === null) pending = request(tick)
+    aim(next) {
+      if (next === target) return
+      target = next
+      if (phase === 'hold' && next !== direction) begin('back')
+      // Match the partial outward pose to the corresponding return progress.
+      if (phase === 'out' && next !== direction) begin('back', 1 - progress)
+      if (pending === null && (phase !== 'center' || target)) pending = request(tick)
     },
     start() {
-      draw(current, current, 1)
+      paint(GAZE_LAYOUT.center)
     },
     stop() {
       if (pending !== null) cancel(pending)
       pending = null
       started = null
-      lastPaint = null
     },
   }
 }

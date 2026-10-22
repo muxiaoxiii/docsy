@@ -51,16 +51,8 @@ for video_id in sorted({clip[0] for clip in CLIPS.values()}):
         raise RuntimeError(f'Could not decode {source}')
     frames[video_id] = result
 
-# Static pose atlas, sampled chronologically from the full look-around video.
-# Runtime uses this to follow the pointer with frame changes, without decoding a video.
-gaze_frames = frames['077e946b']
-layout = json.loads((DEST / 'gaze-layout.json').read_text())
-columns, cell_w, cell_h = layout['columns'], layout['width'], layout['height']
-rows = (len(layout['poses']) + columns - 1) // columns
-atlas = Image.new('RGBA', (columns * cell_w, rows * cell_h))
-for index, pose in enumerate(layout['poses']):
-    atlas.paste(gaze_frames[pose['frame']].resize((cell_w, cell_h), Image.Resampling.LANCZOS), ((index % columns) * cell_w, (index // columns) * cell_h))
-atlas.save(DEST / 'gaze-atlas.webp', quality=85, method=5)
+# Radial turns use the newer independent center-to-direction footage.
+subprocess.run(['python3', str(ROOT / 'scripts/prepare-doclet-gaze.py')], check=True)
 
 def animation_path(name):
     if name == 'look':

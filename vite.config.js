@@ -70,7 +70,6 @@ export default defineConfig({
       output: {
         // Keep shared helpers out of optional renderers: otherwise the entry
         // imports Mermaid just to obtain a helper and defeats lazy loading.
-        onlyExplicitManualChunks: true,
         manualChunks(id) {
           if (id === '\0commonjsHelpers.js' || id === '\0vite/preload-helper.js') {
             return 'runtime'

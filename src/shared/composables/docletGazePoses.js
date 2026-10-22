@@ -1,28 +1,12 @@
 import layout from '../../assets/doclet-video/gaze-layout.json'
 
-export const GAZE_POSES = layout.poses
 export const GAZE_LAYOUT = layout
-export const GAZE_CELL = new Map(GAZE_POSES.map((pose, index) => [pose.frame, index]))
+export const GAZE_CELL = new Map(layout.frames.map((frame, index) => [frame, index]))
 
+// Only map directions actually present in the radial-turn source. The later
+// head tilts are not reliable diagonal gaze poses, so use the nearest cardinal.
 export function gazeTarget(x, y) {
-  const length = Math.hypot(x, y)
-  if (length < 0.18) return { x: 0, y: 0 }
-  const scale = Math.max(1, length)
-  return { x: x / scale, y: y / scale }
-}
-
-// Pick the nearest actual pose in screen space. Never walk video timestamps.
-export function nearestGazePose(x, y, previous) {
-  let best = GAZE_POSES[0]
-  let distance = Infinity
-  for (const pose of GAZE_POSES) {
-    const next = (pose.x - x) ** 2 + (pose.y - y) ** 2
-    if (next < distance) {
-      best = pose
-      distance = next
-    }
-  }
-  const old = GAZE_POSES[GAZE_CELL.get(previous)]
-  if (old && (old.x - x) ** 2 + (old.y - y) ** 2 <= distance + 0.0004) return old.frame
-  return best.frame
+  if (Math.hypot(x, y) < 0.28) return null
+  if (Math.abs(x) > Math.abs(y)) return x > 0 ? 'right' : 'left'
+  return y > 0 ? 'down' : 'up'
 }

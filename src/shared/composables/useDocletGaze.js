@@ -51,7 +51,7 @@ export function useDocletGaze(root, canvas, enabled, onError) {
         const reset = () => {
           attention.reset()
           lastFocus = null
-          driver?.aim({ x: 0, y: 0 })
+          driver?.aim(null)
         }
         loadAtlas()
           .then((image) => {
@@ -68,31 +68,21 @@ export function useDocletGaze(root, canvas, enabled, onError) {
             driver = createGazeDriver({
               request: (callback) => window.requestAnimationFrame(callback),
               cancel: (id) => window.cancelAnimationFrame(id),
-              draw: (frame, from, blend) => {
+              draw: (frame) => {
                 context.clearRect(0, 0, node.width, node.height)
                 const { columns, width, height } = GAZE_LAYOUT
-                const paint = (pose, opacity) => {
-                  if (opacity <= 0) return
-                  const cell = GAZE_CELL.get(pose) ?? 0
-                  context.globalAlpha = opacity
-                  context.drawImage(
-                    image,
-                    (cell % columns) * width,
-                    Math.floor(cell / columns) * height,
-                    width,
-                    height,
-                    0,
-                    0,
-                    node.width,
-                    node.height,
-                  )
-                }
-                // Add premultiplied pixels so overlap keeps its original opacity.
-                paint(from, 1 - blend)
-                context.globalCompositeOperation = 'lighter'
-                paint(frame, blend)
-                context.globalCompositeOperation = 'source-over'
-                context.globalAlpha = 1
+                const cell = GAZE_CELL.get(frame) ?? 0
+                context.drawImage(
+                  image,
+                  (cell % columns) * width,
+                  Math.floor(cell / columns) * height,
+                  width,
+                  height,
+                  0,
+                  0,
+                  node.width,
+                  node.height,
+                )
               },
             })
             driver.start()
