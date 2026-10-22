@@ -27,6 +27,19 @@ function harness() {
   return { driver, drawn, advance, callbacks }
 }
 describe('Doclet 正面转向片段', () => {
+  it('左转左上不插入旧片中先向下倾斜再翻转的片段', () => {
+    const h = harness()
+    h.driver.aim('left')
+    h.advance(500)
+    const start = h.drawn.length
+    h.driver.aim('up-left')
+    h.advance(500)
+    const transition = h.drawn.slice(start)
+    expect(transition.at(-1)).toMatchObject({ frame: 1205, mix: 1 })
+    expect(transition.filter(({ frame }) => frame >= 1000).every(({ frame }) => frame >= 1195)).toBe(true)
+    expect(transition.some(({ frame, mix }) => frame >= 1195 && mix > 0 && mix < 1)).toBe(true)
+    expect(h.callbacks.size).toBe(0)
+  })
   it('拼接处短暂补间保持原定时长，停稳与中途取消后都不残留半透明帧', () => {
     const h = harness()
     h.driver.aim('up-left')

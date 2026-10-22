@@ -1,0 +1,2 @@
+# Rendered fixtures carry hashes and byte offsets generated from LF source text.
+src-tauri/src/markdown/fixtures/*.md text eol=lf

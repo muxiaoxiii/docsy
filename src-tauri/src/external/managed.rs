@@ -1101,8 +1101,8 @@ mod tests {
         assert_eq!(find_in_directories("missing-tool", search()), None);
         #[cfg(windows)]
         assert_eq!(
-            find_in_directories("probe", search()),
-            Some(first.join(binary))
+            find_in_directories("probe", search()).map(|path| path.canonicalize().unwrap()),
+            Some(first.join(binary).canonicalize().unwrap())
         );
         #[cfg(unix)]
         {
