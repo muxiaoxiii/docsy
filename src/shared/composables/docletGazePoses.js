@@ -1,15 +1,28 @@
-// Coordinates are source-video frame numbers, not compass bearings.
-// 40 is a frontal pose; 55 is the start of the raised, upper-right pose.
-// Keep the right -> upper-right -> up arc inside frames 55..85.
-export const GAZE_COMPASS = [11, 13, 17, 22, 26, 31, 36, 41, 59]
+import layout from '../../assets/doclet-video/gaze-layout.json'
 
-// Do not park on a blink or a partially closed eye from the look-around video.
-// Wink remains a separate complete action (open -> wink -> open).
-export const GAZE_BLINK_RANGES = [[20, 34], [92, 100], [116, 124], [186, 194], [211, 219], [231, 239]]
-export function gazeSourceFrame(position) {
-  const frame = ((Math.round(position * 5) % 240) + 240) % 240
-  const blink = GAZE_BLINK_RANGES.find(([start, end]) => frame >= start && frame <= end)
-  if (!blink) return frame
-  const [start, end] = blink
-  return frame - start <= end - frame ? start - 1 : (end + 1) % 240
+export const GAZE_POSES = layout.poses
+export const GAZE_LAYOUT = layout
+export const GAZE_CELL = new Map(GAZE_POSES.map((pose, index) => [pose.frame, index]))
+
+export function gazeTarget(x, y) {
+  const length = Math.hypot(x, y)
+  if (length < 0.18) return { x: 0, y: 0 }
+  const scale = Math.max(1, length)
+  return { x: x / scale, y: y / scale }
+}
+
+// Pick the nearest actual pose in screen space. Never walk video timestamps.
+export function nearestGazePose(x, y, previous) {
+  let best = GAZE_POSES[0]
+  let distance = Infinity
+  for (const pose of GAZE_POSES) {
+    const next = (pose.x - x) ** 2 + (pose.y - y) ** 2
+    if (next < distance) {
+      best = pose
+      distance = next
+    }
+  }
+  const old = GAZE_POSES[GAZE_CELL.get(previous)]
+  if (old && (old.x - x) ** 2 + (old.y - y) ** 2 <= distance + 0.0004) return old.frame
+  return best.frame
 }

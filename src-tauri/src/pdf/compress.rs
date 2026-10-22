@@ -1099,19 +1099,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
-
-pub fn review_dpi(doc: &Document) -> Result<HashMap<ObjectId, f64>> {
-    collect_effective_dpi(doc, &collect_image_xobjects(doc), &mut |_| {})
-}
-
-pub fn review_compress(input: &std::path::Path, output: &std::path::Path, dpi: u32) -> Result<()> {
-    compress_pdf_whole(
-        input,
-        output,
-        &CompressOptions {
-            jpeg_quality: 75,
-            target_dpi: dpi,
-        },
-        &mut |_| {},
-    )
-}

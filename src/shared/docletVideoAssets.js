@@ -9,7 +9,7 @@ export const DOCLET_MOTIONS = ['idle', 'greet', 'celebrate', 'error', 'waiting',
 export function docletVideoAsset(motion) {
   const name = DOCLET_MOTIONS.includes(motion) ? motion : 'idle'
   return {
-    animation: files[`../assets/doclet-video/${name}.webp`],
+    animation: files[`../assets/doclet-video/${name}.webp`] || files[`../assets/doclet-video/${name}-poster.webp`],
     poster: files[`../assets/doclet-video/${name}-poster.webp`],
   }
 }

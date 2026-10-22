@@ -798,6 +798,7 @@ pub(crate) fn compute_x_with_page(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn compute_x(
     config: &OverlayTextConfig,
     text: &str,

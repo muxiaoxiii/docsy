@@ -79,6 +79,15 @@ src-tauri/review-output/
 /REVIEW_1.0.6.md
 node_modules
 
+# Local design experiments and generated marketing drafts (retain on disk).
+/designs/doclet-regenerated-v1/
+/designs/doclet-vector-preview.html
+/designs/doclet-video-kit-v1/
+/designs/promo-xiaohongshu-1.1.1/
+/scripts/create-doclet-vector-study.py
+/src/assets/doclet-original-animated.svg
+/src/assets/doclet-rebuilt-animated.svg
+
 # doc2x sidecar binary (prepared by scripts/prepare-doc2x.mjs)
 src-tauri/runtime/bin/doc2x
 src-tauri/runtime/bin/doc2x.exe

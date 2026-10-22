@@ -1,6 +1,6 @@
 //! Markdown → docx：pulldown-cmark 事件流转 docx-rs 文档。
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use docx_rs::{
     AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
     Level, LevelJc, LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, PageMargin,
@@ -692,7 +692,8 @@ fn heading_styles(style: DocxStylePreset) -> Vec<Style> {
         .collect()
 }
 
-/// 生成 docx 字节（供写文件与测试复用）。
+/// 测试便捷入口；正式转换统一使用 build_docx_with_resources。
+#[cfg(test)]
 pub fn build_docx_bytes_with_media(
     md: &str,
     base_dir: &Path,
@@ -737,6 +738,7 @@ pub fn build_docx_with_resources(
     }
 }
 
+#[cfg(test)]
 pub fn build_docx_bytes_with_style(
     md: &str,
     base_dir: &Path,
@@ -748,21 +750,6 @@ pub fn build_docx_bytes_with_style(
 #[cfg(test)]
 pub fn build_docx_bytes(md: &str, base_dir: &Path) -> Result<Vec<u8>> {
     build_docx_bytes_with_style(md, base_dir, DocxStylePreset::Professional)
-}
-
-pub fn convert(input: &Path, output: &Path, style: DocxStylePreset) -> Result<()> {
-    let md = std::fs::read_to_string(input)
-        .with_context(|| format!("无法读取 Markdown 文件: {}", input.display()))?;
-    let base_dir = input.parent().unwrap_or_else(|| Path::new("."));
-    let bytes = build_docx_bytes_with_style(&md, base_dir, style)?;
-    std::fs::write(output, &bytes)
-        .with_context(|| format!("无法写入 docx 文件: {}", output.display()))?;
-    // 自验证：生成的文件必须能被 docx-rs reader 读回
-    let back = docx_rs::read_docx(&bytes).context("生成的 docx 无法读回校验")?;
-    if back.document.children.is_empty() && !md.trim().is_empty() {
-        anyhow::bail!("生成的 docx 内容为空，转换失败");
-    }
-    Ok(())
 }
 
 #[cfg(test)]

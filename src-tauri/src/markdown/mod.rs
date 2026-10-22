@@ -480,6 +480,7 @@ fn office_input_warning(extension: &str, facts: &OfficeImportFacts) -> Option<St
     (!notices.is_empty()).then(|| notices.join(" "))
 }
 
+#[cfg(test)]
 pub fn convert(
     input: &str,
     output_dir: Option<&str>,
@@ -836,6 +837,7 @@ fn safe_html_fragment(markdown: &str) -> String {
 }
 
 /// 粘贴 Markdown 文本直接转换为 Office / HTML 文件。
+#[cfg(test)]
 pub fn convert_text(
     text: &str,
     format: &str,

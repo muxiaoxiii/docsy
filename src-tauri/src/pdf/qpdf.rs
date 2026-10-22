@@ -183,6 +183,7 @@ pub fn unlock(input: &Path) -> Result<UnlockResult> {
     })
 }
 
+#[cfg(test)]
 pub fn merge(inputs: &[String], output: &str, duplex_separate: bool) -> Result<String> {
     let state = std::sync::Arc::new(crate::ConversionState::new());
     merge_with_state(inputs, output, duplex_separate, &state)
@@ -352,6 +353,7 @@ where
     })
 }
 
+#[cfg(test)]
 pub fn extract_pages(
     input: &str,
     pages: &[u32],

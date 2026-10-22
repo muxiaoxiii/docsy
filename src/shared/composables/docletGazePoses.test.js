@@ -1,22 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { GAZE_BLINK_RANGES, gazeSourceFrame } from './docletGazePoses.js'
-import { gazePosition } from './useDocletGaze.js'
-const isBlink = frame => GAZE_BLINK_RANGES.some(([start, end]) => frame >= start && frame <= end)
-describe('Doclet 视线停靠姿态', () => {
-  it('整个源片以及任意方向均不会停在闭眼帧', () => {
-    for (let frame = 0; frame < 240; frame++) {
-      expect(isBlink(gazeSourceFrame(frame / 5))).toBe(false)
-    }
-    for (let degrees = 0; degrees < 360; degrees += .25) {
-      const radians = degrees * Math.PI / 180
-      expect(isBlink(gazeSourceFrame(gazePosition(Math.sin(radians), -Math.cos(radians))))).toBe(false)
-    }
+import { GAZE_POSES, gazeTarget, nearestGazePose } from './docletGazePoses.js'
+
+describe('Doclet 二维姿态选择', () => {
+  it('保留中心死区和远近程度，不只按鼠标夹角挑视频进度', () => {
+    expect(gazeTarget(0.05, -0.05)).toEqual({ x: 0, y: 0 })
+    expect(gazeTarget(0.3, 0)).toEqual({ x: 0.3, y: 0 })
+    expect(gazeTarget(3, 0)).toEqual({ x: 1, y: 0 })
+    expect(nearestGazePose(0, 0)).toBe(0)
+    expect(nearestGazePose(1, 0)).toBe(85)
+    expect(nearestGazePose(-1, 0)).toBe(175)
+    expect(nearestGazePose(0, -1)).toBe(55)
   })
-  it('只替换闭眼片段，保留左右方向及中间正面的睁眼姿态', () => {
-    for (const frame of [0, 55, 65, 85, 110, 130, 155, 175, 205, 225]) {
-      expect(gazeSourceFrame(frame / 5)).toBe(frame)
+  it('跟随素材不再包含闭眼、开头等待和中间重复正面段', () => {
+    expect(new Set(GAZE_POSES.map((pose) => pose.frame)).size).toBe(GAZE_POSES.length)
+    for (const pose of GAZE_POSES) {
+      expect(pose.frame === 0 || pose.frame >= 51).toBe(true)
+      expect(
+        [
+          [92, 100],
+          [116, 124],
+          [131, 145],
+          [186, 194],
+          [211, 239],
+        ].some(([a, b]) => pose.frame >= a && pose.frame <= b),
+      ).toBe(false)
     }
-    expect(gazeSourceFrame(25 / 5)).toBe(19)
-    expect(gazeSourceFrame(238 / 5)).toBe(0)
   })
 })

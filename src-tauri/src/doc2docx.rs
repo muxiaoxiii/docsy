@@ -158,6 +158,7 @@ fn describe_output(stdout: &str, stderr: &str, killed: bool, limit_ms: u64) -> S
     }
 }
 
+#[cfg(test)]
 fn utf16le(ascii: &str) -> Vec<u8> {
     ascii.encode_utf16().flat_map(|unit| unit.to_le_bytes()).collect()
 }

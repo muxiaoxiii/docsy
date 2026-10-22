@@ -176,16 +176,15 @@ jobs:
         working-directory: src-tauri
 
       - name: Run stop-release Rust regressions on Windows
-        # Skip on GitHub-hosted Windows for 1.0.8 publish:
-        # `docsy_lib-* freeze` exits STATUS_ENTRYPOINT_NOT_FOUND even on host
-        # x64 after tool install (environment/DLL issue, not i686-only).
-        # Full `cargo test` already runs on macOS jobs; package builds proceed
-        # on Windows after frontend tests + metadata checks.
-        if: runner.os == 'Windows' && false
+        # A test-runtime failure must block packaging rather than silently
+        # bypass the regression gate. Exercise the package's actual target.
+        if: runner.os == 'Windows'
         run: |
-          cargo test --lib freeze
+          cargo test --locked --target ${{ matrix.rust-target }} --lib freeze
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --lib markdown
+          cargo test --locked --target ${{ matrix.rust-target }} --lib markdown
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --target ${{ matrix.rust-target }} --lib word_convert
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         working-directory: src-tauri
 

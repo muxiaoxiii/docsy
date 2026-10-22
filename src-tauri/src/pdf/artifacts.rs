@@ -1,6 +1,10 @@
 use anyhow::{Context, Result};
-use lopdf::content::{Content, Operation};
-use lopdf::{decode_text_string, Dictionary, Document, Object, ObjectId, StringFormat};
+use lopdf::content::Operation;
+#[cfg(test)]
+use lopdf::content::Content;
+use lopdf::{decode_text_string, Dictionary, Object, StringFormat};
+#[cfg(test)]
+use lopdf::Document;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -44,6 +48,7 @@ pub struct HeaderFooterArtifactTargets {
     pub footer: bool,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ArtifactRemovalStats {
     pub header: usize,
@@ -85,6 +90,7 @@ impl HeaderFooterArtifactInspection {
     }
 }
 
+#[cfg(test)]
 impl ArtifactRemovalStats {
     fn total(self) -> usize {
         self.header + self.footer
@@ -1030,28 +1036,7 @@ fn edit_header_footer_artifacts_qpdf(
     Ok(result)
 }
 
-fn merge_edit_result(
-    target: &mut HeaderFooterArtifactEditResult,
-    source: HeaderFooterArtifactEditResult,
-) {
-    target.removed_header += source.removed_header;
-    target.removed_footer += source.removed_footer;
-    target.edited_header += source.edited_header;
-    target.edited_footer += source.edited_footer;
-    target
-        .removed_header_pages
-        .extend(source.removed_header_pages);
-    target
-        .removed_footer_pages
-        .extend(source.removed_footer_pages);
-    target
-        .edited_header_pages
-        .extend(source.edited_header_pages);
-    target
-        .edited_footer_pages
-        .extend(source.edited_footer_pages);
-}
-
+#[cfg(test)]
 fn edit_target_artifact_ranges(
     operations: &[Operation],
     plan: &HeaderFooterArtifactEditPlan,
@@ -1381,6 +1366,7 @@ fn encode_utf16be_pdf_string(value: &str) -> Vec<u8> {
     encoded
 }
 
+#[cfg(test)]
 fn remove_target_artifact_ranges(
     operations: &[Operation],
     targets: HeaderFooterArtifactTargets,
@@ -1460,162 +1446,11 @@ fn artifact_subtype<'a>(property: &'a Object, properties: &'a Dictionary) -> Opt
     }
 }
 
-fn edit_referenced_form_artifacts(
-    doc: &mut Document,
-    operations: &[Operation],
-    xobjects: &Dictionary,
-    plan: &HeaderFooterArtifactEditPlan,
-    page_index: usize,
-    visited: &mut BTreeSet<ObjectId>,
-) -> Result<HeaderFooterArtifactEditResult> {
-    let mut result = HeaderFooterArtifactEditResult::default();
-    for operation in operations
-        .iter()
-        .filter(|operation| operation.operator == "Do")
-    {
-        let Some(name) = operation.operands.first().and_then(name_bytes) else {
-            continue;
-        };
-        let Some(object_id) = xobjects.get(name).ok().and_then(object_reference) else {
-            continue;
-        };
-        if !visited.insert(object_id) {
-            continue;
-        }
 
-        let Some((stream_content, stream_dict)) = doc
-            .get_object(object_id)
-            .ok()
-            .and_then(|object| object.as_stream().ok())
-            .filter(|stream| stream.dict.get(b"Subtype").ok().and_then(name_bytes) == Some(b"Form"))
-            .and_then(|stream| {
-                stream
-                    .get_plain_content()
-                    .ok()
-                    .map(|content| (content, stream.dict.clone()))
-            })
-        else {
-            continue;
-        };
-        let Ok(content) = Content::decode(&stream_content) else {
-            continue;
-        };
-        let resources = resource_dictionary(doc, stream_dict.get(b"Resources").ok());
-        let properties = properties_from_resources(doc, resources.as_ref());
-        let nested_xobjects = xobjects_from_resources(doc, resources.as_ref());
-        let (edited, mut form_result) =
-            edit_target_artifact_ranges(&content.operations, plan, &properties, page_index);
-        let direct_changed = form_result.changed_count() > 0;
-        if !nested_xobjects.is_empty() {
-            let nested_result = edit_referenced_form_artifacts(
-                doc,
-                &content.operations,
-                &nested_xobjects,
-                plan,
-                page_index,
-                visited,
-            )?;
-            merge_edit_result(&mut form_result, nested_result);
-        }
-        if direct_changed {
-            let encoded = Content { operations: edited }
-                .encode()
-                .context("编码 Form XObject 中的页眉页脚失败")?;
-            doc.get_object_mut(object_id)
-                .and_then(Object::as_stream_mut)
-                .context("写回 Form XObject 页眉页脚失败")?
-                .set_plain_content(encoded);
-        }
-        merge_edit_result(&mut result, form_result);
-    }
-    Ok(result)
-}
 
-pub(crate) fn object_reference(object: &Object) -> Option<ObjectId> {
-    object.as_reference().ok()
-}
 
-pub(crate) fn resource_dictionary(doc: &Document, object: Option<&Object>) -> Option<Dictionary> {
-    match object? {
-        Object::Dictionary(dictionary) => Some(dictionary.clone()),
-        Object::Reference(id) => doc.get_dictionary(*id).ok().cloned(),
-        _ => None,
-    }
-}
 
-fn properties_from_resources(doc: &Document, resources: Option<&Dictionary>) -> Dictionary {
-    let mut properties = Dictionary::new();
-    if let Some(resources) = resources {
-        merge_properties(doc, resources, &mut properties);
-    }
-    properties
-}
 
-pub(crate) fn xobjects_from_resources(
-    doc: &Document,
-    resources: Option<&Dictionary>,
-) -> Dictionary {
-    let Some(resources) = resources else {
-        return Dictionary::new();
-    };
-    resource_dictionary(doc, resources.get(b"XObject").ok()).unwrap_or_default()
-}
-
-pub(crate) fn page_xobjects(doc: &Document, page_id: ObjectId) -> Dictionary {
-    let mut xobjects = Dictionary::new();
-    let Ok((direct_resources, resource_ids)) = doc.get_page_resources(page_id) else {
-        return xobjects;
-    };
-    for resource_id in resource_ids.into_iter().rev() {
-        if let Ok(resources) = doc.get_dictionary(resource_id) {
-            merge_xobjects(doc, resources, &mut xobjects);
-        }
-    }
-    if let Some(resources) = direct_resources {
-        merge_xobjects(doc, resources, &mut xobjects);
-    }
-    xobjects
-}
-
-fn merge_xobjects(doc: &Document, resources: &Dictionary, output: &mut Dictionary) {
-    let Some(xobjects) = resource_dictionary(doc, resources.get(b"XObject").ok()) else {
-        return;
-    };
-    for (name, value) in xobjects.iter() {
-        output.set(name.clone(), value.clone());
-    }
-}
-
-fn page_properties(doc: &Document, page_id: ObjectId) -> Dictionary {
-    let mut properties = Dictionary::new();
-    if let Ok((resource_dict, resource_ids)) = doc.get_page_resources(page_id) {
-        if let Some(resources) = resource_dict {
-            merge_properties(doc, resources, &mut properties);
-        }
-        for id in resource_ids {
-            if let Ok(resources) = doc.get_dictionary(id) {
-                merge_properties(doc, resources, &mut properties);
-            }
-        }
-    }
-    properties
-}
-
-fn merge_properties(doc: &Document, resources: &Dictionary, output: &mut Dictionary) {
-    let Ok(properties_obj) = resources.get(b"Properties") else {
-        return;
-    };
-    let properties_dict = match properties_obj {
-        Object::Dictionary(dict) => Some(dict),
-        Object::Reference(id) => doc.get_dictionary(*id).ok(),
-        _ => None,
-    };
-    if let Some(properties_dict) = properties_dict {
-        for (name, value) in properties_dict.iter() {
-            output.set(name.clone(), value.clone());
-        }
-    }
-}
 
 fn name_bytes(object: &Object) -> Option<&[u8]> {
     object.as_name().ok()
