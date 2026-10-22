@@ -68,7 +68,7 @@ export function controlsFromLayout(layout, customRows, customCols, flow) {
   if (perPage === 1) arrangeMode = 'single'
   else if (perPage === 2) arrangeMode = grid.cols === 2 ? 'side' : 'stack'
   else if (perPage === 3) arrangeMode = grid.rows === 3 ? 'stack' : 'side'
-  else if (perPage === 4) arrangeMode = 'grid'
+  else if (perPage === 4) arrangeMode = grid.rows === 1 ? 'side' : grid.cols === 1 ? 'stack' : 'grid'
   else if (perPage === 6) arrangeMode = grid.rows === 3 ? '3x2' : '2x3'
   else if (perPage === 9) arrangeMode = 'grid'
   return { imagesPerPage: perPage, arrangeMode }
@@ -145,6 +145,21 @@ export function layoutFromControls({ imagesPerPage, arrangeMode, customRows, cus
 export function perPageFromLayout(layout, customRows, customCols, flow) {
   const grid = parseLayoutString(layout, customRows, customCols)
   return flow ? grid.rows * grid.cols : grid.rows * grid.cols
+}
+
+/** Row-major cells display the input numbers in the selected reading order. */
+export function layoutSlotNumbers(grid, mode = 'z', count = grid.rows * grid.cols) {
+  const traversal = []
+  if (mode === 'n' || mode === 'reverse_n') {
+    const columns = Array.from({ length: grid.cols }, (_, i) => i)
+    if (mode === 'reverse_n') columns.reverse()
+    for (const col of columns) for (let row = 0; row < grid.rows; row += 1) traversal.push(row * grid.cols + col)
+  } else {
+    for (let i = 0; i < grid.rows * grid.cols; i += 1) traversal.push(i)
+  }
+  const slots = Array(count)
+  traversal.filter(slot => slot < count).forEach((slot, index) => { slots[slot] = index + 1 })
+  return slots
 }
 
 /** 导入推荐与当前布局是否明显不一致（例如导入按 2 张推荐，用户改成了 4 张）。 */

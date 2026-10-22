@@ -254,6 +254,9 @@ fn test_pdfcraft_merge_duplex_separate() {
     let read_doc = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)).unwrap();
     let count = pdfcraft_organize::page_count(&read_doc).unwrap();
     assert_eq!(count, 4);
+    let pages = pdfcraft_organize::walk(&read_doc).unwrap();
+    let separator = read_doc.get(pages[1].0);
+    assert!(crate::pdf::blank::is_docsy_separator(separator.as_dict().unwrap()), "merge must preserve Docsy separator marker");
 }
 
 #[test]

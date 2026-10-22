@@ -4,6 +4,7 @@ import {
   controlsFromLayout,
   importRecommendationDrifts,
   layoutFromControls,
+  layoutSlotNumbers,
   parseLayoutString,
 } from './layoutControls.js'
 
@@ -29,6 +30,14 @@ describe('layoutControls', () => {
     expect(controlsFromLayout('2x1', 2, 2, false)).toEqual({ imagesPerPage: 2, arrangeMode: 'stack' })
     expect(controlsFromLayout('1x2', 2, 2, false)).toEqual({ imagesPerPage: 2, arrangeMode: 'side' })
     expect(controlsFromLayout('4', 2, 2, false).imagesPerPage).toBe(4)
+    expect(controlsFromLayout('1x4', 2, 2, false).arrangeMode).toBe('side')
+    expect(controlsFromLayout('4x1', 2, 2, false).arrangeMode).toBe('stack')
+  })
+
+  it('places consecutive inputs down columns for N order, including a partial page', () => {
+    expect(layoutSlotNumbers({ rows: 2, cols: 3 }, 'n')).toEqual([1, 3, 5, 2, 4, 6])
+    expect(layoutSlotNumbers({ rows: 2, cols: 3 }, 'reverse_n')).toEqual([5, 3, 1, 6, 4, 2])
+    expect(layoutSlotNumbers({ rows: 2, cols: 3 }, 'n', 4)).toEqual([1, 3, 4, 2])
   })
 
   it('parses custom and legacy count layouts', () => {

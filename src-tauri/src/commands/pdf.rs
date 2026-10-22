@@ -11,6 +11,9 @@ pub struct BuildEvidenceGroupPdfsArgs {
     root: String,
     #[serde(default)]
     groups: Vec<crate::pdf::evidence::GroupConfig>,
+    #[serde(default)] output_mode: String,
+    #[serde(default)] duplex_files: bool,
+    #[serde(default)] duplex_groups: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -173,6 +176,16 @@ pub async fn merge_pdfs(
 }
 
 #[tauri::command]
+pub async fn convert_image_to_pdf(
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+    input: String,
+) -> Result<String, String> {
+    run_managed(&manager, "convert_image_to_pdf", None, move |_token| {
+        crate::pdf::image_convert::convert_image_to_pdf(&input)
+    }).await
+}
+
+#[tauri::command]
 pub async fn convert_word_to_pdf(
     input: String,
     output: Option<String>,
@@ -300,6 +313,9 @@ pub async fn build_evidence_group_pdfs(
     let build_args = crate::pdf::evidence::BuildGroupPdfsArgs {
         root: args.root,
         groups: args.groups,
+        output_mode: args.output_mode,
+        duplex_files: args.duplex_files,
+        duplex_groups: args.duplex_groups,
     };
     run_managed(&manager, "build_evidence_group_pdfs", None, move |_token| {
         crate::pdf::evidence::build_group_pdfs(&build_args, &state)
@@ -484,4 +500,13 @@ pub async fn remove_pdf_bookmarks(input: String) -> Result<(), String> {
         crate::pdf::header_footer::remove_pdf_bookmarks(std::path::Path::new(&input))
     })
     .await
+}
+
+#[tauri::command]
+pub async fn plan_image_pdf(args: crate::pdf::image_convert::ImagePdfArgs) -> Result<crate::pdf::image_convert::ImagePdfPlan, String> {
+    run_blocking(move || crate::pdf::image_convert::plan(&args)).await
+}
+#[tauri::command]
+pub async fn export_image_pdf(args: crate::pdf::image_convert::ImagePdfArgs, manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>) -> Result<String, String> {
+    run_managed(&manager, "export_image_pdf", None, move |_token| crate::pdf::image_convert::export(&args)).await
 }

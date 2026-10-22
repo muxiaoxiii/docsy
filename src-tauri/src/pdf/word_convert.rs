@@ -100,6 +100,7 @@ pub fn convert_word_to_pdf(
     output_dir: &Path,
     conversion_state: &Arc<ConversionState>,
 ) -> Result<String> {
+    if !Path::new(doc_path).is_file() { anyhow::bail!("原文件不存在或不是文件：{doc_path}"); }
     fs::create_dir_all(output_dir)
         .with_context(|| format!("无法创建输出目录: {}", output_dir.display()))?;
 
@@ -144,6 +145,7 @@ pub fn convert_word_to_pdf_file(
     output_pdf_path: &Path,
     conversion_state: &Arc<ConversionState>,
 ) -> Result<String> {
+    if !Path::new(doc_path).is_file() { anyhow::bail!("原文件不存在或不是文件：{doc_path}"); }
     let parent = output_pdf_path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).with_context(|| format!("无法创建输出目录: {}", parent.display()))?;
 
@@ -218,7 +220,7 @@ fn convert_doc_or_docx_to_pdf_in_dir(
     }
 
     anyhow::bail!(
-        "没有可用的 Word 转 PDF 引擎，文件未转换: {}。{}",
+        "Word 自动转 PDF 失败，原文件未修改: {}。请使用 Word 或 WPS 另存为 PDF，再添加转换后的 PDF 继续。尝试记录：{}",
         doc_path,
         attempts.join("；")
     )
@@ -409,36 +411,66 @@ fn convert_doc_to_pdf_with_word(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
-    let output = output_dir.join(format!("{stem}.pdf"));
+    // A stable exchange folder lets Word reuse its user-granted folder access.
+    // Input and output share this folder; Word never needs the final destination.
+    let source_dir = dirs::cache_dir().context("无法定位转换缓存目录")?.join("Docsy").join("WordConversion");
+    fs::create_dir_all(&source_dir)?;
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&source_dir, fs::Permissions::from_mode(0o700))?;
+    let lock = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(source_dir.join(".conversion.lock"))?;
+    lock.try_lock().context("另一个 Word 转换正在进行，请完成后重试")?;
+    // Never operate on an already-open original; only close our isolated copy.
+    let staged = crate::util::fs::copy_unique(&input, &source_dir).context("创建 Word 转换副本失败")?;
+    let _source_guard = crate::util::fs::TempPathGuard::new(staged.clone());
+    let output = crate::util::fs::unique_output_path(&source_dir, stem, "pdf");
+    let _output_guard = crate::util::fs::TempPathGuard::new(output.clone());
+    // Use a lazy document reference as in docx2pdf's macOS adapter. Fetching
+    // `active document` as an AppleScript value fails in some Word releases.
+    // Keep a stable named reference and verify its full path before touching it.
     let script = r#"
-on run argv
-  set inputPath to item 1 of argv
-  set outputPath to item 2 of argv
-  set inputHfsPath to POSIX file inputPath as text
-  set outputFile to POSIX file outputPath
-  set docRef to missing value
-  tell application "Microsoft Word"
-    set visible to false
-    try
-      open file inputHfsPath
-      set docRef to active document
-      save as docRef file name outputFile file format format PDF
-    on error errMsg number errNum
-      try
-        if docRef is not missing value then close docRef saving no
-      end try
-      error errMsg number errNum
-    end try
-    close docRef saving no
-  end tell
-end run
+ObjC.import('Foundation');
+function canonical(value) {
+  var path = String(value);
+  if (path.charAt(0) !== '/') path = '/' + path.split(':').slice(1).join('/');
+  return ObjC.unwrap($(path).stringByStandardizingPath.stringByResolvingSymlinksInPath);
+}
+function run(argv) {
+  var input = argv[0], output = argv[1];
+  var word = Application('Microsoft Word');
+  if (!word.running()) word.launch();
+  var previousVisibility = word.visible();
+  var owned = null, step = '打开文档副本', lastError = 'Word 尚未返回文档';
+  try {
+    word.open(Path(input), {readOnly: true, addToRecentFiles: false});
+    step = '取得转换副本';
+    for (var attempt = 0; attempt < 100; attempt++) {
+      try {
+        var candidate = word.activeDocument;
+        if (canonical(candidate.fullName()) === canonical(input)) {
+          owned = word.documents.byName(candidate.name());
+          if (canonical(owned.fullName()) === canonical(input)) break;
+          owned = null;
+        }
+      } catch (error) { lastError = String(error); }
+      delay(0.1);
+    }
+    if (!owned) throw new Error('未取得转换副本，未操作其他已打开文档：' + lastError);
+    step = '导出 PDF';
+    owned.saveAs({fileName: output, fileFormat: 'format PDF', addToRecentFiles: false});
+  } catch (error) {
+    throw new Error(step + '：' + String(error));
+  } finally {
+    if (owned) { try { owned.close({saving: 'no'}); } catch (_) {} }
+    try { word.visible = previousVisibility; } catch (_) {}
+  }
+}
 "#;
 
     let mut command = crate::external::hidden_command("osascript");
     command
-        .arg("-e")
+        .args(["-l", "JavaScript", "-e"])
         .arg(script)
-        .arg(input.display().to_string())
+        .arg(staged.display().to_string())
         .arg(output.display().to_string());
     let app = crate::get_app_handle().ok_or_else(|| anyhow::anyhow!("应用未初始化"))?;
     let result = run_process_with_interactive_timeout(
@@ -454,7 +486,8 @@ end run
             crate::external::command_failure_detail(&result)
         );
     }
-    Ok(output.display().to_string())
+    let published = crate::util::fs::copy_unique_with_stem(&output, output_dir, stem, "pdf")?;
+    Ok(published.display().to_string())
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]

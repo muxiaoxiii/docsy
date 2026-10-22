@@ -9,6 +9,8 @@ const operationLabels = {
   split_merged_evidence_pdf: 'Doclet 正在拆分 PDF…',
   merge_pdfs: 'Doclet 正在合并 PDF…',
   convert_word_to_pdf: 'Doclet 正在将 Word 转为 PDF…',
+  export_image_pdf: 'Doclet 正在生成打印用 PDF…',
+  convert_image_to_pdf: 'Doclet 正在将图片排入 A4 PDF…',
   compress_pdf: 'Doclet 正在压缩 PDF…',
   optimize_pdf_lossless: 'Doclet 正在无损优化 PDF…',
   convert_markdown: 'Doclet 正在转换文档…',

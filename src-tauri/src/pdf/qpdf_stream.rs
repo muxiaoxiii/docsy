@@ -32,6 +32,7 @@ pub(crate) struct QpdfIndexedPage {
     pub properties: Dictionary,
     pub page_box: Option<QpdfBox>,
     pub rotation: i64,
+    pub safe_for_blank_removal: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +88,21 @@ impl QpdfObjectIndex {
                 let resources = index.inherited_dictionary(page_ref, "/Resources");
                 Some(QpdfIndexedPage {
                     number: page_index as u32 + 1,
+                    safe_for_blank_removal: index.object_dictionary(page_ref).is_some_and(|dict| {
+                        let no_actions = ["/AA", "/PresSteps", "/AF"].iter().all(|key| !dict.contains_key(*key));
+                        let no_annotations = match dict.get("/Annots") {
+                            None => true,
+                            Some(Value::Array(values)) => values.is_empty(),
+                            Some(value) => index.resolve_array(value).is_some_and(Vec::is_empty),
+                        };
+                        let clear_contents = match dict.get("/Contents") {
+                            None => true,
+                            Some(Value::String(reference)) => reference.ends_with(" R"),
+                            Some(Value::Array(values)) => values.iter().all(|v| v.as_str().is_some_and(|r| r.ends_with(" R"))),
+                            _ => false,
+                        };
+                        no_actions && no_annotations && clear_contents
+                    }),
                     contents: page
                         .get("contents")
                         .and_then(Value::as_array)
@@ -478,41 +494,8 @@ pub(crate) fn object_selector(reference: &str) -> Option<String> {
     Some(format!("{object},{generation}"))
 }
 
-/// 仅拉取 pages 元数据（不含 objects），避免扫描件把图像对象整档载入内存。
-pub(crate) fn load_pages_metadata(input: &Path) -> Result<Vec<(u32, Vec<String>)>> {
-    let qpdf_bin = crate::external::QpdfTool.binary_path()?;
-    let output = crate::external::hidden_command(qpdf_bin)
-        .arg("--json=1")
-        .arg("--json-key=pages")
-        .arg(input)
-        .output()
-        .context("读取 qpdf 页面元数据失败")?;
-    if !super::qpdf::status_is_success(&output.status) {
-        anyhow::bail!(
-            "qpdf 页面元数据失败：{}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    let json: Value = serde_json::from_slice(&output.stdout).context("解析 qpdf 页面元数据失败")?;
-    let raw_pages = json
-        .get("pages")
-        .and_then(Value::as_array)
-        .context("qpdf 页面元数据缺少 pages")?;
-    Ok(raw_pages
-        .iter()
-        .enumerate()
-        .map(|(page_index, page)| {
-            let contents = page
-                .get("contents")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect();
-            ((page_index as u32) + 1, contents)
-        })
-        .collect())
+fn blank_state_operator(operation: &Operation) -> bool {
+    !super::split::operation_is_visible(operation) && matches!(operation.operator.as_str(), "q" | "Q" | "cm" | "w" | "J" | "j" | "M" | "d" | "ri" | "i" | "gs" | "CS" | "cs" | "SC" | "SCN" | "sc" | "scn" | "G" | "g" | "RG" | "rg" | "K" | "k" | "BT" | "ET" | "Tc" | "Tw" | "Tz" | "TL" | "Tf" | "Tr" | "Ts" | "Td" | "TD" | "Tm" | "T*" | "BMC" | "BDC" | "EMC" | "MP" | "DP" | "BX" | "EX")
 }
 
 fn detect_blank_pages_native(input: &Path) -> Result<BTreeSet<u32>> {
@@ -527,11 +510,24 @@ fn detect_blank_pages_native(input: &Path) -> Result<BTreeSet<u32>> {
     let mut blank = BTreeSet::new();
     for (idx, (page_ref, page_attrs)) in pages.into_iter().enumerate() {
         let number = (idx + 1) as u32;
+        let page_object = doc.get(page_ref);
+        let Some(page_dictionary) = page_object.as_dict() else { continue };
+        if [b"AA".as_slice(), b"PresSteps", b"AF"].iter().any(|key| page_dictionary.get(key).is_some()) { continue; }
+        let no_annotations = match page_dictionary.get(b"Annots") {
+            None => true,
+            Some(pdfcraft_cos::Object::Array(values)) => values.is_empty(),
+            Some(pdfcraft_cos::Object::Ref(r)) => matches!(&*doc.get(*r), pdfcraft_cos::Object::Array(values) if values.is_empty()),
+            _ => false,
+        };
+        if !no_annotations { continue; }
+        let marked_separator = super::blank::is_docsy_separator(page_dictionary);
         let existing = page_attrs.get(b"Contents").cloned().or_else(|| {
             doc.get(page_ref)
                 .as_dict()
                 .and_then(|d| d.get(b"Contents").cloned())
         });
+        // The marker identifies our separators; it never overrides later content.
+        if marked_separator && existing.is_none() { blank.insert(number); continue; }
         let refs: Vec<pdfcraft_cos::ObjRef> = match existing {
             None => {
                 blank.insert(number);
@@ -540,11 +536,13 @@ fn detect_blank_pages_native(input: &Path) -> Result<BTreeSet<u32>> {
             Some(pdfcraft_cos::Object::Ref(r)) => match &*doc.get(r) {
                 pdfcraft_cos::Object::Stream(_) => vec![r],
                 pdfcraft_cos::Object::Array(arr) => {
+                    if arr.iter().any(|v| v.as_ref().is_none()) { continue; }
                     arr.iter().filter_map(pdfcraft_cos::Object::as_ref).collect()
                 }
                 _ => continue,
             },
             Some(pdfcraft_cos::Object::Array(arr)) => {
+                if arr.iter().any(|v| v.as_ref().is_none()) { continue; }
                 arr.iter().filter_map(pdfcraft_cos::Object::as_ref).collect()
             }
             _ => continue,
@@ -570,7 +568,7 @@ fn detect_blank_pages_native(input: &Path) -> Result<BTreeSet<u32>> {
                     if content
                         .operations
                         .iter()
-                        .any(super::split::operation_is_visible)
+                        .any(|op| !blank_state_operator(op))
                     {
                         has_visible = true;
                         break;
@@ -595,9 +593,10 @@ pub(crate) fn detect_blank_pages_streaming(input: &Path) -> Result<BTreeSet<u32>
     if let Ok(blank) = detect_blank_pages_native(input) {
         return Ok(blank);
     }
-    let pages = load_pages_metadata(input)?;
+    let index = QpdfObjectIndex::load(input)?;
+    let pages = index.pages().iter().filter(|page| page.safe_for_blank_removal).map(|page| (page.number, page.contents.clone()));
     let mut content_refs: Vec<String> = Vec::new();
-    let mut page_contents: Vec<(u32, Vec<String>)> = Vec::with_capacity(pages.len());
+    let mut page_contents: Vec<(u32, Vec<String>)> = Vec::new();
     for (number, contents) in pages {
         for reference in &contents {
             if !content_refs.contains(reference) {
@@ -626,7 +625,7 @@ pub(crate) fn detect_blank_pages_streaming(input: &Path) -> Result<BTreeSet<u32>
                     if content
                         .operations
                         .iter()
-                        .any(super::split::operation_is_visible)
+                        .any(|op| !blank_state_operator(op))
                     {
                         has_visible = true;
                         break;
@@ -840,4 +839,32 @@ pub(crate) fn update_streams(
     }
     let _ = std::fs::remove_file(&update_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod blank_safety_tests {
+    use super::*;
+    use lopdf::{dictionary, Stream};
+    #[test]
+    fn removes_only_proven_blank_pages_and_never_trusts_a_marker_over_content() {
+        let input = temp_named_path("docsy-blank-safety", "pdf");
+        let _guard = crate::util::fs::TempPathGuard::new(input.clone());
+        let mut doc = lopdf::Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let mut pages = Vec::new();
+        for kind in 0..7 {
+            let mut page = dictionary! { "Type" => "Page", "Parent" => pages_id, "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()] };
+            if [0, 2, 3].contains(&kind) { page.set("DocsySeparator", lopdf::Object::Name(b"V1".to_vec())); }
+            if kind == 2 { page.set("Annots", vec![doc.add_object(dictionary! { "Type" => "Annot", "Subtype" => "Text", "Rect" => vec![10.into(), 10.into(), 30.into(), 30.into()], "Contents" => lopdf::Object::string_literal("retain annotation") }).into()]); }
+            if kind == 3 { page.set("Contents", doc.add_object(Stream::new(dictionary! {}, b"BT (retained) Tj ET".to_vec()))); }
+            if kind == 4 { page.set("Contents", vec![lopdf::Object::Integer(8)]); }
+            if kind == 5 { page.set("Contents", doc.add_object(Stream::new(dictionary! {}, b"unknown-render-op".to_vec()))); }
+            if kind == 6 { page.set("Contents", doc.add_object(Stream::new(dictionary! {}, b"q 1 0 0 1 0 0 cm Q".to_vec()))); }
+            pages.push(doc.add_object(page).into());
+        }
+        doc.objects.insert(pages_id, dictionary! { "Type" => "Pages", "Kids" => pages, "Count" => 7 }.into());
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog); doc.save(&input).unwrap();
+        assert_eq!(detect_blank_pages_streaming(&input).unwrap(), BTreeSet::from([1, 2, 7]));
+    }
 }

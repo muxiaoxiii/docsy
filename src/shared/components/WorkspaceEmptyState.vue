@@ -17,7 +17,7 @@
       :description="description"
       :show-action="Boolean($slots.actions)"
     >
-      <template #actions>
+      <template v-if="$slots.actions" #actions>
         <slot name="actions" />
       </template>
     </ModuleSceneStage>

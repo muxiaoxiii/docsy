@@ -64,7 +64,7 @@ pub struct RecommendedSettings {
     pub recommended_width_mm: Option<f64>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct RunArgs {
     pub folder: String,
     #[serde(default)]
@@ -464,7 +464,7 @@ fn scan_images_recursive(dir_path: &Path, images: &mut Vec<ImageInfo>) -> Result
                 let ext_lower = ext.to_lowercase();
                 if IMAGE_EXTENSIONS.contains(&ext_lower.as_str()) {
                     let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                    let (width, height) = match image::image_dimensions(&path) {
+                    let (width, height) = match crate::util::images::oriented_dimensions(&path) {
                         Ok(dimensions) => dimensions,
                         Err(_) => continue,
                     };
@@ -532,7 +532,7 @@ fn image_info_from_path(path: &Path) -> Result<Option<ImageInfo>> {
         return Ok(None);
     }
     let metadata = std::fs::metadata(path)?;
-    let (width, height) = match image::image_dimensions(path) {
+    let (width, height) = match crate::util::images::oriented_dimensions(path) {
         Ok(dimensions) => dimensions,
         Err(_) => return Ok(None),
     };
@@ -962,7 +962,7 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, default_output_dir: &P
     }
 
     let total_pages = images.len().div_ceil(per_page);
-    reorder_images(&mut images, &grid, order_mode);
+    reorder_images(&mut images, &grid, order_mode, args.last_page_mode.as_deref() == Some("reflow"));
 
     let mut config = LayoutConfig {
         page_w_mm: page_w,
@@ -1073,16 +1073,17 @@ fn run_images(args: &RunArgs, mut images: Vec<ImageInfo>, default_output_dir: &P
     })
 }
 
-fn reorder_images(images: &mut Vec<ImageInfo>, grid: &LayoutGrid, order_mode: &str) {
+fn reorder_images(images: &mut Vec<ImageInfo>, grid: &LayoutGrid, order_mode: &str, reflow: bool) {
     let per_page = grid.rows * grid.cols;
     let mut reordered = Vec::with_capacity(images.len());
     for chunk in images.chunks(per_page) {
-        let order = cell_order(grid, order_mode);
-        for idx in order {
-            if idx < chunk.len() {
-                reordered.push(chunk[idx].clone());
-            }
+        let page_grid = if reflow && chunk.len() < per_page { compact_grid_for_count(grid, chunk.len()) } else { grid.clone() };
+        let order = cell_order(&page_grid, order_mode);
+        let mut slots = vec![0; chunk.len()];
+        for (source, destination) in order.into_iter().filter(|idx| *idx < chunk.len()).enumerate() {
+            slots[destination] = source;
         }
+        reordered.extend(slots.into_iter().map(|source| chunk[source].clone()));
     }
     *images = reordered;
 }
@@ -2349,7 +2350,7 @@ fn image_for_output(
     target_height: u32,
     rotation_degrees: u16,
 ) -> Result<::image::DynamicImage> {
-    let img = crate::util::images::rotate(::image::open(path)?, rotation_degrees)?;
+    let img = crate::util::images::rotate(crate::util::images::open_oriented(Path::new(path))?, rotation_degrees)?;
     if img.width() <= target_width && img.height() <= target_height {
         return Ok(img);
     }
@@ -2362,12 +2363,12 @@ fn image_for_output(
 
 fn image_as_png(path: &str, target_width: u32, target_height: u32, rotation_degrees: u16) -> Result<(Vec<u8>, u32, u32)> {
     let source_dimensions =
-        ::image::image_dimensions(path).map_err(|e| anyhow::anyhow!("{}", e))?;
+        crate::util::images::oriented_dimensions(Path::new(path))?;
     let is_png = Path::new(path)
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
-    if rotation_degrees == 0 && is_png && source_dimensions.0 <= target_width && source_dimensions.1 <= target_height {
+    if rotation_degrees == 0 && is_png && !crate::util::images::has_orientation_transform(Path::new(path))? && source_dimensions.0 <= target_width && source_dimensions.1 <= target_height {
         return Ok((
             std::fs::read(path)?,
             source_dimensions.0,
@@ -2442,6 +2443,20 @@ mod tests {
         let g = parse_layout("2x3", None, None);
         assert_eq!(g.rows, 2);
         assert_eq!(g.cols, 3);
+    }
+
+    #[test]
+    fn n_order_places_inputs_down_columns_in_non_square_grids() {
+        let source: Vec<_> = (0..6).map(|n| ImageInfo { path: n.to_string(), width: 1, height: 1, file_size: 1 }).collect();
+        let grid = LayoutGrid { rows: 2, cols: 3 };
+        for (mode, expected) in [("n", vec!["0", "2", "4", "1", "3", "5"]), ("reverse_n", vec!["4", "2", "0", "5", "3", "1"])] {
+            let mut images = source.clone();
+            reorder_images(&mut images, &grid, mode, false);
+            assert_eq!(images.iter().map(|image| image.path.as_str()).collect::<Vec<_>>(), expected);
+        }
+        let mut partial = source[..4].to_vec();
+        reorder_images(&mut partial, &grid, "n", false);
+        assert_eq!(partial.iter().map(|image| image.path.as_str()).collect::<Vec<_>>(), vec!["0", "2", "3", "1"]);
     }
 
     #[test]

@@ -20,7 +20,7 @@
           :key="itemKey(item, index)"
           class="queue-item"
           :data-reorder-index="index"
-          :class="itemClasses(index)"
+          :class="[itemClasses(index), { 'is-selected': selectable && selectedIndex === index }]"
         >
           <button
             v-if="sortable"
@@ -38,7 +38,8 @@
           </button>
           <slot name="leading" :item="item" :index="index" />
           <div class="queue-item-main">
-            <div class="queue-item-name" :title="itemLabel(item)">{{ itemLabel(item) }}</div>
+            <button v-if="selectable" type="button" class="queue-select-name" :disabled="busy" :title="itemLabel(item)" @click="$emit('select', index)">{{ itemLabel(item) }}</button>
+            <div v-else class="queue-item-name" :title="itemLabel(item)">{{ itemLabel(item) }}</div>
             <div v-if="$slots.meta" class="queue-item-meta">
               <slot name="meta" :item="item" :index="index" />
             </div>
@@ -79,6 +80,8 @@ import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
 import WorkspaceEmptyState from './WorkspaceEmptyState.vue'
 
 const props = defineProps({
+  selectable: { type: Boolean, default: false },
+  selectedIndex: { type: Number, default: -1 },
   busy: { type: Boolean, default: false },
   celebrating: { type: Boolean, default: false },
   dragging: { type: Boolean, default: false },
@@ -117,7 +120,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['clear', 'remove', 'reorder', 'empty-action'])
+const emit = defineEmits(['clear', 'remove', 'reorder', 'empty-action', 'select'])
 const { start, move, finish, reset, itemClasses } = usePointerReorder({
   itemCount: () => props.items.length,
   onReorder: (payload) => { if (!props.busy) emit('reorder', payload) },
@@ -196,6 +199,9 @@ function itemKey(item, index) {
   transition: background 150ms var(--ease-out);
 }
 
+.queue-item.is-selected { background: var(--docsy-primary-soft); }
+.queue-select-name { display: block; width: 100%; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.queue-select-name:focus-visible { outline: 2px solid var(--docsy-primary); outline-offset: 3px; }
 .queue-item:hover {
   background: color-mix(in srgb, var(--docsy-primary-soft) 44%, var(--docsy-surface-elevated));
 }
@@ -256,9 +262,12 @@ function itemKey(item, index) {
 
 .queue-item-actions {
   display: flex;
+  flex-wrap: wrap;
   flex: 0 0 auto;
   align-items: center;
+  gap: 8px;
 }
+.queue-item-actions > :deep(.el-button + .el-button) { margin-left: 0; }
 
 .queue-empty {
   margin: 10px;

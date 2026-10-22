@@ -13,6 +13,7 @@ pub mod evidence;
 pub mod evidence_session;
 mod glyph_names;
 pub mod header_footer;
+pub mod image_convert;
 pub(crate) mod metadata;
 pub mod normalize;
 pub(crate) mod overlay_font;

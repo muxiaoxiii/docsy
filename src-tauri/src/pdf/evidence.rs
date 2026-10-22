@@ -13,12 +13,13 @@ use crate::ConversionState;
 
 use super::word_convert::convert_word_to_pdf;
 
-const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm"];
+const SUPPORTED_EXTS: &[&str] = &["pdf", "doc", "docx", "docm", "jpg", "jpeg", "png", "webp", "bmp"];
 
 #[derive(Debug, Clone, Copy)]
 enum FileType {
     Pdf,
     Word,
+    Image,
 }
 
 impl FileType {
@@ -26,6 +27,7 @@ impl FileType {
         match ext.to_lowercase().as_str() {
             "pdf" => Some(Self::Pdf),
             "doc" | "docx" | "docm" => Some(Self::Word),
+            "jpg" | "jpeg" | "png" | "webp" | "bmp" => Some(Self::Image),
             _ => None,
         }
     }
@@ -34,6 +36,7 @@ impl FileType {
         match self {
             Self::Pdf => "pdf",
             Self::Word => "word",
+            Self::Image => "image",
         }
     }
 }
@@ -165,6 +168,7 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("证据")
                 .to_string();
+            let group_name = format!("{group_name}（本层文件）");
             let mut unique_name = group_name.clone();
             let mut suffix = 1;
             while groups.contains_key(&unique_name) {
@@ -198,6 +202,7 @@ pub fn scan_folder(root: &str) -> Result<serde_json::Value> {
         }));
     }
 
+    groups_json.sort_by(|a, b| natural_cmp(a["name"].as_str().unwrap_or(""), b["name"].as_str().unwrap_or("")));
     Ok(serde_json::json!({
         "groups": groups_json,
         "root": root,
@@ -210,6 +215,9 @@ pub struct BuildGroupPdfsArgs {
     pub root: String,
     #[serde(default)]
     pub groups: Vec<GroupConfig>,
+    #[serde(default)] pub output_mode: String,
+    #[serde(default)] pub duplex_files: bool,
+    #[serde(default)] pub duplex_groups: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -238,6 +246,12 @@ pub fn build_group_pdfs(
     let mut results = Vec::new();
     let mut failed_conversions = Vec::new();
     let mut failed_groups = Vec::new();
+    if !args.output_mode.is_empty() && !["per_folder", "all"].contains(&args.output_mode.as_str()) { anyhow::bail!("不支持的合并模式"); }
+    let all = args.output_mode == "all";
+    let staging = crate::util::fs::temp_named_path("docsy-folder-merge", "dir");
+    fs::create_dir_all(&staging)?;
+    let _staging_guard = crate::util::fs::TempDirGuard::new(staging.clone())?;
+    let mut all_inputs = Vec::new();
 
     for group in &args.groups {
         crate::operations::check_current_cancelled()?;
@@ -245,8 +259,10 @@ pub fn build_group_pdfs(
         let group_id = &group.id;
 
         let mut pdf_paths: Vec<String> = Vec::new();
+        let mut incomplete = false;
 
         for file in &group.files {
+            crate::operations::check_current_cancelled()?;
             let file_path = &file.path;
             let file_type = &file.file_type;
 
@@ -256,7 +272,10 @@ pub fn build_group_pdfs(
                 }
                 "word" => match convert_word_to_pdf(file_path, &evidence_dir, conversion_state) {
                     Ok(converted) => pdf_paths.push(converted),
-                    Err(err) => failed_conversions.push(serde_json::json!({
+                    Err(err) => {
+                        if crate::operations::check_current_cancelled().is_err() { return Err(err); }
+                        incomplete = true;
+                        failed_conversions.push(serde_json::json!({
                         "groupId": group_id,
                         "groupName": group_name,
                         "path": file_path,
@@ -265,23 +284,39 @@ pub fn build_group_pdfs(
                             .and_then(|name| name.to_str())
                             .unwrap_or(file_path),
                         "reason": err.to_string(),
-                    })),
+                        }));
+                    },
                 },
-                _ => {}
+                "image" => {
+                    incomplete = true;
+                    failed_conversions.push(serde_json::json!({ "groupId": group_id, "groupName": group_name,
+                        "path": file_path, "name": Path::new(file_path).file_name().and_then(|n| n.to_str()).unwrap_or(file_path),
+                        "reason": "图片尚未确认排版，请先预览并转换为 PDF。" }));
+                }
+                _ => { incomplete = true; }
             }
         }
 
+        if incomplete {
+            failed_groups.push(serde_json::json!({
+                "groupId": group_id, "name": group_name,
+                "reason": "分组内存在未转换或不支持的文件，本组未生成 PDF，避免遗漏证据。请补充手动转换的 PDF 后重试。",
+            }));
+            continue;
+        }
         if pdf_paths.is_empty() {
             continue;
         }
 
-        let group_output = evidence_dir.join(format!(
+        if all && !args.duplex_groups { all_inputs.extend(pdf_paths); continue; }
+        let group_output = if all { &staging } else { &evidence_dir }.join(format!(
             "{}-{:016x}.pdf",
             safe_file_stem(group_name),
             fnv1a_hash(group_id)
         ));
-        match merge_pdfs_print(&pdf_paths, &group_output, Some(conversion_state)) {
+        match merge_pdfs_print(&pdf_paths, &group_output, Some(conversion_state), args.duplex_files) {
             Ok((merged_path, page_count)) => {
+                if all { all_inputs.push(merged_path.display().to_string()); continue; }
                 results.push(serde_json::json!({
                     "groupId": group_id,
                     "name": group_name,
@@ -307,6 +342,13 @@ pub fn build_group_pdfs(
         }
     }
 
+    if all && failed_groups.is_empty() && !all_inputs.is_empty() {
+        let output = evidence_dir.join("全部证据.pdf");
+        match merge_pdfs_print(&all_inputs, &output, Some(conversion_state), if args.duplex_groups { true } else { args.duplex_files }) {
+            Ok((path, pages)) => results.push(serde_json::json!({ "groupId": "all", "name": "全部证据", "outputPath": path.display().to_string(), "pageCount": pages })),
+            Err(err) => { crate::operations::check_current_cancelled()?; failed_groups.push(serde_json::json!({"groupId": "all", "name": "全部证据", "reason": err.to_string()})); }
+        }
+    }
     Ok(serde_json::json!({
         "evidenceDir": evidence_dir.display().to_string(),
         "results": results,
@@ -359,7 +401,7 @@ pub fn merge_all(args: &MergeAllArgs) -> Result<String> {
     };
 
     let (merged_path, _) =
-        merge_pdfs_print(&overlaid_paths, Path::new(&output_path_str), None)?;
+        merge_pdfs_print(&overlaid_paths, Path::new(&output_path_str), None, false)?;
 
     Ok(merged_path.display().to_string())
 }
@@ -368,6 +410,7 @@ fn merge_pdfs_print(
     inputs: &[String],
     output: &Path,
     conversion_state: Option<&Arc<ConversionState>>,
+    duplex: bool,
 ) -> Result<(PathBuf, u32)> {
     if inputs.is_empty() {
         anyhow::bail!("没有可合并的 PDF");
@@ -375,7 +418,7 @@ fn merge_pdfs_print(
 
     let policy = super::backend::policy::OutputPolicy {
         merge_policy: super::backend::policy::MergePolicy::Print,
-        duplex_separate: false,
+        duplex_separate: duplex,
         ..Default::default()
     };
     let req = super::backend::MergeRequest {
@@ -561,10 +604,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_failed_word_never_publishes_an_incomplete_evidence_group() {
+        let root = crate::util::fs::temp_named_path("docsy-incomplete-group", "dir");
+        fs::create_dir_all(&root).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(root.clone()).unwrap();
+        let pdf = root.join("existing.pdf");
+        fs::write(&pdf, b"original-not-to-be-merged-alone").unwrap();
+        let args = BuildGroupPdfsArgs { root: root.to_string_lossy().into_owned(), output_mode: String::new(), duplex_files: false, duplex_groups: false, groups: vec![GroupConfig {
+            name: "证据组".into(), id: "group".into(), files: vec![
+                FileConfig { path: pdf.to_string_lossy().into_owned(), file_type: "pdf".into() },
+                FileConfig { path: root.join("missing.docx").to_string_lossy().into_owned(), file_type: "word".into() },
+            ],
+        }] };
+        let result = build_group_pdfs(&args, &Arc::new(ConversionState::new())).unwrap();
+        assert_eq!(result["results"].as_array().unwrap().len(), 0);
+        assert_eq!(result["failedConversions"].as_array().unwrap().len(), 1);
+        assert_eq!(result["failedGroups"].as_array().unwrap().len(), 1);
+        assert_eq!(fs::read(&pdf).unwrap(), b"original-not-to-be-merged-alone");
+    }
+
+    #[test]
+    fn folder_and_file_duplex_boundaries_are_independent() {
+        let dir = crate::util::fs::temp_named_path("docsy-scan-duplex", "dir");
+        fs::create_dir_all(&dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
+        let image = dir.join("sample.png");
+        image::RgbImage::from_pixel(120, 80, image::Rgb([10, 20, 30])).save(&image).unwrap();
+        let one = crate::pdf::image_convert::convert_image_to_pdf(image.to_str().unwrap()).unwrap();
+        let group = |id: &str, count: usize| GroupConfig { id: id.into(), name: id.into(), files: (0..count).map(|_| FileConfig { path: one.clone(), file_type: "pdf".into() }).collect() };
+        for (mode, files, folders, expected) in [
+            ("per_folder", false, false, vec![2, 1]),
+            ("per_folder", true, false, vec![4, 2]),
+            ("all", false, false, vec![3]),
+            ("all", false, true, vec![4]),
+            ("all", true, false, vec![6]),
+            ("all", true, true, vec![6]),
+        ] {
+            let args = BuildGroupPdfsArgs { root: dir.to_string_lossy().into_owned(), groups: vec![group("first", 2), group("second", 1)], output_mode: mode.into(), duplex_files: files, duplex_groups: folders };
+            let result = build_group_pdfs(&args, &Arc::new(ConversionState::new())).unwrap();
+            assert_eq!(result["failedGroups"].as_array().unwrap().len(), 0, "{result}");
+            let results = result["results"].as_array().unwrap();
+            assert_eq!(results.iter().map(|r| r["pageCount"].as_u64().unwrap()).collect::<Vec<_>>(), expected, "mode={mode}, files={files}, folders={folders}");
+            for result in results {
+                let path = Path::new(result["outputPath"].as_str().unwrap());
+                let doc = lopdf::Document::load(path).unwrap();
+                let marked = doc.get_pages().values().filter(|id| doc.get_dictionary(**id).unwrap().get(b"DocsySeparator").and_then(|v| v.as_name()).ok() == Some(b"V1".as_slice())).count();
+                let expected_blanks = if files { 3 } else if folders && mode == "all" { 1 } else { 0 };
+                if mode == "all" { assert_eq!(marked, expected_blanks); }
+            }
+        }
+    }
+
+    #[test]
     fn scan_includes_root_files_and_excludes_nested_outputs() {
         let root = super::super::temp_named_path("docsy_scan_audit", "dir");
         fs::create_dir_all(root.join("group/_evidence_output")).unwrap();
         fs::write(root.join("root.pdf"), b"fixture").unwrap();
+        fs::write(root.join("root.jpg"), b"fixture").unwrap();
+        fs::write(root.join("group/source.docx"), b"fixture").unwrap();
         fs::write(root.join("group/10.pdf"), b"fixture").unwrap();
         fs::write(root.join("group/2.pdf"), b"fixture").unwrap();
         fs::write(root.join("group/_evidence_output/old.pdf"), b"fixture").unwrap();
@@ -572,7 +669,10 @@ mod tests {
         let groups = scanned["groups"].as_array().unwrap();
         assert_eq!(groups.len(), 2);
         let group = groups.iter().find(|group| group["name"] == "group").unwrap();
-        assert_eq!(group["files"].as_array().unwrap().len(), 2);
+        assert_eq!(group["files"].as_array().unwrap().len(), 3);
+        let root_group = groups.iter().find(|g| g["name"].as_str().unwrap().ends_with("（本层文件）")).unwrap();
+        assert_eq!(root_group["files"].as_array().unwrap().len(), 2);
+        assert!(root_group["files"].as_array().unwrap().iter().any(|f| f["fileType"] == "image"));
         assert_eq!(group["files"][0]["name"], "2.pdf");
         fs::remove_dir_all(root).unwrap();
     }

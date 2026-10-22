@@ -5,7 +5,7 @@
     :class="{ 'is-evidence-dragging': evidenceDragging, 'is-list-reordering': listReordering }"
   >
     <div v-if="evidenceDragging" class="evidence-drop-overlay">
-      <div class="evidence-drop-message">松开以导入 PDF 或 Word 文件</div>
+      <div class="evidence-drop-message">{{ workflowMode === 'split' ? '松开以导入合并证据 PDF' : '松开以导入 PDF、Word 或图片' }}</div>
     </div>
     <section class="hf-panel" ref="hfPanelRef">
       <div class="section-head">
@@ -39,6 +39,16 @@
       <div v-if="deepDetecting" class="local-processing">
         <p>{{ detectionProgressText || '正在检测页眉页脚...' }}</p>
       </div>
+
+      <section v-if="failedDocumentImports.length && workflowMode !== 'split'" class="import-recovery" role="status">
+        <strong>部分文件尚未加入证据队列</strong>
+        <p>补充 PDF 或移除失败项后再执行，避免遗漏证据。Word 可在 Word／WPS 中另存为 PDF；图片可在“图片排版”中生成 PDF。原文件和已添加文件都会保留。</p>
+        <div v-for="failure in failedDocumentImports" :key="failure.path" class="import-recovery-item">
+          <span><strong>{{ fileName(failure.path) }}</strong>：{{ failure.error }}</span>
+          <el-button size="small" :disabled="importingEvidence || overlaying" @click="addManualEvidencePdf(failure)">添加转换后的 PDF</el-button>
+          <el-button size="small" text type="danger" :disabled="importingEvidence || overlaying" @click="failedDocumentImports = failedDocumentImports.filter(item => item.path !== failure.path)">移除此项</el-button>
+        </div>
+      </section>
 
       <div v-if="showSessionSummary" class="session-summary">
         <div class="summary-item">
@@ -528,7 +538,7 @@
         </div>
         <div class="split-options-row">
           <div class="block-title">拆分选项</div>
-          <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
+          <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox><HelpTooltip content="勾选后移除确认空白的页面。Docsy 分隔页带专属标记；其他页面保守检查，含批注、表单或无法解析内容的页会保留。默认不删除。" />
           <el-tooltip content="仅移除无可视内容的空白页，输出页数可能减少。"><span class="hint">说明</span></el-tooltip>
         </div>
           <template #footer><el-button type="primary" @click="splitOptionsVisible = false">完成</el-button></template>
@@ -824,7 +834,8 @@
                 class="table-drag-handle index-drag-overlay"
                 :data-reorder-index="$index"
                 title="拖动调整处理顺序"
-                @pointerdown.stop="startOverlayReorder($index, $event)"
+                :disabled="evidenceListBusy"
+                @pointerdown.stop="!evidenceListBusy && startOverlayReorder($index, $event)"
                 @pointermove.stop="moveOverlayReorder"
                 @pointerup.stop="finishOverlayReorder"
                 @pointercancel.stop="resetOverlayReorder"
@@ -897,18 +908,18 @@
         </el-table-column>
         <el-table-column label="操作" width="70" fixed="right">
           <template #default="{ $index }">
-            <el-button link size="small" :disabled="$index === 0" @click.stop="moveOverlayFile($index, -1)">
+            <el-button link size="small" :disabled="evidenceListBusy || $index === 0" @click.stop="moveOverlayFile($index, -1)">
               <el-icon><Top /></el-icon>
             </el-button>
             <el-button
               link
               size="small"
-              :disabled="$index === overlayRows.length - 1"
+              :disabled="evidenceListBusy || $index === overlayRows.length - 1"
               @click.stop="moveOverlayFile($index, 1)"
             >
               <el-icon><Bottom /></el-icon>
             </el-button>
-            <el-button link type="danger" size="small" @click.stop="removeOverlayFile($index)">
+            <el-button link type="danger" size="small" :disabled="evidenceListBusy" @click.stop="removeOverlayFile($index)">
               <el-icon><Delete /></el-icon>
             </el-button>
           </template>
@@ -922,7 +933,7 @@
         <WorkspaceEmptyState
           scene="evidence"
           title="导入待编排证据文件"
-          description="导入 PDF 或 Word 证据材料，划分页段并配置纸张、页码与页眉页脚，再导出 PDF。"
+          description="导入 PDF、Word 或静态图片；Word 自动转 PDF，图片经预览后排入 A4，可调整缩放、裁剪和排列，再配置页码与页眉页脚。"
         >
           <template #actions>
             <el-button
@@ -1198,11 +1209,15 @@
         />
       </div>
     </section>
+    <ImagePdfImportDialog ref="imageImportDialog" />
   </div>
 </template>
 
 <script setup>
+import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfImportDialog.vue'
+const imageImportDialog = ref(null)
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
+import { DOCUMENT_FILTERS, appendUniqueDocuments, convertImportDocument, documentKind, reviewImageImports } from '../../../shared/pdf-tools/documentImport.js'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
@@ -1346,10 +1361,11 @@ const workflowHint = computed(() => {
   if (workflowMode.value === 'split') return '识别证据页段，核对后拆分为独立 PDF'
   return '按法律证据包流程处理页眉、页码、A4、批注、合并与反向拆分'
 })
-const splitImportButtonText = computed(() => '导入分项证据 PDF')
+const splitImportButtonText = computed(() => '导入分项证据')
 const mergedImportButtonText = computed(() => '导入合并证据 PDF')
 
 const overlayFiles = ref([])
+const failedDocumentImports = ref([])
 const overlayOutputDir = ref('')
 const importingEvidence = ref(false)
 const checkingOverlayPages = ref(false)
@@ -2444,8 +2460,9 @@ const hasUnresolvedExistingOverlapRisk = computed(() => {
       (insertsFooter && hasExistingPageNumber(file) && !file.removeExistingPageNumber && !file.convertPlainPageNumber),
   )
 })
+const evidenceListBusy = computed(() => importingEvidence.value || checkingOverlayPages.value || overlaying.value || deepDetecting.value || mergedBatchBusy.value)
 const canApplyOverlay = computed(
-  () => overlayFiles.value.length > 0 && overlayFiles.value.every(file => Number(file.pages) > 0) && !importingEvidence.value && !checkingOverlayPages.value && !overlaying.value && !deepDetecting.value && hasApplicableProcessingRule.value,
+  () => !failedDocumentImports.value.length && overlayFiles.value.length > 0 && overlayFiles.value.every(file => Number(file.pages) > 0) && !importingEvidence.value && !checkingOverlayPages.value && !overlaying.value && !deepDetecting.value && hasApplicableProcessingRule.value,
 )
 const canApplySplitReplacement = computed(
   () =>
@@ -2786,28 +2803,30 @@ function applyWorkflowDefaults() {
 }
 
 async function selectOverlayFiles() {
-  const selected = await open({
-    multiple: true,
-    filters: [
-      { name: 'PDF 与 Word 文档 (*.pdf, *.docx, *.doc)', extensions: ['pdf', 'docx', 'doc', 'docm'] },
-      { name: 'PDF 文档 (*.pdf)', extensions: ['pdf'] },
-      { name: 'Word 文档 (*.docx, *.doc)', extensions: ['docx', 'doc', 'docm'] },
-    ],
-  })
-  if (!selected) return
-  const paths = Array.isArray(selected) ? selected : [selected]
-  await loadEvidenceFiles(paths)
+  const selected = await open({ multiple: true, filters: DOCUMENT_FILTERS })
+  if (selected) await loadEvidenceFiles(Array.isArray(selected) ? selected : [selected])
 }
 
 async function handleEvidenceDrop(paths) {
-  const supportedPaths = paths.filter((p) => /\.(pdf|docx|doc|docm)$/i.test(p))
-  if (!supportedPaths.length) return
   if (workflowMode.value === 'split') {
-    const pdfPaths = paths.filter((p) => p.toLowerCase().endsWith('.pdf'))
+    const pdfPaths = paths.filter((path) => documentKind(path) === 'pdf')
     if (pdfPaths.length) await importMergedPdfAsEvidence(pdfPaths)
     return
   }
-  await loadEvidenceFiles(supportedPaths)
+  const supported = paths.filter(path => documentKind(path))
+  if (supported.length < paths.length) ElMessage.warning('已忽略不支持的格式；可添加 PDF、Word、JPG、PNG、WebP 或 BMP')
+  if (supported.length) await loadEvidenceFiles(supported)
+}
+
+async function addManualEvidencePdf(failure) {
+  const selected = await open({ multiple: false, filters: [{ name: '手动转换后的 PDF', extensions: ['pdf'] }] })
+  const path = Array.isArray(selected) ? selected[0] : selected
+  if (!path) return
+  await loadEvidenceFiles([path])
+  if (overlayFiles.value.some(file => file.path === path)) {
+    failedDocumentImports.value = failedDocumentImports.value.filter(item => item.path !== failure.path)
+    ElMessage.success('手动 PDF 已添加，可在文件列表中拖动调整顺序')
+  }
 }
 
 async function loadEvidenceFiles(paths) {
@@ -2816,48 +2835,34 @@ async function loadEvidenceFiles(paths) {
     return
   }
   importingEvidence.value = true
+  let loadingId = null
   try {
+    const existing = new Set(overlayFiles.value.flatMap(file => [file.path, file.sourcePath].filter(Boolean)))
+    const candidates = await reviewImageImports([...new Set(paths)].filter(path => documentKind(path) && !existing.has(path)), group => imageImportDialog.value.open(group))
+    const converted = []
+    for (const [index, path] of candidates.entries()) {
+      try {
+        if (documentKind(path) !== 'pdf') {
+          loadingId ??= showLoading('正在将文档或图片转为 PDF…')
+          emitOperationUpdate(loadingId, `准备 PDF (${index + 1}/${candidates.length})：${fileName(path)}`)
+        }
+        const resolved = await convertImportDocument(path, tauriCallQuiet)
+        converted.push({ ...createEvidenceFile(resolved), sourcePath: path })
+        failedDocumentImports.value = failedDocumentImports.value.filter(item => item.path !== path)
+      } catch (error) {
+        const failure = { path, error: userFacingError(error, '自动转换失败') }
+        failedDocumentImports.value = [...failedDocumentImports.value.filter(item => item.path !== path), failure]
+      }
+    }
+    if (!converted.length) return
     mergedImportPlan.value = null
     mergedImportPlans.value = []
-
-    const wordPaths = paths.filter((p) => /\.(docx|doc|docm)$/i.test(p))
-    let wordLoadingId = null
-    let wordIndex = 0
-    if (wordPaths.length) {
-      wordLoadingId = showLoading(`正在将 Word 文档转为 PDF (1/${wordPaths.length})…`)
-    }
-
-    const resolvedPaths = []
-    try {
-      for (const p of paths) {
-        if (/\.(docx|doc|docm)$/i.test(p)) {
-          wordIndex += 1
-          if (wordLoadingId) {
-            emitOperationUpdate(
-              wordLoadingId,
-              `正在将 Word 转为 PDF (${wordIndex}/${wordPaths.length}): ${fileName(p)}`,
-            )
-          }
-          const res = await tauriCallSafe('convert_word_to_pdf', { input: p })
-          if (res.ok && (res.data?.output_path || res.data)) {
-            resolvedPaths.push(res.data?.output_path || res.data)
-          } else {
-            ElMessage.error(userFacingError(res.error, `Word 转 PDF 失败: ${fileName(p)}`))
-          }
-        } else {
-          resolvedPaths.push(p)
-        }
-      }
-    } finally {
-      if (wordLoadingId) hideLoading(wordLoadingId)
-    }
-    if (!resolvedPaths.length) return
-
-    overlayFiles.value = resolvedPaths.map(createEvidenceFile)
-    selectedOverlayIndex.value = 0
+    overlayFiles.value = appendUniqueDocuments(overlayFiles.value, converted)
+    if (selectedOverlayIndex.value >= overlayFiles.value.length) selectedOverlayIndex.value = 0
     await refreshOverlayPageCounts()
     await checkExistingBookmarks()
   } finally {
+    if (loadingId) hideLoading(loadingId)
     importingEvidence.value = false
   }
 }
@@ -3914,6 +3919,7 @@ function sourceRangeText(row) {
 }
 
 function sortOverlayFiles({ prop, order }) {
+  if (evidenceListBusy.value) return
   if (!prop || !order) return
   const selectedPath = selectedOverlayFile.value?.path
   overlayFiles.value = sortByNatural(overlayFiles.value, (row, index) => overlaySortValue(row, prop, index), order)
@@ -3938,6 +3944,7 @@ function overlaySortValue(row, prop, index) {
 }
 
 function moveOverlayFile(index, direction) {
+  if (evidenceListBusy.value) return
   const target = index + direction
   if (target < 0 || target >= overlayFiles.value.length) return
   const items = [...overlayFiles.value]
@@ -3949,6 +3956,7 @@ function moveOverlayFile(index, direction) {
 }
 
 function reorderOverlayFiles(from, to) {
+  if (evidenceListBusy.value) return
   if (from === to || from < 0 || to < 0 || from >= overlayFiles.value.length || to >= overlayFiles.value.length) return
   const selectedPath = selectedOverlayFile.value?.path
   const items = [...overlayFiles.value]
@@ -4010,6 +4018,7 @@ function mergedReorderRowClass({ rowIndex }) {
 }
 
 function removeOverlayFile(index) {
+  if (evidenceListBusy.value) return
   overlayFiles.value.splice(index, 1)
   selectedOverlayIndex.value = Math.min(selectedOverlayIndex.value, Math.max(0, overlayFiles.value.length - 1))
   refreshPreview()
@@ -5680,4 +5689,12 @@ h3 {
 }
 .rule-grid > .rule-item:has(> label:not(.el-checkbox)) > :is(.el-input, .el-select, .el-input-number) { width: 100%; min-width: 0; }
 .rule-grid > .rule-item:not(:has(> label:not(.el-checkbox))) { min-height: 28px; }
+</style>
+
+<style scoped>
+.import-recovery { margin: 10px 0; padding: 12px; border: 1px solid var(--docsy-danger-border); border-radius: var(--docsy-radius); background: var(--docsy-danger-soft); font-size: 12px; line-height: 1.6; }
+.import-recovery > p { margin: 4px 0 8px; }
+.import-recovery-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.import-recovery-item > span { flex: 1 1 240px; overflow-wrap: anywhere; }
+.import-recovery-item > .el-button + .el-button { margin-left: 0; }
 </style>

@@ -40,4 +40,37 @@ describe('证据扫描工作流', () => {
     expect(tauriCallSafe.mock.calls[0][1].args.groups[0].files.map(file => file.path)).toEqual(['2.pdf', '1.pdf'])
     expect(state.evidenceOutputDir.value).toBe('/root/_evidence_output')
   })
+  it('手动 PDF 替换失败的 Word 并保留位置，不重新导入已经列出的同一 PDF', async () => {
+    const state = useEvidenceFolder()
+    state.evidenceGroups.value = [{ id: 'g', name: '组', files: [{ path: '/a.pdf', fileType: 'pdf' }, { path: '/b.docx', fileType: 'word' }, { path: '/manual/b.pdf', fileType: 'pdf' }] }]
+    state.conversionFailures.value = [{ groupId: 'g', path: '/b.docx' }]
+    open.mockResolvedValueOnce('/manual/b.pdf')
+    await state.replaceFailedConversion(state.conversionFailures.value[0])
+    expect(state.evidenceGroups.value[0].files.map(file => file.path)).toEqual(['/a.pdf', '/manual/b.pdf'])
+    expect(state.evidenceGroups.value[0].files[1].fileType).toBe('pdf')
+    expect(state.conversionFailures.value).toEqual([])
+  })
+  it('previews images inside each folder, keeps document order, and passes the two duplex boundaries independently', async () => {
+    const review = vi.fn().mockResolvedValue('/root/_evidence_output/images.pdf')
+    const state = useEvidenceFolder({ reviewImages: review })
+    state.evidenceFolder.value = '/root'; state.outputMode.value = 'all'; state.duplexFiles.value = true; state.duplexGroups.value = false
+    state.evidenceGroups.value = [{ name: 'root', id: 'r', files: [{ path: '/root/a.pdf', fileType: 'pdf' }, { path: '/root/b.png', fileType: 'image' }, { path: '/root/c.jpg', fileType: 'image' }, { path: '/root/d.docx', fileType: 'word' }] }]
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { results: [{}], evidenceDir: '/root/_evidence_output' } })
+    await state.buildEvidence()
+    expect(review).toHaveBeenCalledWith(['/root/b.png', '/root/c.jpg'], { outputDir: '/root/_evidence_output' })
+    expect(tauriCallSafe.mock.calls[0][1].args).toMatchObject({ outputMode: 'all', duplexFiles: true, duplexGroups: false })
+    expect(state.evidenceGroups.value[0].files.map(file => file.path)).toEqual(['/root/a.pdf', '/root/_evidence_output/images.pdf', '/root/d.docx'])
+    state.outputMode.value = 'per_folder'; state.duplexGroups.value = true
+    await state.buildEvidence()
+    expect(tauriCallSafe.mock.calls[1][1].args.duplexGroups).toBe(false)
+  })
+  it('cancelling image review never starts a partial merge or removes original image entries', async () => {
+    const state = useEvidenceFolder({ reviewImages: vi.fn().mockResolvedValue(null) })
+    state.evidenceFolder.value = '/root'; state.evidenceGroups.value = [{ name: 'root', id: 'r', files: [{ path: '/root/a.png', fileType: 'image' }, { path: '/root/b.pdf', fileType: 'pdf' }] }]
+    await state.buildEvidence()
+    expect(tauriCallSafe).not.toHaveBeenCalled()
+    expect(state.evidenceGroups.value[0].files.map(file => file.path)).toEqual(['/root/a.png', '/root/b.pdf'])
+    expect(state.building.value).toBe(false)
+  })
+
 })

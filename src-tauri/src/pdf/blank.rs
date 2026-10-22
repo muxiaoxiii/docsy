@@ -17,6 +17,10 @@ use crate::util::fs::TempPathGuard;
 ///
 /// 守卫持有临时文件路径（`guard.path()`），drop 时自动删除文件。
 /// 调用方在 qpdf 合并命令运行期间持有守卫即可。
+pub(crate) fn is_docsy_separator(page: &pdfcraft_cos::Dict) -> bool {
+    matches!(page.get(b"DocsySeparator"), Some(pdfcraft_cos::Object::Name(name)) if name.as_slice() == b"V1")
+}
+
 pub fn write_blank_page(size: &PageSize) -> Result<TempPathGuard> {
     let path = crate::util::fs::temp_named_path("docsy-blank", "pdf");
     write_blank_pdf(&path, size)?;
@@ -45,7 +49,7 @@ fn write_blank_pdf(path: &Path, size: &PageSize) -> Result<()> {
     };
 
     let page_dict = format!(
-        "<< /Type /Page /Parent 2 0 R /MediaBox [{x0} {y0} {x1} {y1}] /Resources << >>{rotate}{user_unit} >>"
+        "<< /Type /Page /Parent 2 0 R /MediaBox [{x0} {y0} {x1} {y1}] /Resources << >> /DocsySeparator /V1{rotate}{user_unit} >>"
     );
     let objects: [&[u8]; 3] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",

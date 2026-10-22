@@ -344,7 +344,7 @@ fn preview_image_data_url(path: &str, max_edge: Option<u32>, rotation_degrees: u
     if u64::from(width) * u64::from(height) > MAX_SOURCE_PIXELS {
         anyhow::bail!("图片像素过大，无法安全生成预览缩略图");
     }
-    let image = image::open(&path).map_err(|error| anyhow::anyhow!("读取图片失败: {error}"))?;
+    let image = crate::util::images::open_oriented(&path).map_err(|error| anyhow::anyhow!("读取图片失败: {error}"))?;
     let preview_edge = max_edge
         .unwrap_or(DEFAULT_PREVIEW_EDGE)
         .clamp(160, MAX_PREVIEW_EDGE)

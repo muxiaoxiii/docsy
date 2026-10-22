@@ -128,15 +128,15 @@ describe('PDF 合并支持 DOCX 与 DOC 文档', () => {
     })
     expect(state.mergeOutputPath.value).toBe('/folder/contract.pdf')
     expect(state.mergeFiles.value[0].outputPath).toBe('/folder/contract.pdf')
-    expect(state.mergeFiles.value[0].statusText).toBe('已转为 PDF')
+    expect(state.mergeFiles.value[0].statusText).toBe('PDF 已就绪')
   })
 
-  it('列表中的 Word 项可通过 convertSingleWordFile 独立转为 PDF', async () => {
+  it('列表中的 Word 项可通过 convertSingleMergeFile 独立转为 PDF', async () => {
     const state = PdfToolsView.setup({}, { expose: vi.fn() })
     state.addMergeFiles(['/folder/note.doc'])
     tauriCallSafe.mockResolvedValueOnce({ ok: true, data: { output_path: '/folder/note.pdf' } })
 
-    await state.convertSingleWordFile(state.mergeFiles.value[0])
+    await state.convertSingleMergeFile(state.mergeFiles.value[0])
 
     expect(tauriCallSafe).toHaveBeenCalledWith('convert_word_to_pdf', {
       input: '/folder/note.doc',
@@ -144,20 +144,45 @@ describe('PDF 合并支持 DOCX 与 DOC 文档', () => {
     expect(state.mergeFiles.value[0].outputPath).toBe('/folder/note.pdf')
   })
 
-  it('多项 Word 与 PDF 混排时执行合并并调用 merge_pdfs', async () => {
+  it('多项 Word 转为 PDF 后按原顺序合并', async () => {
     const state = PdfToolsView.setup({}, { expose: vi.fn() })
     state.addMergeFiles(['/docs/cover.docx', '/docs/page.pdf', '/docs/appendix.doc'])
     open.mockResolvedValueOnce('/out')
-    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: { output_path: '/out/merged.pdf' } })
-
+    tauriCallSafe.mockImplementation(async (command, args) => ({ ok: true, data: { output_path: command === 'merge_pdfs' ? '/out/merged.pdf' : args.input.replace(/\.(docx|doc)$/, '.pdf') } }))
     await state.doMerge()
-
     expect(tauriCallSafe).toHaveBeenCalledWith('merge_pdfs', {
-      inputs: ['/docs/cover.docx', '/docs/page.pdf', '/docs/appendix.doc'],
-      output: '/out/merged.pdf',
-      duplexSeparate: false,
+      inputs: ['/docs/cover.pdf', '/docs/page.pdf', '/docs/appendix.pdf'], output: '/out/merged.pdf', duplexSeparate: false,
     })
     expect(state.mergeOutputPath.value).toBe('/out/merged.pdf')
+  })
+
+  it('转换失败后保留列表，手动 PDF 替换原项后继续合并且不重复转换 Word', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    state.addMergeFiles(['/docs/fail.docx', '/docs/page.pdf'])
+    open.mockResolvedValueOnce('/out')
+    tauriCallSafe.mockResolvedValue({ ok: false, error: 'Word / WPS 转换失败' })
+    await state.doMerge()
+    expect(state.mergeFiles.value.map(item => item.path)).toEqual(['/docs/fail.docx', '/docs/page.pdf'])
+    expect(state.mergeFiles.value[0].conversionError).toContain('另存为 PDF')
+    expect(tauriCallSafe.mock.calls.some(([command]) => command === 'merge_pdfs')).toBe(false)
+    open.mockResolvedValueOnce('/manual/fail.pdf')
+    await state.selectManualMergePdf(state.mergeFiles.value[0])
+    open.mockResolvedValueOnce('/out')
+    tauriCallSafe.mockResolvedValue({ ok: true, data: '/out/merged.pdf' })
+    await state.doMerge()
+    expect(tauriCallSafe).toHaveBeenLastCalledWith('merge_pdfs', { inputs: ['/manual/fail.pdf', '/docs/page.pdf'], output: '/out/merged.pdf', duplexSeparate: false })
+    expect(tauriCallSafe.mock.calls.filter(([command]) => command === 'convert_word_to_pdf')).toHaveLength(1)
+  })
+
+  it('图片先进入预览，确认后的 PDF 保持混排位置，取消时不添加图片', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    const review = vi.fn().mockResolvedValueOnce('/docs/images_A4.pdf').mockResolvedValueOnce(null)
+    state.imageImportDialog.value = { open: review }
+    await state.addMergeFiles(['/docs/before.pdf', '/docs/a.png', '/docs/b.jpg', '/docs/after.docx'])
+    expect(review).toHaveBeenCalledWith(['/docs/a.png', '/docs/b.jpg'])
+    expect(state.mergeFiles.value.map(item => item.path)).toEqual(['/docs/before.pdf', '/docs/images_A4.pdf', '/docs/after.docx'])
+    await state.addMergeFiles(['/docs/c.png'])
+    expect(state.mergeFiles.value).toHaveLength(3)
   })
 
   it('拖入文件在 merge 标签页下允许 docx 与 doc', async () => {

@@ -249,6 +249,7 @@ mod tests {
             y1: 12.,
         };
         let mut page = QpdfIndexedPage {
+            safe_for_blank_removal: false,
             number: 1,
             contents: vec![],
             fonts: BTreeMap::new(),

@@ -21,6 +21,7 @@ import {
   importRecommendationDrifts,
   isFlowLayoutMode,
   layoutFromControls,
+  layoutSlotNumbers,
   parseLayoutString,
 } from './layoutControls.js'
 
@@ -145,20 +146,21 @@ export function useImagePaddlerState(options = {}) {
     return analysis.value?.recommended?.orientation || 'portrait'
   })
   const resolvedOrientationLabel = computed(() => (resolvedOrientation.value === 'landscape' ? '横向' : '竖向'))
-  const orderedImages = computed(() => {
-    const images = (analysis.value?.images || []).map(image => {
-      const rotation = imageRotation(image.path)
-      const swapped = rotation === 90 || rotation === 270
-      return { ...image, width: swapped ? image.height : image.width,
-        height: swapped ? image.width : image.height, rotation_degrees: rotation }
-    })
+  const imagesWithRotation = computed(() => (analysis.value?.images || []).map(image => {
+    const rotation = imageRotation(image.path)
+    const swapped = rotation === 90 || rotation === 270
+    return { ...image, width: swapped ? image.height : image.width,
+      height: swapped ? image.width : image.height, rotation_degrees: rotation }
+  }))
+  function orderForLayout(images) {
     if (settings.output_mode === 'per_folder') {
       return buildOutputPlan(images, Math.max(1, images.length), 'per_folder')
         .flatMap(file => reorderImages(file.pages[0].images, layoutGrid.value, settings.order_mode))
     }
     return reorderImages(images, layoutGrid.value, settings.order_mode)
-  })
-  const includedImages = computed(() => orderedImages.value.filter((image) => !isImageExcluded(image)))
+  }
+  const orderedImages = computed(() => orderForLayout(imagesWithRotation.value))
+  const includedImages = computed(() => orderForLayout(imagesWithRotation.value.filter(image => !isImageExcluded(image))))
   const excludedCount = computed(() => orderedImages.value.length - includedImages.value.length)
   const perPage = computed(() => Math.max(1, layoutGrid.value.rows * layoutGrid.value.cols))
   const isPairLayout = computed(() => perPage.value === 2 && !isFlowLayout.value)
@@ -1262,30 +1264,11 @@ export function useImagePaddlerState(options = {}) {
     const result = []
     for (let start = 0; start < images.length; start += perPage) {
       const chunk = images.slice(start, start + perPage)
-      for (const idx of cellOrder(grid, mode)) {
-        if (idx < chunk.length) result.push(chunk[idx])
-      }
+      for (const number of layoutSlotNumbers(compactGridForCount(grid, chunk.length), mode, chunk.length)) result.push(chunk[number - 1])
     }
     return result
   }
 
-  function cellOrder(grid, mode) {
-    const order = []
-    if (mode === 'n') {
-      for (let col = 0; col < grid.cols; col += 1) {
-        for (let row = 0; row < grid.rows; row += 1) order.push(row * grid.cols + col)
-      }
-    } else if (mode === 'reverse_n') {
-      for (let col = grid.cols - 1; col >= 0; col -= 1) {
-        for (let row = 0; row < grid.rows; row += 1) order.push(row * grid.cols + col)
-      }
-    } else {
-      for (let row = 0; row < grid.rows; row += 1) {
-        for (let col = 0; col < grid.cols; col += 1) order.push(row * grid.cols + col)
-      }
-    }
-    return order
-  }
 
   /** 导入推荐：根据素材整体给出方向/张数/网格/初始尺寸，仅在用户明确应用时整体采用。 */
   function applyImportRecommendation(showMessage = true) {

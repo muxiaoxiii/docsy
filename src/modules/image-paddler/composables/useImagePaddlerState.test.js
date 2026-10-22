@@ -29,6 +29,19 @@ const images = Array.from({ length: 6 }, (_, index) => ({ path: `/images/${index
 describe('image paddler state integration', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it('recomputes N-order for the actual remaining images and compact final-page grid', () => {
+    const state = useImagePaddlerState()
+    state.analysis.value = { images }
+    state.settings.layout = '2x3'
+    state.settings.order_mode = 'n'
+    state.toggleImageExclusion({ item: images[0], excluded: true })
+    expect(state.includedImages.value.map(image => image.path)).toEqual([1, 3, 5, 2, 4].map(n => `/images/${n}.png`))
+    state.analysis.value = { images: images.slice(0, 4) }
+    state.toggleImageExclusion({ item: images[0], excluded: false })
+    state.settings.last_page_mode = 'reflow'
+    expect(state.includedImages.value.map(image => image.path)).toEqual([0, 2, 1, 3].map(n => `/images/${n}.png`))
+  })
+
   it('exports the displayed N-order exactly once', async () => {
     const state = useImagePaddlerState()
     state.folders.value = ['/images']
@@ -41,7 +54,7 @@ describe('image paddler state integration', () => {
     tauriCallSafe.mockResolvedValue({ ok: true, data: { images: 6, pages: 1 } })
     await state.run()
     const payload = tauriCallSafe.mock.calls[0][1].args
-    expect(payload.image_paths).toEqual([0, 3, 1, 4, 2, 5].map((index) => `/images/${index}.png`))
+    expect(payload.image_paths).toEqual([0, 2, 4, 1, 3, 5].map((index) => `/images/${index}.png`))
     expect(payload.order_mode).toBe('custom')
     expect(payload.fixed_width_mm).toBe(state.actualImageWidth.value)
   })

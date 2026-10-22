@@ -139,7 +139,7 @@ defineProps({
   gap: 10px;
   min-height: clamp(50px, 6.5dvh, 58px);
   margin-top: clamp(8px, 1.5dvh, 12px);
-  padding-block: clamp(10px, 1.5dvh, 12px) 0;
+  padding-block: clamp(10px, 1.5dvh, 12px);
   padding-inline: 2px;
   border: 0;
   border-top: 1px solid var(--docsy-border-subtle);

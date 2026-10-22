@@ -102,8 +102,8 @@
                   :value="option.value"
                 />
               </el-select>
-              <span class="grid-chip">
-                <i v-for="n in Math.min(perPage, 9)" :key="n">{{ n }}</i>
+              <span class="grid-chip" :style="{ '--preview-cols': layoutGrid.cols }" :aria-label="`${layoutGrid.rows} 行 ${layoutGrid.cols} 列，${settings.order_mode === 'n' ? 'N 字' : settings.order_mode === 'reverse_n' ? '倒 N 字' : '逐行'}顺序`">
+                <i v-for="(n, index) in layoutSlotNumbers(layoutGrid, settings.order_mode)" :key="index">{{ n }}</i>
               </span>
             </div>
             <div class="field-hint">{{ layoutGrid.rows }}×{{ layoutGrid.cols }} · {{ perPage }} 张/页</div>
@@ -654,6 +654,7 @@ import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.
 import DocletSprite from '../../../shared/components/DocletSprite.vue'
 import imageLayoutIconUrl from '../../../assets/icons/image-layout.svg?url'
 import { useImagePaddlerState } from '../composables/useImagePaddlerState.js'
+import { layoutSlotNumbers } from '../composables/layoutControls.js'
 import { useWorkspaceStore } from '../../../stores/workspace.js'
 
 const workspaceStore = useWorkspaceStore()
@@ -948,20 +949,22 @@ function hasCellCaption(img) {
 }
 
 .grid-chip {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 3px;
+  --preview-cell: clamp(9px, calc(88px / var(--preview-cols) - 2px), 18px);
+  display: inline-grid;
+  grid-template-columns: repeat(var(--preview-cols), 1fr);
+  flex: none;
+  gap: 2px;
   max-width: 88px;
 }
 
 .grid-chip i {
-  width: 18px;
-  height: 18px;
+  width: var(--preview-cell);
+  height: var(--preview-cell);
   border-radius: 3px;
   border: 1px solid var(--docsy-border-subtle);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text-strong);
-  font-size: 10px;
+  font-size: clamp(7px, calc(var(--preview-cell) * .6), 10px);
   font-style: normal;
   display: inline-flex;
   align-items: center;

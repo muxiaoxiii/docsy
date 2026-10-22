@@ -1,7 +1,7 @@
 <template>
   <div class="pdf-tools-view" :class="{ 'is-file-dragging': pdfDragging }">
     <div v-if="pdfDragging" class="pdf-drop-overlay">
-      <div class="pdf-drop-message">{{ activeTab === 'merge' ? '松开以添加 PDF 或 Word 文件' : '松开以添加 PDF 文件' }}</div>
+      <div class="pdf-drop-message">{{ activeTab === 'merge' ? '松开以添加 PDF、Word 或图片' : '松开以添加 PDF 文件' }}</div>
     </div>
     <el-tabs v-model="activeTab" :tab-position="tabPosition" class="pdf-tabs">
       <el-tab-pane label="PDF 解锁" name="unlock" lazy>
@@ -43,7 +43,7 @@
         <ToolWorkspaceShell
           title="PDF 合并"
           :hide-toolbar="!mergeFiles.length"
-          description="按列表顺序合并多个 PDF 或 Word 文档；Word 文档会自动转为 PDF 后合并；合并时会压平页面注释和电子签章外观以便打印，不保留签章证书和交互。"
+          description="按列表顺序合并 PDF、Word 或图片；Word 自动转 PDF，图片先预览再排入 A4，可调整方向、缩放、裁剪和每页排列；合并时会压平页面注释和电子签章外观以便打印，不保留签章证书和交互。"
         >
           <template #toolbar>
             <el-button v-if="mergeFiles.length" type="primary" plain :disabled="merging" @click="selectMergeFiles">添加文件</el-button>
@@ -56,7 +56,7 @@
             :items="mergeFiles"
             :busy="merging"
             sortable
-            empty-text="添加需要合并的 PDF 或 Word 文档（支持 .pdf、.docx、.doc）"
+            empty-text="添加 PDF、Word 或图片（JPG / PNG / WebP / BMP）"
             @empty-action="selectMergeFiles"
             @clear="clearMergeFiles"
             @remove="removeMergeFile"
@@ -64,22 +64,25 @@
           >
             <template #meta="{ item }">
               <el-tag :type="isWordPath(item.path) ? 'warning' : 'info'" size="small">
-                {{ isWordPath(item.path) ? 'Word' : 'PDF' }}
+                {{ isWordPath(item.path) ? 'Word' : documentKind(item.path) === 'image' ? '图片' : 'PDF' }}
               </el-tag>
               <span v-if="item.statusText" class="merge-item-status">{{ item.statusText }}</span>
+              <span v-if="item.conversionError" class="merge-conversion-error" role="status">{{ item.conversionError }}</span>
+              <span v-if="item.manualPdf" class="merge-item-status">使用：{{ fileName(item.outputPath) }}</span>
               <el-button v-if="item.outputPath" link type="primary" size="small" @click="openPath(item.outputPath)">打开文件</el-button>
             </template>
             <template #item-actions="{ item, index }">
               <el-button
-                v-if="isWordPath(item.path) && !item.outputPath"
+                v-if="!isPdfPath(item.path) && !item.outputPath"
                 link
                 size="small"
                 type="primary"
                 :disabled="merging"
-                @click="convertSingleWordFile(item)"
+                @click="convertSingleMergeFile(item)"
               >
                 转为 PDF
               </el-button>
+              <el-button v-if="item.conversionError" :disabled="merging" link size="small" type="primary" @click="selectManualMergePdf(item)">选择手动转换的 PDF</el-button>
               <el-button :disabled="merging" link size="small" type="danger" @click="removeMergeFile(index)">
                 移除
               </el-button>
@@ -94,9 +97,9 @@
               type="success"
               @click="doMerge"
               :loading="merging"
-              :disabled="mergeFiles.length === 0 || (mergeFiles.length === 1 && !isWordPath(mergeFiles[0].path))"
+              :disabled="mergeFiles.length === 0 || (mergeFiles.length === 1 && isPdfPath(mergeFiles[0].path))"
             >
-              {{ mergeFiles.length === 1 && isWordPath(mergeFiles[0].path) ? '转换为 PDF' : '合并为一个 PDF' }}
+              {{ mergeFiles.length === 1 && !isPdfPath(mergeFiles[0].path) ? '转换为 PDF' : '合并为一个 PDF' }}
             </el-button>
             <el-button v-if="mergeOutputPath" @click="openPath(mergeOutputPath)">打开文件</el-button>
           </template>
@@ -210,8 +213,8 @@
           <div v-if="splitFile" ref="splitMainRef" :inert="splittingMerged" class="split-main" :style="splitGridStyle">
             <section class="split-list-panel">
               <div class="split-options-row">
-                <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox>
-                <span class="split-option-note">拆分时自动移除无可视内容的空白页（分隔页、扫描背面等）。</span>
+                <el-checkbox v-model="removeBlankPages">删除空白页</el-checkbox><HelpTooltip content="勾选后移除确认空白的页面。Docsy 分隔页带专属标记；其他页面保守检查，含批注、表单或无法解析内容的页会保留。默认不删除。" />
+                <span class="split-option-note">含批注或无法确认空白的页会保留。</span>
               </div>
               <el-alert v-if="splitWarnings.length" type="warning" :closable="false" show-icon class="split-warning">
                 <template #title>页段需要核对（{{ splitWarnings.length }}）</template>
@@ -447,12 +450,16 @@
         </ToolWorkspaceShell>
       </el-tab-pane>
     </el-tabs>
+    <ImagePdfImportDialog ref="imageImportDialog" />
   </div>
 </template>
 
 <script setup>
+import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfImportDialog.vue'
+const imageImportDialog = ref(null)
 import { useResponsiveTabs } from '../../../shared/composables/useResponsiveTabs.js'
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
+import { DOCUMENT_FILTERS, MANUAL_PDF_HINT, convertImportDocument, documentKind, reviewImageImports } from '../../../shared/pdf-tools/documentImport.js'
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
@@ -542,7 +549,7 @@ async function selectUnlockFiles() {
 function addUnlockFiles(paths) {
   if (unlocking.value || unlockInspecting.value) return
   const existing = new Set(unlockFiles.value.map((file) => file.path))
-  const candidates = [...new Set(paths)].filter((path) => !existing.has(path))
+  const candidates = [...new Set(paths)].filter((path) => isPdfPath(path) && !existing.has(path))
   const items = makeQueueItems(candidates).map((item) => ({
     ...item,
     encrypted: null,
@@ -846,24 +853,28 @@ async function processAntiCopy(removeProtection) {
 async function selectMergeFiles() {
   const selected = await open({
     multiple: true,
-    filters: [
-      { name: 'PDF 与 Word 文档 (*.pdf, *.docx, *.doc)', extensions: ['pdf', 'docx', 'doc', 'docm'] },
-      { name: 'PDF 文档 (*.pdf)', extensions: ['pdf'] },
-      { name: 'Word 文档 (*.docx, *.doc)', extensions: ['docx', 'doc', 'docm'] },
-    ],
+    filters: DOCUMENT_FILTERS,
   })
   if (selected) {
     const paths = Array.isArray(selected) ? selected : [selected]
-    addMergeFiles(paths)
+    await addMergeFiles(paths)
   }
 }
 
-function addMergeFiles(paths) {
+async function addMergeFiles(paths) {
   if (merging.value) return
-  const existing = new Set(mergeFiles.value.map((file) => file.path))
-  const candidates = [...new Set(paths)].filter((path) => !existing.has(path))
+  const existing = new Set(mergeFiles.value.map(file => file.path))
+  const raw = [...new Set(paths)].filter(path => isMergeSupportedPath(path) && !existing.has(path))
+  let candidates = raw
+  if (raw.some(path => documentKind(path) === 'image')) {
+    merging.value = true
+    try { candidates = await reviewImageImports(raw, group => imageImportDialog.value.open(group)) }
+    finally { merging.value = false }
+  }
   if (candidates.length) mergeOutputPath.value = ''
-  mergeFiles.value.push(...makeQueueItems(candidates))
+  const items = makeQueueItems(candidates).map(item => raw.includes(item.path) ? item : { ...item, outputPath: item.path, statusText: '图片 PDF 已就绪', statusType: 'success' })
+  mergeFiles.value.push(...items)
+  if (mergeFiles.value.length === 1 && items[0]?.outputPath) mergeOutputPath.value = items[0].outputPath
 }
 
 function clearMergeFiles() {
@@ -885,38 +896,53 @@ function reorderMergeFiles({ from, to }) {
   mergeFiles.value.splice(to, 0, item)
 }
 
-async function convertSingleWordFile(item) {
-  if (merging.value) return
-  merging.value = true
+async function prepareMergeItem(item) {
+  if (isPdfPath(item.path) || item.outputPath) return true
   item.statusText = '正在转为 PDF…'
   item.statusType = 'warning'
+  item.conversionError = ''
   try {
-    const result = await tauriCallSafe('convert_word_to_pdf', {
-      input: item.path,
-    })
-    if (result.ok) {
-      const outputPath = result.data?.output_path || result.data
-      item.outputPath = outputPath
-      item.statusText = '已转为 PDF'
-      item.statusType = 'success'
-      mergeOutputPath.value = outputPath
-      ElMessage.success(`转换完成：${fileName(outputPath)}`)
-    } else {
-      item.statusText = '转换失败'
-      item.statusType = 'danger'
-      ElMessage.error(userFacingError(result.error, 'Word 转 PDF 失败，请确认系统已安装 Microsoft Word、WPS 或 LibreOffice'))
-    }
-  } finally {
-    merging.value = false
+    item.outputPath = await convertImportDocument(item.path, tauriCallSafe)
+    item.statusText = 'PDF 已就绪'
+    item.statusType = 'success'
+    return true
+  } catch (error) {
+    item.statusText = '转换失败，等待补充 PDF'
+    item.statusType = 'danger'
+    item.conversionError = `${userFacingError(error, '转换失败')}。${isWordPath(item.path) ? MANUAL_PDF_HINT : '请在图片排版中生成 PDF，再选择生成的 PDF 继续。'}`
+    return false
   }
+}
+
+async function convertSingleMergeFile(item) {
+  if (merging.value) return
+  merging.value = true
+  try {
+    if (await prepareMergeItem(item)) {
+      mergeOutputPath.value = item.outputPath
+      ElMessage.success(`转换完成：${fileName(item.outputPath)}`)
+    } else ElMessage.warning('自动转换未完成，请查看该文件的提示并补充 PDF')
+  } finally { merging.value = false }
+}
+
+async function selectManualMergePdf(item) {
+  if (merging.value) return
+  const selected = normalizeSelectedPath(await open({ multiple: false, filters: [{ name: '手动转换后的 PDF', extensions: ['pdf'] }] }))
+  if (!selected || merging.value || !mergeFiles.value.includes(item)) return
+  item.outputPath = selected
+  item.manualPdf = true
+  item.conversionError = ''
+  item.statusText = '手动 PDF 已就绪'
+  item.statusType = 'success'
+  mergeOutputPath.value = ''
 }
 
 async function doMerge() {
   if (merging.value || !mergeFiles.value.length) return
-  if (mergeFiles.value.length === 1 && !isWordPath(mergeFiles.value[0].path)) return
+  if (mergeFiles.value.length === 1 && isPdfPath(mergeFiles.value[0].path)) return
 
-  if (mergeFiles.value.length === 1 && isWordPath(mergeFiles.value[0].path)) {
-    await convertSingleWordFile(mergeFiles.value[0])
+  if (mergeFiles.value.length === 1 && !isPdfPath(mergeFiles.value[0].path)) {
+    await convertSingleMergeFile(mergeFiles.value[0])
     return
   }
 
@@ -925,6 +951,12 @@ async function doMerge() {
     const output = await open({ directory: true })
     if (output) {
       const outputPath = `${output}/merged.pdf`
+      let failed = 0
+      for (const file of mergeFiles.value) if (!await prepareMergeItem(file)) failed += 1
+      if (failed) {
+        ElMessage.warning(`${failed} 个文件未能转为 PDF，请补充手动转换的 PDF 后继续合并；列表已保留`)
+        return
+      }
       for (const file of mergeFiles.value) {
         file.statusText = isWordPath(file.path) && !file.outputPath ? '转换并合并中…' : '合并中…'
         file.statusType = 'warning'
@@ -1200,18 +1232,18 @@ function isWordPath(path) {
 }
 
 function isMergeSupportedPath(path) {
-  return /\.(pdf|docx|doc|docm)$/i.test(String(path || ''))
+  return documentKind(path) !== null
 }
 
 async function handleDroppedPdfPaths(paths) {
   if (activeTab.value === 'merge') {
     const mergePaths = [...new Set((paths || []).filter(isMergeSupportedPath))]
     if (!mergePaths.length) {
-      ElMessage.warning('请拖入 PDF 或 Word 文件（.docx, .doc）')
+      ElMessage.warning('请拖入 PDF、Word 或图片（JPG / PNG / WebP / BMP）')
       return
     }
-    if (mergePaths.length < (paths || []).length) ElMessage.warning('已忽略不支持的文件格式（仅支持 PDF、Word）')
-    addMergeFiles(mergePaths)
+    if (mergePaths.length < (paths || []).length) ElMessage.warning('已忽略不支持的文件格式（仅支持 PDF、Word 和静态图片）')
+    await addMergeFiles(mergePaths)
     return
   }
 
@@ -1495,8 +1527,8 @@ onBeforeUnmount(() => {
 :deep(.pdf-tabs .workspace-actions) {
   min-height: clamp(50px, 6.5dvh, 58px);
   margin-top: clamp(8px, 1.5dvh, 12px);
-  padding-block: clamp(10px, 1.5dvh, 12px) 0;
-  padding-inline: 2px;
+  padding-block: 12px;
+  padding-inline: 14px;
   box-shadow: none;
 }
 
@@ -1863,4 +1895,8 @@ h3 {
 .split-preview-actions { align-items: center; gap: 8px 14px; }
 .split-preview-actions :deep(.el-button-group .el-button + .el-button) { margin-left: -1px; }
 .merge-options { display: flex; align-items: center; gap: 2px; }
+</style>
+
+<style scoped>
+.merge-conversion-error { flex-basis: 100%; color: var(--docsy-danger); font-size: 12px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
 </style>
