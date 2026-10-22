@@ -5094,7 +5094,7 @@ h3 {
 }
 
 .split-plan-actions :deep(.el-button) {
-  height: 34px;
+  height: var(--docsy-control-height);
   margin: 0;
   padding: 0 12px;
 }

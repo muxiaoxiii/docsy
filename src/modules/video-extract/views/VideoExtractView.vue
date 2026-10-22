@@ -1213,6 +1213,7 @@ useWindowFileDrop({
   font-size: 13px;
   color: var(--docsy-text);
 }
+.status-row > .el-button + .el-button { margin-left: 0; }
 
 .status-ok {
   color: var(--el-color-success);

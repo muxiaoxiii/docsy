@@ -928,9 +928,12 @@ function hasCellCaption(img) {
 }
 
 .per-page-group {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  width: 100%;
 }
+.per-page-group :deep(.el-radio-button) { min-width: 0; }
+.per-page-group :deep(.el-radio-button__inner) { width: 100%; padding-inline: 0; }
 
 .arrange-row {
   display: flex;

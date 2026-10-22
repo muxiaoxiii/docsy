@@ -1,3 +1,90 @@
+/* One size contract for all Element Plus form controls. Some library controls
+   use fixed pixel heights, so changing --el-component-size alone is incomplete. */
+:root {
+  --docsy-control-default: 32px;
+  --docsy-control-font-default: 14px;
+}
+:is(.el-button, .el-input, .el-input-number, .el-select, .el-switch,
+    .el-radio, .el-checkbox, .el-radio-button, .el-checkbox-button) {
+  --docsy-control-height: var(--docsy-control-default);
+  --docsy-control-font: var(--docsy-control-font-default);
+}
+:is(.el-button--small, .el-input--small, .el-input-number--small, .el-select--small,
+    .el-switch--small, .el-radio--small, .el-checkbox--small,
+    .el-radio-button--small, .el-checkbox-button--small) {
+  --docsy-control-height: 24px;
+  --docsy-control-font: 12px;
+}
+:is(.el-button--large, .el-input--large, .el-input-number--large, .el-select--large,
+    .el-switch--large, .el-radio--large, .el-checkbox--large,
+    .el-radio-button--large, .el-checkbox-button--large) {
+  --docsy-control-height: 40px;
+  --docsy-control-font: 14px;
+}
+.el-button:not(.is-link) {
+  height: var(--docsy-control-height);
+  padding-block: 0;
+  font-size: var(--docsy-control-font);
+}
+.el-input {
+  --el-input-height: var(--docsy-control-height);
+  font-size: var(--docsy-control-font);
+}
+.el-select__wrapper {
+  min-height: var(--docsy-control-height);
+  padding-block: 4px;
+  line-height: calc(var(--docsy-control-height) - 8px);
+  font-size: var(--docsy-control-font);
+}
+.el-input-number {
+  height: var(--docsy-control-height);
+  line-height: calc(var(--docsy-control-height) - 2px);
+}
+.el-input-number :is(.el-input-number__increase, .el-input-number__decrease) {
+  width: var(--docsy-control-height);
+  font-size: var(--docsy-control-font);
+}
+.el-input-number .el-input__wrapper {
+  padding-inline: calc(var(--docsy-control-height) + 8px);
+}
+.el-input-number.is-controls-right .el-input__wrapper {
+  padding-left: 12px;
+  padding-right: calc(var(--docsy-control-height) + 8px);
+}
+.el-input-number.is-controls-right :is(.el-input-number__increase, .el-input-number__decrease) {
+  --el-input-number-controls-height: calc((var(--docsy-control-height) - 2px) / 2);
+  height: var(--el-input-number-controls-height);
+  line-height: var(--el-input-number-controls-height);
+}
+:is(.el-switch, .el-checkbox, .el-radio) {
+  height: var(--docsy-control-height);
+  vertical-align: middle;
+  font-size: var(--docsy-control-font);
+}
+.el-checkbox { --el-checkbox-border-radius: 4px; }
+:is(.el-checkbox__label, .el-radio__label, .el-switch__label, .el-switch__label *) {
+  font-size: var(--docsy-control-font);
+  line-height: 20px;
+}
+.el-switch__label { height: 20px; }
+:is(.el-radio-group, .el-checkbox-group) { vertical-align: middle; }
+:is(.el-radio-button__inner, .el-checkbox-button__inner) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--docsy-control-height);
+  padding-block: 0;
+  font-size: var(--docsy-control-font);
+}
+/* Radio buttons use an outside outline in the library. Bring the stroke inside
+   so their visible bounds match neighboring buttons and input fields. */
+.el-radio-button__inner { border: 1px solid var(--el-border-color); outline: none; }
+.el-radio-button + .el-radio-button { margin-left: -1px; }
+.el-radio-button.is-active .el-radio-button__inner { border-color: var(--el-radio-button-checked-border-color, var(--docsy-primary)); }
+.el-button-group { display: inline-flex; vertical-align: middle; }
+.el-button-group > .el-button:not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.el-button-group > .el-button:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+
 /* Opt-in layout primitives. Keep related actions together when a toolbar wraps. */
 .control-cluster {
   display: inline-flex;
@@ -41,10 +128,12 @@
 
 /* Compact settings keep a readable label and a usable control on the same row. */
 .compact-options {
+  --docsy-control-default: 28px;
+  --docsy-control-font-default: 12px;
   --el-component-size: 28px;
   --el-component-size-small: 24px;
   --el-font-size-base: 12px;
 }
 .compact-options .el-form-item { margin-bottom: 8px; }
-.compact-options .el-form-item__label { align-items: center; font-size: 12px; }
-.compact-options .el-form-item__content { min-width: 0; }
+.compact-options .el-form-item__label { align-items: center; min-height: 28px; height: auto; line-height: 20px; font-size: 12px; }
+.compact-options .el-form-item__content { min-width: 0; min-height: 28px; line-height: 28px; }
