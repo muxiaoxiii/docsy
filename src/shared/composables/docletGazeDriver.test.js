@@ -46,11 +46,13 @@ describe('Doclet 正面转向片段', () => {
     const start = h.drawn.length
     h.driver.aim('up')
     h.advance(2000)
-    expect(h.drawn.slice(start).map((item) => item.frame)).toEqual([
-      ...layout.routes.right.back,
-      layout.center,
-      ...layout.routes.up.out,
-    ])
+    const transition = h.drawn.slice(start)
+    const center = transition.findIndex((item) => item.frame === layout.center)
+    expect(center).toBeGreaterThan(0)
+    expect(transition.slice(0, center).every((item) => layout.routes.right.back.includes(item.frame))).toBe(true)
+    expect(transition.slice(center + 1).map((item) => item.frame)).toEqual(layout.routes.up.out)
+    expect(transition[center].time - transition[0].time).toBeLessThanOrEqual(125)
+    expect(transition.at(-1).time - transition[center].time).toBeLessThanOrEqual(250)
   })
   it('回正期间只保留最新目标，跳过曾经指向的方向', () => {
     const h = harness()
@@ -58,7 +60,7 @@ describe('Doclet 正面转向片段', () => {
     h.advance(1000)
     const start = h.drawn.length
     h.driver.aim('left')
-    h.advance(100)
+    h.advance(30)
     h.driver.aim('down')
     h.driver.aim('up')
     h.advance(2000)

@@ -33,10 +33,9 @@ export function createGazeDriver({ draw, request, cancel }) {
     started ??= time
     const route = GAZE_LAYOUT.routes[direction]
     const frames = route[phase]
-    const duration =
-      phase === 'out'
-        ? Math.max(320, ((frames.length - 1) * 1000) / 24)
-        : Math.max(200, ((frames.length - 1) * 1000) / 30)
+    // A turn is a short reaction, not a slow replay of the source video.
+    // Sample by elapsed time so slower displays skip frames instead of queuing.
+    const duration = phase === 'out' ? 220 : 100
     progress = Math.min(1, offset + (time - started) / duration)
     paint(frames[Math.min(frames.length - 1, Math.floor(progress * (frames.length - 1)))])
     if (progress === 1) {
