@@ -73,7 +73,9 @@ export function useDocletGaze(root, canvas, enabled, onError) {
             const ratio = Math.min(window.devicePixelRatio || 1, 1.5)
             node.width = Math.round(rect.width * ratio)
             node.height = Math.round(rect.height * ratio)
-            const options = gazeRenderOptions(diagnosticBuild ? gazeDiagnosticMode.value : 'original')
+            // Windows WebView2 can show black behind transparent low-latency
+            // canvases. Keep normal compositing and the existing frame blending.
+            const options = gazeRenderOptions(diagnosticBuild ? gazeDiagnosticMode.value : 'synchronized')
             const context = node.getContext('2d', { alpha: true, desynchronized: options.desynchronized })
             recordGazeDiagnostic('canvas-created', {
               requested: { alpha: true, desynchronized: options.desynchronized },

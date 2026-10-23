@@ -91,8 +91,8 @@ it.each([
   lifecycle.unmount()
   expect(h.removeEventListener).toHaveBeenCalledWith('pointermove', expect.any(Function))
 })
-it('normal builds retain the released drawing behavior even if a diagnostic mode is selected', async () => {
+it('normal builds use synchronized transparent compositing and retain additive blending', async () => {
   const h = await setup('combined', false)
-  expect(h.canvas.getContext).toHaveBeenCalledWith('2d', { alpha: true, desynchronized: true })
+  expect(h.canvas.getContext).toHaveBeenCalledWith('2d', { alpha: true, desynchronized: false })
   expect(h.operations.at(-1).composite).toBe('lighter')
 })
