@@ -1,0 +1,17 @@
+{
+  "productName": "Docsy Diagnostic",
+  "identifier": "com.only.docsy.diagnostic",
+  "app": {
+    "windows": [
+      {
+        "title": "Docsy 1.1.2 · 独立诊断包",
+        "width": 1360,
+        "height": 820,
+        "minWidth": 1100,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  }
+}

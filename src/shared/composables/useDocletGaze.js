@@ -3,6 +3,12 @@ import atlasUrl from '../../assets/doclet-video/gaze-atlas.webp'
 import { createGazeDriver } from './docletGazeDriver.js'
 import { gazeTarget, GAZE_CELL, GAZE_LAYOUT } from './docletGazePoses.js'
 import { createDwellTarget } from './docletDwellTarget.js'
+import {
+  diagnosticBuild,
+  gazeDiagnosticMode,
+  gazeRenderOptions,
+  recordGazeDiagnostic,
+} from './docletGazeDiagnostics.js'
 let sharedAtlas
 function loadAtlas() {
   if (!sharedAtlas)
@@ -21,7 +27,7 @@ export function useDocletGaze(root, canvas, enabled, onError) {
   let stop
   onMounted(() => {
     stop = watch(
-      [enabled, canvas],
+      [enabled, canvas, gazeDiagnosticMode],
       ([active, node], _, cleanup) => {
         if (!active || !node) return
         let cancelled = false
@@ -37,6 +43,12 @@ export function useDocletGaze(root, canvas, enabled, onError) {
           emit: (point) => {
             lastFocus = point
             if (!bounds) return
+            recordGazeDiagnostic('target', {
+              direction: gazeTarget(
+                (point.x - bounds.left - bounds.width / 2) / Math.max(bounds.width, 160),
+                (point.y - bounds.top - bounds.height / 2) / Math.max(bounds.height, 160),
+              ),
+            })
             driver?.aim(
               gazeTarget(
                 (point.x - bounds.left - bounds.width / 2) / Math.max(bounds.width, 160),
@@ -51,6 +63,7 @@ export function useDocletGaze(root, canvas, enabled, onError) {
         const reset = () => {
           attention.reset()
           lastFocus = null
+          recordGazeDiagnostic('return-center')
           driver?.aim(null)
         }
         loadAtlas()
@@ -60,7 +73,13 @@ export function useDocletGaze(root, canvas, enabled, onError) {
             const ratio = Math.min(window.devicePixelRatio || 1, 1.5)
             node.width = Math.round(rect.width * ratio)
             node.height = Math.round(rect.height * ratio)
-            const context = node.getContext('2d', { alpha: true, desynchronized: true })
+            const options = gazeRenderOptions(diagnosticBuild ? gazeDiagnosticMode.value : 'original')
+            const context = node.getContext('2d', { alpha: true, desynchronized: options.desynchronized })
+            recordGazeDiagnostic('canvas-created', {
+              requested: { alpha: true, desynchronized: options.desynchronized },
+              actual: context?.getContextAttributes?.(),
+              size: [node.width, node.height],
+            })
             if (!context) {
               onError()
               return
@@ -69,6 +88,7 @@ export function useDocletGaze(root, canvas, enabled, onError) {
               request: (callback) => window.requestAnimationFrame(callback),
               cancel: (id) => window.cancelAnimationFrame(id),
               draw: (frame, from, mix) => {
+                recordGazeDiagnostic('draw', { frame, from, mix })
                 context.clearRect(0, 0, node.width, node.height)
                 const { columns, width, height } = GAZE_LAYOUT
                 const paint = (pose, opacity) => {
@@ -90,7 +110,7 @@ export function useDocletGaze(root, canvas, enabled, onError) {
                 paint(from, 1 - mix)
                 // Add premultiplied pixels: a source-over crossfade lowers the
                 // overlapping white body's opacity and causes a visible flash.
-                context.globalCompositeOperation = 'lighter'
+                context.globalCompositeOperation = options.additive || mix < 1 ? 'lighter' : 'source-over'
                 paint(frame, mix)
                 context.globalCompositeOperation = 'source-over'
                 context.globalAlpha = 1
@@ -117,6 +137,7 @@ export function useDocletGaze(root, canvas, enabled, onError) {
           cancelled = true
           attention.reset()
           driver?.stop()
+          recordGazeDiagnostic('canvas-disposed')
           window.removeEventListener('pointermove', move)
           window.removeEventListener('resize', measure)
           window.removeEventListener('scroll', measure, true)

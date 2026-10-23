@@ -1,0 +1,225 @@
+name: Build Doclet diagnostic (no release)
+
+on:
+  workflow_dispatch:
+
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    env:
+      VITE_DOCLET_DIAGNOSTICS: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            os: windows-latest
+            command: npm run tauri:build:windows
+            rust-target: x86_64-pc-windows-msvc
+            artifacts: |
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig
+          - platform: windows-x86
+            os: windows-latest
+            command: npm run tauri:build:windows:x86
+            rust-target: i686-pc-windows-msvc
+            artifacts: |
+              src-tauri/target/i686-pc-windows-msvc/release/bundle/nsis/*.exe
+              src-tauri/target/i686-pc-windows-msvc/release/bundle/nsis/*.exe.sig
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm config set registry https://registry.npmjs.org/
+          npm config set audit false
+          npm config set fund false
+          for attempt in 1 2 3; do
+            npm ci && exit 0
+            sleep $((attempt * 10))
+          done
+          npm ci
+
+      - name: Install external tools on macOS
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_REQUIRE_TAP_TRUST: 1
+        run: brew install qpdf poppler ffmpeg
+
+      - name: Install external tools on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $toolsRoot = Join-Path $env:RUNNER_TEMP "docsy-tools"
+          New-Item -ItemType Directory -Force $toolsRoot | Out-Null
+
+          function Install-ZipTool {
+            param(
+              [string] $Name,
+              [string[]] $Urls,
+              [string[]] $Executables
+            )
+            $zipPath = Join-Path $toolsRoot "$Name.zip"
+            $dest = Join-Path $toolsRoot $Name
+            $downloaded = $false
+            foreach ($url in $Urls) {
+              for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                  Invoke-WebRequest -Uri $url -OutFile $zipPath
+                  $downloaded = $true
+                  break
+                } catch {
+                  if ($attempt -eq 3) {
+                    Write-Warning "$Name download failed from $url"
+                  } else {
+                    Start-Sleep -Seconds ($attempt * 5)
+                  }
+                }
+              }
+              if ($downloaded) { break }
+            }
+            if (-not $downloaded) {
+              throw "$Name download failed from all mirrors"
+            }
+            Expand-Archive -Path $zipPath -DestinationPath $dest -Force
+            foreach ($exe in $Executables) {
+              $match = Get-ChildItem -Path $dest -Recurse -Filter $exe | Select-Object -First 1
+              if (-not $match) {
+                throw "$Name package does not contain $exe"
+              }
+              Add-Content -Path $env:GITHUB_PATH -Value $match.DirectoryName
+            }
+          }
+
+          Install-ZipTool `
+            -Name "qpdf" `
+            -Urls @(
+              "https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip",
+              "https://gh-proxy.com/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip",
+              "https://ghfast.top/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip",
+              "https://gh-proxy.net/https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2-msvc64.zip"
+            ) `
+            -Executables @("qpdf.exe")
+
+          Install-ZipTool `
+            -Name "poppler" `
+            -Urls @(
+              "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip",
+              "https://gh-proxy.com/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip",
+              "https://ghfast.top/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip",
+              "https://gh-proxy.net/https://github.com/oschwartz10612/poppler-windows/releases/download/v26.02.0-0/Release-26.02.0-0.zip"
+            ) `
+            -Executables @("pdftoppm.exe", "pdftotext.exe")
+
+          Install-ZipTool `
+            -Name "ffmpeg" `
+            -Urls @(
+              "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+              "https://gh-proxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+              "https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+              "https://gh-proxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+            ) `
+            -Executables @("ffmpeg.exe", "ffprobe.exe")
+
+      - name: Prepare doc2x sidecar
+        shell: bash
+        run: node scripts/prepare-doc2x.mjs
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          npm run build
+          echo "=== dist contents ==="
+          ls -la dist/ 2>/dev/null || echo "ERROR: dist/ does not exist!"
+          echo "=== dist/index.html ==="
+          cat dist/index.html 2>/dev/null || echo "ERROR: index.html missing!"
+
+      - name: Run frontend tests
+        run: npm run test -- --run
+
+      - name: Check frontend and release metadata
+        shell: bash
+        run: |
+          npm run lint
+          python -m unittest discover -s site/scripts -p 'test_*.py'
+          node scripts/check-release-version.mjs
+
+      - name: Run Rust tests
+        if: runner.os != 'Windows'
+        run: cargo test
+        working-directory: src-tauri
+
+      - name: Run Rust regressions on Windows
+        # A test-runtime failure must block packaging rather than silently
+        # bypass the regression gate. Exercise the package's actual target.
+        if: runner.os == 'Windows'
+        run: |
+          cargo test --locked --target ${{ matrix.rust-target }} --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        working-directory: src-tauri
+
+      - name: Diagnose Windows test runtime failure
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products '*' -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          $testExe = Get-ChildItem 'src-tauri/target/${{ matrix.rust-target }}/debug/deps/docsy_lib-*.exe' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($dumpbin -and $testExe) { & $dumpbin /imports $testExe.FullName }
+          Get-Item "$env:WINDIR/System32/msvcp140.dll", "$env:WINDIR/System32/vcruntime140.dll", "$env:WINDIR/SysWOW64/msvcp140.dll", "$env:WINDIR/SysWOW64/vcruntime140.dll" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName) $($_.VersionInfo.FileVersion)" }
+
+      - name: Build package
+        if: inputs.checks_only != true
+        run: ${{ matrix.command }} -- --config src-tauri/tauri.diagnostic.conf.json
+
+      - name: Verify macOS package
+        if: runner.os == 'macOS' && inputs.checks_only != true
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_PATH="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$DMG_PATH"
+          hdiutil verify "$DMG_PATH"
+
+      - name: Verify Windows application manifest
+        if: runner.os == 'Windows' && inputs.checks_only != true
+        shell: pwsh
+        run: |
+          $mt = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin" -Filter mt.exe -Recurse | Where-Object FullName -Match '\\x64\\mt.exe$' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $mt) { throw 'Windows manifest tool is unavailable' }
+          $exe = Resolve-Path 'src-tauri/target/${{ matrix.rust-target }}/release/docsy.exe'
+          $manifest = Join-Path $env:RUNNER_TEMP 'docsy-release.manifest'
+          & $mt.FullName "-inputresource:$exe;#1" "-out:$manifest"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          [xml]$xml = Get-Content $manifest -Raw
+          $controls = $xml.GetElementsByTagName('assemblyIdentity') | Where-Object { $_.name -eq 'Microsoft.Windows.Common-Controls' -and $_.version -eq '6.0.0.0' }
+          if (-not $controls) { throw 'Common Controls v6 manifest is missing' }
+
+      - name: Upload package
+        if: inputs.checks_only != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: docsy-diagnostic-${{ matrix.platform }}
+          retention-days: 30
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error

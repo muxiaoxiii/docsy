@@ -96,7 +96,8 @@
         </div>
       </Transition>
     </el-container>
-    <OnboardingModal ref="onboardingModalRef" />
+    <DocletDiagnosticPanel v-if="diagnosticBuild" />
+    <OnboardingModal v-if="!diagnosticBuild" ref="onboardingModalRef" />
   </el-container>
 </template>
 
@@ -109,6 +110,8 @@ import { confirmAppClose, listActiveOperations, tauriCallSafe } from './core/tau
 import { hasDesktopRuntime, listenDesktop as listen } from './core/desktopRuntime.js'
 import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
+import { diagnosticBuild } from './shared/composables/docletGazeDiagnostics.js'
+import DocletDiagnosticPanel from './shared/components/DocletDiagnosticPanel.vue'
 import OnboardingModal from './shared/components/OnboardingModal.vue'
 import { useAppStore } from './stores/app.js'
 import evidenceIconUrl from './assets/icons/evidence.svg?url'

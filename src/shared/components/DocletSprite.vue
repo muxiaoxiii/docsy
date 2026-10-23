@@ -19,6 +19,7 @@
     <canvas
       v-else-if="gazeEnabled && !videoFailed"
       ref="gazeCanvas"
+      :key="gazeDiagnosticMode"
       class="doclet-sprite__gaze"
       :style="gazeSize"
     />
@@ -49,6 +50,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { DOCLET_MOTIONS, docletVideoAsset } from '../docletVideoAssets.js'
+import { gazeDiagnosticMode } from '../composables/docletGazeDiagnostics.js'
 import { useDocletGaze } from '../composables/useDocletGaze.js'
 import { useMotionActivity } from '../composables/useMotionActivity.js'
 import spritesheet from '../../assets/doclet-v2-spritesheet.webp'
