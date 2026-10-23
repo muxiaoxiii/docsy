@@ -3,7 +3,7 @@
     <div v-if="pdfDragging" class="pdf-drop-overlay">
       <div class="pdf-drop-message">{{ activeTab === 'merge' ? '松开以添加 PDF、Word 或图片' : '松开以添加 PDF 文件' }}</div>
     </div>
-    <el-tabs v-model="activeTab" :tab-position="tabPosition" class="pdf-tabs">
+    <el-tabs v-model="activeTab" v-motion-tabs="activeTab" :tab-position="tabPosition" class="pdf-tabs">
       <el-tab-pane label="PDF 解锁" name="unlock" lazy>
         <ToolWorkspaceShell title="PDF 解锁" description="移除 PDF 文件的密码保护，原文件旁会生成已解锁副本。" :hide-toolbar="!unlockFiles.length">
           <template #toolbar>
@@ -1631,7 +1631,7 @@ h3 {
 .path-badge {
   flex-shrink: 0;
   padding: 2px 7px;
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   color: var(--docsy-text-muted);
   font-size: 11px;

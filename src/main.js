@@ -9,12 +9,14 @@ import router from './router'
 import './styles.css'
 import './shared/motion.css'
 import './shared/controls.css'
+import { dialogTransition, installUiMotion } from './shared/motion/uiMotion.js'
 
 const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus, { locale: zhCn })
+app.use(ElementPlus, { locale: zhCn, dialog: { transition: dialogTransition } })
+installUiMotion(app)
 
 // 禁用默认右键上下文菜单（避免唤起 webview 默认的浏览器右键行为）
 document.addEventListener('contextmenu', (e) => {

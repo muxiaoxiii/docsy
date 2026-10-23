@@ -217,7 +217,7 @@ function itemKey(item, index) {
 }
 
 .queue-item.is-selected { background: var(--docsy-primary-soft); }
-.queue-select-name { display: block; width: 100%; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.queue-select-name { display: block; width: 100%; padding: 0; border: 0; border-radius: var(--docsy-radius); background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .queue-select-name:focus-visible { outline: 2px solid var(--docsy-primary); outline-offset: 3px; }
 .queue-item:hover {
   background: color-mix(in srgb, var(--docsy-primary-soft) 44%, var(--docsy-surface-elevated));

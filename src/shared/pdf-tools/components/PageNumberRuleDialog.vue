@@ -380,7 +380,7 @@ watch(localFooterGroups, (value) => emit('update:footerGroups', normalizeGroups(
 .exception-row {
   padding: 8px 10px;
   border: 1px solid var(--docsy-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
 }
 .exception-row-main {
   flex-wrap: wrap;

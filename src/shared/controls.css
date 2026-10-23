@@ -3,6 +3,26 @@
 :root {
   --docsy-control-default: 32px;
   --docsy-control-font-default: 14px;
+  --docsy-control-radius: var(--docsy-radius);
+}
+/* A single outer radius; paired controls keep their shared edges flush. */
+.el-button:not(.is-circle),
+.el-input__wrapper, .el-select__wrapper, .el-textarea__inner,
+.el-alert, .el-dialog, .el-message-box, .el-popper, .el-message,
+.el-notification, .el-upload-dragger {
+  border-radius: var(--docsy-control-radius);
+}
+.el-input-number__decrease {
+  border-radius: var(--docsy-control-radius) 0 0 var(--docsy-control-radius);
+}
+.el-input-number__increase {
+  border-radius: 0 var(--docsy-control-radius) var(--docsy-control-radius) 0;
+}
+.el-input-number.is-controls-right .el-input-number__increase {
+  border-radius: 0 var(--docsy-control-radius) 0 0;
+}
+.el-input-number.is-controls-right .el-input-number__decrease {
+  border-radius: 0 0 var(--docsy-control-radius) 0;
 }
 :is(.el-button, .el-input, .el-input-number, .el-select, .el-switch,
     .el-radio, .el-checkbox, .el-radio-button, .el-checkbox-button) {

@@ -20,6 +20,7 @@ import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue
 import { readFile } from '@tauri-apps/plugin-fs'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { DESKTOP_ONLY_MESSAGE, hasDesktopRuntime } from '../../../core/desktopRuntime.js'
 
 const props = defineProps({
   filePath: { type: String, default: '' },
@@ -77,6 +78,11 @@ async function renderCurrentPage() {
   errorText.value = ''
   imageDataUrl.value = ''
   if (!props.filePath) return
+  if (!hasDesktopRuntime()) {
+    errorText.value = DESKTOP_ONLY_MESSAGE
+    emit('error', errorText.value)
+    return
+  }
 
   loading.value = true
   try {

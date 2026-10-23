@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { logError } from '../services/appLogger.js'
+import { DESKTOP_ONLY_MESSAGE, hasDesktopRuntime } from './desktopRuntime.js'
 
 const operationLabels = {
   extract_frames: 'Doclet 正在抽取视频帧…',
@@ -89,6 +90,9 @@ function readableError(err) {
     } catch {
       /* Plain text error. */
     }
+  }
+  if (!hasDesktopRuntime() && /Cannot read properties of undefined.*(?:invoke|transformCallback)/i.test(String(message))) {
+    return DESKTOP_ONLY_MESSAGE
   }
   return String(message)
 }

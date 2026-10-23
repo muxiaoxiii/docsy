@@ -45,7 +45,7 @@
           <div class="format-toolbar">
             <div class="format-group">
               <span class="field-label">MD 转出</span>
-              <el-radio-group v-model="fileOfficeFormat" :disabled="converting" size="small">
+              <el-radio-group v-model="fileOfficeFormat" v-motion-selection="fileOfficeFormat" :disabled="converting" size="small">
                 <el-radio-button v-for="option in MARKDOWN_OUTPUT_FORMATS" :key="option.value" :value="option.value">{{
                   option.label
                 }}</el-radio-button>
@@ -231,7 +231,7 @@
             <div class="format-toolbar compact">
               <div class="format-group">
                 <span class="field-label">转出格式</span>
-                <el-radio-group v-model="pasteFormat" :disabled="pasteConverting" size="small">
+                <el-radio-group v-model="pasteFormat" v-motion-selection="pasteFormat" :disabled="pasteConverting" size="small">
                   <el-radio-button
                     v-for="option in MARKDOWN_OUTPUT_FORMATS"
                     :key="option.value"
@@ -810,8 +810,9 @@ defineExpose({
   grid-template-columns: minmax(320px, 1.08fr) 14px minmax(320px, 0.92fr);
   gap: 0;
   min-height: 100%;
-  height: 100%;
+  height: auto;
 }
+.file-panel { min-height: 620px; }
 
 .convert-workspace.is-resizing {
   cursor: col-resize !important;
@@ -1008,6 +1009,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
 }
+.file-panel > :deep(.file-queue-panel:has(.md-convert-scene)) { min-height: 340px; }
 
 /* ── Left Panel Bottom Footer Bar ── */
 .panel-bottom-bar {
@@ -1048,7 +1050,7 @@ defineExpose({
   color: var(--docsy-primary);
   background: color-mix(in srgb, var(--docsy-primary) 8%, transparent);
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
 }
 
 .queue-warning {

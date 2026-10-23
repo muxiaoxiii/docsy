@@ -396,7 +396,7 @@
             <template v-else>
               <el-popover placement="left-start" trigger="click" width="420">
                 <template #reference>
-                  <el-button size="small" circle>⋯</el-button>
+                  <el-button size="small" aria-label="更多字段操作">⋯</el-button>
                 </template>
                 <div class="row-settings">
                   <h4>{{ row.text || row.name }}</h4>

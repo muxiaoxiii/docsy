@@ -750,7 +750,7 @@ onBeforeUnmount(() => {
   height: 30px;
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.62);
-  border-radius: 8px;
+  border-radius: var(--docsy-radius);
   color: #fff;
   background: rgba(30, 34, 31, 0.64);
   backdrop-filter: blur(8px);
@@ -774,7 +774,7 @@ onBeforeUnmount(() => {
   max-width: calc(100% - 16px);
   padding: 4px 7px;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   color: #fff;
   background: rgba(29, 48, 40, 0.78);
   font-size: 11px;

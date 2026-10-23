@@ -38,7 +38,7 @@
           </el-form-item>
 
           <el-form-item>
-            <template #label><span class="form-label-help">输出目录<HelpTooltip :content="settings.output_dir ? '本次所有文档保存到所选目录，并记住此选择。' : '合并输出保存在首张图片所在目录；分文件夹输出各自保存。'" /></span></template>
+            <template #label><span class="form-label-help">输出目录<HelpTooltip :content="settings.output_dir ? '本次所有文档保存到所选目录，并记住此选择。' : '默认保存到素材目录下的 _docsy_image_out；合并输出按首张图片确定目录，分文件夹输出各自保存。'" /></span></template>
             <div class="output-directory-control">
               <el-input :model-value="settings.output_dir" readonly placeholder="默认：素材目录下的 _docsy_image_out" :title="settings.output_dir || '素材目录下的 _docsy_image_out'" />
               <div class="source-actions">
@@ -596,7 +596,7 @@
           class="result-empty-state"
           :icon-url="imageLayoutIconUrl"
           :title="analyzing ? '正在分析图片' : '等待添加图片'"
-          :description="analyzing ? '读取尺寸并计算智能网格…' : '添加文件夹或图片后，Docsy 会自动计算黄金排版与白边预览'"
+          :description="analyzing ? '读取尺寸并计算智能网格…' : '添加文件夹或图片后，按当前设置预览 A4 排版与打印边距'"
         >
           <template #actions>
             <el-button type="primary" plain size="default" :disabled="analyzing" @click="addImages">

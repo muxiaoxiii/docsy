@@ -13,7 +13,7 @@
         </span>
       </button>
       <div class="sidebar-section-label">工作空间</div>
-      <el-menu :default-active="activeMenu" @select="onMenuSelect" class="sidebar-menu">
+      <el-menu v-motion-navigation="activeMenu" :default-active="activeMenu" @select="onMenuSelect" class="sidebar-menu">
         <template v-for="(item, index) in menuItems" :key="item.route">
           <el-menu-item :index="item.route" :aria-label="item.label" :title="item.label">
             <span class="menu-index">{{ String(index + 1).padStart(2, '0') }}</span>
@@ -27,25 +27,27 @@
           </el-menu-item>
         </template>
       </el-menu>
-      <div class="sidebar-footer">
-        <el-tooltip content="关于" placement="right">
+      <div v-motion-navigation:footer="route.name" class="sidebar-footer">
+        <el-tooltip content="关于" placement="top" :enterable="false">
           <el-button
             class="footer-btn"
+            aria-label="关于"
             :class="{ active: route.name === 'about' }"
             @click="router.push({ name: 'about' })"
           >
             <el-icon><InfoFilled /></el-icon>
-            <span>关于</span>
+            <span class="footer-label">关于</span>
           </el-button>
         </el-tooltip>
-        <el-tooltip content="设置" placement="right">
+        <el-tooltip content="设置" placement="top" :enterable="false">
           <el-button
             class="footer-btn"
+            aria-label="设置"
             :class="{ active: route.name === 'settings' }"
             @click="router.push({ name: 'settings' })"
           >
             <el-icon><Setting /></el-icon>
-            <span>设置</span>
+            <span class="footer-label">设置</span>
           </el-button>
         </el-tooltip>
       </div>
@@ -69,7 +71,10 @@
             <span class="page-context">本地文档处理工作台</span>
           </div>
         </div>
-        <span class="app-version">v{{ version }}</span>
+        <div class="header-runtime">
+          <span v-if="!hasDesktopRuntime()" class="browser-preview-note">浏览器预览 · 文件处理请使用桌面版</span>
+          <span class="app-version">v{{ version }}</span>
+        </div>
       </el-header>
       <el-main ref="mainRef" class="app-main">
         <router-view v-slot="{ Component, route: currentRoute }">
@@ -101,7 +106,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { Setting, InfoFilled } from '@element-plus/icons-vue'
 import { getMenuItems } from './core/moduleRegistry.js'
 import { confirmAppClose, listActiveOperations, tauriCallSafe } from './core/tauriBridge.js'
-import { listen } from '@tauri-apps/api/event'
+import { hasDesktopRuntime, listenDesktop as listen } from './core/desktopRuntime.js'
 import { ElMessageBox } from 'element-plus'
 import DocletWorkingPet from './shared/components/DocletWorkingPet.vue'
 import OnboardingModal from './shared/components/OnboardingModal.vue'
@@ -368,6 +373,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.header-runtime { display: flex; align-items: center; gap: 10px; }
+.browser-preview-note { font-size: 11px; color: var(--docsy-text-muted); }
 .app-container {
   --docsy-sidebar-width: clamp(212px, 18vw, 236px);
   --docsy-shell-header-height: clamp(62px, 8.4dvh, 76px);
@@ -406,7 +413,7 @@ onBeforeUnmount(() => {
 .app-aside.is-collapsed .sidebar-section-label,
 .app-aside.is-collapsed .menu-label,
 .app-aside.is-collapsed .menu-arrow,
-.app-aside.is-collapsed .sidebar-footer .footer-btn span {
+.app-aside.is-collapsed .sidebar-footer .footer-label {
   display: none;
 }
 
@@ -432,6 +439,7 @@ onBeforeUnmount(() => {
 .app-aside.is-collapsed .sidebar-footer .footer-btn {
   gap: 0;
 }
+.app-aside.is-collapsed .sidebar-footer { flex-direction: column; padding: 8px 12px; }
 
 .app-aside::after {
   position: absolute;
@@ -606,27 +614,35 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 1;
   display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  flex-shrink: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.13);
   background: transparent;
 }
 
 .sidebar-footer .footer-btn {
   display: flex;
-  flex: 1;
+  flex: 1 0 32px;
   align-items: center;
   justify-content: center;
-  height: var(--docsy-footer-height);
+  height: 32px;
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 8px;
   margin: 0;
   gap: 7px;
   color: rgba(255, 255, 255, 0.48);
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--docsy-radius);
   font-size: 12px;
 }
 
-.sidebar-footer .footer-btn + .footer-btn {
-  border-left: 1px solid rgba(255, 255, 255, 0.13);
+.sidebar-footer .footer-btn > :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .sidebar-footer .footer-btn:hover {
@@ -634,7 +650,7 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.footer-btn.active {
+.sidebar-footer .footer-btn.active {
   color: #fff;
   background: rgba(255, 255, 255, 0.1);
 }
@@ -776,7 +792,7 @@ onBeforeUnmount(() => {
   .sidebar-section-label,
   .menu-label,
   .menu-arrow,
-  .sidebar-footer .footer-btn span {
+  .sidebar-footer .footer-label {
     display: none;
   }
 
@@ -802,6 +818,7 @@ onBeforeUnmount(() => {
   .sidebar-footer .footer-btn {
     gap: 0;
   }
+  .sidebar-footer { flex-direction: column; padding: 8px 12px; }
 
   .app-header {
     padding: 0 18px;

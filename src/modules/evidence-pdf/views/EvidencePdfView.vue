@@ -1,6 +1,6 @@
 <template>
   <div class="evidence-pdf-view">
-    <el-tabs v-model="activeTab" :tab-position="tabPosition" class="evidence-tabs">
+    <el-tabs v-model="activeTab" v-motion-tabs="activeTab" :tab-position="tabPosition" class="evidence-tabs">
       <el-tab-pane label="分项证据合并" name="merge" lazy>
         <EvidencePdfWorkbench workflow="merge" />
       </el-tab-pane>
@@ -17,7 +17,7 @@
             <el-button v-if="evidenceFolder" :loading="scanning" :disabled="building" @click="scanEvidence">重新扫描</el-button>
           </template>
           <div class="scan-options compact-form">
-            <el-radio-group v-model="outputMode" size="small" :disabled="scanning || building"><el-radio-button value="per_folder">各文件夹分别合并</el-radio-button><el-radio-button value="all">全部合成一份</el-radio-button></el-radio-group>
+            <el-radio-group v-model="outputMode" v-motion-selection="outputMode" size="small" :disabled="scanning || building"><el-radio-button value="per_folder">各文件夹分别合并</el-radio-button><el-radio-button value="all">全部合成一份</el-radio-button></el-radio-group>
             <span class="scan-separator-option"><el-checkbox v-model="duplexFiles" :disabled="scanning || building">文件夹内按文件补齐双面</el-checkbox><HelpTooltip content="每份材料为奇数页时在末尾补一页空白，让下一份材料从正面起印。预览中合成的一批图片算作一份材料。" /></span>
             <span v-if="outputMode === 'all'" class="scan-separator-option"><el-checkbox v-model="duplexGroups" :disabled="scanning || building">文件夹之间补齐双面</el-checkbox><HelpTooltip content="先合并各文件夹，文件夹总页数为奇数时补一页空白，让下一个文件夹从正面起印。可与文件夹内分隔同时开启，偶数页不重复补白。母文件夹的本层文件也作为一组。" /></span>
           </div>
@@ -176,7 +176,7 @@ onBeforeUnmount(() => void preference.stop())
 .path-label {
   flex-shrink: 0;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   background: var(--docsy-surface-muted);
   color: var(--docsy-text-muted);
   font-size: 11px;

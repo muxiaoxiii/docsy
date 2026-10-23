@@ -20,7 +20,7 @@
         <p class="header-subtitle">
           {{
             step === 'select'
-              ? '下面这些核心功能需要外部工具组件支持。您可以选择需要的功能自动配置，也可以直接跳过稍后在设置中安装。'
+              ? '视频抽帧与 PDF 预览等功能需要外部组件；基础 PDF 合并、拆分已内置。您可以选择安装，也可跳过后在设置中配置。'
               : (isAllDone ? '所选组件已配置完毕，现在可以开始畅享完整的文档处理体验了。' : '小狗 Doclet 正在后台加紧处理，请稍候…')
           }}
         </p>
@@ -197,8 +197,8 @@ const featureList = reactive([
     tool: 'qpdf',
     toolName: 'qpdf',
     toolLabel: 'Qpdf 结构工具',
-    title: 'PDF 拆分合并与无损结构处理',
-    desc: '提供 PDF 合并、拆分及结构优化所需的工具支持。',
+    title: 'PDF 复杂结构兼容与无损优化',
+    desc: '基础 PDF 合并、拆分已内置；Qpdf 用于复杂结构兼容回退及部分无损优化。',
     detail: 'PDF 线性化与结构处理',
     color: '#8b5cf6',
     icon: Files,
@@ -420,7 +420,7 @@ onMounted(async () => {
   font-weight: 600;
   color: #0284c7;
   background: #e0f2fe;
-  border-radius: 12px;
+  border-radius: var(--docsy-radius);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -465,7 +465,7 @@ onMounted(async () => {
   gap: 14px;
   padding: 14px 16px;
   border: 1.5px solid var(--el-border-color-light);
-  border-radius: 10px;
+  border-radius: var(--docsy-radius);
   background: var(--el-fill-color-blank);
   cursor: pointer;
   transition: all 0.2s ease;
@@ -493,7 +493,7 @@ onMounted(async () => {
 .card-icon {
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: var(--docsy-radius);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -520,7 +520,7 @@ onMounted(async () => {
 .progress-notice {
   margin-top: 14px;
   padding: 10px 14px;
-  border-radius: 8px;
+  border-radius: var(--docsy-radius);
   font-size: 13px;
   line-height: 1.5;
   color: var(--el-text-color-secondary);
@@ -555,7 +555,7 @@ onMounted(async () => {
 .card-detail code {
   background: var(--el-fill-color-light);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   font-family: ui-monospace, monospace;
 }
 
@@ -603,7 +603,7 @@ onMounted(async () => {
 .progress-task-list {
   width: 100%;
   background: var(--el-fill-color-light);
-  border-radius: 8px;
+  border-radius: var(--docsy-radius);
   padding: 8px 16px;
   margin-bottom: 24px;
 }

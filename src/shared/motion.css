@@ -5,19 +5,21 @@
   --motion-normal: 220ms;
   --motion-enter: 300ms;
   --motion-ease: cubic-bezier(.2, .75, .25, 1);
-  --motion-spring: cubic-bezier(.2, .9, .3, 1.2);
+  --motion-spring: cubic-bezier(.22, 1.25, .36, 1);
 }
 
 /* Controls across every workspace. Translate/scale keep existing transforms intact. */
 :where(.el-button, .sidebar-toggle, .footer-btn, .queue-drag-handle) {
-  transition: translate var(--motion-fast) var(--motion-ease),
-    scale var(--motion-fast) var(--motion-ease),
+  transition: translate 320ms var(--motion-spring),
+    scale 320ms var(--motion-spring),
     background-color var(--motion-fast) ease, border-color var(--motion-fast) ease,
     color var(--motion-fast) ease;
 }
 :where(.el-button, .sidebar-toggle, .footer-btn):not(:disabled, .is-disabled, .is-loading):active {
-  scale: .97;
-  translate: 0 1px;
+  scale: .95;
+  translate: 0 2px;
+  transition-duration: 100ms;
+  transition-timing-function: var(--motion-ease);
 }
 :where(.el-button) > .el-icon:not(.is-loading) {
   transition: translate var(--motion-normal) var(--motion-spring);
@@ -53,6 +55,54 @@
 .queue-item-actions, .el-upload-dragger .el-icon { transition: translate var(--motion-normal) var(--motion-spring); }
 .el-upload-dragger { transition: border-color 160ms ease, background-color 160ms ease; }
 .el-upload-dragger.is-dragover .el-icon { translate: 0 -5px; }
+
+/* One moving selection surface; original radios keep keyboard and click behavior. */
+.docsy-motion-selection { position: relative; isolation: isolate; }
+.docsy-motion-navigation, .docsy-motion-tab-nav { position: relative; isolation: isolate; }
+.docsy-motion-navigation > .docsy-selection-indicator {
+  background: rgba(255, 255, 255, .11);
+  border: 1px solid rgba(255, 255, 255, .08);
+}
+.sidebar-menu.docsy-motion-navigation.docsy-selection-ready .el-menu-item.is-active,
+.sidebar-footer.docsy-motion-navigation.docsy-selection-ready .footer-btn.active {
+  background: transparent;
+}
+.sidebar-menu.docsy-selection-ready .el-menu-item.is-active::before { display: none; }
+.sidebar-menu.docsy-motion-navigation > .docsy-selection-indicator::before {
+  content: ''; position: absolute; top: 8px; bottom: 8px; left: -10px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--docsy-accent-light);
+}
+.docsy-motion-tab-nav > .docsy-selection-indicator {
+  background: var(--docsy-surface-elevated);
+  border: 1px solid var(--docsy-border-subtle);
+}
+.el-tabs--left > .el-tabs__header .docsy-motion-tab-nav.docsy-selection-ready .el-tabs__item.is-left.is-active {
+  background: transparent; box-shadow: none;
+}
+.docsy-selection-indicator {
+  position: absolute; top: 0; left: 0; z-index: -1; pointer-events: none;
+  border-radius: var(--docsy-radius);
+  background: var(--el-color-primary); border: 1px solid var(--el-color-primary);
+  box-sizing: border-box;
+}
+.docsy-selection-ready .el-radio-button__inner { background: transparent; }
+.docsy-selection-ready .el-radio-button {
+  --el-radio-button-checked-bg-color: transparent;
+  --el-radio-button-checked-border-color: transparent;
+}
+.docsy-motion-selection > .el-radio-button:first-of-type .el-radio-button__inner {
+  border-radius: var(--docsy-radius) 0 0 var(--docsy-radius);
+}
+.docsy-motion-selection > .el-radio-button:last-of-type .el-radio-button__inner {
+  border-radius: 0 var(--docsy-radius) var(--docsy-radius) 0;
+}
+.docsy-motion-selection > .el-radio-button:only-of-type .el-radio-button__inner {
+  border-radius: var(--docsy-radius);
+}
+.docsy-selection-ready .el-radio-button.is-active .el-radio-button__inner {
+  background: transparent; border-color: transparent; box-shadow: none;
+}
+.docsy-selection-ready .el-radio-button.is-active.is-disabled .el-radio-button__inner { color: var(--el-color-white); opacity: .7; }
 
 /* Queue animation is bounded to small lists by the component. */
 .queue-row-enter-active, .queue-row-leave-active { transition: opacity 180ms ease, transform 220ms var(--motion-ease); }

@@ -4,11 +4,20 @@
   <div class="hf-rule-fields compact-options">
     <section class="hf-section">
       <div class="rule-item section-label">
-        <strong>页眉文字</strong>
+        <div class="section-title">
+          <strong>页眉文字</strong
+          ><el-switch v-model="headerInsertEnabledModel" size="small" aria-label="启用页眉文字" />
+        </div>
         <div class="section-actions">
-          <el-switch v-model="headerInsertEnabledModel" size="small" />
-          <el-button size="small" aria-label="添加页眉规则" title="添加页眉规则" :disabled="!headerInsertEnabled" @click="addGroup">
-            <el-icon><Plus /></el-icon>
+          <el-button
+            size="small"
+            aria-label="添加页眉规则"
+            title="添加页眉规则"
+            plain
+            :disabled="!headerInsertEnabled"
+            @click="addGroup"
+          >
+            <el-icon><Plus /></el-icon><span>添加规则</span>
           </el-button>
           <UndoRedoButtons
             :can-undo="headerHistory.canUndo.value"
@@ -77,7 +86,12 @@
             </el-select>
           </div>
           <div v-if="headerMode === 'per_file'" class="rule-item">
-            <label>序号起始<HelpTooltip :content="headerNumberingSourceModel === 'default' ? '跟随全局，选择单独设置后可修改。' : '仅覆盖本规则。'" /></label>
+            <label
+              >序号起始<HelpTooltip
+                :content="
+                  headerNumberingSourceModel === 'default' ? '跟随全局，选择单独设置后可修改。' : '仅覆盖本规则。'
+                "
+            /></label>
             <el-input-number
               v-model="effectiveHeaderSeqStartModel"
               :min="0"
@@ -116,6 +130,9 @@
           <div class="rule-item">
             <label>页眉后缀</label><el-input v-model="headerSuffixModel" :disabled="headerMode === 'none'" />
           </div>
+        </div>
+        <div class="settings-group-label">文字与位置</div>
+        <div class="hf-section-grid">
           <TextPlacementFields
             prefix="页眉"
             :disabled="headerMode === 'none'"
@@ -157,11 +174,20 @@
 
     <section class="hf-section">
       <div class="rule-item section-label">
-        <strong>页脚文字</strong>
+        <div class="section-title">
+          <strong>页脚文字</strong
+          ><el-switch v-model="footerInsertEnabledModel" size="small" aria-label="启用页脚文字" />
+        </div>
         <div class="section-actions">
-          <el-switch v-model="footerInsertEnabledModel" size="small" />
-          <el-button size="small" aria-label="添加页脚规则" title="添加页脚规则" :disabled="!footerInsertEnabled" @click="addFooterTextGroup">
-            <el-icon><Plus /></el-icon>
+          <el-button
+            size="small"
+            aria-label="添加页脚规则"
+            title="添加页脚规则"
+            plain
+            :disabled="!footerInsertEnabled"
+            @click="addFooterTextGroup"
+          >
+            <el-icon><Plus /></el-icon><span>添加规则</span>
           </el-button>
           <UndoRedoButtons
             :can-undo="footerTextHistory.canUndo.value"
@@ -221,6 +247,9 @@
               </el-tooltip>
             </div>
           </div>
+        </div>
+        <div class="settings-group-label">文字与位置</div>
+        <div class="hf-section-grid">
           <TextPlacementFields
             prefix="页脚"
             v-model:align="footerTextAlignModel"
@@ -261,11 +290,19 @@
 
     <section class="hf-section">
       <div class="rule-item section-label">
-        <strong>页码</strong>
+        <div class="section-title">
+          <strong>页码</strong><el-switch v-model="pageNumberEnabledModel" size="small" aria-label="启用页码" />
+        </div>
         <div class="section-actions">
-          <el-switch v-model="pageNumberEnabledModel" size="small" />
-          <el-button size="small" aria-label="添加页码规则" title="添加页码规则" :disabled="!pageNumberEnabled" @click="addPageNumberGroup">
-            <el-icon><Plus /></el-icon>
+          <el-button
+            size="small"
+            aria-label="添加页码规则"
+            title="添加页码规则"
+            plain
+            :disabled="!pageNumberEnabled"
+            @click="addPageNumberGroup"
+          >
+            <el-icon><Plus /></el-icon><span>添加规则</span>
           </el-button>
           <UndoRedoButtons
             :can-undo="pageNumberHistory.canUndo.value"
@@ -301,6 +338,7 @@
             </el-button>
           </div>
         </div>
+        <div class="settings-group-label">编号与格式</div>
         <div class="hf-section-grid">
           <div class="rule-item">
             <label>页码起始<HelpTooltip content="总页数随起始页码自动偏移。" /></label>
@@ -308,59 +346,63 @@
           </div>
           <div class="rule-item">
             <label>连续方式</label>
-            <el-select v-model="pageSequenceModel">
-              <el-option label="全部文件连续" value="continuous" />
-              <el-option label="每个文件单独编号" value="per-file" />
-            </el-select>
+            <el-select v-model="pageSequenceModel"
+              ><el-option label="全部文件连续" value="continuous" /><el-option
+                label="每个文件单独编号"
+                value="per-file"
+            /></el-select>
           </div>
           <div class="rule-item">
             <label>总页数口径</label>
-            <el-select v-model="pageTotalModeModel">
-              <el-option label="合并后总页数" value="combined" />
-              <el-option label="单个文件页数" value="per-file" />
-            </el-select>
+            <el-select v-model="pageTotalModeModel"
+              ><el-option label="合并后总页数" value="combined" /><el-option label="单个文件页数" value="per-file"
+            /></el-select>
           </div>
           <div class="rule-item">
-            <label>页码样式</label>
-            <el-select v-model="pageNumberStyleModel">
-              <el-option
+            <label>数字样式</label>
+            <el-select v-model="pageNumberStyleModel"
+              ><el-option
                 v-for="style in PAGE_NUMBER_STYLES"
                 :key="style.value"
                 :value="style.value"
                 :label="`${style.label} · ${style.sample}`"
-              />
-            </el-select>
+            /></el-select>
           </div>
           <div class="rule-item">
-            <label>显示总页数</label>
-            <el-switch v-model="pageNumberShowTotalModel" active-text="开" inactive-text="关" />
+            <label>显示总页数</label
+            ><el-switch v-model="pageNumberShowTotalModel" active-text="开" inactive-text="关" />
           </div>
           <div class="rule-item">
             <label>页码格式</label>
-            <div class="template-presets">
-              <el-radio-group v-model="pageNumberPresetModel" size="small" @change="applyPresetTemplate">
-                <el-radio-button v-for="p in filteredPageNumberPresets" :key="p.value" :value="p.value">
-                  {{ p.label }}
-                </el-radio-button>
-              </el-radio-group>
-            </div>
+            <el-select v-model="pageNumberPresetModel" aria-label="页码格式" @change="applyPresetTemplate">
+              <el-option
+                v-for="preset in filteredPageNumberPresets"
+                :key="preset.value"
+                :value="preset.value"
+                :label="renderPageNumberTemplate(preset.value, 1, 35, pageNumberStyle)"
+              />
+              <el-option label="自定义格式" value="custom" />
+            </el-select>
+          </div>
+          <div v-if="pageNumberPresetModel === 'custom'" class="rule-item custom-format-field">
+            <label
+              >自定义格式<HelpTooltip
+                content="{page} 为当前页码，{total} 为总页数，{range} 为当前页码/总页数；数字按所选样式显示。"
+            /></label>
             <el-input
               v-model="pageNumberTemplateModel"
-              placeholder="例如 {page}/{total}、-{page}-"
-              size="small"
-              class="template-custom-input"
+              placeholder="例如 第{page}页，共{total}页"
+              aria-label="自定义页码格式"
             />
           </div>
+        </div>
+        <div class="settings-group-label">文字与位置</div>
+        <div class="hf-section-grid">
           <div class="rule-item">
-            <label>预览</label>
-            <span class="page-number-preview">{{ pageNumberPreviewText }}</span>
-          </div>
-          <div class="rule-item">
-            <label>页码区域</label>
-            <el-select v-model="pageNumberRegionModel">
-              <el-option label="页脚区域" value="footer" />
-              <el-option label="页眉区域" value="header" />
-            </el-select>
+            <label>页码区域</label
+            ><el-select v-model="pageNumberRegionModel"
+              ><el-option label="页脚区域" value="footer" /><el-option label="页眉区域" value="header"
+            /></el-select>
           </div>
           <TextPlacementFields
             prefix="页码"
@@ -374,23 +416,26 @@
             :margin-label="pageNumberRegion === 'header' ? '距顶' : '距底'"
           />
           <div class="rule-item">
-            <label>双面装订对开</label>
-            <el-select v-model="pageNumberDuplexModeModel">
-              <el-option label="单面固定（不镜像）" value="none" />
-              <el-option label="长边翻页（左右外侧对开）" value="long-edge" />
-              <el-option label="短边翻页（对开翻转）" value="short-edge" />
-            </el-select>
-          </div>
-          <div v-if="pageNumberDuplexModeModel !== 'none'" class="duplex-page-hint">
-            长边翻页时偶数页自动翻转至对开外侧，防止页码装订进装订中缝
-          </div>
-          <div class="rule-item">
-            <label>分段与例外</label>
-            <el-button @click="$emit('editPageNumberRules')">
-              设置规则{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount} 条）` : '' }}
-            </el-button>
+            <label
+              >双面装订<HelpTooltip
+                content="根据所选翻页方式调整奇偶页页码的位置；请与实际打印的翻页设置保持一致。" /></label
+            ><el-select v-model="pageNumberDuplexModeModel"
+              ><el-option label="单面固定（不镜像）" value="none" /><el-option
+                label="长边翻页（左右外侧对开）"
+                value="long-edge" /><el-option label="短边翻页（对开翻转）" value="short-edge"
+            /></el-select>
           </div>
         </div>
+        <section class="page-number-sample" aria-label="页码格式预览">
+          <div class="sample-heading">
+            <span>格式预览</span
+            ><el-button v-if="showRuleEditor" size="small" text @click="$emit('editPageNumberRules')"
+              >分段与例外{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount}）` : '' }}</el-button
+            >
+          </div>
+          <output class="page-number-preview" aria-live="polite">{{ pageNumberPreviewText }}</output>
+          <span class="sample-caption">当前编号示例，纸面位置以页面预览为准</span>
+        </section>
       </template>
     </section>
   </div>
@@ -398,7 +443,8 @@
 
 <script setup>
 import HelpTooltip from '../../components/HelpTooltip.vue'
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { pageNumberPresets, templateForTotal, usesPageTotal } from '../pageNumberFormats.js'
 import { Plus, InfoFilled, ArrowRight } from '@element-plus/icons-vue'
 import TextPlacementFields from './TextPlacementFields.vue'
 import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
@@ -413,19 +459,6 @@ function debounce(fn, ms) {
   }
 }
 
-const PRESETS_WITH_TOTAL = [
-  { value: '{page}/{total}', label: '1/35' },
-  { value: '第{page}页，共{total}页', label: '第1页，共35页' },
-  { value: '{page} of {total}', label: '1 of 35' },
-]
-const PRESETS_NO_TOTAL = [
-  { value: '{page}', label: '1' },
-  { value: '-{page}-', label: '-1-' },
-  { value: '— {page} —', label: '— 1 —' },
-  { value: '第{page}页', label: '第1页' },
-  { value: '（{page}）', label: '（1）' },
-]
-
 const MODE_LABELS = {
   filename: '文件名',
   per_file: '按列表名称',
@@ -433,6 +466,7 @@ const MODE_LABELS = {
 }
 
 const props = defineProps({
+  showRuleEditor: { type: Boolean, default: true },
   headerGroups: { type: Array, required: true },
   selectedHeaderGroupId: { type: String, required: true },
   headerInsertEnabled: { type: Boolean, default: true },
@@ -776,39 +810,48 @@ const pageTotalModeModel = computed({
   get: () => selectedPageNumberGroup.value?.numbering?.totalMode || 'combined',
   set: (value) => updateGroupNumbering('pageNumber', { totalMode: value }),
 })
+const customFormatEditing = ref(false)
+const filteredPageNumberPresets = computed(() => pageNumberPresets(props.pageNumberShowTotal))
 const pageNumberPresetModel = computed({
-  get() {
-    const tpl = props.pageNumberTemplate
-    const presets = props.pageNumberShowTotal ? PRESETS_WITH_TOTAL : PRESETS_NO_TOTAL
-    return presets.some((p) => p.value === tpl) ? tpl : 'custom'
+  get: () =>
+    customFormatEditing.value || !filteredPageNumberPresets.value.some((p) => p.value === props.pageNumberTemplate)
+      ? 'custom'
+      : props.pageNumberTemplate,
+  set: (value) => {
+    customFormatEditing.value = value === 'custom'
   },
-  set() {},
 })
-const filteredPageNumberPresets = computed(() => (props.pageNumberShowTotal ? PRESETS_WITH_TOTAL : PRESETS_NO_TOTAL))
-function applyPresetTemplate(val) {
-  if (val && val !== 'custom') pageNumberTemplateModel.value = val
+function applyPresetTemplate(value) {
+  if (value && value !== 'custom') pageNumberTemplateModel.value = value
 }
-const pageNumberPreviewText = computed(() => {
-  let tpl = props.pageNumberTemplate || '{page}'
-  if (!props.pageNumberShowTotal) tpl = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '')
-  return renderPageNumberTemplate(tpl, props.pageNumberSamplePage, props.pageNumberSampleTotal, props.pageNumberStyle)
-})
-
-// Sync template when showTotal toggles
+watch(
+  () => props.selectedPageNumberGroupId,
+  () => {
+    customFormatEditing.value = false
+  },
+)
 let lastTemplateWithTotal = ''
+const pageNumberPreviewText = computed(() =>
+  renderPageNumberTemplate(
+    templateForTotal(props.pageNumberTemplate || '{page}', props.pageNumberShowTotal, lastTemplateWithTotal),
+    props.pageNumberSamplePage,
+    props.pageNumberSampleTotal,
+    props.pageNumberStyle,
+  ),
+)
 watch(
   () => props.pageNumberShowTotal,
   (showTotal) => {
-    const tpl = props.pageNumberTemplate || '{page}/{total}'
-    if (!showTotal && tpl.includes('{total}')) {
-      lastTemplateWithTotal = tpl
-      const cleaned = tpl.replaceAll('{total}', '').replaceAll('//', '/').replace(/\/+$/, '').replace(/^\//, '')
-      pageNumberTemplateModel.value = cleaned || '{page}'
-    } else if (showTotal && !tpl.includes('{total}')) {
-      pageNumberTemplateModel.value = lastTemplateWithTotal || '{page}/{total}'
-    }
+    const template = props.pageNumberTemplate || '{page}'
+    if (!showTotal && usesPageTotal(template)) lastTemplateWithTotal = template
+    pageNumberTemplateModel.value = templateForTotal(template, showTotal, lastTemplateWithTotal)
   },
 )
+watch(() => props.pageNumberTemplate, template => {
+  if (customFormatEditing.value && usesPageTotal(template) !== props.pageNumberShowTotal) {
+    pageNumberShowTotalModel.value = usesPageTotal(template)
+  }
+})
 
 // Overlap detection
 const overlapWarnings = computed(() => {
@@ -966,6 +1009,48 @@ function removePageNumberGroup(id) {
 </script>
 
 <style scoped>
+.section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.settings-group-label {
+  margin-top: 5px;
+  color: var(--docsy-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.custom-format-field {
+  grid-column: 1 / -1;
+}
+.page-number-sample {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  margin-top: 6px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-muted);
+}
+.sample-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--docsy-text-muted);
+  font-size: 11px;
+}
+.sample-caption {
+  color: var(--docsy-text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+.page-number-sample .page-number-preview {
+  display: block;
+  padding: 6px;
+  background: transparent;
+  font-size: 20px;
+  text-align: center;
+}
 /* 根容器：纵向排列三个区块，区块间留固定间距 */
 .hf-rule-fields {
   display: flex;
@@ -977,11 +1062,15 @@ function removePageNumberGroup(id) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
 }
 /* 区块内部网格：v-if 行增删只重排本区块，不影响其它区块 */
 .hf-section-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 238px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 6px 12px;
   align-items: start;
 }
@@ -1009,7 +1098,7 @@ function removePageNumberGroup(id) {
   justify-content: space-between;
   margin-top: 4px;
   padding-top: 8px;
-  border-top: 1px solid var(--docsy-border-subtle);
+  border-top: 0;
 }
 .section-label strong {
   font-size: 12px;
@@ -1125,7 +1214,7 @@ function removePageNumberGroup(id) {
   color: var(--docsy-primary);
   background: color-mix(in srgb, var(--docsy-primary) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--docsy-primary) 18%, transparent);
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   padding: 4px 8px;
   line-height: 1.4;
   margin-top: -2px;
@@ -1133,8 +1222,20 @@ function removePageNumberGroup(id) {
 </style>
 
 <style scoped>
-.hf-section-grid :deep(.rule-item > :is(.el-input, .el-select, .el-input-number)) { width: 100%; min-width: 0; }
-.hf-section-grid :deep(.rule-item > label) { display: inline-flex; align-items: center; }
-.section-label { min-height: 28px; margin-top: 0; padding-top: 6px; }
-.hf-section { gap: 6px; }
+.hf-section-grid :deep(.rule-item > :is(.el-input, .el-select, .el-input-number)) {
+  width: 100%;
+  min-width: 0;
+}
+.hf-section-grid :deep(.rule-item > label) {
+  display: inline-flex;
+  align-items: center;
+}
+.section-label {
+  min-height: 28px;
+  margin-top: 0;
+  padding-top: 6px;
+}
+.hf-section {
+  gap: 6px;
+}
 </style>

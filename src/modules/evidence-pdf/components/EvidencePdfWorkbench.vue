@@ -244,8 +244,9 @@
       <div v-if="showProcessingControls" class="rule-block">
         <div class="block-title-row">
           <div class="block-title">插入新页眉、页脚、页码</div>
+          <el-switch v-model="insertHeaderFooterEnabled" active-text="启用" inactive-text="关闭" />
         </div>
-        <div class="hf-control-bar">
+        <div v-if="insertHeaderFooterEnabled" class="hf-control-bar">
           <div class="hf-control-left">
             <span class="hf-control-label">证据编号起始</span>
             <el-input-number
@@ -269,13 +270,13 @@
             </el-button>
           </div>
           <div class="hf-control-right">
-            <el-checkbox v-model="globalApplyEnabled" size="small">全局应用</el-checkbox>
-            <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
+            <el-checkbox v-model="globalApplyEnabled" size="small">应用到全部证据</el-checkbox>
           </div>
         </div>
         <HeaderFooterRuleFields
           v-if="insertHeaderFooterEnabled"
           ref="inlineHfFieldsRef"
+          :show-rule-editor="false"
           v-model:header-groups="headerGroupsModel"
           v-model:selected-header-group-id="selectedHeaderGroupId"
           v-model:header-mode="headerMode"
@@ -1223,7 +1224,7 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-dialog'
-import { listen } from '@tauri-apps/api/event'
+import { listenDesktop as listen } from '../../../core/desktopRuntime.js'
 import { log as diagLog } from '../../../shared/diagnostics.js'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import NextPageThumbnail from '../../../shared/pdf-tools/components/NextPageThumbnail.vue'

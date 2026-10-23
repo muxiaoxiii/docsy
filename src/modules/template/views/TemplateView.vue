@@ -1,6 +1,6 @@
 <template>
   <div class="template-view">
-    <el-tabs v-model="activeTab" :tab-position="tabPosition" class="template-tabs">
+    <el-tabs v-model="activeTab" v-motion-tabs="activeTab" :tab-position="tabPosition" class="template-tabs">
       <el-tab-pane label="制作模板" name="build">
         <ToolWorkspaceShell title="制作模板" description="导入标黄 Word，确认字段后保存到模板库。">
         <TemplateBuildTab

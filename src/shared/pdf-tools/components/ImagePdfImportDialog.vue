@@ -694,7 +694,7 @@ defineExpose({ open })
 }
 .page-select {
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--docsy-radius);
   padding: 3px 0;
   background: transparent;
   color: var(--docsy-text-strong);
@@ -705,7 +705,7 @@ defineExpose({ open })
 }
 .page-drop-zone {
   border: 1px dashed var(--docsy-border-strong);
-  border-radius: 6px;
+  border-radius: var(--docsy-radius);
   padding: 6px 4px;
   color: var(--docsy-text-muted);
   font-size: 11px;

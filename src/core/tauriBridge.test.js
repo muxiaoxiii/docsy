@@ -2,8 +2,14 @@ import { describe, it, expect, vi } from 'vitest'
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 import { invoke } from '@tauri-apps/api/core'
 import { userFacingError, tauriCallQuiet } from './tauriBridge.js'
+import { DESKTOP_ONLY_MESSAGE } from './desktopRuntime.js'
 
 describe('Tauri Bridge', () => {
+  it('explains missing browser runtime instead of exposing the invoke exception', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new TypeError("Cannot read properties of undefined (reading 'invoke')"))
+    expect(await tauriCallQuiet('render_pdf_preview')).toEqual({ ok: false, error: DESKTOP_ONLY_MESSAGE })
+    expect(userFacingError("Cannot read properties of undefined (reading 'transformCallback')")).toBe(DESKTOP_ONLY_MESSAGE)
+  })
   it('shows readable structured errors for quiet preview calls', async () => {
     for (const error of [
       { kind: 'unknown', message: '图片读取失败' },

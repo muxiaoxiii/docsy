@@ -310,7 +310,7 @@ import { ref, reactive, computed, onBeforeUnmount, onDeactivated, onActivated, o
 import { useRouter } from 'vue-router'
 import { tauriCallQuiet, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { open } from '@tauri-apps/plugin-dialog'
-import { listen } from '@tauri-apps/api/event'
+import { listenDesktop as listen } from '../../../core/desktopRuntime.js'
 import { CircleCheckFilled, WarningFilled, VideoCamera, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
