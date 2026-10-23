@@ -11,11 +11,11 @@ Docsy 官方主页部署在 **https://docsy.muxiaoxi.top**，基于 **GitHub Pag
    - 自动编译构建 macOS（Apple Silicon）、Windows x64 与 Windows x86 安装包；
    - 自动在 GitHub Releases 发布新版本并上传安装包及 SHA256 校验和。
 2. **部署官网**（`.github/workflows/deploy-pages.yml`）：
-   - 发布安装包后，通过 `workflow_dispatch` 明确触发 `main` 分支官网流程；不依赖旧默认分支的 `workflow_run` 配置；
+   - 发布安装包后，通过 `workflow_dispatch` 明确触发 `main` 分支官网流程；官网始终从 `main` 部署；
    - 修改 `main` 上的 `site/**`、更新日志或官网流程，也会独立触发部署，无需重新打包桌面应用；
    - 从 GitHub Releases API 读取最新的已发布版本与下载链接；
    - 运行 `site/scripts/build-data.py` 刷新 `releases.json`、`changelog.json` 和相关下载信息；
-   - 下载区与回退数据只使用已发布版本；更新日志与截图分别刷新，单项加载失败不会阻塞其他内容；
+   - 旧版本归档为草稿，公开仅保留 1.1.2；下载区与回退数据只使用已发布版本；更新日志与截图分别刷新，单项加载失败不会阻塞其他内容；
    - 自动部署发布到 GitHub Pages（`docsy.muxiaoxi.top`）。
 
 ---

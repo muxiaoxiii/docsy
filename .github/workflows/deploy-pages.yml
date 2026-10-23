@@ -8,9 +8,6 @@ on:
       - 'CHANGELOG.md'
       - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
-  workflow_run:
-    workflows: ['Build desktop packages']
-    types: [completed]
 
 permissions:
   contents: read
@@ -23,7 +20,6 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -38,7 +34,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api 'repos/muxiaoxiii/docsy/releases?per_page=12' > /tmp/releases.json
+          gh api 'repos/muxiaoxiii/docsy/releases?per_page=100' --jq '[.[] | select(.draft == false and .prerelease == false)]' > /tmp/releases.json
           python3 site/scripts/build-data.py \
             --api-json /tmp/releases.json \
             --assets-dir site/public/downloads \
