@@ -1546,3 +1546,11 @@ a:hover {
   .utility-grid { grid-template-columns: 1fr; }
   .feature-detail { padding-bottom: 36px; }
 }
+
+.release-page-link { display: block; width: fit-content; margin: 22px auto 0; font-size: 14px; }
+@media (max-width: 900px) {
+  html { scroll-padding-top: 126px; }
+  .nav-inner { height: auto; min-height: 60px; flex-wrap: wrap; gap: 4px 14px; padding: 10px 16px 6px; }
+  .nav-links { display: flex; order: 3; flex: 0 0 100%; margin-left: 0; overflow-x: auto; white-space: nowrap; padding-bottom: 4px; }
+  .nav-links a { flex-shrink: 0; padding: 6px 10px; font-size: 13px; }
+}

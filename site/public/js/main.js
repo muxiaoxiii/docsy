@@ -475,14 +475,12 @@
       setText('dl-mac-size', formatSize(mac.size));
       setText('dl-mac-sha', mac.sha256 || '见 GitHub Releases 发布页');
       setAttr('dl-mac-link', 'href', macDownload || '#');
-      setAttr('dl-mac-github', 'href', mac.github_url);
     }
     if (win) {
       setText('dl-win-name', win.name);
       setText('dl-win-size', formatSize(win.size));
       setText('dl-win-sha', win.sha256 || '见 GitHub Releases 发布页');
       setAttr('dl-win-link', 'href', winDownload || '#');
-      setAttr('dl-win-github', 'href', win.github_url);
     }
 
     /* Hero CTA 也指向最新版 */
@@ -499,6 +497,7 @@
       if (tag) tag.hidden = false;
     }
 
+    setAttr('dl-release-page', 'href', FALLBACK.githubUrl + '/tag/' + (latest.tag || 'v' + latest.version));
     renderHistory(releases);
   }
 
@@ -515,7 +514,7 @@
         var asset = release.assets[j];
         links.push(
           '<a class="h-dl" href="' + escapeHtml(asset.url || asset.github_url) + '">' +
-            (asset.platform === 'macos' ? 'macOS' : asset.platform === 'windows' ? 'Windows' : asset.platform) +
+            (asset.platform === 'macos' ? 'macOS' : asset.platform === 'windows' ? 'Windows 64 位' : asset.platform === 'windows-x86' ? 'Windows 32 位' : asset.platform) +
             '</a>'
         );
       }
