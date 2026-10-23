@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-09-24T02:18:41Z",
+  "generated_at": "2026-10-23T01:34:41Z",
   "github_url": "https://github.com/muxiaoxiii/docsy/releases",
   "tools": {
     "qpdf": {
       "label": "qpdf",
-      "purpose": "PDF 合并、拆分、叠加和结构处理",
+      "purpose": "复杂 PDF 兼容回退与部分无损优化；基础合并拆分已内置",
       "page": "https://github.com/qpdf/qpdf/releases",
       "entries": [
         {

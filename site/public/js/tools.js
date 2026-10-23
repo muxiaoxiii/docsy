@@ -6,7 +6,7 @@
     tools: {
       qpdf: {
         label: 'qpdf',
-        purpose: 'PDF 合并、拆分、叠加和结构处理',
+        purpose: '复杂 PDF 兼容回退与部分无损优化；基础合并拆分已内置',
         page: 'https://github.com/qpdf/qpdf/releases',
         entries: [
           {

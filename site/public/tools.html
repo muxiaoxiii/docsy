@@ -6,12 +6,15 @@
   <title>外部工具下载 · Docsy</title>
   <meta
     name="description"
-    content="Docsy 依赖的外部工具（qpdf、Poppler、FFmpeg）官方下载地址与安装指引：macOS 用 Homebrew，Windows 用官方压缩包，附 SHA256 校验值。"
+    content="Docsy 可选组件的官方下载与安装说明：qpdf 处理复杂 PDF，Poppler 提供 PDF 预览，FFmpeg 支持视频抽帧。"
   />
   <meta property="og:title" content="外部工具下载 · Docsy" />
   <meta property="og:type" content="website" />
+  <link rel="canonical" href="https://docsy.muxiaoxi.top/tools.html" />
+  <meta property="og:image" content="https://docsy.muxiaoxi.top/assets/screenshots/shot-convert.png?v=1.1.2" />
+  <meta property="og:image:alt" content="Docsy Markdown 转换工作区" />
   <link rel="icon" type="image/png" href="assets/favicon.png" />
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/style.css?v=1.1.2-site" />
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -39,12 +42,10 @@
   <main id="main">
     <section class="page-head">
       <div class="page-head-inner reveal">
-        <p class="hero-badge">Docsy 外部依赖</p>
+        <p class="hero-badge">按需安装组件</p>
         <h1>外部工具下载</h1>
         <p class="page-head-sub">
-          qpdf、Poppler、FFmpeg 是 Docsy 处理 PDF 和视频时使用的引擎。
-          按下面的对照表选择你系统的版本，从官方源下载；也可以直接在 Docsy
-          设置页一键安装。
+          基础 PDF 合并与拆分已内置。PDF 预览需要 Poppler，视频抽帧需要 FFmpeg；qpdf 用于复杂 PDF 的兼容处理和部分无损优化。可先在 Docsy 设置页检测，按需安装。
         </p>
       </div>
     </section>
@@ -73,15 +74,15 @@
         <ol class="guide-steps">
           <li>
             <strong>方式一（推荐）：系统安装</strong>
-            <p>macOS 用 Homebrew：<code class="code-inline">brew install qpdf poppler ffmpeg</code>，Docsy 会自动检测。Windows 可用 winget 或官方安装包。</p>
+            <p>macOS 用 Homebrew：<code class="code-inline">brew install qpdf poppler ffmpeg</code>，Docsy 会自动检测。Windows 可通过 Docsy 设置页下载并安装组件。</p>
           </li>
           <li>
             <strong>方式二：Docsy 一键安装</strong>
-            <p>打开 Docsy 设置 → 外部工具状态，工具未安装时点击「下载安装到 Docsy」，由 Docsy 下载、校验并安装到工具目录。</p>
+            <p>Windows：打开设置 → 外部工具状态，下载、校验并安装到 Docsy 工具目录。macOS：使用「终端安装（Homebrew）」安装到系统。</p>
           </li>
           <li>
             <strong>方式三：本地安装（离线）</strong>
-            <p>下载本页的 zip 包，在设置页点击「本地安装」选择该文件；或解压后把可执行文件放入 Docsy 工具目录（设置页可见路径）。</p>
+            <p>在设置页点击「本地安装」，选择适用于当前系统的工具包；请勿把 Windows 压缩包用于 macOS。</p>
           </li>
         </ol>
       </div>
@@ -89,8 +90,7 @@
       <div class="install-guide reveal">
         <h2>文档转换工具（Word / WPS / LibreOffice）</h2>
         <p class="guide-note">
-          Word 文件转 PDF 时，Docsy 优先使用 Microsoft Word，失败后使用 LibreOffice。
-          这些是完整办公软件，请从官方渠道安装：
+          Windows 按 Microsoft Word → WPS → LibreOffice 的顺序尝试转换。macOS 使用 Microsoft Word，失败后尝试 LibreOffice；暂不自动调用 macOS WPS。自动转换失败时，可在办公软件中手动导出 PDF，再添加到 Docsy。请从官方渠道安装办公软件：
         </p>
         <ul class="guide-links">
           <li>Microsoft Word：<a href="https://www.microsoft.com/microsoft-365/word" target="_blank" rel="noopener">microsoft.com</a></li>
@@ -119,6 +119,6 @@
     </div>
   </footer>
 
-  <script src="js/tools.js"></script>
+  <script src="js/tools.js?v=1.1.2-site"></script>
 </body>
 </html>

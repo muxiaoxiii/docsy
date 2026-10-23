@@ -1,6 +1,12 @@
 name: Deploy Docsy Site to GitHub Pages
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'CHANGELOG.md'
+      - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
   workflow_run:
     workflows: ['Build desktop packages']
@@ -25,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Refresh published download data
         env:
@@ -38,6 +46,11 @@ jobs:
             --out site/public/data \
             --remote-only \
             --sync-fallback site/public/js/main.js
+
+      - name: Validate site data
+        run: |
+          python3 -m unittest discover -s site/scripts -p 'test_*.py'
+          node --test site/scripts/test-site-runtime.mjs
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

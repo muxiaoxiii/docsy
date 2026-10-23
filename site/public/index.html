@@ -4,19 +4,22 @@
   <meta name="docsy-source-version" content="1.1.2">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Docsy · 你的文档处理百宝箱</title>
+  <title>Docsy · 本地文档转换与证据整理</title>
   <meta
     name="description"
-    content="Docsy 是一款完全本地运行的文档处理桌面工具：PDF 合并拆分、证据整理、文书模板、图片排版、视频抽帧，文件绝不上传云端。"
+    content="Docsy 是免费的本地文档工具：Markdown 转 Word、Excel、PPT 与 HTML，PDF、Word 和图片合并为证据册，另有文书模板、图片排版与视频抽帧。"
   />
-  <meta property="og:title" content="Docsy · 你的文档处理百宝箱" />
+  <meta property="og:title" content="Docsy · 本地文档转换与证据整理" />
   <meta
     property="og:description"
-    content="PDF 合并拆分、证据整理、文书模板、图片排版，全部本地完成，免费开源。"
+    content="Markdown 转 Office、证据合并与拆分、文书模板、图片排版与视频抽帧。免费开源，本地处理。"
   />
   <meta property="og:type" content="website" />
+  <link rel="canonical" href="https://docsy.muxiaoxi.top/" />
+  <meta property="og:image" content="https://docsy.muxiaoxi.top/assets/screenshots/shot-convert.png?v=1.1.2" />
+  <meta property="og:image:alt" content="Docsy Markdown 转换工作区" />
   <link rel="icon" type="image/png" href="assets/favicon.png" />
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/style.css?v=1.1.2-site" />
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -46,14 +49,14 @@
     <section class="hero" id="top">
       <div class="hero-inner">
         <div class="hero-copy">
-          <p class="hero-badge">MIT 开源 · 完全本地处理</p>
-          <h1>你的文档<span class="hero-accent">处理百宝箱</span></h1>
+          <p class="hero-badge">免费开源 · 本地处理</p>
+          <h1>文档转换与<span class="hero-accent">证据整理</span></h1>
           <p class="hero-sub">
-            PDF 合并拆分、证据整理、文书模板、图片排版，全部在本地完成，文件绝不上传云端。
+            把 Markdown 转成 Office 文档，把 PDF、Word 和图片整理成证据册。文档处理在自己的电脑上完成。
           </p>
           <div class="hero-cta">
             <a class="btn btn-primary" id="cta-macos" href="https://github.com/muxiaoxiii/docsy/releases" data-platform="macos">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.286 7.008c-3.216 0 -4.286 3.23 -4.286 5.92c0 3.229 2.143 8.072 4.286 8.072c1.165 -.05 1.799 -.538 3.214 -.538c1.406 0 1.607 .538 3.214 .538s2.326 -1.074 3.214 -1.074c1.28 0 1.895 1.074 3.214 1.074c1.406 0 2.326 -.538 3.214 -.538c1.58 -.074 3.213 -4.736 3.213 -4.736c-3.214 -.215 -4.016 -3.5 -1.071 -4.986" /><path d="M14.292 3.258c.577 -.748 1.605 -1.346 2.444 -1.367c.128 1.088 -.342 2.15 -1.051 2.89c-.697 .752 -1.816 1.325 -2.635 1.19c-.141 -1.026 .378 -2.081 1.242 -2.713" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.286 7.008c-3.216 0 -4.286 3.23 -4.286 5.92c0 3.229 2.143 8.072 4.286 8.072c1.165 -.05 1.799 -.538 3.214 -.538c1.406 0 1.607 .538 3.214 .538s4.286 -3.229 4.286 -5.381c-.03 -.011 -2.649 -.434 -2.679 -3.23c-.02 -2.335 2.589 -3.179 2.679 -3.228c-1.096 -1.606 -3.162 -2.113 -3.75 -2.153c-1.535 -.12 -3.032 1.077 -3.75 1.077c-.729 0 -2.036 -1.077 -3.214 -1.077" /><path d="M12 4a2 2 0 0 0 2 -2a2 2 0 0 0 -2 2" /></svg>
               下载 macOS 版
             </a>
             <a class="btn btn-secondary" id="cta-windows" href="https://github.com/muxiaoxiii/docsy/releases" data-platform="windows">
@@ -80,7 +83,7 @@
           </span>
           <div class="trust-text">
             <strong>本地处理</strong>
-            <span>所有操作都在你的电脑上完成</span>
+            <span>文档转换与整理在本机完成</span>
           </div>
         </div>
         <div class="trust-item">
@@ -88,8 +91,8 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06" /><path d="M15 19l2 2l4 -4" /></svg>
           </span>
           <div class="trust-text">
-            <strong>绝不上传</strong>
-            <span>文件不离开你的设备</span>
+            <strong>无需上传文档</strong>
+            <span>无需把材料交给在线转换网站</span>
           </div>
         </div>
         <div class="trust-item">
@@ -107,66 +110,45 @@
     <!-- ============ 功能 ============ -->
     <section class="features" id="features">
       <div class="section-head reveal">
-        <h2>一个工具，搞定常见文档活</h2>
-        <p>六个模块覆盖高频场景，操作直观，所见即所得。</p>
+        <h2>从一段 Markdown，到一册证据</h2>
+        <p>转换、编号、排版与拆分，覆盖常用文档工作。</p>
       </div>
       <div class="bento">
         <article class="bento-cell bento-lg reveal">
-          <span class="bento-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a1 1 0 0 1 1 -1h14a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-14a1 1 0 0 1 -1 -1l0 -2" /><path d="M4 13a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -6" /><path d="M14 12l6 0" /><path d="M14 16l6 0" /><path d="M14 20l6 0" /></svg>
-          </span>
-          <h3>文书模板</h3>
-          <p>更强大的 Word「邮件合并」：标黄即建模，支持 Excel 数据批量合并导出。</p>
-          <ul class="bento-points">
-            <li>无需复杂域代码，Word 标黄直接建模</li>
-            <li>Excel 批量合并，空项智能清理语病</li>
-          </ul>
-        </article>
-
-        <article class="bento-cell bento-lg reveal">
-          <span class="bento-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /><path d="M9 9l1 0" /><path d="M9 13l6 0" /><path d="M9 17l6 0" /></svg>
-          </span>
-          <h3>证据处理</h3>
-          <p>分项证据合并、合并证据拆分与证据扫描；多份 PDF 按文件分组核对，逐份处理。</p>
-          <ul class="bento-points">
-            <li>三层检测，自动识别页眉页脚</li>
-            <li>页码样式自由组合，连续编号</li>
-          </ul>
-        </article>
-
-        <article class="bento-cell bento-md reveal">
-          <span class="bento-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M12 10.5v1.5" /><path d="M12 16v1.5" /><path d="M15.031 12.25l-1.299 .75" /><path d="M10.268 15l-1.3 .75" /><path d="M15 15.803l-1.285 -.773" /><path d="M10.285 12.97l-1.285 -.773" /><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /></svg>
-          </span>
-          <h3>PDF 工具</h3>
-          <p>解锁、合并、拆分、压缩、提取页面，拖拽排序，处理完原样保留。</p>
-        </article>
-
-        <article class="bento-cell bento-md reveal">
-          <span class="bento-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 8h.01" /><path d="M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12" /><path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5" /><path d="M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3" /></svg>
-          </span>
-          <h3>图片排版</h3>
-          <p>照片、截图、扫描件批量排成整齐的 A4 文档，PDF 与 DOCX 双格式输出。</p>
-        </article>
-
-        <article class="bento-cell bento-md reveal">
-          <span class="bento-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4" /><path d="M3 8a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2l0 -8" /></svg>
-          </span>
-          <h3>视频抽帧</h3>
-          <p>按时间范围或固定帧率截取画面，时间戳水印叠加，取证必备。</p>
-        </article>
-
-        <article class="bento-cell bento-wide reveal">
-          <span class="bento-icon">
+<span class="bento-icon">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-10" /><path d="M7 15v-6l2 2l2 -2v6" /><path d="M14 13l2 2l2 -2m-2 2v-6" /></svg>
           </span>
-          <div class="bento-wide-body">
-            <h3>Markdown 与 Office 互转</h3>
-            <p>Markdown、Word 与 PDF 文本层双向转换，标题、表格、图片语义完整保留。</p>
-          </div>
+<h3>Markdown 转换</h3><p>粘贴文字或批量导入文件，生成 Word、Excel、PowerPoint 或 HTML。</p><ul class="bento-points"><li>Word 支持的公式可编辑，Mermaid 图以图片嵌入</li><li>Office / HTML 可提取为 Markdown；PDF 仅提取已有文本层</li></ul>
+        </article>
+        <article class="bento-cell bento-lg reveal">
+<span class="bento-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /><path d="M9 9l1 0" /><path d="M9 13l6 0" /><path d="M9 17l6 0" /></svg>
+          </span>
+<h3>证据整理</h3><p>PDF、Word 和图片一起编排，添加页眉页脚与连续页码，合并成可打印的证据册。</p><ul class="bento-points"><li>图片可预览、旋转、缩放与手动裁剪后排入 A4</li><li>按文件夹分别合并，或合成一份；拆分前核对页段</li></ul>
+        </article>
+        <article class="bento-cell bento-md reveal">
+<span class="bento-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a1 1 0 0 1 1 -1h14a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-14a1 1 0 0 1 -1 -1l0 -2" /><path d="M4 13a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -6" /><path d="M14 12l6 0" /><path d="M14 16l6 0" /><path d="M14 20l6 0" /></svg>
+          </span>
+<h3>文书模板</h3><p>在 Word 中标黄变量，建立填报模板；支持 Excel 数据批量生成文书。</p>
+        </article>
+        <article class="bento-cell bento-md reveal">
+<span class="bento-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M12 10.5v1.5" /><path d="M12 16v1.5" /><path d="M15.031 12.25l-1.299 .75" /><path d="M10.268 15l-1.3 .75" /><path d="M15 15.803l-1.285 -.773" /><path d="M10.285 12.97l-1.285 -.773" /><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /></svg>
+          </span>
+<h3>PDF 工具</h3><p>合并、拆分、提取页面、压缩、移除编辑限制与防复制处理；输出另存，保留原件。</p>
+        </article>
+        <article class="bento-cell bento-md reveal">
+<span class="bento-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 8h.01" /><path d="M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12" /><path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5" /><path d="M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3" /></svg>
+          </span>
+<h3>图片排版</h3><p>把照片、截图与扫描件排入 A4，调整行列、顺序、图注与边距，导出 PDF 或 DOCX。</p>
+        </article>
+        <article class="bento-cell bento-md reveal">
+<span class="bento-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4" /><path d="M3 8a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2l0 -8" /></svg>
+          </span>
+<h3>视频抽帧</h3><p>按时间范围、频率或间隔提取画面，筛选所需图片，按需添加时间戳水印。</p>
         </article>
       </div>
     </section>
@@ -175,72 +157,16 @@
     <section class="screenshots" id="screenshots">
       <div class="section-head reveal">
         <h2>软件截图</h2>
-        <p>界面一览，直观感受 Docsy 的强大功能。</p>
+        <p>当前版本界面示例。</p>
       </div>
       <div class="shot-grid" id="shot-grid">
-        <div class="shot-item shot-featured reveal">
-          <div class="shot-img">
-            <img src="assets/screenshots/home.png" alt="Docsy 主页工作台" loading="lazy" />
-          </div>
-          <div class="shot-caption">
-            <h4>主页工作台</h4>
-            <p>六大功能模块一目了然；Doclet 用招呼、等待、核对、工作与完成动态陪伴操作，支持点击互动和气泡提示。</p>
-          </div>
-        </div>
-        <div class="shot-item reveal">
-          <div class="shot-img">
-            <img src="assets/screenshots/shot-template.png" alt="文书模板功能" loading="lazy" />
-          </div>
-          <div class="shot-caption">
-            <h4>文书模板</h4>
-            <p>Word 标黄即建模板，支持交互填报与 Excel 批量合并导出，空项自动清理标点语病</p>
-          </div>
-        </div>
-        <div class="shot-item reveal">
-          <div class="shot-img">
-            <img src="assets/screenshots/shot-evidence.png" alt="证据处理功能" loading="lazy" />
-          </div>
-          <div class="shot-caption">
-            <h4>证据处理</h4>
-            <p>多份合并 PDF 逐份检测、核对与拆分，页段内联展示；可选清除标准页眉页脚，原件保持不变。</p>
-          </div>
-        </div>
-        <div class="shot-item reveal">
-          <div class="shot-img">
-            <img src="assets/screenshots/shot-pdf-tools.png" alt="PDF工具功能" loading="lazy" />
-          </div>
-          <div class="shot-caption">
-            <h4>PDF 工具</h4>
-            <p>解锁、合并、拆分、压缩、提取页面，拖拽排序，处理完原样保留</p>
-          </div>
-        </div>
-        <div class="shot-item reveal">
-          <div class="shot-img">
-            <img src="assets/screenshots/shot-image.png" alt="图片排版功能" loading="lazy" />
-          </div>
-          <div class="shot-caption">
-            <h4>图片排版</h4>
-            <p>照片、截图、扫描件批量排成整齐的 A4 文档，PDF 与 DOCX 双格式输出</p>
-          </div>
-        </div>
-        <div class="shot-item reveal">
-          <div class="shot-img">
-            <img src="assets/screenshots/shot-video.png" alt="视频抽帧功能" loading="lazy" />
-          </div>
-          <div class="shot-caption">
-            <h4>视频抽帧</h4>
-            <p>按时间范围或固定帧率截取画面，时间戳水印叠加，取证必备</p>
-          </div>
-        </div>
-        <div class="shot-item reveal">
-          <div class="shot-img">
-            <img src="assets/screenshots/shot-convert.png" alt="文档转换功能" loading="lazy" />
-          </div>
-          <div class="shot-caption">
-            <h4>文档转换</h4>
-            <p>Markdown、Office 与 PDF 互转，标题、表格、图片语义完整保留</p>
-          </div>
-        </div>
+<div class="shot-item shot-featured reveal"><div class="shot-img"><img src="assets/screenshots/shot-convert.png?v=1.1.2" alt="Docsy Markdown 转换界面" loading="lazy" width="1280" height="720" /></div><div class="shot-caption"><h4>Markdown 转换</h4><p>文件批量转换与粘贴转换并排使用，按输出格式选择版式。</p></div></div>
+<div class="shot-item reveal"><div class="shot-img"><img src="assets/screenshots/shot-evidence.png?v=1.1.2" alt="Docsy 证据合并界面" loading="lazy" width="1280" height="720" /></div><div class="shot-caption"><h4>证据合并</h4><p>页面处理、页眉页脚与页码分组设置，编号格式独立预览。</p></div></div>
+<div class="shot-item reveal"><div class="shot-img"><img src="assets/screenshots/home.png?v=1.1.2" alt="Docsy 工作台界面" loading="lazy" width="1280" height="720" /></div><div class="shot-caption"><h4>工作台</h4><p>证据、文档、排版和视频工具集中在一个工作空间。</p></div></div>
+<div class="shot-item reveal"><div class="shot-img"><img src="assets/screenshots/shot-template.png?v=1.1.2" alt="Docsy 文书模板界面" loading="lazy" width="1280" height="720" /></div><div class="shot-caption"><h4>文书模板</h4><p>建立变量模板、填写信息，或从 Excel 批量生成文书。</p></div></div>
+<div class="shot-item reveal"><div class="shot-img"><img src="assets/screenshots/shot-image.png?v=1.1.2" alt="Docsy 图片排版界面" loading="lazy" width="1280" height="720" /></div><div class="shot-caption"><h4>图片排版</h4><p>调整每页布局、图片顺序和打印边距。</p></div></div>
+<div class="shot-item reveal"><div class="shot-img"><img src="assets/screenshots/shot-pdf-tools.png?v=1.1.2" alt="Docsy PDF 工具界面" loading="lazy" width="1280" height="720" /></div><div class="shot-caption"><h4>PDF 工具</h4><p>按需选择合并、拆分、提取、压缩与解锁操作。</p></div></div>
+<div class="shot-item reveal"><div class="shot-img"><img src="assets/screenshots/shot-video.png?v=1.1.2" alt="Docsy 视频抽帧界面" loading="lazy" width="1280" height="720" /></div><div class="shot-caption"><h4>视频抽帧</h4><p>设置时间范围和抽帧方式，再筛选需要保留的画面。</p></div></div>
       </div>
       <div class="shot-more reveal">
         <a class="btn btn-secondary" href="features.html">
@@ -254,16 +180,14 @@
     <section class="download" id="download">
       <div class="section-head reveal">
         <h2>下载 Docsy</h2>
-        <p>已发布下载版本 <strong id="dl-version-static">v1.0.9</strong>（.doc 自动转换、HTML→Markdown、AnyDoc 0.2.4）。</p>
-        <p>源码与安装包版本均为 <strong>1.0.9</strong>，资产由 GitHub Actions 构建并发布至 Releases。</p>
-        <p>1.0.7：图片排版全局/单页双模式缩放、两级图注/预留说明栏、智能排版冲突预检。</p>
+        <p>当前稳定版 <strong id="dl-version-static">v1.1.2</strong> · 免费使用，无需注册。</p>
       </div>
 
       <div class="dl-grid">
         <article class="dl-card reveal" data-platform-card="macos">
           <div class="dl-card-head">
             <span class="dl-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.286 7.008c-3.216 0 -4.286 3.23 -4.286 5.92c0 3.229 2.143 8.072 4.286 8.072c1.165 -.05 1.799 -.538 3.214 -.538c1.406 0 1.607 .538 3.214 .538s2.326 -1.074 3.214 -1.074c1.28 0 1.895 1.074 3.214 1.074c1.406 0 2.326 -.538 3.214 -.538c1.58 -.074 3.213 -4.736 3.213 -4.736c-3.214 -.215 -4.016 -3.5 -1.071 -4.986" /><path d="M14.292 3.258c.577 -.748 1.605 -1.346 2.444 -1.367c.128 1.088 -.342 2.15 -1.051 2.89c-.697 .752 -1.816 1.325 -2.635 1.19c-.141 -1.026 .378 -2.081 1.242 -2.713" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.286 7.008c-3.216 0 -4.286 3.23 -4.286 5.92c0 3.229 2.143 8.072 4.286 8.072c1.165 -.05 1.799 -.538 3.214 -.538c1.406 0 1.607 .538 3.214 .538s4.286 -3.229 4.286 -5.381c-.03 -.011 -2.649 -.434 -2.679 -3.23c-.02 -2.335 2.589 -3.179 2.679 -3.228c-1.096 -1.606 -3.162 -2.113 -3.75 -2.153c-1.535 -.12 -3.032 1.077 -3.75 1.077c-.729 0 -2.036 -1.077 -3.214 -1.077" /><path d="M12 4a2 2 0 0 0 2 -2a2 2 0 0 0 -2 2" /></svg>
             </span>
             <div class="dl-card-title">
               <h3>macOS</h3>
@@ -272,7 +196,7 @@
             <span class="dl-tag" data-os-tag="macos" hidden>当前系统</span>
           </div>
           <div class="dl-file">
-            <code id="dl-mac-name">Docsy_1.0.9_aarch64.dmg</code>
+            <code id="dl-mac-name">Docsy_1.1.2_aarch64.dmg</code>
             <span id="dl-mac-size">加载中</span>
           </div>
           <div class="dl-hash">
@@ -304,7 +228,7 @@
             <span class="dl-tag" data-os-tag="windows" hidden>当前系统</span>
           </div>
           <div class="dl-file">
-            <code id="dl-win-name">Docsy_1.0.9_x64-setup.exe</code>
+            <code id="dl-win-name">Docsy_1.1.2_x64-setup.exe</code>
             <span id="dl-win-size">加载中</span>
           </div>
           <div class="dl-hash">
@@ -322,8 +246,10 @@
             GitHub 备用下载
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6" /><path d="M11 13l9 -9" /><path d="M15 4h5v5" /></svg>
           </a>
+          <a class="dl-alt" id="dl-win-x86" href="https://github.com/muxiaoxiii/docsy/releases/tag/v1.1.2">下载 Windows 32 位版</a>
         </article>
       </div>
+      <p class="download-note">Word 转 PDF 需本机办公软件；PDF 预览与视频抽帧所需组件可在设置中安装。macOS 当前提供 Apple 芯片版本。</p>
 
       <details class="history reveal">
         <summary>历史版本</summary>
@@ -337,7 +263,7 @@
     <section class="changelog" id="changelog">
       <div class="section-head reveal">
         <h2>更新日志</h2>
-        <p>持续迭代中，最新动态看这里。</p>
+        <p>查看本次更新的主要变化。</p>
       </div>
       <ol class="timeline" id="changelog-list">
         <li class="timeline-empty">正在加载更新日志…</li>
@@ -369,6 +295,6 @@
     </div>
   </footer>
 
-  <script src="js/main.js"></script>
+  <script src="js/main.js?v=1.1.2-site"></script>
 </body>
 </html>

@@ -6,14 +6,16 @@ Docsy 官方主页部署在 **https://docsy.muxiaoxi.top**，基于 **GitHub Pag
 
 ## 一、自动化发布流程
 
-当向仓库推送版本标签（例如 `v1.0.7`）时：
+当向仓库推送版本标签（例如 `v1.1.2`）时：
 1. **构建安装包**（`.github/workflows/build-desktop.yml`）：
    - 自动编译构建 macOS（Apple Silicon）、Windows x64 与 Windows x86 安装包；
    - 自动在 GitHub Releases 发布新版本并上传安装包及 SHA256 校验和。
 2. **部署官网**（`.github/workflows/deploy-pages.yml`）：
-   - 在桌面包发布完成后自动触发；
+   - 发布安装包后，通过 `workflow_dispatch` 明确触发 `main` 分支官网流程；不依赖旧默认分支的 `workflow_run` 配置；
+   - 修改 `main` 上的 `site/**`、更新日志或官网流程，也会独立触发部署，无需重新打包桌面应用；
    - 从 GitHub Releases API 读取最新的已发布版本与下载链接；
    - 运行 `site/scripts/build-data.py` 刷新 `releases.json`、`changelog.json` 和相关下载信息；
+   - 下载区与回退数据只使用已发布版本；更新日志与截图分别刷新，单项加载失败不会阻塞其他内容；
    - 自动部署发布到 GitHub Pages（`docsy.muxiaoxi.top`）。
 
 ---
@@ -42,3 +44,9 @@ site/
    ```bash
    npx serve site/public
    ```
+
+## 四、素材与校验
+
+截图取自当前版本的浏览器界面预览，使用示例文字，不包含用户文件。更新 `assets/screenshots/` 时，同步核对 `data/screenshots.json` 与静态 HTML 的说明。官网保留已有 Doclet 形象。
+
+部署前运行 `python3 -m unittest discover -s site/scripts` 与 `node --test site/scripts/test-site-runtime.mjs`，并检查首页、功能详情、组件说明及下载链接。

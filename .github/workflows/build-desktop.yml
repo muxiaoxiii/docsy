@@ -236,6 +236,9 @@ jobs:
 
   release:
     name: Publish GitHub Release
+    permissions:
+      contents: write
+      actions: write
     needs: build
     if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -274,3 +277,10 @@ jobs:
             release-assets/*.sig
             release-assets/SHA256SUMS.txt
             release-assets/BUILD-MANIFEST.json
+
+      # workflow_run reads the repository default branch. Dispatch main explicitly
+      # so site publication stays current even while the default branch is legacy.
+      - name: Refresh website after publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-pages.yml --ref main

@@ -187,7 +187,7 @@ GH_MIRROR_PREFIXES = [
 
 # 各工具在 docsy 中的用途（与设置页 tools 列表一致）
 TOOL_PURPOSE = {
-    "qpdf": "PDF 合并、拆分、叠加和结构处理",
+    "qpdf": "复杂 PDF 兼容回退与部分无损优化；基础合并拆分已内置",
     "poppler": "PDF 预览渲染和页眉页脚文本检测",
     "ffmpeg": "视频信息读取、抽帧和时间戳水印",
 }
@@ -330,6 +330,9 @@ def main() -> int:
         source, count = re.subn(r"  var FALLBACK = \{.*?\n  \};", lambda match: "  var FALLBACK = " + json.dumps(fallback, ensure_ascii=False, indent=2).replace("\n", "\n  ") + ";", source, count=1, flags=re.S)
         if count != 1:
             raise ValueError("未找到站点回退数据块")
+        source, count = re.subn(r"  var FALLBACK_CHANGELOG = \[.*?\n  \];", lambda match: "  var FALLBACK_CHANGELOG = " + json.dumps(changelog_entries[:1], ensure_ascii=False, indent=2).replace("\n", "\n  ") + ";", source, count=1, flags=re.S)
+        if count != 1:
+            raise ValueError("未找到站点更新日志回退块")
         fallback_path.write_text(source, encoding="utf-8")
     (out_dir / "changelog.json").write_text(
         json.dumps(changelog_entries, ensure_ascii=False, indent=2), encoding="utf-8"
