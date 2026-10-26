@@ -107,6 +107,7 @@ struct A4Transform {
     page_w: f32,
     page_h: f32,
     matrix: [f32; 6],
+    source_clip: [f32; 4],
     preserve_rotation: bool,
 }
 
@@ -179,6 +180,7 @@ fn unrotated_content_transform(
         page_w,
         page_h,
         matrix: multiply_matrix(fit_matrix, origin_matrix),
+        source_clip: [source.box_x0, source.box_y0, raw_w, raw_h],
         preserve_rotation: true,
     }
 }
@@ -232,6 +234,12 @@ fn rotated_content_transform(
             ),
             origin_matrix,
         ),
+        source_clip: [
+            source.box_x0,
+            source.box_y0,
+            source.raw_width_pt,
+            source.raw_height_pt,
+        ],
         preserve_rotation: false,
     }
 }
@@ -354,6 +362,19 @@ fn normalize_page_content(
                     pdf_number(transform.matrix[5]),
                 ],
             ),
+            // Enlarging CropBox to A4 must not reveal a neighboring page or
+            // bleed hidden by the old CropBox. Clip the source in its own
+            // coordinate system after installing the placement transform.
+            Operation::new(
+                "re",
+                transform
+                    .source_clip
+                    .iter()
+                    .map(|v| pdf_number(*v))
+                    .collect(),
+            ),
+            Operation::new("W", vec![]),
+            Operation::new("n", vec![]),
         ],
     }
     .encode()
@@ -705,6 +726,49 @@ mod tests {
                 original_bytes[index]
             );
         }
+    }
+
+    #[test]
+    fn normalization_keeps_cropped_out_content_out_of_the_new_margins() {
+        if crate::external::PopplerTool::binary_path_for("pdftoppm").is_err() {
+            return;
+        }
+        let input = temp_named_path("docsy_normalize_crop_clip", "pdf");
+        let _input_guard = crate::util::fs::TempPathGuard::new(input.clone());
+        let mut doc = Document::with_version("1.7");
+        let pages = doc.new_object_id();
+        let content = doc.add_object(Stream::new(
+            Dictionary::new(),
+            b"1 0 0 rg 0 0 300 400 re f 0 0 1 rg 300 0 300 400 re f".to_vec(),
+        ));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Contents" => content,
+            "Resources" => Dictionary::new(),
+            "MediaBox" => vec![0.into(), 0.into(), 600.into(), 400.into()],
+            "CropBox" => vec![300.into(), 0.into(), 600.into(), 400.into()],
+        });
+        doc.objects.insert(
+            pages,
+            dictionary! {
+                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+            }
+            .into(),
+        );
+        let root = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", root);
+        doc.save(&input).unwrap();
+
+        let normalized = normalize_pdf_to_a4(&input, 200, "portrait", "none", 10.0).unwrap();
+        let _normalized_guard = crate::util::fs::TempPathGuard::new(normalized.clone());
+        let png = crate::pdf::preview::render_pdf_page_to_png(&normalized, 1, 72).unwrap();
+        let _png_guard = crate::util::fs::TempPathGuard::new(png.clone());
+        let image = ::image::open(png).unwrap().to_rgb8();
+        assert_eq!(
+            image.get_pixel(50, 420).0,
+            [255, 255, 255],
+            "cropped-out neighboring page leaked into the A4 margin"
+        );
+        assert_eq!(image.get_pixel(300, 420).0, [0, 0, 255]);
     }
 
     #[test]
