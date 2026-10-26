@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { useEvidencePdfPreview } from './useEvidencePdfPreview.js'
 import {
   buildHeaderFooterItems,
@@ -73,6 +73,30 @@ function globalRules(group) {
 }
 
 describe('previewHeaderText matches the generated header', () => {
+  it.each([true, false])('uses the live evidence start with global apply %s', (globalApply) => {
+    const files = [makeFile('证据甲'), makeFile('证据乙')]
+    const group = { ...createDefaultHeaderGroup(), mode: 'per_file' }
+    files.forEach((file) => { file.headerGroups = [group] })
+    const defaults = reactive({ evidenceStart: 21, pageStart: 1 })
+    const rules = { ...globalRules(group), _globalApply: globalApply, numberingDefaults: defaults }
+    if (!globalApply) delete rules._globalHeaderGroup
+    const preview = makePreview({ file: files[1], index: 1, rules })
+    expect(preview.previewHeaderText.value).toBe('证据22')
+    expect(preview.previewHeaderText.value).toBe(buildHeaderFooterItems(files, rules)[1].header.text)
+    defaults.evidenceStart = 41
+    expect(preview.previewHeaderText.value).toBe('证据42')
+    expect(preview.previewHeaderText.value).toBe(buildHeaderFooterItems(files, rules)[1].header.text)
+  })
+
+  it('uses a rule-specific evidence start instead of the global default', () => {
+    const file = makeFile('证据甲')
+    const group = { ...createDefaultHeaderGroup(), mode: 'per_file', numbering: { source: 'custom', evidenceStart: 75 } }
+    const rules = { ...globalRules(group), numberingDefaults: { evidenceStart: 21, pageStart: 1 } }
+    const preview = makePreview({ file, rules })
+    expect(preview.previewHeaderText.value).toBe('证据75')
+    expect(preview.previewHeaderText.value).toBe(buildHeaderFooterItems([file], rules)[0].header.text)
+  })
+
   it('global apply + fixed text: preview shows the fixed text, not the file name or the detected old header', () => {
     const file = makeFile('合同扫描件')
     // A previously detected existing header must not leak into the preview.

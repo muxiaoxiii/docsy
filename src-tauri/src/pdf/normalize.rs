@@ -20,15 +20,20 @@ pub fn normalize_pdf_to_a4(
     // 大文件：按页段规范化再合并，避免整档 Document::load
     if super::chunked::should_chunk(input, page_count) && page_count > 0 {
         let output = temp_named_path("docsy_a4_normalized", "pdf");
-        super::chunked::process_pdf_chunked(input, &output, page_count, |chunk_in, chunk_out, _, _, _| {
-            normalize_pdf_to_a4_whole(
-                chunk_in,
-                orientation,
-                content_rotation,
-                content_margin_mm,
-                chunk_out,
-            )
-        })?;
+        super::chunked::process_pdf_chunked(
+            input,
+            &output,
+            page_count,
+            |chunk_in, chunk_out, _, _, _| {
+                normalize_pdf_to_a4_whole(
+                    chunk_in,
+                    orientation,
+                    content_rotation,
+                    content_margin_mm,
+                    chunk_out,
+                )
+            },
+        )?;
         return Ok(output);
     }
 
@@ -300,6 +305,41 @@ fn normalize_page_content(
         return Ok(());
     };
 
+    // /Contents may reference an array, not just a single stream. Nesting that
+    // array inside our wrapper makes qpdf's overlay omit the original body.
+    // Resolve the container, retaining the original stream references and bytes.
+    let items = match contents {
+        Object::Reference(id) => match doc.get_object(id).context("读取 PDF 正文内容流失败")?
+        {
+            Object::Array(items) => items.clone(),
+            Object::Stream(_) => vec![Object::Reference(id)],
+            Object::Null => vec![],
+            _ => anyhow::bail!("PDF 正文引用既不是内容流也不是内容流数组，已停止规范化"),
+        },
+        Object::Array(items) => items,
+        Object::Stream(stream) => vec![Object::Reference(doc.add_object(stream))],
+        Object::Null => vec![],
+        _ => anyhow::bail!("PDF 正文既不是内容流也不是内容流数组，已停止规范化"),
+    };
+    let mut originals = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            Object::Reference(id) => {
+                match doc
+                    .get_object(id)
+                    .context("读取 PDF 正文数组中的内容流失败")?
+                {
+                    Object::Stream(_) => originals.push(Object::Reference(id)),
+                    Object::Null => {}
+                    _ => anyhow::bail!("PDF 正文数组包含非内容流引用，已停止规范化以避免丢失正文"),
+                }
+            }
+            Object::Stream(stream) => originals.push(Object::Reference(doc.add_object(stream))),
+            Object::Null => {}
+            _ => anyhow::bail!("PDF 正文数组包含非内容流对象，已停止规范化以避免丢失正文"),
+        }
+    }
+
     let prefix = Content {
         operations: vec![
             Operation::new("q", vec![]),
@@ -327,16 +367,7 @@ fn normalize_page_content(
     let suffix_id = doc.add_object(Stream::new(Dictionary::new(), suffix));
 
     let mut wrapped = vec![Object::Reference(prefix_id)];
-    match contents {
-        Object::Array(items) => wrapped.extend(
-            items
-                .into_iter()
-                .filter(|item| !matches!(item, Object::Null)),
-        ),
-        Object::Null => {}
-        Object::Stream(stream) => wrapped.push(Object::Reference(doc.add_object(stream))),
-        other => wrapped.push(other),
-    }
+    wrapped.extend(originals);
     wrapped.push(Object::Reference(suffix_id));
 
     doc.get_object_mut(page_id)
@@ -629,6 +660,156 @@ mod tests {
         let suffix = doc.get_object(suffix_id).unwrap().as_stream().unwrap();
         let operations = Content::decode(&suffix.content).unwrap().operations;
         assert_eq!(operations[0].operator, "Q");
+    }
+
+    #[test]
+    fn normalization_expands_indirect_content_arrays_without_reencoding() {
+        let mut doc = Document::with_version("1.7");
+        let original_bytes = [
+            b"q\n".to_vec(),
+            b"1 0 0 rg 10 20 100 120 re f\n".to_vec(),
+            b"Q\n".to_vec(),
+        ];
+        let ids: Vec<_> = original_bytes
+            .iter()
+            .map(|bytes| doc.add_object(Stream::new(Dictionary::new(), bytes.clone())))
+            .collect();
+        let array_id = doc.add_object(Object::Array(
+            ids.iter().copied().map(Object::Reference).collect(),
+        ));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Contents" => array_id,
+            "MediaBox" => vec![0.into(), 0.into(), 300.into(), 400.into()],
+        });
+        let transform = a4_transform(&page_size(300.0, 400.0), "portrait", "none", 10.0);
+
+        normalize_page_content(&mut doc, page_id, &transform).unwrap();
+
+        let contents = doc
+            .get_dictionary(page_id)
+            .unwrap()
+            .get(b"Contents")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            contents.len(),
+            ids.len() + 2,
+            "normalization must expand the indirect array, not nest it"
+        );
+        for (index, id) in ids.iter().enumerate() {
+            assert_eq!(contents[index + 1].as_reference().unwrap(), *id);
+            assert_eq!(
+                doc.get_object(*id).unwrap().as_stream().unwrap().content,
+                original_bytes[index]
+            );
+        }
+    }
+
+    #[test]
+    fn normalization_refuses_malformed_contents_instead_of_saving_an_empty_body() {
+        let mut doc = Document::with_version("1.7");
+        let invalid = doc.add_object(Object::Array(vec![Object::Integer(7)]));
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Contents" => invalid });
+        let before = doc
+            .get_dictionary(page)
+            .unwrap()
+            .get(b"Contents")
+            .unwrap()
+            .clone();
+        let transform = a4_transform(&page_size(300.0, 400.0), "portrait", "none", 0.0);
+        assert!(normalize_page_content(&mut doc, page, &transform).is_err());
+        assert_eq!(
+            doc.get_dictionary(page).unwrap().get(b"Contents").unwrap(),
+            &before
+        );
+    }
+
+    #[test]
+    fn a4_overlay_keeps_body_from_indirect_content_array() {
+        if crate::external::QpdfTool.binary_path().is_err() {
+            return;
+        }
+        let input = temp_named_path("docsy_indirect_contents_input", "pdf");
+        let _input_guard = crate::util::fs::TempPathGuard::new(input.clone());
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let ids: Vec<_> = [
+            b"q\n".as_slice(),
+            b"1 0 0 rg 10 20 100 120 re f\n".as_slice(),
+            b"Q\n".as_slice(),
+        ]
+        .iter()
+        .map(|bytes| doc.add_object(Stream::new(Dictionary::new(), bytes.to_vec())))
+        .collect();
+        let array_id = doc.add_object(Object::Array(
+            ids.into_iter().map(Object::Reference).collect(),
+        ));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "Contents" => array_id,
+            "Resources" => Dictionary::new(),
+            "MediaBox" => vec![0.into(), 0.into(), 300.into(), 400.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+            }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog);
+        doc.save(&input).unwrap();
+        let output = temp_named_path("docsy_indirect_contents_overlay", "pdf");
+        let job: crate::pdf::header_footer::HeaderFooterJob =
+            serde_json::from_value(serde_json::json!({
+                "inputPath": input, "outputPath": output, "normalizeA4": true,
+                "header": { "text": "HEADER", "region": "header", "fontFamily": "auto" },
+            }))
+            .unwrap();
+
+        let result = crate::pdf::header_footer::batch_overlay(&[job]).unwrap();
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        assert_eq!(result.results.len(), 1);
+        let actual_output = PathBuf::from(&result.results[0].output_path);
+        let _output_guard = crate::util::fs::TempPathGuard::new(actual_output.clone());
+        let output_doc = Document::load(actual_output).unwrap();
+        let page_id = output_doc.get_pages().into_values().next().unwrap();
+        let (inline, indirect) = output_doc.get_page_resources(page_id).unwrap();
+        let resources: Vec<_> = inline
+            .into_iter()
+            .chain(
+                indirect
+                    .iter()
+                    .map(|id| output_doc.get_dictionary(*id).unwrap()),
+            )
+            .collect();
+        let mut body_found = false;
+        for resource in resources {
+            let Ok((_, Object::Dictionary(xobjects))) = resource
+                .get(b"XObject")
+                .and_then(|object| output_doc.dereference(object))
+            else {
+                continue;
+            };
+            for (_, object) in xobjects.iter() {
+                let stream = output_doc
+                    .get_object(object.as_reference().unwrap())
+                    .unwrap()
+                    .as_stream()
+                    .unwrap();
+                let bytes = stream
+                    .decompressed_content()
+                    .unwrap_or_else(|_| stream.content.clone());
+                let operations = Content::decode(&bytes).unwrap().operations;
+                body_found |= operations.iter().any(|op| op.operator == "re")
+                    && operations.iter().any(|op| op.operator == "f");
+            }
+        }
+        assert!(
+            body_found,
+            "A4 + page-header processing silently dropped the original body drawing"
+        );
     }
 
     #[test]

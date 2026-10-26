@@ -8,6 +8,7 @@ import {
   buildHeaderFooterItems,
   expandPlaceholders,
   buildHeaderTextForGroup,
+  effectiveHeaderNumbering,
   selectedGroupFor,
 } from './useEvidencePdfSession.js'
 import { renderPageNumberTemplate } from './pdfPageNumberRules.js'
@@ -97,7 +98,8 @@ export function useEvidencePdfPreview({
     if (!group || group.enabled === false) return ''
     const mode = rules.headerMode !== undefined ? rules.headerMode : group.mode
     if (mode === 'none') return ''
-    return buildHeaderTextForGroup(file, selectedOverlayIndex.value, { ...group, mode }, rules)
+    const perFileSeqStart = effectiveHeaderNumbering(group, rules.numberingDefaults).evidenceStart
+    return buildHeaderTextForGroup(file, selectedOverlayIndex.value, { ...group, mode, perFileSeqStart }, rules)
   })
 
   const previewFooterText = computed(() => {

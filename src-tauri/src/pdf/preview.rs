@@ -94,6 +94,9 @@ fn run_pdftoppm(pdftoppm: &Path, input: &Path, page: u32, dpi: u32) -> Result<Pa
     let mut command = crate::external::hidden_command(pdftoppm);
     command
         .arg("-png")
+        // Match PDF readers and page_info: show the visible CropBox, not a
+        // larger original MediaBox left behind by a crop/split operation.
+        .arg("-cropbox")
         .arg("-singlefile")
         .arg("-r")
         .arg(dpi.to_string())
@@ -141,6 +144,63 @@ fn repair_pdf_for_preview(input: &Path, output: &Path) -> Result<()> {
 
 fn find_pdftoppm() -> Option<PathBuf> {
     crate::external::PopplerTool::binary_path_for("pdftoppm").ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lopdf::{dictionary, Dictionary, Document, Stream};
+
+    #[test]
+    fn preview_renders_the_visible_crop_box_instead_of_the_uncropped_spread() {
+        if find_pdftoppm().is_none() {
+            return;
+        }
+        let input = temp_named_path("docsy_preview_cropbox", "pdf");
+        let _guard = crate::util::fs::TempPathGuard::new(input.clone());
+        let mut doc = Document::with_version("1.7");
+        let pages = doc.new_object_id();
+        let content = doc.add_object(Stream::new(
+            Dictionary::new(),
+            b"1 0 0 rg 0 0 300 400 re f 0 0 1 rg 300 0 300 400 re f".to_vec(),
+        ));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages, "Contents" => content,
+            "Resources" => Dictionary::new(),
+            "MediaBox" => vec![0.into(), 0.into(), 600.into(), 400.into()],
+            "CropBox" => vec![300.into(), 0.into(), 600.into(), 400.into()],
+        });
+        doc.objects.insert(
+            pages,
+            dictionary! {
+                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+            }
+            .into(),
+        );
+        let root = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", root);
+        doc.save(&input).unwrap();
+        let original = fs::read(&input).unwrap();
+
+        let preview = render_preview(&PreviewArgs {
+            input_path: input.to_string_lossy().into_owned(),
+            page: 1,
+            dpi: 72,
+        })
+        .unwrap();
+        assert_eq!((preview.width_pt, preview.height_pt), (300.0, 400.0));
+        assert_eq!((preview.width_px, preview.height_px), (300, 400));
+        let bytes = general_purpose::STANDARD
+            .decode(preview.image_data_url.split_once(',').unwrap().1)
+            .unwrap();
+        let image = ::image::load_from_memory(&bytes).unwrap().to_rgb8();
+        assert_eq!(image.get_pixel(150, 200).0, [0, 0, 255]);
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            original,
+            "preview must not rewrite the source PDF"
+        );
+    }
 }
 
 /// 为 poppler 工具设置字体配置环境变量，让自管理的 poppler 能找到系统字体
