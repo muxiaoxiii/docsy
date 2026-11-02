@@ -249,3 +249,60 @@ it('retains the folder selected at execution for mixed-source files and rejects 
   await state.addMergeFiles(['/one/c.pdf'])
   expect(state.mergeOutputDir.value).toBe('/chosen')
 })
+
+describe('长图处理界面链路', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('添加长图文件后生成预览并更新尺寸与预计页数', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    tauriCallSafe.mockResolvedValue({
+      ok: true,
+      data: {
+        sourceWidth: 1080,
+        sourceHeight: 7500,
+        totalPages: 4,
+        previewPage: 1,
+        previewDataUrl: 'data:image/png;base64,mock',
+      },
+    })
+    state.addLongSliceFiles(['/photos/long_screen.png'])
+    expect(state.longSliceFiles.value.length).toBe(1)
+    await state.refreshPreview()
+    expect(tauriCallSafe).toHaveBeenCalledWith('preview_long_slice', expect.objectContaining({
+      args: expect.objectContaining({
+        inputPath: '/photos/long_screen.png',
+        orientation: 'portrait',
+        marginMm: 5,
+        contentWidthMode: 'fit',
+      }),
+      previewPage: 1,
+    }))
+    expect(state.longSliceFiles.value[0].dimText).toBe('1080 × 7500')
+    expect(state.longSliceFiles.value[0].statusText).toBe('预计 4 页')
+  })
+
+  it('批量执行长图切片并输出对应 A4 文件路径', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    state.longSliceFiles.value = [
+      { path: '/screen.png', name: 'screen.png', statusText: '待处理', statusType: 'info' },
+    ]
+    tauriCallSafe.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        outputPath: '/screen_A4.pdf',
+        totalPages: 4,
+        sourceWidth: 1080,
+        sourceHeight: 7500,
+      },
+    })
+    await state.batchProcessLongSlice()
+    expect(tauriCallSafe).toHaveBeenCalledWith('process_long_slice', expect.objectContaining({
+      args: expect.objectContaining({
+        inputPath: '/screen.png',
+      }),
+    }))
+    expect(state.longSliceFiles.value[0].outputPath).toBe('/screen_A4.pdf')
+    expect(state.longSliceFiles.value[0].statusText).toBe('已生成 4 页')
+    expect(state.longSliceFiles.value[0].statusType).toBe('success')
+  })
+})

@@ -510,3 +510,25 @@ pub async fn plan_image_pdf(args: crate::pdf::image_convert::ImagePdfArgs) -> Re
 pub async fn export_image_pdf(args: crate::pdf::image_convert::ImagePdfArgs, manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>) -> Result<String, String> {
     run_managed(&manager, "export_image_pdf", None, move |_token| crate::pdf::image_convert::export(&args)).await
 }
+
+#[tauri::command]
+pub async fn preview_long_slice(
+    args: crate::pdf::long_slice::LongSliceArgs,
+    preview_page: Option<usize>,
+) -> Result<crate::pdf::long_slice::LongSlicePreviewResult, String> {
+    run_blocking(move || {
+        crate::pdf::long_slice::preview_long_slice(&args, preview_page.unwrap_or(1))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn process_long_slice(
+    args: crate::pdf::long_slice::LongSliceArgs,
+    manager: tauri::State<'_, std::sync::Arc<crate::operations::OperationManager>>,
+) -> Result<crate::pdf::long_slice::LongSliceResult, String> {
+    run_managed(&manager, "process_long_slice", None, move |_token| {
+        crate::pdf::long_slice::process_long_slice(&args)
+    })
+    .await
+}

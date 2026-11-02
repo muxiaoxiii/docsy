@@ -253,6 +253,18 @@ const SCENE_CONFIGS = {
     defaultDesc: '按所选模式限制直接复制；无法保证阻止截图或 OCR，处理后请核对阅读效果',
     actionLabel: '添加文件',
   },
+  'pdf-long-slice': {
+    sourceBadge: '长截图 / 长PDF',
+    sourceIcon: '📜',
+    targetBadge: 'A4 打印件',
+    targetIcon: '📄',
+    glyphs: ['✂️', '📏', '📄', '✦'],
+    busyTitle: 'Doclet 正在智能切片分页…',
+    busyDesc: '智能避让文字与缝隙，按 A4 纸张排版生成易打印文档',
+    defaultTitle: '添加长截图或长图 PDF',
+    defaultDesc: '支持手机长截屏、网页长图及超长单页 PDF，按 A4 智能切片分页打印',
+    actionLabel: '选择长图文件',
+  },
   'pdf-extract': {
     sourceBadge: '源 PDF',
     sourceIcon: '📑',

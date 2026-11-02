@@ -131,6 +131,43 @@
       </svg>
     </template>
 
+    <!-- ==================== PDF LONG SLICE ==================== -->
+    <template v-else-if="scene === 'pdf-long-slice'">
+      <!-- Source: Continuous extra-tall ribbon with cut indicators -->
+      <svg v-if="type === 'source'" viewBox="0 0 100 120" class="illus-svg" fill="none">
+        <rect x="28" y="6" width="44" height="108" rx="4" fill="#f8fafc" stroke="#64748b" stroke-width="1.8" />
+        <line x1="34" y1="18" x2="66" y2="18" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" />
+        <line x1="34" y1="26" x2="58" y2="26" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" />
+        <!-- Cut line 1 -->
+        <line x1="22" y1="42" x2="78" y2="42" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="3 2" />
+        <circle cx="24" cy="42" r="2.5" fill="#f43f5e" />
+        <line x1="34" y1="52" x2="64" y2="52" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" />
+        <line x1="34" y1="60" x2="60" y2="60" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" />
+        <!-- Cut line 2 -->
+        <line x1="22" y1="78" x2="78" y2="78" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="3 2" />
+        <circle cx="24" cy="78" r="2.5" fill="#f43f5e" />
+        <line x1="34" y1="88" x2="66" y2="88" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" />
+        <line x1="34" y1="96" x2="52" y2="96" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" />
+      </svg>
+      <!-- Target: Neat stacked A4 pages with header & page numbers -->
+      <svg v-else viewBox="0 0 100 120" class="illus-svg" fill="none">
+        <!-- Page 2 under -->
+        <rect x="24" y="22" width="58" height="82" rx="4" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5" />
+        <!-- Page 1 top -->
+        <rect x="18" y="14" width="58" height="82" rx="4" fill="#ffffff" stroke="#0ea5e9" stroke-width="2" />
+        <!-- Header line -->
+        <line x1="24" y1="22" x2="70" y2="22" stroke="#0ea5e9" stroke-width="1.2" />
+        <circle cx="26" cy="18" r="1.5" fill="#0ea5e9" />
+        <!-- Content block centered -->
+        <rect x="26" y="28" width="42" height="48" rx="2" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1" />
+        <line x1="30" y1="36" x2="62" y2="36" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
+        <line x1="30" y1="44" x2="56" y2="44" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
+        <line x1="30" y1="52" x2="64" y2="52" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
+        <!-- Footer page number -->
+        <line x1="42" y1="88" x2="52" y2="88" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" />
+      </svg>
+    </template>
+
     <!-- ==================== EVIDENCE ==================== -->
     <template v-else-if="scene === 'evidence'">
       <!-- Source: Case dossier file -->

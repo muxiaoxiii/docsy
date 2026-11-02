@@ -454,6 +454,191 @@
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
+
+      <el-tab-pane label="长图处理" name="long-slice" lazy>
+        <ToolWorkspaceShell
+          title="长图处理"
+          :hide-toolbar="!longSliceFiles.length"
+          description="将网页长截图、手机长截屏及长图 PDF 智能分页切片，按标准 A4 纸张排版生成易打印文档。"
+        >
+          <template #toolbar>
+            <el-button v-if="longSliceFiles.length" type="primary" plain :disabled="longSliceProcessing" @click="selectLongSliceFiles">添加文件</el-button>
+            <el-button v-if="longSliceFiles.length" :disabled="longSliceProcessing" @click="selectLongSliceOutputDir">
+              {{ longSliceOutputDir ? '更改输出目录' : '选择输出目录' }}
+            </el-button>
+          </template>
+
+          <div v-if="longSliceOutputDir && longSliceFiles.length" class="path-line">
+            <span class="path-badge">输出目录</span>
+            <span>{{ longSliceOutputDir }}</span>
+          </div>
+
+          <div class="long-slice-container" :class="{ 'has-files': longSliceFiles.length }">
+            <FileQueuePanel
+              fill
+              scene="pdf-long-slice"
+              :celebrating="longSliceCelebrating"
+              empty-action-label="选择长图或文档"
+              :items="longSliceFiles"
+              :busy="longSliceProcessing"
+              selectable
+              :selected-index="selectedLongSliceIndex"
+              empty-text="选择或拖入长截图图片（PNG/JPG/WebP/BMP）或长图 PDF"
+              @empty-action="selectLongSliceFiles"
+              @clear="clearLongSliceFiles"
+              @remove="removeLongSliceFile"
+              @select="onSelectLongSliceItem"
+            >
+              <template #meta="{ item }">
+                <el-tag v-if="item.dimText" size="small" type="info">{{ item.dimText }}</el-tag>
+                <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
+                <el-button v-if="item.outputPath" link type="primary" @click="openPath(item.outputPath)">打开文件</el-button>
+              </template>
+            </FileQueuePanel>
+
+            <aside v-if="longSliceFiles.length" class="long-slice-sidebar">
+              <div class="long-slice-preview-card" v-loading="previewLoading">
+                <div class="preview-header">
+                  <span class="preview-title">A4 打印预览</span>
+                  <div class="preview-pagination" v-if="currentLongSlicePreview && currentLongSlicePreview.totalPages > 1">
+                    <el-button
+                      size="small"
+                      circle
+                      :disabled="currentPreviewPage <= 1"
+                      @click="changePreviewPage(-1)"
+                    >&lt;</el-button>
+                    <span class="page-indicator">{{ currentPreviewPage }} / {{ currentLongSlicePreview.totalPages }}</span>
+                    <el-button
+                      size="small"
+                      circle
+                      :disabled="currentPreviewPage >= currentLongSlicePreview.totalPages"
+                      @click="changePreviewPage(1)"
+                    >&gt;</el-button>
+                  </div>
+                </div>
+
+                <div class="a4-sheet-viewport">
+                  <div class="a4-sheet-canvas" :class="[longSliceOrientation]">
+                    <img
+                      v-if="currentLongSlicePreview && currentLongSlicePreview.previewDataUrl"
+                      :src="currentLongSlicePreview.previewDataUrl"
+                      class="preview-image"
+                      alt="A4 Preview"
+                    />
+                    <div v-else class="preview-placeholder">正在生成预览…</div>
+                  </div>
+                </div>
+
+                <div class="preview-footer-info" v-if="currentLongSlicePreview">
+                  <span>{{ currentLongSlicePreview.sourceWidth }} × {{ currentLongSlicePreview.sourceHeight }} px</span>
+                  <span>·</span>
+                  <span>预计 {{ currentLongSlicePreview.totalPages }} 页</span>
+                </div>
+              </div>
+
+              <div class="long-slice-options-panel">
+                <el-form label-position="top" size="small">
+                  <el-form-item label="纸张方向与留白">
+                    <div class="opt-row">
+                      <el-radio-group v-model="longSliceOrientation" @change="refreshPreview">
+                        <el-radio-button label="portrait">纵向 (A4)</el-radio-button>
+                        <el-radio-button label="landscape">横向 (A4)</el-radio-button>
+                      </el-radio-group>
+                      <el-select v-model="longSliceMarginMm" style="width: 130px" @change="refreshPreview">
+                        <el-option label="无留白 (0mm)" :value="0" />
+                        <el-option label="窄边距 (5mm)" :value="5" />
+                        <el-option label="标准边距 (10mm)" :value="10" />
+                        <el-option label="装订边距 (15mm)" :value="15" />
+                      </el-select>
+                    </div>
+                  </el-form-item>
+
+                  <el-form-item label="内容宽度与对齐">
+                    <div class="opt-row">
+                      <el-radio-group v-model="longSliceWidthMode" @change="refreshPreview">
+                        <el-radio-button label="fit">满版宽度</el-radio-button>
+                        <el-radio-button label="phone">手机适中 (55%)</el-radio-button>
+                        <el-radio-button label="custom">自定义</el-radio-button>
+                      </el-radio-group>
+                      <el-radio-group v-model="longSliceAlignment" @change="refreshPreview">
+                        <el-radio-button label="left">靠左</el-radio-button>
+                        <el-radio-button label="center">居中</el-radio-button>
+                        <el-radio-button label="right">靠右</el-radio-button>
+                      </el-radio-group>
+                    </div>
+                    <div v-if="longSliceWidthMode === 'custom'" class="slider-row">
+                      <el-slider v-model="longSliceCustomWidth" :min="40" :max="100" @change="refreshPreview" />
+                      <span class="slider-val">{{ longSliceCustomWidth }}%</span>
+                    </div>
+                  </el-form-item>
+
+                  <el-form-item label="切片防腰斩与重叠">
+                    <div class="opt-row align-center">
+                      <el-checkbox v-model="longSliceSmartCut" @change="refreshPreview">
+                        智能防腰斩 (自动寻找空白缝隙)
+                      </el-checkbox>
+                      <div class="overlap-box">
+                        <span>相邻重叠:</span>
+                        <el-input-number v-model="longSliceOverlapMm" :min="0" :max="15" :step="1" style="width: 80px" @change="refreshPreview" />
+                        <span>mm</span>
+                      </div>
+                    </div>
+                  </el-form-item>
+
+                  <el-collapse class="header-footer-collapse">
+                    <el-collapse-item title="页眉与页脚设置">
+                      <div class="collapse-block">
+                        <div class="sub-heading">
+                          <el-checkbox v-model="longSliceHeaderEnabled" @change="refreshPreview">开启页眉</el-checkbox>
+                        </div>
+                        <div v-if="longSliceHeaderEnabled" class="sub-fields">
+                          <el-input
+                            v-model="longSliceHeaderTitle"
+                            placeholder="网页标题或来源网址（可选）"
+                            clearable
+                            size="small"
+                            @change="refreshPreview"
+                          />
+                          <div class="opt-row mt-2">
+                            <el-checkbox v-model="longSliceHeaderDate" @change="refreshPreview">打印日期</el-checkbox>
+                            <el-checkbox v-model="longSliceHeaderDatePrefix" :disabled="!longSliceHeaderDate" @change="refreshPreview">
+                              带“打印日期：”前缀
+                            </el-checkbox>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="collapse-block mt-3">
+                        <div class="sub-heading">
+                          <el-checkbox v-model="longSliceFooterEnabled" @change="refreshPreview">开启页脚页码</el-checkbox>
+                        </div>
+                        <div v-if="longSliceFooterEnabled" class="sub-fields">
+                          <el-select v-model="longSliceFooterNumberStyle" style="width: 100%" @change="refreshPreview">
+                            <el-option label="第 1 页 / 共 5 页" value="page_of_total" />
+                            <el-option label="1 / 5" value="simple" />
+                            <el-option label="- 1 -" value="dash" />
+                          </el-select>
+                        </div>
+                      </div>
+                    </el-collapse-item>
+                  </el-collapse>
+                </el-form>
+              </div>
+            </aside>
+          </div>
+
+          <template #actions>
+            <el-button
+              type="success"
+              @click="batchProcessLongSlice"
+              :loading="longSliceProcessing"
+              :disabled="longSliceFiles.length === 0"
+            >
+              切片导出 {{ longSliceFiles.length }} 个文件
+            </el-button>
+          </template>
+        </ToolWorkspaceShell>
+      </el-tab-pane>
     </el-tabs>
     <ImagePdfImportDialog ref="imageImportDialog" />
   </div>
@@ -498,7 +683,7 @@ import {
 
 const tabPosition = useResponsiveTabs()
 
-const PDF_TABS = new Set(['unlock', 'merge', 'extract', 'compress', 'split', 'anti-ocr'])
+const PDF_TABS = new Set(['unlock', 'merge', 'extract', 'compress', 'split', 'anti-ocr', 'long-slice'])
 const currentInstance = getCurrentInstance()
 const route = currentInstance ? useRoute() : null
 const router = currentInstance ? useRouter() : null
@@ -525,12 +710,14 @@ const mergeCelebrating = ref(false)
 const extractCelebrating = ref(false)
 const compressCelebrating = ref(false)
 const antiOcrCelebrating = ref(false)
+const longSliceCelebrating = ref(false)
 
 const triggerUnlockCelebration = createCelebrationTrigger(unlockCelebrating)
 const triggerMergeCelebration = createCelebrationTrigger(mergeCelebrating)
 const triggerExtractCelebration = createCelebrationTrigger(extractCelebrating)
 const triggerCompressCelebration = createCelebrationTrigger(compressCelebrating)
 const triggerAntiOcrCelebration = createCelebrationTrigger(antiOcrCelebrating)
+const triggerLongSliceCelebration = createCelebrationTrigger(longSliceCelebrating)
 const splitReorder = usePointerReorder({
   itemCount: () => splitRanges.value.length,
   itemAttribute: 'data-split-reorder-index',
@@ -860,6 +1047,209 @@ async function processAntiCopy(removeProtection) {
   }
   if (targets.length) {
     triggerAntiOcrCelebration()
+  }
+}
+
+// ── Long Slice (长图处理) ──
+const LONG_SLICE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'bmp', 'pdf'])
+const isLongSliceSupportedPath = (path) => {
+  const ext = (String(path || '').split('.').pop() || '').toLowerCase()
+  return LONG_SLICE_EXTENSIONS.has(ext)
+}
+
+const longSliceFiles = ref([])
+const longSliceProcessing = ref(false)
+const longSliceOutputDir = ref('')
+const selectedLongSliceIndex = ref(0)
+const currentLongSlicePreview = ref(null)
+const currentPreviewPage = ref(1)
+const previewLoading = ref(false)
+
+const longSliceOrientation = ref('portrait')
+const longSliceMarginMm = ref(5)
+const longSliceWidthMode = ref('fit')
+const longSliceCustomWidth = ref(55)
+const longSliceAlignment = ref('center')
+const longSliceSmartCut = ref(true)
+const longSliceOverlapMm = ref(0)
+const longSliceHeaderEnabled = ref(false)
+const longSliceHeaderTitle = ref('')
+const longSliceHeaderDate = ref(true)
+const longSliceHeaderDatePrefix = ref(true)
+const longSliceFooterEnabled = ref(true)
+const longSliceFooterNumberStyle = ref('page_of_total')
+
+function getLongSliceArgs(path, outputDir = null) {
+  return {
+    inputPath: path,
+    outputDir: outputDir || longSliceOutputDir.value || null,
+    outputFilename: null,
+    orientation: longSliceOrientation.value,
+    marginMm: Number(longSliceMarginMm.value) || 0,
+    contentWidthMode: longSliceWidthMode.value,
+    customWidthPercent: Number(longSliceCustomWidth.value) || 55,
+    alignment: longSliceAlignment.value,
+    smartCut: Boolean(longSliceSmartCut.value),
+    overlapMm: Number(longSliceOverlapMm.value) || 0,
+    headerEnabled: Boolean(longSliceHeaderEnabled.value),
+    headerTitle: longSliceHeaderTitle.value?.trim() || null,
+    headerDate: Boolean(longSliceHeaderDate.value),
+    headerDatePrefix: Boolean(longSliceHeaderDatePrefix.value),
+    footerEnabled: Boolean(longSliceFooterEnabled.value),
+    footerPageNumberStyle: longSliceFooterNumberStyle.value,
+  }
+}
+
+async function refreshPreview() {
+  const current = longSliceFiles.value[selectedLongSliceIndex.value]
+  if (!current) {
+    currentLongSlicePreview.value = null
+    return
+  }
+  previewLoading.value = true
+  try {
+    const args = getLongSliceArgs(current.path)
+    const res = await tauriCallSafe('preview_long_slice', {
+      args,
+      previewPage: currentPreviewPage.value,
+    })
+    if (res.ok && res.data) {
+      currentLongSlicePreview.value = res.data
+      currentPreviewPage.value = res.data.previewPage || res.data.preview_page || 1
+      const w = res.data.sourceWidth ?? res.data.source_width
+      const h = res.data.sourceHeight ?? res.data.source_height
+      const pages = res.data.totalPages ?? res.data.total_pages
+      current.dimText = `${w} × ${h}`
+      current.statusText = `预计 ${pages} 页`
+      current.statusType = 'info'
+    } else if (!res.ok) {
+      current.statusText = '解析失败'
+      current.statusType = 'danger'
+    }
+  } catch (err) {
+    console.error('preview error', err)
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function onSelectLongSliceItem(index) {
+  selectedLongSliceIndex.value = index
+  currentPreviewPage.value = 1
+  void refreshPreview()
+}
+
+function changePreviewPage(delta) {
+  if (!currentLongSlicePreview.value) return
+  const max = currentLongSlicePreview.value.totalPages || 1
+  const target = Math.max(1, Math.min(max, currentPreviewPage.value + delta))
+  if (target !== currentPreviewPage.value) {
+    currentPreviewPage.value = target
+    void refreshPreview()
+  }
+}
+
+function addLongSliceFiles(paths) {
+  if (longSliceProcessing.value) return
+  const existing = new Set(longSliceFiles.value.map((f) => f.path))
+  const newItems = paths
+    .filter((p) => !existing.has(p) && isLongSliceSupportedPath(p))
+    .map((p) => ({
+      path: p,
+      name: fileName(p),
+      statusText: '待处理',
+      statusType: 'info',
+      dimText: '',
+      outputPath: null,
+    }))
+  if (!newItems.length) return
+  const wasEmpty = longSliceFiles.value.length === 0
+  longSliceFiles.value = [...longSliceFiles.value, ...newItems]
+  if (wasEmpty) {
+    selectedLongSliceIndex.value = 0
+    currentPreviewPage.value = 1
+    void refreshPreview()
+  }
+}
+
+async function selectLongSliceFiles() {
+  const selected = await open({
+    multiple: true,
+    filters: [
+      { name: '长图与PDF文档', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'pdf'] },
+      { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] },
+      { name: 'PDF 文档', extensions: ['pdf'] },
+    ],
+  })
+  if (selected) {
+    const paths = Array.isArray(selected) ? selected : [selected]
+    addLongSliceFiles(paths)
+  }
+}
+
+async function selectLongSliceOutputDir() {
+  const selected = await open({ directory: true })
+  if (selected) {
+    longSliceOutputDir.value = selected
+  }
+}
+
+function clearLongSliceFiles() {
+  if (longSliceProcessing.value) return
+  longSliceFiles.value = []
+  currentLongSlicePreview.value = null
+  selectedLongSliceIndex.value = 0
+}
+
+function removeLongSliceFile(index) {
+  if (longSliceProcessing.value) return
+  longSliceFiles.value.splice(index, 1)
+  if (selectedLongSliceIndex.value >= longSliceFiles.value.length) {
+    selectedLongSliceIndex.value = Math.max(0, longSliceFiles.value.length - 1)
+  }
+  if (longSliceFiles.value.length) {
+    void refreshPreview()
+  } else {
+    currentLongSlicePreview.value = null
+  }
+}
+
+async function batchProcessLongSlice() {
+  if (longSliceProcessing.value || !longSliceFiles.value.length) return
+  longSliceProcessing.value = true
+  let successCount = 0
+  try {
+    for (const file of longSliceFiles.value) {
+      file.statusText = '切片中…'
+      file.statusType = 'warning'
+      const args = getLongSliceArgs(file.path)
+      const res = await withMinimumDuration(
+        () => tauriCallSafe('process_long_slice', { args }),
+        450,
+      )
+      if (res.ok && res.data) {
+        file.outputPath = res.data.outputPath
+        file.statusText = `已生成 ${res.data.totalPages} 页`
+        file.statusType = 'success'
+        successCount++
+      } else {
+        file.statusText = '处理失败'
+        file.statusType = 'danger'
+        ElMessage.error(userFacingError(res.error, '长图切片处理失败'))
+      }
+    }
+    if (successCount > 0) {
+      triggerLongSliceCelebration()
+      ElNotification({
+        title: '长图处理完成',
+        message: `成功切片导出 ${successCount} 个 A4 文档`,
+        type: 'success',
+      })
+    }
+  } catch (err) {
+    ElMessage.error('处理过程出现异常: ' + String(err))
+  } finally {
+    longSliceProcessing.value = false
   }
 }
 
@@ -1271,6 +1661,17 @@ function isMergeSupportedPath(path) {
 }
 
 async function handleDroppedPdfPaths(paths) {
+  if (activeTab.value === 'long-slice') {
+    const slicePaths = [...new Set((paths || []).filter(isLongSliceSupportedPath))]
+    if (!slicePaths.length) {
+      ElMessage.warning('请拖入长截屏图片（PNG/JPG/WebP/BMP）或 PDF 文件')
+      return
+    }
+    if (slicePaths.length < (paths || []).length) ElMessage.warning('已忽略不支持的文件格式（仅支持静态图片和 PDF）')
+    addLongSliceFiles(slicePaths)
+    return
+  }
+
   if (activeTab.value === 'merge') {
     const mergePaths = [...new Set((paths || []).filter(isMergeSupportedPath))]
     if (!mergePaths.length) {
@@ -1938,4 +2339,140 @@ h3 {
 
 <style scoped>
 .merge-conversion-error { flex-basis: 100%; color: var(--docsy-danger); font-size: 12px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
+
+/* ── Long Slice Styles ── */
+.long-slice-container.has-files {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) 420px;
+  gap: 16px;
+  align-items: start;
+}
+.long-slice-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.long-slice-preview-card {
+  padding: 12px 14px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+}
+.preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.preview-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--docsy-text);
+}
+.preview-pagination {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.page-indicator {
+  font-size: 12px;
+  color: var(--docsy-text-subtle);
+}
+.a4-sheet-viewport {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--docsy-bg-muted, #f1f5f9);
+  padding: 12px;
+  border-radius: 6px;
+  min-height: 240px;
+  max-height: 320px;
+  overflow: hidden;
+}
+.a4-sheet-canvas {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.a4-sheet-canvas.portrait {
+  width: 170px;
+  height: 240px;
+}
+.a4-sheet-canvas.landscape {
+  width: 240px;
+  height: 170px;
+}
+.preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.preview-placeholder {
+  font-size: 12px;
+  color: var(--docsy-text-muted);
+}
+.preview-footer-info {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--docsy-text-muted);
+}
+.long-slice-options-panel {
+  padding: 14px;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  background: var(--docsy-surface-elevated);
+}
+.opt-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.opt-row.align-center {
+  align-items: center;
+  justify-content: space-between;
+}
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  width: 100%;
+}
+.slider-val {
+  font-size: 12px;
+  font-weight: 500;
+  width: 40px;
+}
+.overlap-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--docsy-text);
+}
+.header-footer-collapse {
+  border-top: 1px solid var(--docsy-border-subtle);
+  margin-top: 8px;
+}
+.sub-fields {
+  margin-top: 8px;
+  padding-left: 4px;
+}
+.mt-2 { margin-top: 8px; }
+.mt-3 { margin-top: 12px; }
+
+@media (max-width: 960px) {
+  .long-slice-container.has-files {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

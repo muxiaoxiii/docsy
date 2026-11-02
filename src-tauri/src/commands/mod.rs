@@ -87,6 +87,8 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
         pdf::convert_image_to_pdf,
         pdf::plan_image_pdf,
         pdf::export_image_pdf,
+        pdf::preview_long_slice,
+        pdf::process_long_slice,
         pdf::extract_pdf_pages,
         pdf::compress_pdf,
         pdf::optimize_pdf_lossless,
