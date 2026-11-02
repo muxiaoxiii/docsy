@@ -376,6 +376,7 @@ pub fn preview_overlay(
             input_path: job.output_path.clone(),
             page,
             dpi,
+            force_refresh: false,
         })
     });
     let _ = fs::remove_file(&preview_output);
@@ -1260,6 +1261,9 @@ mod tests {
             "normalized header drifted from top: yMin={y_min}"
         );
 
+        if let Some(copy_path) = std::env::var_os("DOCSY_NORMALIZE_OUTPUT") {
+            fs::copy(&result.output_path, copy_path).expect("保存人工核验副本失败");
+        }
         let _ = fs::remove_file(result.output_path);
         let _ = fs::remove_file(output);
         let _ = fs::remove_file(rendered_png);

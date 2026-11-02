@@ -45,13 +45,23 @@ export function sameSequenceRowKeys(rows, selectedRow) {
   return (groups.find(group => group.some(row => row.key === selectedRow.key)) || []).map(row => row.key)
 }
 
-export function detectedElementFromCandidate(candidate, kind, index = 0) {
+export function detectedElementFromCandidate(candidate, kind, index = 0, pages = []) {
   const range = candidate?.pageRange || {}
   const text = String(candidate?.text || candidate?.normalizedText || '')
   const confidence = Number(candidate?.confidence || 0)
   const source = candidate?.source || 'content-text'
   const pageStart = Number(range.start || candidate?.bbox?.page || 1)
   const pageEnd = Number(range.end || range.start || candidate?.bbox?.page || 1)
+  const center = bbox => [
+    (Number(bbox?.x0 || 0) + Number(bbox?.x1 || 0)) / 2 / Number(bbox?.width || 1),
+    (Number(bbox?.y0 || 0) + Number(bbox?.y1 || 0)) / 2 / Number(bbox?.height || 1),
+  ]
+  const origin = center(candidate?.bbox)
+  const pageSamples = pages.filter(page => page.page >= pageStart && page.page <= pageEnd)
+    .flatMap(page => (candidate?.region === 'header' ? page.headers || [] : page.footers || [])
+      .filter(line => line.normalizedText === candidate?.normalizedText &&
+        center(line.bbox).every((value, axis) => Math.abs(value - origin[axis]) < 0.05))
+      .map(line => ({ page: page.page, text: line.text, bbox: line.bbox })))
   // Low-confidence: either the score is below threshold, or this is a
   // single-page file where content-text heuristics have no repetition to
   // validate (page-number candidates from single pages are still useful for
@@ -69,6 +79,8 @@ export function detectedElementFromCandidate(candidate, kind, index = 0) {
     artifactId: candidate?.artifactId || null,
     docsyKind: candidate?.docsyKind || null,
     bbox: candidate?.bbox || null,
+    pageSamples,
+    sequenceStable: candidate?.sequenceStable === true,
     fontSize: Number(candidate?.fontSize || 0) || null,
     pageStart,
     pageEnd,

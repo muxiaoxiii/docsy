@@ -1,5 +1,5 @@
 <template>
-  <section class="file-queue-panel" :class="{ 'is-fill': fill && !items.length }">
+  <section class="file-queue-panel" :class="{ 'is-fill': fill, 'is-empty': !items.length }">
     <div v-if="items.length" class="queue-summary">
       <span>{{ items.length }} 个文件</span>
       <el-button v-if="items.length && clearable" :disabled="busy" link size="small" type="danger" @click="$emit('clear')">
@@ -7,7 +7,7 @@
       </el-button>
     </div>
 
-    <el-scrollbar v-if="items.length" class="queue-scrollbar" :max-height="maxHeight">
+    <el-scrollbar v-if="items.length" class="queue-scrollbar" :max-height="fill ? undefined : maxHeight">
       <TransitionGroup
         tag="div"
         name="queue-row"
@@ -163,13 +163,21 @@ function itemKey(item, index) {
 
 .file-queue-panel.is-fill {
   display: flex;
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   flex-direction: column;
+}
+
+.file-queue-panel.is-fill.is-empty {
   border-style: dashed;
   border-color: var(--docsy-border-strong);
   background: color-mix(in srgb, var(--docsy-surface-muted) 34%, var(--docsy-surface-elevated));
   box-shadow: none;
+}
+
+.file-queue-panel.is-fill .queue-scrollbar {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .file-queue-panel.is-fill .queue-empty {
@@ -190,6 +198,7 @@ function itemKey(item, index) {
 
 .queue-summary {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   min-height: 42px;

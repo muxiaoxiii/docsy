@@ -9,7 +9,7 @@ vi.mock('../../../core/tauriBridge.js', () => ({
 }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('element-plus', () => ({
-  ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+  ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
   ElMessageBox: { confirm: vi.fn().mockResolvedValue('confirm') },
 }))
 
@@ -293,4 +293,222 @@ describe('合并证据拆分导入', () => {
     expect(state.overlayFiles.value.map(file => file.path)).toEqual(['/out/b.pdf'])
     expect(tauriCallSafe).not.toHaveBeenCalled()
   })
+})
+
+
+describe('manual split navigation and editing', () => {
+  function manual() {
+    const context = setup()
+    context.state.previewMaxPage.value = 20
+    context.state.mergedImportPlan.value = { inputPath: '/scan.pdf', totalPages: 20,
+      items: [{ name: '封面', pageStart: 1, pageEnd: 4 }, { name: '正文', pageStart: 5, pageEnd: 20 }] }
+    return context
+  }
+  it('focuses the requested endpoint without resetting the render key or calling the backend', () => {
+    const { state, api } = manual()
+    const row = state.mergedImportPlan.value.items[1]
+    api.selectMergedImportRange(row, 'end')
+    expect(state.previewPage.value).toBe(20)
+    expect(state.selectedMergedImportIndex.value).toBe(1)
+    api.selectMergedImportRange(row, 'end')
+    expect(state.previewPage.value).toBe(20)
+    api.selectMergedImportRange(row)
+    expect(state.previewPage.value).toBe(5)
+    expect(state.refreshPreview).not.toHaveBeenCalled()
+    expect(tauriCallSafe).not.toHaveBeenCalled()
+  })
+  it('selecting and renaming a segment keeps the current page and completed preview', () => {
+    const { state, api } = manual()
+    const row = state.mergedImportPlan.value.items[1]
+    state.previewPage.value = 17
+    state.truePreview.value = { path: '/cached-page.png' }
+    const rendered = state.truePreview.value
+    api.selectMergedImportRange(row, null)
+    row.name = '修正后的文件名'
+    api.selectMergedImportRange(row, null)
+    expect(state.selectedMergedImportIndex.value).toBe(1)
+    expect(state.previewPage.value).toBe(17)
+    expect(state.truePreview.value).toBe(rendered)
+    expect(state.refreshPreview).not.toHaveBeenCalled()
+    expect(tauriCallSafe).not.toHaveBeenCalled()
+    // Re-selecting an endpoint already on screen must also keep the render.
+    state.previewPage.value = 20
+    api.selectMergedImportRange(row, 'end')
+    expect(state.truePreview.value).toBe(rendered)
+  })
+  it('keeps rows fixed during editing, reports the unassigned tail and fills it only explicitly', () => {
+    const { state, api } = manual()
+    api.onMergedRangeEndChanged(1, 12)
+    expect(state.previewPage.value).toBe(12)
+    expect(state.mergedImportPlan.value.items.map(r => [r.pageStart, r.pageEnd])).toEqual([[1, 4], [5, 12]])
+    expect(api.mergedImportGaps.value).toEqual([{ pageStart: 13, pageEnd: 20 }])
+    api.fillMergedImportGaps()
+    expect(state.mergedImportPlan.value.items).toHaveLength(3)
+    api.undoMergedImportEdit()
+    expect(state.mergedImportPlan.value.items).toHaveLength(2)
+    expect(api.canUndoMergedImport.value).toBe(true)
+    api.undoMergedImportEdit()
+    expect(state.mergedImportPlan.value.items.map(r => [r.pageStart, r.pageEnd])).toEqual([[1, 4], [5, 20]])
+    api.redoMergedImportEdit()
+    expect(state.previewPage.value).toBe(12)
+    expect(state.safeRefreshPreview).not.toHaveBeenCalled()
+  })
+  it('splits before or after the viewed page, retaining that page and using idempotent boundaries', () => {
+    const { state, api } = manual()
+    state.previewPage.value = 10
+    api.splitMergedImportFromCurrentPage()
+    expect(state.mergedImportPlan.value.items.map(r => [r.pageStart, r.pageEnd])).toEqual([[1, 4], [5, 9], [10, 20]])
+    expect(state.previewPage.value).toBe(10)
+    expect(state.selectedMergedImportIndex.value).toBe(2)
+    api.splitMergedImportFromCurrentPage()
+    expect(state.mergedImportPlan.value.undoStack).toHaveLength(1)
+    api.undoMergedImportEdit()
+    state.previewPage.value = 10
+    api.splitMergedImportAfterCurrentPage()
+    expect(state.mergedImportPlan.value.items.map(r => [r.pageStart, r.pageEnd])).toEqual([[1, 4], [5, 10], [11, 20]])
+    expect(state.previewPage.value).toBe(10)
+    expect(state.selectedMergedImportIndex.value).toBe(1)
+    expect(state.refreshPreview).not.toHaveBeenCalled()
+  })
+  it('guards the document edges and stops edits while a batch or split is running', () => {
+    const { state, api } = manual()
+    state.previewPage.value = 1
+    expect(api.splitMergedImportFromCurrentPage()).toBe(false)
+    state.previewPage.value = 20
+    expect(api.splitMergedImportAfterCurrentPage()).toBe(false)
+    api.batchRunning.value = true
+    state.previewPage.value = 10
+    expect(api.splitMergedImportAfterCurrentPage()).toBe(false)
+    api.onMergedRangeEndChanged(1, 12)
+    expect(state.mergedImportPlan.value.items[1].pageEnd).toBe(20)
+    expect(state.mergedImportPlan.value.items).toHaveLength(2)
+  })
+  it('applies a whole batch as one reversible edit and preserves other segments and the viewed page', () => {
+    const { state, api } = manual()
+    state.previewPage.value = 14
+    const payload = { inputPath: '/scan.pdf', pageStart: 5, pageEnd: 20, items: [
+      { name: '甲', pageStart: 5, pageEnd: 10 }, { name: '乙', pageStart: 11, pageEnd: 15 }, { name: '丙', pageStart: 16, pageEnd: 20 },
+    ] }
+    expect(api.applyMergedRangeBatch(payload)).toBe(true)
+    expect(state.mergedImportPlan.value.items.map(r => r.name)).toEqual(['封面', '甲', '乙', '丙'])
+    expect(state.selectedMergedImportIndex.value).toBe(2)
+    expect(state.previewPage.value).toBe(14)
+    expect(state.mergedImportPlan.value.undoStack).toHaveLength(1)
+    expect(api.applyMergedRangeBatch(payload)).toBe(false)
+    api.undoMergedImportEdit()
+    expect(state.mergedImportPlan.value.items.map(r => r.name)).toEqual(['封面', '正文'])
+    expect(state.previewPage.value).toBe(14)
+    expect(state.refreshPreview).not.toHaveBeenCalled()
+  })
+})
+
+
+it('retains the sole interval instead of leaving manual splitting without an editable range', () => {
+  const { state, api } = setup()
+  state.mergedImportPlan.value = { inputPath: '/scan.pdf', totalPages: 20,
+    items: [{ name: '全文', pageStart: 1, pageEnd: 20 }] }
+  api.removeMergedImportRange(0)
+  expect(state.mergedImportPlan.value.items).toEqual([{ name: '全文', pageStart: 1, pageEnd: 20 }])
+  expect(api.canUndoMergedImport.value).toBe(false)
+})
+
+
+it('keeps keyed rows and object references through reordering, boundary edits and undo', () => {
+  const { state, api } = setup()
+  state.mergedImportPlan.value = { inputPath: '/scan.pdf', totalPages: 30, items: [
+    { name: '证据1', pageStart: 1, pageEnd: 10 }, { name: '证据2', pageStart: 11, pageEnd: 20 }, { name: '证据3', pageStart: 21, pageEnd: 30 },
+  ] }
+  const rows = state.mergedImportPlan.value.items, target = rows[1], keys = rows.map(api.splitRangeRowKey)
+  rows.reverse()
+  api.onMergedRangeEndChanged(target, 30)
+  expect(rows.map(row => row.name)).toEqual(['证据3', '证据2', '证据1'])
+  expect(rows.map(api.splitRangeRowKey)).toEqual([...keys].reverse())
+  expect(rows[0].pageStart).toBe(21)
+  expect(rows[2].pageEnd).toBe(10)
+  expect(api.mergedImportWarnings.value.some(message => message.includes('重叠'))).toBe(true)
+  api.undoMergedImportEdit()
+  expect(rows[1]).toBe(target)
+  expect(rows[1].pageEnd).toBe(20)
+})
+
+it('uses the same idempotent add operation at an existing boundary and preserves current-page preview', () => {
+  const { state, api } = setup()
+  state.mergedImportPlan.value = { inputPath: '/scan.pdf', totalPages: 30, items: [
+    { name: '证据7', pageStart: 1, pageEnd: 20 }, { name: '证据9', pageStart: 21, pageEnd: 30 },
+  ] }
+  state.previewPage.value = 10
+  api.addMergedImportRangeFromPage()
+  expect(state.mergedImportPlan.value.items.map(row => [row.pageStart, row.pageEnd])).toEqual([[1, 9], [10, 20], [21, 30]])
+  const original = state.mergedImportPlan.value.items[0], key = api.splitRangeRowKey(original)
+  api.addMergedImportRangeFromPage()
+  expect(state.mergedImportPlan.value.items).toHaveLength(3)
+  expect(api.splitRangeRowKey(original)).toBe(key)
+  expect(state.previewPage.value).toBe(10)
+})
+
+
+it('merges the selected physical neighbour after reordering and can undo reorder and merge separately', () => {
+  const { state, api } = setup()
+  state.mergedImportPlan.value = { inputPath: '/scan.pdf', totalPages: 30, items: [
+    { name: '甲', pageStart: 1, pageEnd: 10 }, { name: '乙', pageStart: 11, pageEnd: 20 }, { name: '丙', pageStart: 21, pageEnd: 30 },
+  ] }
+  const rows = state.mergedImportPlan.value.items, a = rows[0], b = rows[1], c = rows[2]
+  api.selectMergedImportRange(c, 'end')
+  api.reorderMergedImportRanges(2, 0)
+  expect(state.previewPage.value).toBe(30)
+  expect(api.selectedMergedImportRange.value).toBe(c)
+  api.mergeCurrentMergedImportRangeIntoPrevious()
+  expect(rows.map(row => row.name)).toEqual(['甲', '乙'])
+  expect(b.pageEnd).toBe(30)
+  expect(a.pageEnd).toBe(10)
+  api.undoMergedImportEdit()
+  expect(rows.map(row => row.name)).toEqual(['丙', '甲', '乙'])
+  expect(b.pageEnd).toBe(20)
+  api.undoMergedImportEdit()
+  expect(rows.map(row => row.name)).toEqual(['甲', '乙', '丙'])
+  expect(state.previewPage.value).toBe(30)
+})
+
+it('inserts directly after the selected row using the surrounding gap, independently of the preview page', () => {
+  const { state, api } = setup()
+  state.mergedImportPlan.value = { inputPath: '/scan.pdf', totalPages: 30, items: [
+    { name: '甲', pageStart: 1, pageEnd: 9 }, { name: '乙', pageStart: 20, pageEnd: 25 }, { name: '丙', pageStart: 26, pageEnd: 30 },
+  ] }
+  state.selectedMergedImportIndex.value = 0
+  state.previewPage.value = 28
+  const original = [...state.mergedImportPlan.value.items]
+  expect(api.addMergedImportRange()).toBe(true)
+  const rows = state.mergedImportPlan.value.items
+  expect(rows.map(row => [row.pageStart, row.pageEnd])).toEqual([[1, 9], [10, 19], [20, 25], [26, 30]])
+  expect(state.selectedMergedImportIndex.value).toBe(1)
+  expect(state.previewPage.value).toBe(28)
+  expect(rows[0]).toBe(original[0])
+  expect(rows[2]).toBe(original[1])
+  expect(rows[3]).toBe(original[2])
+  api.undoMergedImportEdit()
+  expect(rows.map(row => row.name)).toEqual(['甲', '乙', '丙'])
+  expect(state.previewPage.value).toBe(28)
+})
+
+it('inserts an explicit draft when adjacent rows leave no free pages, without changing them or jumping the preview', () => {
+  const { state, api } = setup()
+  state.mergedImportPlan.value = { inputPath: '/scan.pdf', totalPages: 30, items: [
+    { name: '甲', pageStart: 1, pageEnd: 9 }, { name: '乙', pageStart: 10, pageEnd: 30 },
+  ] }
+  state.previewPage.value = 25
+  expect(api.insertMergedImportRangeAfter(0)).toBe(true)
+  const rows = state.mergedImportPlan.value.items
+  expect(rows.map(row => [row.pageStart, row.pageEnd])).toEqual([[1, 9], [null, 9], [10, 30]])
+  api.selectMergedImportRange(rows[1], 'start')
+  expect(state.previewPage.value).toBe(25)
+  expect(api.mergedImportWarnings.value.some(message => message.includes('缺少名称或起止页'))).toBe(true)
+  api.removeMergedImportRange(1)
+  expect(rows.map(row => [row.pageStart, row.pageEnd])).toEqual([[1, 9], [10, 30]])
+})
+
+it('takes the document end for a newly inserted final row', () => {
+  const { state, api } = setup()
+  state.mergedImportPlan.value = { inputPath: '/scan.pdf', totalPages: 30, items: [{ name: '甲', pageStart: 1, pageEnd: 20 }] }
+  api.insertMergedImportRangeAfter(0)
+  expect(state.mergedImportPlan.value.items.map(row => [row.pageStart, row.pageEnd])).toEqual([[1, 20], [21, 30]])
 })

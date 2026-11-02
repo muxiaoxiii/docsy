@@ -48,8 +48,11 @@
           <template #toolbar>
             <el-button v-if="mergeFiles.length" type="primary" plain :disabled="merging" @click="selectMergeFiles">添加文件</el-button>
             <el-button v-if="mergeFiles.length > 1" :disabled="merging" @click="selectMergeOutputDir">{{ mergeOutputDir ? '更改输出目录' : '选择输出目录' }}</el-button>
-            <span v-if="mergeOutputDir" class="merge-directory" :title="mergeOutputDir">{{ mergeOutputDir }}</span>
+            <el-button v-if="mergeOutputDir" text class="merge-directory" :title="mergeOutputDir" :disabled="merging" @click="selectMergeOutputDir">{{ mergeOutputDir }}</el-button>
           </template>
+          <div v-if="mergeFiles.length > 1" class="merge-output-settings">
+            <label>合并文件名</label><MergeFileNameField v-model="mergeFileName" :files="mergeFiles" :disabled="merging" />
+          </div>
           <FileQueuePanel
             fill
             scene="pdf-merge"
@@ -461,6 +464,8 @@ import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfI
 const imageImportDialog = ref(null)
 import { useResponsiveTabs } from '../../../shared/composables/useResponsiveTabs.js'
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
+import MergeFileNameField from '../../../shared/pdf-tools/components/MergeFileNameField.vue'
+import { commonSourceDirectory, pdfOutputFileName, joinOutputPath } from '../../../core/outputFiles.js'
 import { DOCUMENT_FILTERS, MANUAL_PDF_HINT, convertImportDocument, documentKind, reviewImageImports } from '../../../shared/pdf-tools/documentImport.js'
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -669,6 +674,11 @@ const mergeFiles = ref([])
 const merging = ref(false)
 const mergeOutputPath = ref('')
 const mergeOutputDir = ref('')
+const mergeOutputDirManual = ref(false)
+const mergeFileName = ref('合并文件.pdf')
+function syncMergeOutputDirectory() {
+  if (!mergeOutputDirManual.value) mergeOutputDir.value = commonSourceDirectory(mergeFiles.value)
+}
 const extractResultPath = ref('')
 const splitResultDir = ref('')
 const duplexSeparate = ref(false)
@@ -869,20 +879,28 @@ async function addMergeFiles(paths) {
   const existing = new Set(mergeFiles.value.map(file => file.path))
   const raw = [...new Set(paths)].filter(path => isMergeSupportedPath(path) && !existing.has(path))
   let candidates = raw
+  const sourcePaths = new Map()
   if (raw.some(path => documentKind(path) === 'image')) {
     merging.value = true
-    try { candidates = await reviewImageImports(raw, group => imageImportDialog.value.open(group)) }
+    try { candidates = await reviewImageImports(raw, async group => {
+      const path = await imageImportDialog.value.open(group)
+      if (path) sourcePaths.set(path, group)
+      return path
+    }) }
     finally { merging.value = false }
   }
   if (candidates.length) mergeOutputPath.value = ''
-  const items = makeQueueItems(candidates).map(item => raw.includes(item.path) ? item : { ...item, outputPath: item.path, statusText: '图片 PDF 已就绪', statusType: 'success' })
+  const items = makeQueueItems(candidates).map(item => raw.includes(item.path) ? item : { ...item, sourcePaths: sourcePaths.get(item.path) || [item.path], outputPath: item.path, statusText: '图片 PDF 已就绪', statusType: 'success' })
   mergeFiles.value.push(...items)
+  syncMergeOutputDirectory()
   if (mergeFiles.value.length === 1 && items[0]?.outputPath) mergeOutputPath.value = items[0].outputPath
 }
 
 function clearMergeFiles() {
   if (merging.value) return
   mergeOutputDir.value = ''
+  mergeOutputDirManual.value = false
+  mergeFileName.value = '合并文件.pdf'
   mergeOutputPath.value = ''
   mergeFiles.value = []
 }
@@ -891,6 +909,7 @@ function removeMergeFile(index) {
   if (merging.value) return
   mergeOutputPath.value = ''
   mergeFiles.value.splice(index, 1)
+  syncMergeOutputDirectory()
 }
 
 function reorderMergeFiles({ from, to }) {
@@ -944,7 +963,7 @@ async function selectManualMergePdf(item) {
 async function selectMergeOutputDir() {
   if (merging.value) return
   const selected = normalizeSelectedPath(await open({ directory: true }))
-  if (selected) { mergeOutputDir.value = selected; mergeOutputPath.value = '' }
+  if (selected) { mergeOutputDir.value = selected; mergeOutputDirManual.value = true; mergeOutputPath.value = '' }
 }
 
 async function doMerge() {
@@ -956,12 +975,17 @@ async function doMerge() {
     return
   }
 
+  try { pdfOutputFileName(mergeFileName.value) } catch (error) { ElMessage.warning(error.message); return }
   merging.value = true
   try {
-    const output = mergeOutputDir.value || normalizeSelectedPath(await open({ directory: true }))
+    let output = mergeOutputDir.value || commonSourceDirectory(mergeFiles.value)
+    if (!output) {
+      output = normalizeSelectedPath(await open({ directory: true }))
+      if (output) mergeOutputDirManual.value = true
+    }
     if (output) {
       mergeOutputDir.value = output
-      const outputPath = `${output}/merged.pdf`
+      const outputPath = joinOutputPath(output, pdfOutputFileName(mergeFileName.value))
       let failed = 0
       for (const file of mergeFiles.value) if (!await prepareMergeItem(file)) failed += 1
       if (failed) {
@@ -1466,6 +1490,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.merge-output-settings { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 0; }
+.merge-output-settings > label { line-height: 32px; white-space: nowrap; font-size: 13px; }
+
 .pdf-tools-view {
   position: relative;
   height: 100%;

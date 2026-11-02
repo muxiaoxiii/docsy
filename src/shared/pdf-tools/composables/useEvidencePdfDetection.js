@@ -163,12 +163,12 @@ export function useEvidencePdfDetection({
         .filter((candidate) => !isPageNumberCandidate(candidate))
         .filter((candidate) => bestReliableHeaderCandidate([candidate], totalPages))
         .filter((candidate) => isReliableDetectedCandidate(candidate, totalPages))
-        .map((candidate, index) => detectedElementFromCandidate(candidate, 'header', index)),
+        .map((candidate, index) => detectedElementFromCandidate(candidate, 'header', index, data.pages || [])),
       ...footerCandidates
         .filter((candidate) => !isPageNumberCandidate(candidate) && isStrongNonPageFooterCandidate(candidate))
         .filter((candidate) => isReliableDetectedCandidate(candidate, totalPages))
-        .map((candidate, index) => detectedElementFromCandidate(candidate, 'footerText', index)),
-      ...pageNumberCandidates.map((candidate, index) => detectedElementFromCandidate(candidate, 'pageNumber', index)),
+        .map((candidate, index) => detectedElementFromCandidate(candidate, 'footerText', index, data.pages || [])),
+      ...pageNumberCandidates.map((candidate, index) => detectedElementFromCandidate(candidate, 'pageNumber', index, data.pages || [])),
     ]
     file.existingElements = mergeExistingElements(file.existingElements || [], detectedElements)
 

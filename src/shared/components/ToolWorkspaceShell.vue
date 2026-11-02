@@ -133,6 +133,11 @@ defineProps({
   flex-shrink: 0;
 }
 
+.workspace-content > :deep(.file-queue-panel.is-fill) {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .workspace-actions {
   flex-shrink: 0;
   flex-wrap: wrap;

@@ -4,15 +4,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { emitOperationUpdate, hideLoading, showLoading, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import {
-  buildRangeAfter,
-  insertRangeAfter,
   insertRangeAtPage,
   pageCount,
-  smartSetRangeEnd,
-  smartSetRangeStart,
 } from '../../../core/pdfUtils.js'
 import { createEvidenceFile, naturalCompare, sortByNatural } from './useEvidencePdfSession.js'
 import { formatSplitFileName, cleanSplitBaseName } from './splitFileName.js'
+import { editSplitRangeBoundary, splitRangeRowKey, splitRangeAfterDefaults, unassignedSplitRanges } from './splitRangeEditing.js'
+import { validRangeSubdivision } from './batchSplitRanges.js'
 import { splitRangeWarnings } from './usePdfSplitRanges.js'
 import { headerFooterDetectionZoneMm } from './useEvidencePdfDetection.js'
 
@@ -75,7 +73,6 @@ export function useEvidencePdfMergedImport({
     selectedMergedImportIndex.value = plan.viewState?.selectedIndex || 0
     previewPage.value = plan.viewState?.page || 1
     truePreview.value = null
-    safeRefreshPreview()
   }
 
   function requestStopMergedBatch() {
@@ -133,7 +130,7 @@ export function useEvidencePdfMergedImport({
     if (plan.splitError) return '拆分受阻'
     if (plan.detectionError) return '检测失败'
     if (plan.reviewed) return '已核对'
-    return plan.pagesAnalyzed ? '待核对' : '未检测'
+    return plan.pagesAnalyzed ? '待核对' : plan.manualEdited ? '手动分段' : '未检测'
   }
 
   function reopenMergedImportPlan(plan) {
@@ -148,7 +145,10 @@ export function useEvidencePdfMergedImport({
   const mergedImportWarnings = computed(() => {
     if (!mergedImportPlan.value) return []
     return [
-      ...(mergedImportPlan.value.warnings || []),
+      ...(mergedImportPlan.value.warnings || []).map(message =>
+        mergedImportPlan.value.items?.length > 1 && message.includes('仅生成一个默认页段')
+          ? `未识别到稳定页眉，当前按手动设置的 ${mergedImportPlan.value.items.length} 个页段拆分`
+          : message),
       ...splitRangeWarnings(mergedImportPlan.value.items || [], mergedImportPlan.value.totalPages),
     ]
   })
@@ -166,17 +166,15 @@ export function useEvidencePdfMergedImport({
   })
   const canUndoMergedImport = computed(() => mergedImportUndoStack.value.length > 0)
   const canRedoMergedImport = computed(() => mergedImportRedoStack.value.length > 0)
-  const currentMergedImportRangeIndex = computed(() => {
-    const page = Number(previewPage.value || 1)
-    return (mergedImportPlan.value?.items || []).findIndex(
-      (item) => page >= Number(item.pageStart || 0) && page <= Number(item.pageEnd || 0),
-    )
+  const canMergeCurrentMergedImportRange = computed(() => {
+    const selected = selectedMergedImportRange.value
+    return Boolean(selected && [...(mergedImportPlan.value?.items || [])].some(row => row !== selected && row.pageStart < selected.pageStart))
   })
-  const canMergeCurrentMergedImportRange = computed(() => currentMergedImportRangeIndex.value > 0)
+  const mergedImportGaps = computed(() => unassignedSplitRanges(mergedImportPlan.value?.items || [], mergedImportPlan.value?.totalPages || 0))
 
   function mergedImportSnapshot() {
     return {
-      items: (mergedImportPlan.value?.items || []).map((item) => ({ ...item })),
+      items: (mergedImportPlan.value?.items || []).map((item) => ({ ...item, rangeId: splitRangeRowKey(item) })),
       selectedIndex: selectedMergedImportIndex.value,
       previewPage: previewPage.value,
     }
@@ -185,24 +183,30 @@ export function useEvidencePdfMergedImport({
   function restoreMergedImportSnapshot(snapshot) {
     if (!mergedImportPlan.value || !snapshot) return false
     mergedImportPlan.value.reviewed = false
-    mergedImportPlan.value.items = snapshot.items.map((item) => ({ ...item }))
+    const existing = new Map(mergedImportPlan.value.items.map(row => [splitRangeRowKey(row), row]))
+    mergedImportPlan.value.items.splice(0, mergedImportPlan.value.items.length, ...snapshot.items.map(item => {
+      const row = existing.get(item.rangeId) || {}
+      return Object.assign(row, item)
+    }))
     selectedMergedImportIndex.value = Math.min(
       Math.max(0, Number(snapshot.selectedIndex || 0)),
       Math.max(0, mergedImportPlan.value.items.length - 1),
     )
-    previewPage.value = Math.min(previewMaxPage.value, Math.max(1, Number(snapshot.previewPage || 1)))
+    previewPage.value = Math.min(Number(mergedImportPlan.value.totalPages || previewMaxPage.value), Math.max(1, Number(snapshot.previewPage || 1)))
     truePreview.value = null
-    safeRefreshPreview()
     return true
   }
 
   function runMergedImportMutation(mutate) {
     if (batchRunning.value || mergedImportPlan.value?.splitRequest || detectingMergedImport.value || splittingMergedImport.value) return
+    if (!Array.isArray(mergedImportPlan.value.undoStack)) mergedImportPlan.value.undoStack = []
+    if (!Array.isArray(mergedImportPlan.value.redoStack)) mergedImportPlan.value.redoStack = []
     const before = mergedImportSnapshot()
     const beforeItems = JSON.stringify(before.items)
     const result = mutate()
     if (JSON.stringify(mergedImportPlan.value?.items || []) !== beforeItems) {
       mergedImportPlan.value.reviewed = false
+      mergedImportPlan.value.manualEdited = true
       mergedImportUndoStack.value.push(before)
       if (mergedImportUndoStack.value.length > 50) mergedImportUndoStack.value.shift()
       mergedImportRedoStack.value = []
@@ -574,13 +578,21 @@ export function useEvidencePdfMergedImport({
     }
   }
 
-  function selectMergedImportRange(row) {
-    if (!row) return
+  function selectMergedImportRange(row, boundary = 'start') {
+    if (!row) return false
     const index = mergedImportPlan.value?.items?.indexOf(row) ?? -1
-    if (index >= 0) selectedMergedImportIndex.value = index
-    previewPage.value = Math.min(previewMaxPage.value, Math.max(1, Number(row.pageStart || 1)))
-    truePreview.value = null
-    refreshPreview()
+    if (index < 0) return false
+    selectedMergedImportIndex.value = index
+    // Naming is metadata-only: retain the currently displayed page and render.
+    if (boundary == null) return true
+    const target = Number(boundary === 'end' ? row.pageEnd : row.pageStart)
+    if (!Number.isFinite(target) || target < 1) return true
+    const page = Math.min(Number(mergedImportPlan.value.totalPages || previewMaxPage.value), target)
+    if (previewPage.value !== page) {
+      previewPage.value = page
+      truePreview.value = null
+    }
+    return true
   }
 
   function setSelectedMergedRangeStart() {
@@ -588,157 +600,209 @@ export function useEvidencePdfMergedImport({
     if (!items) return
     const index = items.indexOf(selectedMergedImportRange.value)
     if (index < 0) return
-    // 智能调整：改起始页后自动与前一段无缝衔接，前段被吃空则自动并入
-    const newIndex = runMergedImportMutation(() =>
-      smartSetRangeStart(items, index, previewPage.value, mergedImportPlan.value.totalPages),
-    )
-    selectedMergedImportIndex.value = newIndex
+    updateMergedRangeBoundary(index, previewPage.value, 'start')
   }
 
   function setSelectedMergedRangeEnd() {
     const items = mergedImportPlan.value?.items
     if (!items) return
     const index = items.indexOf(selectedMergedImportRange.value)
-    if (index < 0) return
-    // 智能调整：改结束页后自动与后一段无缝衔接，后段被吃空则自动并入
-    const newIndex = runMergedImportMutation(() =>
-      smartSetRangeEnd(items, index, previewPage.value, mergedImportPlan.value.totalPages),
-    )
-    selectedMergedImportIndex.value = newIndex
+    if (index >= 0) updateMergedRangeBoundary(index, previewPage.value, 'end')
   }
 
-  // 预览区「添加新页段」：以当前预览页为起始页插入新页段，
-  // 结束页与后续页段接续；边界页提出一页，段中页承接段尾，末段到最后一页。
+  // Every add/split entry point uses the same idempotent boundary operation.
   function addMergedImportRangeFromPage() {
-    const plan = mergedImportPlan.value
-    if (!plan) return
-    const items = plan.items
-    const newIndex = runMergedImportMutation(() =>
-      insertRangeAtPage(items, previewPage.value, plan.totalPages, {
-        name: `文件${items.length + 1}`,
-        extra: { source: 'manual' },
-      }),
-    )
-    if (newIndex < 0) {
-      ElMessage.info('当前页已是最后一个独立页段，无需新增')
-      return
-    }
-    selectedMergedImportIndex.value = newIndex
-    const item = items[newIndex]
-    previewPage.value = Math.min(previewMaxPage.value, Math.max(1, Number(item.pageStart || 1)))
-    truePreview.value = null
-    refreshPreview()
+    return splitMergedImportAtPage(previewPage.value)
   }
 
-  function splitMergedImportAtPage(page) {
+  function nextManualRangeName() {
+    const items = mergedImportPlan.value?.items || []
+    const names = new Set(items.map(item => item.name))
+    let number = items.length + 1
+    while (names.has(`文件${number}`)) number += 1
+    return `文件${number}`
+  }
+
+  function splitMergedImportAtPage(page, displayPage = page) {
     const plan = mergedImportPlan.value
-    if (!plan) return
-    const target = Math.min(Number(plan.totalPages || 1), Math.max(1, Number(page || 1)))
+    if (!plan || batchRunning.value || plan.splitRequest || detectingMergedImport.value || splittingMergedImport.value) return false
+    const target = Math.round(Number(page))
+    if (!Number.isInteger(target) || target <= 1 || target > plan.totalPages) return false
     const items = plan.items
-    const newIndex = runMergedImportMutation(() =>
-      insertRangeAtPage(items, target, plan.totalPages, {
-        name: `文件${items.length + 1}`,
-        extra: { source: 'manual' },
-        reuseBoundary: true,
-      }),
-    )
-    if (newIndex < 0) return
-    selectedMergedImportIndex.value = newIndex
-    previewPage.value = target
+    const alreadySplit = items.some(item => Number(item.pageStart) === target)
+    if (!alreadySplit && items.filter(item => target >= item.pageStart && target <= item.pageEnd).length !== 1) {
+      ElMessage.warning('当前页存在重叠或尚未分配，请先修正范围或使用“补齐空缺”')
+      return false
+    }
+    const newIndex = runMergedImportMutation(() => insertRangeAtPage(items, target, plan.totalPages, {
+      name: nextManualRangeName(), extra: { source: 'manual' }, reuseBoundary: true,
+    }))
+    if (!Number.isInteger(newIndex) || newIndex < 0) return false
+    const displayed = Math.max(1, Math.min(plan.totalPages, Number(displayPage) || target))
+    const activeIndex = items.findIndex(item => displayed >= item.pageStart && displayed <= item.pageEnd)
+    selectedMergedImportIndex.value = activeIndex >= 0 ? activeIndex : newIndex
+    previewPage.value = displayed
     truePreview.value = null
-    refreshPreview()
+    if (alreadySplit) ElMessage.info?.('此处已经分段，无需重复拆分')
+    return !alreadySplit
   }
 
   function splitMergedImportFromCurrentPage() {
-    splitMergedImportAtPage(previewPage.value)
+    return splitMergedImportAtPage(previewPage.value)
   }
 
-  function splitMergedImportFromPreviousPage() {
-    if (previewPage.value <= 1) return
-    splitMergedImportAtPage(previewPage.value - 1)
+  function splitMergedImportAfterCurrentPage() {
+    return splitMergedImportAtPage(Number(previewPage.value) + 1, previewPage.value)
   }
 
   function mergeCurrentMergedImportRangeIntoPrevious() {
     const plan = mergedImportPlan.value
     if (!plan?.items?.length) return
-    let index = currentMergedImportRangeIndex.value
-    if (index < 0) index = selectedMergedImportIndex.value
-    if (index <= 0 || index >= plan.items.length) {
-      ElMessage.info('当前已是第一个页段，无法合并到上段')
-      return
-    }
+    const current = selectedMergedImportRange.value
+    if (!current) return false
+    const previous = [...plan.items].filter(row => row !== current && row.pageStart < current.pageStart)
+      .sort((a, b) => b.pageStart - a.pageStart)[0]
+    if (!previous) return false
     runMergedImportMutation(() => {
-      const current = plan.items[index]
-      const previous = plan.items[index - 1]
-      previous.pageEnd = Math.max(Number(previous.pageEnd || 0), Number(current.pageEnd || 0))
+      previous.pageEnd = Math.max(previous.pageEnd, current.pageEnd)
       previous.source = 'manual'
-      plan.items.splice(index, 1)
+      plan.items.splice(plan.items.indexOf(current), 1)
     })
-    selectedMergedImportIndex.value = index - 1
+    selectedMergedImportIndex.value = plan.items.indexOf(previous)
+    return true
+  }
+
+  // Inputs are drafts until change/Enter/blur, so the undo snapshot retains
+  // the original interval. Clicking the endpoint itself only navigates.
+  function updateMergedRangeBoundary(index, value, boundary) {
+    const plan = mergedImportPlan.value
+    if (!plan) return
+    if (typeof index === 'object') index = plan.items.indexOf(index)
+    if (!plan.items[index]) return
+    const newIndex = runMergedImportMutation(() => editSplitRangeBoundary(plan.items, index, value, plan.totalPages, boundary))
+    if (Number.isInteger(newIndex) && newIndex >= 0) selectMergedImportRange(plan.items[newIndex], boundary)
+  }
+
+  function onMergedRangeStartChanged(index, value) { updateMergedRangeBoundary(index, value, 'start') }
+  function onMergedRangeEndChanged(index, value) { updateMergedRangeBoundary(index, value, 'end') }
+
+  function applyMergedRangeBatch({ inputPath, rangeId, pageStart, pageEnd, items }) {
+    const plan = mergedImportPlan.value
+    if (!plan || inputPath !== plan.inputPath) return false
+    const index = plan.items.findIndex(item => (!rangeId || splitRangeRowKey(item) === rangeId) && item.pageStart === pageStart && item.pageEnd === pageEnd)
+    if (index < 0 || !validRangeSubdivision(plan.items[index], items)) {
+      ElMessage.warning('原页段已变化，请重新打开批量分段')
+      return false
+    }
+    const applied = runMergedImportMutation(() => {
+      const original = plan.items[index]
+      const first = Object.assign(original, items[0], { source: 'manual' })
+      plan.items.splice(index, 1, first, ...items.slice(1).map(item => ({ ...item, rangeId: undefined, source: 'manual' })))
+      return true
+    })
+    if (!applied) return false
+    const selected = plan.items.findIndex(item => previewPage.value >= item.pageStart && previewPage.value <= item.pageEnd)
+    selectedMergedImportIndex.value = selected >= 0 ? selected : index
     truePreview.value = null
-    safeRefreshPreview()
+    return true
   }
 
-  // 计划表格内直接修改起始页/结束页后，同样走智能无缝调整
-  function onMergedRangeStartChanged(index, value) {
-    const items = mergedImportPlan.value?.items
-    if (!items || index < 0) return
-    const newIndex = smartSetRangeStart(items, index, value, mergedImportPlan.value.totalPages)
-    selectedMergedImportIndex.value = newIndex
-  }
+  function addMergedImportRange() { return insertMergedImportRangeAfter() }
 
-  function onMergedRangeEndChanged(index, value) {
-    const items = mergedImportPlan.value?.items
-    if (!items || index < 0) return
-    const newIndex = smartSetRangeEnd(items, index, value, mergedImportPlan.value.totalPages)
-    selectedMergedImportIndex.value = newIndex
-  }
-
-  function addMergedImportRange() {
-    if (!mergedImportPlan.value) return
-    const items = mergedImportPlan.value.items
-    runMergedImportMutation(() => {
-      items.push(buildRangeAfter(items, items.length - 1, previewMaxPage.value, { extra: { source: 'manual' } }))
+  function insertMergedImportRangeAfter(index = selectedMergedImportIndex.value) {
+    const plan = mergedImportPlan.value
+    if (!plan || batchRunning.value || plan.splitRequest || detectingMergedImport.value || splittingMergedImport.value) return false
+    if (typeof index === 'object') index = plan.items.indexOf(index)
+    const defaults = splitRangeAfterDefaults(plan.items, index, plan.totalPages)
+    if (!defaults) return false
+    const item = { name: nextManualRangeName(), ...defaults, source: 'manual' }
+    const added = runMergedImportMutation(() => {
+      plan.items.splice(index + 1, 0, item)
+      return true
     })
-    selectMergedImportRange(items[items.length - 1])
+    if (!added) return false
+    selectedMergedImportIndex.value = index + 1
+    // Adding a list row does not navigate the PDF or depend on the viewed page.
+    if (item.pageStart == null) ElMessage.info?.('相邻页段没有空余页面，已插入待设置行；请设置起点并调整相邻边界')
+    return true
   }
 
-  function insertMergedImportRangeAfter(index) {
-    if (!mergedImportPlan.value) return
-    const items = mergedImportPlan.value.items
-    const item = runMergedImportMutation(() =>
-      insertRangeAfter(items, index, previewMaxPage.value, { extra: { source: 'manual' } }),
-    )
-    selectMergedImportRange(item)
+  function fillMergedImportGaps() {
+    const plan = mergedImportPlan.value
+    if (!plan || !mergedImportGaps.value.length || batchRunning.value || plan.splitRequest || detectingMergedImport.value || splittingMergedImport.value) return false
+    if (plan.items.some(row => !row.pageStart || !row.pageEnd || row.pageStart > row.pageEnd)) {
+      ElMessage.warning('请先补全待设置的页段，并修正起始页大于结束页的范围')
+      return false
+    }
+    const selected = selectedMergedImportRange.value
+    runMergedImportMutation(() => {
+      for (const gap of mergedImportGaps.value) {
+        const next = [...plan.items].filter(row => row.pageStart > gap.pageEnd).sort((a, b) => a.pageStart - b.pageStart)[0]
+        const index = next ? plan.items.indexOf(next) : plan.items.length
+        plan.items.splice(index, 0, { ...gap, name: nextManualRangeName(), source: 'manual' })
+      }
+    })
+    selectedMergedImportIndex.value = Math.max(0, plan.items.indexOf(selected))
+    return true
   }
 
   function removeMergedImportRange(index) {
-    if (!mergedImportPlan.value) return
+    if (!mergedImportPlan.value || batchRunning.value || mergedImportPlan.value.splitRequest || detectingMergedImport.value || splittingMergedImport.value) return
     const items = mergedImportPlan.value.items
+    if (items.length <= 1) {
+      ElMessage.info?.('至少保留一个页段；如不处理此文件，可移除源文件')
+      return
+    }
     if (index < 0 || index >= items.length) return
+    const selected = selectedMergedImportRange.value
+    let recipient
     runMergedImportMutation(() => {
-      const [removed] = items.splice(index, 1)
-      // 删除页段后不留页面空洞：删的是首页段则并入下一段，否则并入上一个页段
-      if (removed && items.length) {
-        if (index === 0) {
-          items[0].pageStart = Math.min(Number(items[0].pageStart || 1), Number(removed.pageStart || 1))
-        } else {
-          items[index - 1].pageEnd = Math.max(Number(items[index - 1].pageEnd || 0), Number(removed.pageEnd || 0))
-        }
+      const removed = items[index]
+      if (!removed.pageStart || !removed.pageEnd || removed.pageStart > removed.pageEnd) {
+        recipient = items[index - 1] || items[index + 1]
+        items.splice(index, 1)
+        return
+      }
+      const sorted = [...items].sort((a, b) => a.pageStart - b.pageStart)
+      const physicalIndex = sorted.indexOf(removed)
+      const previous = sorted[physicalIndex - 1], next = sorted[physicalIndex + 1]
+      recipient = previous || next
+      items.splice(index, 1)
+      if (previous) {
+        previous.pageEnd = Math.max(previous.pageEnd, removed.pageEnd)
+        previous.source = 'manual'
+      } else if (next) {
+        next.pageStart = Math.min(next.pageStart, removed.pageStart)
+        next.pageEnd = Math.max(next.pageEnd, removed.pageEnd)
+        next.source = 'manual'
       }
     })
-    selectedMergedImportIndex.value = Math.min(selectedMergedImportIndex.value, Math.max(0, items.length - 1))
+    selectedMergedImportIndex.value = Math.max(0, items.indexOf(items.includes(selected) ? selected : recipient))
+  }
+
+  function reorderMergedImportRanges(from, to) {
+    const items = mergedImportPlan.value?.items
+    if (!items || from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) return false
+    const selected = selectedMergedImportRange.value
+    const changed = runMergedImportMutation(() => {
+      const [row] = items.splice(from, 1)
+      items.splice(to, 0, row)
+      return true
+    })
+    if (changed) selectedMergedImportIndex.value = Math.max(0, items.indexOf(selected))
+    return Boolean(changed)
   }
 
   function sortMergedImportItems({ prop, order }) {
     if (detectingMergedImport.value || splittingMergedImport.value) return
     if (!mergedImportPlan.value || !prop || !order) return
     const selected = selectedMergedImportRange.value
-    mergedImportPlan.value.items = sortByNatural(
+    const sorted = sortByNatural(
       mergedImportPlan.value.items,
       (row, index) => mergedImportSortValue(row, prop, index),
       order,
     )
+    runMergedImportMutation(() => mergedImportPlan.value.items.splice(0, mergedImportPlan.value.items.length, ...sorted))
     if (selected) {
       selectedMergedImportIndex.value = Math.max(0, mergedImportPlan.value.items.indexOf(selected))
     }
@@ -788,6 +852,9 @@ export function useEvidencePdfMergedImport({
     mergedPlanStatus,
     reopenMergedImportPlan,
     mergedImportWarnings,
+    mergedImportGaps,
+    fillMergedImportGaps,
+    splitRangeRowKey,
     selectedMergedImportRange,
     canUndoMergedImport,
     canRedoMergedImport,
@@ -812,7 +879,8 @@ export function useEvidencePdfMergedImport({
     addMergedImportRangeFromPage,
     splitMergedImportAtPage,
     splitMergedImportFromCurrentPage,
-    splitMergedImportFromPreviousPage,
+    splitMergedImportAfterCurrentPage,
+    applyMergedRangeBatch,
     mergeCurrentMergedImportRangeIntoPrevious,
     undoMergedImportEdit,
     redoMergedImportEdit,
@@ -822,6 +890,7 @@ export function useEvidencePdfMergedImport({
     insertMergedImportRangeAfter,
     removeMergedImportRange,
     sortMergedImportItems,
+    reorderMergedImportRanges,
     mergedImportSortValue,
     mergedImportRangePageCount: pageCount,
     mergedImportSourceType,

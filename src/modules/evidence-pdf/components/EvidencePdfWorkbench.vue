@@ -250,7 +250,8 @@
           <div class="hf-control-left">
             <span class="hf-control-label">证据编号起始</span>
             <el-input-number
-              v-model="numberingDefaults.evidenceStart"
+              :key="`evidence-start-${evidenceStartKey}`"
+              v-model="evidenceStartModel"
               :min="0"
               :max="9999"
               size="small"
@@ -268,14 +269,24 @@
             <el-button size="small" :disabled="!insertHeaderFooterEnabled" @click="pageNumberRulesVisible = true">
               分段与例外{{ totalPageNumberExceptionCount ? `（${totalPageNumberExceptionCount}）` : '' }}
             </el-button>
+            <el-button size="small" :disabled="!editUndoStack.length" @click="undoEdit">撤销内容修改</el-button>
+            <el-button size="small" :disabled="!editRedoStack.length" @click="redoEdit">重做</el-button>
           </div>
           <div class="hf-control-right">
-            <el-checkbox v-model="globalApplyEnabled" size="small">应用到全部证据</el-checkbox>
+            <el-checkbox :key="`apply-${globalToggleKey}`" v-model="globalApplyModel" size="small">应用到全部证据</el-checkbox>
           </div>
         </div>
         <HeaderFooterRuleFields
+          :key="`inline-${headerRuleRenderKey}`"
           v-if="insertHeaderFooterEnabled"
+          :files="globalApplyEnabled ? overlayRows : selectedOverlayFile ? [selectedOverlayFile] : []"
+          :file-index-offset="globalApplyEnabled ? 0 : selectedOverlayIndex"
+          :header-date-value="splitNameDateValue"
+          :has-header-exceptions="insertExceptions.some(entry => (entry.kinds || []).includes('header'))"
           ref="inlineHfFieldsRef"
+          @header-group-edit="recordHeaderGroupEdit"
+          @request-header-numbering="setHeaderNumbering"
+          @request-header-rule-change="setHeaderRulePatch"
           :show-rule-editor="false"
           v-model:header-groups="headerGroupsModel"
           v-model:selected-header-group-id="selectedHeaderGroupId"
@@ -355,7 +366,7 @@
           </div>
           <div class="rule-item merge-row">
             <label>合并文件名</label>
-            <el-input v-model="mergeFileName" :disabled="outputMode === 'files_only'" />
+            <MergeFileNameField v-model="mergeFileName" :files="overlayFiles" :disabled="outputMode === 'files_only' || overlaying" fallback="合并证据.pdf" />
           </div>
           <div v-if="outputMode !== 'files_only'" class="rule-item duplex-item">
             <el-checkbox v-model="duplexSeparate">双面打印分隔模式</el-checkbox>
@@ -431,7 +442,7 @@
       </div>
 
       <div v-if="showProcessingControls" class="toolbar">
-        <el-button :disabled="!overlayFiles.length" @click="selectOverlayOutputDir">输出文件夹</el-button>
+        <el-button :disabled="!overlayFiles.length" @click="selectOverlayOutputDir">更改输出文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="openPlannedOutputDir">打开文件夹</el-button>
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages"
           >刷新页数</el-button
@@ -440,6 +451,7 @@
           {{ processButtonText }}
         </el-button>
       </div>
+      <el-alert v-if="filenameExtractionErrors.length" type="warning" :closable="false" show-icon :title="`页眉有 ${filenameExtractionErrors.length} 项待修正，请打开逐文件编辑或原规则查看`" :description="filenameExtractionErrors.slice(0, 3).join('；')" />
       <div v-if="showProcessingControls && overlayOutputDir" class="path-text">{{ overlayOutputDir }}</div>
       <div v-if="showProcessingControls && overlayFiles.length" class="output-plan">
         <span>单文件输出：{{ plannedOutputDir }}</span>
@@ -467,19 +479,19 @@
           <el-button text size="small" :disabled="mergedBatchBusy" :aria-label="'移除 ' + fileName(filePlan.inputPath)" title="仅移出列表，不删除文件" @click="removeMergedImportPlan(filePlan)"><el-icon><Delete /></el-icon></el-button>
         </div>
         <div class="split-source-summary">
-          <span>{{ filePlan.totalPages || '—' }} 页 · {{ filePlan.detectionAttempted ? filePlan.items.length : '—' }} 个页段</span>
-          <el-checkbox v-if="mergedImportPlans.length > 1 && filePlan.detectionAttempted && filePlan.totalPages && filePlan.splitStatus !== 'complete'" v-model="filePlan.reviewed" :disabled="mergedBatchBusy">已核对本文件</el-checkbox>
+          <span>{{ filePlan.totalPages || '—' }} 页 · {{ filePlan.totalPages ? filePlan.items.length : '—' }} 个页段</span>
+          <el-checkbox v-if="mergedImportPlans.length > 1 && filePlan.items.length && filePlan.totalPages && filePlan.splitStatus !== 'complete'" v-model="filePlan.reviewed" :disabled="mergedBatchBusy">已核对本文件</el-checkbox>
           <el-button v-if="filePlan !== mergedImportPlan && !filePlan.splitRequest" size="small" :disabled="mergedBatchBusy" @click="activateMergedImportPlan(filePlan)">展开核对</el-button>
         </div>
         <div v-if="mergedImportPlan === filePlan && !filePlan.splitRequest" class="merged-import-plan">
         <fieldset :disabled="mergedBatchBusy" style="border: 0; padding: 0; margin: 0; min-width: 0">
         <div class="plan-head split-plan-head">
           <div class="split-plan-title">
-            <div class="block-title">拆分方案 <el-tag size="small" type="info">{{ mergedImportPlan.pagesAnalyzed ? '待核对' : '未检测' }}</el-tag></div>
+            <div class="block-title">拆分方案 <el-tag size="small" type="info">{{ mergedPlanStatus(mergedImportPlan) }}</el-tag></div>
             <div class="split-plan-utilities">
               <el-popover trigger="click" title="拆分说明" :width="300">
                 <template #reference><el-button text aria-label="查看拆分帮助">帮助</el-button></template>
-                <p>检测后核对下方页段，再确认拆分。大文件可能耗时较长。清除标记只作用于输出副本。</p>
+                <p>可直接手动分段，也可先检测已有页眉。核对各段首尾后再确认拆分；清除标记只作用于输出副本。</p>
               </el-popover>
               <el-button text @click="cancelMergedImportPlan">取消</el-button>
             </div>
@@ -492,7 +504,7 @@
               >{{ mergedImportPlan.pagesAnalyzed ? '重新检测' : '检测页段' }}</el-button
             >
             <el-button @click="splitOptionsVisible = true">输出设置</el-button>
-            <el-button type="success" class="split-confirm" :loading="splittingMergedImport" :disabled="mergedBatchBusy || !mergedImportPlan.detectionAttempted || !mergedImportPlan.totalPages" @click="executeMergedImportPlan">
+            <el-button type="success" class="split-confirm" :loading="splittingMergedImport" :disabled="mergedBatchBusy || !mergedImportPlan.items.length || !mergedImportPlan.totalPages" @click="executeMergedImportPlan">
               确认拆分
             </el-button>
           </div>
@@ -544,22 +556,22 @@
         </div>
           <template #footer><el-button type="primary" @click="splitOptionsVisible = false">完成</el-button></template>
         </el-dialog>
-        <el-alert
-          v-if="splitActionableWarnings.length"
-          type="warning"
-          :closable="false"
-          show-icon
-          class="import-plan-warning"
-        >
-          <template #title>{{ splitActionableWarnings.join('；') }}</template>
-        </el-alert>
-        <section v-if="mergedImportPlan.detectionAttempted" class="split-ranges-section" aria-label="证据页段">
-        <div class="block-title-row"><div class="block-title">证据页段</div><el-button size="small" @click="addMergedImportRange">添加页段</el-button></div>
+        <div class="split-plan-feedback" :class="{ 'has-warning': splitActionableWarnings.length }" role="status" aria-live="polite">
+          <el-tooltip :content="splitActionableWarnings.join('；')" :disabled="!splitActionableWarnings.length" placement="top" :show-after="400">
+            <span>{{ splitActionableWarnings.length ? `${splitActionableWarnings.length} 项待核对：${splitActionableWarnings[0]}` : '起止页只修改当前行；新增、合并和删除均单独操作。' }}</span>
+          </el-tooltip>
+        </div>
+        <section v-if="mergedImportPlan.items.length" class="split-ranges-section" aria-label="证据页段">
+        <div class="block-title-row"><div class="block-title">证据页段</div><div class="merged-range-tools">
+          <el-button size="small" :disabled="mergedBatchBusy" @click="insertMergedImportRangeAfter(selectedMergedImportIndex)">新增页段</el-button>
+          <el-button size="small" :disabled="mergedBatchBusy" @click="openMergedRangeBatch()">批量分段…</el-button>
+          <el-button size="small" :disabled="mergedBatchBusy || !mergedImportGaps.length" @click="fillMergedImportGaps">补齐空缺</el-button>
+        </div></div>
         <el-table
           :data="mergedImportPlan.items"
+          :row-key="splitRangeRowKey"
           size="small"
           border
-          highlight-current-row
           :row-class-name="mergedReorderRowClass"
           @row-click="handleMergedImportRowClick"
           @sort-change="sortMergedImportItems"
@@ -582,54 +594,59 @@
           </el-table-column>
           <el-table-column label="文件名" prop="name" sortable="custom" min-width="140">
             <template #default="{ row, $index }">
-              <div class="merged-name-cell">
-                <el-input v-model="row.name" size="small" />
-                <span class="merged-output-name" :title="splitOutputNamePreview(row, $index) + '.pdf'">{{ mergedImportSourceText(row) }} · {{ splitOutputNamePreview(row, $index) }}.pdf</span>
+              <div class="merged-name-cell" @click.stop="selectMergedImportRange(row, null)">
+                <el-input v-model="row.name" size="small" :aria-label="'第 ' + ($index + 1) + ' 段文件名'" @focus="selectMergedImportRange(row, null)" />
+                <span class="merged-output-name" :title="splitOutputNamePreview(row, $index) + '.pdf'">{{ row.pageStart == null || row.pageEnd == null ? '待设置页码' : mergedImportSourceText(row) }} · {{ splitOutputNamePreview(row, $index) }}.pdf</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="起止页" prop="pageStart" sortable="custom" width="182">
+          <el-table-column label="PDF 起止页" prop="pageStart" sortable="custom" width="182">
             <template #default="{ row, $index }">
-              <div class="merged-page-range">
-              <el-input-number
-                v-model="row.pageStart"
-                :min="1"
-                :max="mergedImportPlan.totalPages || 999999"
-                size="small"
-                controls-position="right"
-                style="width: 72px"
-                :aria-label="'第 ' + ($index + 1) + ' 段起始页'"
-                @change="(value) => onMergedRangeStartChanged($index, value)"
-              />
-              <span>–</span>
-              <el-input-number
-                v-model="row.pageEnd"
-                :min="1"
-                :max="mergedImportPlan.totalPages || 999999"
-                size="small"
-                controls-position="right"
-                style="width: 72px"
-                :aria-label="'第 ' + ($index + 1) + ' 段结束页'"
-                @change="(value) => onMergedRangeEndChanged($index, value)"
-              />
+              <div class="merged-page-range" @click.stop>
+                <SplitRangeBoundaryInput
+                  :value="row.pageStart == null ? null : Number(row.pageStart)"
+                  :max="mergedImportPlan.totalPages || 999999"
+                  :label="'第 ' + ($index + 1) + ' 段起始页'"
+                  @navigate="selectMergedImportRange(row, 'start')"
+                  @commit="value => onMergedRangeStartChanged(row, value)"
+                />
+                <span>–</span>
+                <SplitRangeBoundaryInput
+                  :value="row.pageEnd == null ? null : Number(row.pageEnd)"
+                  :max="mergedImportPlan.totalPages || 999999"
+                  :label="'第 ' + ($index + 1) + ' 段结束页'"
+                  @navigate="selectMergedImportRange(row, 'end')"
+                  @commit="value => onMergedRangeEndChanged(row, value)"
+                />
               </div>
             </template>
           </el-table-column>
           <el-table-column label="页数" prop="pageCount" sortable="custom" width="68">
             <template #default="{ row }">{{ mergedImportRangePageCount(row) || '-' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="128" fixed="right">
+          <el-table-column label="操作" width="154" fixed="right" align="center">
             <template #default="{ row, $index }">
-              <el-button link type="primary" size="small" @click.stop="selectMergedImportRange(row)">跳转</el-button>
-              <el-button link type="primary" size="small" @click.stop="insertMergedImportRangeAfter($index)"
-                >续段</el-button
-              >
-              <el-button link type="danger" size="small" @click.stop="removeMergedImportRange($index)">删除</el-button>
+              <div class="merged-range-actions" @click.stop>
+                <el-button-group>
+                  <el-button size="small" @click="selectMergedImportRange(row, 'start')">首页</el-button>
+                  <el-button size="small" @click="selectMergedImportRange(row, 'end')">末页</el-button>
+                </el-button-group>
+                <el-dropdown trigger="click" @command="command => handleMergedRangeCommand(command, row, $index)">
+                  <el-button size="small" :aria-label="'第 ' + ($index + 1) + ' 段更多操作'">更多</el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="insert">在此段后新增</el-dropdown-item>
+                      <el-dropdown-item command="batch" :disabled="mergedImportRangePageCount(row) < 2">分成多段…</el-dropdown-item>
+                      <el-dropdown-item command="remove" :disabled="mergedImportPlan.items.length <= 1" divided>{{ row.pageStart == null || row.pageEnd == null ? '删除待设置行' : '删除页段，页面并入相邻段' }}</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
             </template>
           </el-table-column>
         </el-table>
         </section>
-        <el-empty v-else description="点击检测页段，结果将在这里显示" :image-size="96">
+        <el-empty v-else description="读取 PDF 页数后即可手动分段，也可检测已有页眉" :image-size="96">
           <template #image><DocletSprite :size="96" :motion="detectingMergedImport ? 'review' : 'waiting'" /></template>
         </el-empty>
         </fieldset>
@@ -744,13 +761,12 @@
         :row-class-name="overlayReorderRowClass"
         @row-click="handlePreviewRowClick"
         @sort-change="sortOverlayFiles"
-        @expand-change="handleExpandChange"
       >
         <el-table-column type="expand" width="36">
           <template #default="{ row, $index }">
             <div class="content-subrows">
               <template
-                v-for="contentRows in [buildFileContentRows(row, $index, currentRules)]"
+                v-for="contentRows in [contentRowsForFile(row, $index)]"
                 :key="`${row.path}:${contentRows.length}`"
               >
                 <el-table :data="contentRows" size="small" border class="content-subtable" @click.stop>
@@ -778,7 +794,7 @@
                         :show-after="300"
                         :disabled="!displayContentRowText(row, $index, cr)"
                       >
-                        <span class="editable-text" @dblclick.stop="startContentRowEdit(row, cr)">{{
+                        <span class="editable-text" :class="{ 'content-deleted': cr.status === 'pending-delete' }" @dblclick.stop="startContentRowEdit(row, cr)">{{
                           displayContentRowText(row, $index, cr) || '-'
                         }}</span>
                       </el-tooltip>
@@ -803,6 +819,8 @@
                       </el-button>
                       <el-button
                         v-if="cr.source === 'new'"
+                        :disabled="contentGroupCount(row, cr.kind) <= 1"
+                        :title="contentGroupCount(row, cr.kind) <= 1 ? '至少保留一条规则，可在上方关闭此项' : globalApplyEnabled ? '删除全局规则，会影响全部证据' : '删除此规则'"
                         link
                         size="small"
                         type="danger"
@@ -861,10 +879,8 @@
           </template>
         </el-table-column>
         <el-table-column
-          label="页眉/页脚文本"
-          min-width="200"
-          show-overflow-tooltip
-          :tooltip-props="{ placement: 'right' }"
+          label="页眉 / 页脚"
+          min-width="260"
         >
           <template #default="{ row, $index }">
             <el-input
@@ -875,9 +891,21 @@
               @blur="finishMainColumnContentEdit(row)"
               @keyup.enter="finishMainColumnContentEdit(row)"
             />
-            <span v-else class="table-text editable-text" @dblclick.stop="startMainColumnContentEdit(row, $index)">
-              {{ mainColumnContentText(row, $index) }}
-            </span>
+            <div v-else class="file-content-summary">
+              <div v-for="line in fileContentSummary(row, $index)" :key="line.region" class="file-content-line">
+                <span class="file-content-label">{{ line.label }}</span>
+                <span v-if="!line.entries.length" class="file-content-empty">—</span>
+                <span
+                  v-for="entry in line.entries" :key="entry.id" class="file-content-entry"
+                  :title="entry.title" @dblclick.stop="startContentRowEdit(row, entry.row)">
+                  <template v-if="entry.row.source === 'existing'">
+                    <span v-if="entry.row.status === 'pending-edit'">{{ entry.text }} </span>
+                    <span class="file-content-old">（<span :class="{ 'content-deleted': ['pending-delete', 'pending-edit'].includes(entry.row.status) }">{{ entry.oldText }}</span>）</span>
+                  </template>
+                  <template v-else>{{ entry.text }}</template>
+                </span>
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="页数" prop="pages" sortable="custom" width="70">
@@ -895,8 +923,8 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="页码范围" prop="pageRange" sortable="custom" width="105">
-          <template #default="{ row }">{{ pageRangeText(row, pageNumberSequence) }}</template>
+        <el-table-column label="页码（页序）" prop="pageRange" sortable="custom" min-width="155">
+          <template #default="{ row, $index }"><span :title="'输出页码范围（合并文件中的页面顺序）'">{{ filePageRangeText(row, $index) }}</span></template>
         </el-table-column>
         <el-table-column
           v-if="workflowMode === 'split'"
@@ -955,12 +983,20 @@
       <template #header>
         <div class="dialog-title-row">
           <span>页眉页脚格式</span>
-          <el-checkbox v-model="globalApplyEnabled" size="small">全局应用</el-checkbox>
+          <el-checkbox :key="`dialog-apply-${globalToggleKey}`" v-model="globalApplyModel" size="small">全局应用</el-checkbox>
           <el-switch v-model="insertHeaderFooterEnabled" active-text="插入" inactive-text="不插入" />
         </div>
       </template>
       <HeaderFooterRuleFields
+        :key="`dialog-${headerRuleRenderKey}`"
+        :files="globalApplyEnabled ? overlayRows : selectedOverlayFile ? [selectedOverlayFile] : []"
+        :file-index-offset="globalApplyEnabled ? 0 : selectedOverlayIndex"
+        :header-date-value="splitNameDateValue"
+        :has-header-exceptions="insertExceptions.some(entry => (entry.kinds || []).includes('header'))"
         v-if="insertHeaderFooterEnabled"
+        @header-group-edit="recordHeaderGroupEdit"
+        @request-header-numbering="setHeaderNumbering"
+        @request-header-rule-change="setHeaderRulePatch"
         v-model:header-groups="headerGroupsModel"
         v-model:selected-header-group-id="selectedHeaderGroupId"
         v-model:header-mode="headerMode"
@@ -1050,6 +1086,15 @@
       @pointerdown="startWorkbenchResize"
     />
 
+    <BatchSplitDialog
+      v-model="mergedRangeBatchVisible"
+      :source="mergedRangeBatchSource"
+      :initial-mode="mergedRangeBatchMode"
+      :initial-page="Number(previewPage)"
+      :input-path="mergedImportPlan?.inputPath || ''"
+      @apply="applyMergedRangeBatchAndClose"
+    />
+
     <section v-if="showPreviewPanel" class="preview-panel" :style="previewPanelStyle">
       <div class="preview-head">
         <div>
@@ -1064,7 +1109,7 @@
 <el-button size="small" :disabled="previewPage <= 1" @click="movePreviewPage(-1)">上一页</el-button><el-button size="small" :disabled="previewPage >= previewMaxPage" @click="movePreviewPage(1)"
                 >下一页</el-button
               >
-</el-button-group><el-input-number v-model="previewPage" :min="1" :max="previewMaxPage" size="small" aria-label="预览页码" />
+</el-button-group><SplitRangeBoundaryInput :value="Number(previewPage)" :max="previewMaxPage" label="预览页码" @commit="previewPage = $event" />
 </div>
 <div class="control-cluster" role="group" aria-label="撤销与重做">
 <el-button-group>
@@ -1082,7 +1127,7 @@
               </el-button>
 </div>
             </div>
-            <fieldset class="merged-preview-secondary-row" :disabled="!mergedImportPlan.detectionAttempted || mergedImportPlan.splitRequest || mergedBatchBusy"><legend class="toolbar-caption">编辑页段</legend>
+            <fieldset class="merged-preview-secondary-row" :disabled="mergedImportPlan.splitRequest || mergedBatchBusy"><legend class="toolbar-caption">编辑页段</legend>
 <div class="control-cluster" role="group" aria-label="拆分页段">
 <el-button-group>
 <el-button
@@ -1090,10 +1135,13 @@
                 type="primary"
                 plain
                 :disabled="previewPage <= 1"
-                @click="splitMergedImportFromPreviousPage"
-                >从上一页拆</el-button
-              ><el-button size="small" type="primary" plain @click="splitMergedImportFromCurrentPage"
-                >从本页拆</el-button
+                @click="splitMergedImportFromCurrentPage"
+                :title="previewPage > 1 ? `以 PDF 第 ${previewPage} 页作为新段首页，前段到第 ${previewPage - 1} 页` : '已是文档首页'"
+                >本页前拆</el-button
+              ><el-button
+size="small" type="primary" plain :disabled="previewPage >= previewMaxPage" @click="splitMergedImportAfterCurrentPage"
+                :title="previewPage < previewMaxPage ? `以 PDF 第 ${previewPage} 页作为当前段末页，新段从第 ${previewPage + 1} 页开始` : '已是文档末页'"
+                >本页后拆</el-button
               >
 </el-button-group>
 </div>
@@ -1106,13 +1154,13 @@
               >
 </el-button-group>
 </div>
-<div class="control-cluster" role="group" aria-label="合并与新增页段">
+<div class="control-cluster" role="group" aria-label="合并所选页段">
 <el-button
                 size="small"
                 :disabled="!canMergeCurrentMergedImportRange"
                 @click="mergeCurrentMergedImportRangeIntoPrevious"
-                >合并到上段</el-button
-              ><el-button size="small" type="primary" plain @click="addMergedImportRangeFromPage">添加新页段</el-button>
+                >合并所选段到前段</el-button
+              >
 </div></fieldset>
           </div>
           <div v-else class="preview-utility-actions">
@@ -1167,6 +1215,7 @@
                 v-for="marker in deletionPreviewMarkers"
                 :key="marker.key"
                 class="delete-preview-marker"
+                :class="{ 'caption-below': marker.captionBelow, 'caption-right': marker.captionRight }"
                 :style="marker.style"
               >
                 <span>{{ marker.label }}</span>
@@ -1184,7 +1233,6 @@
               <div
                 v-if="showRulePreviewOverlays && previewHeaderText"
                 class="preview-text preview-header-text"
-                :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
                 :style="previewHeaderStyle"
               >
                 {{ previewHeaderText }}
@@ -1192,7 +1240,6 @@
               <div
                 v-if="showRulePreviewOverlays && previewFooterText"
                 class="preview-text preview-footer-text"
-                :class="{ 'with-delete-background': deletionPreviewMarkers.length }"
                 :style="previewFooterStyle"
               >
                 {{ previewFooterText }}
@@ -1215,11 +1262,15 @@
 </template>
 
 <script setup>
+import SplitRangeBoundaryInput from '../../../shared/pdf-tools/components/SplitRangeBoundaryInput.vue'
+import BatchSplitDialog from '../../../shared/pdf-tools/components/BatchSplitDialog.vue'
+import MergeFileNameField from '../../../shared/pdf-tools/components/MergeFileNameField.vue'
+import { pdfOutputFileName } from '../../../core/outputFiles.js'
 import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfImportDialog.vue'
 const imageImportDialog = ref(null)
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { DOCUMENT_FILTERS, appendUniqueDocuments, convertImportDocument, documentKind, reviewImageImports } from '../../../shared/pdf-tools/documentImport.js'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
@@ -1229,6 +1280,7 @@ import { log as diagLog } from '../../../shared/diagnostics.js'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
 import NextPageThumbnail from '../../../shared/pdf-tools/components/NextPageThumbnail.vue'
 import HeaderFooterRuleFields from '../../../shared/pdf-tools/components/HeaderFooterRuleFields.vue'
+import { filenameHeaderKey } from '../../../shared/pdf-tools/composables/filenameHeader.js'
 import PageNumberRuleDialog from '../../../shared/pdf-tools/components/PageNumberRuleDialog.vue'
 import ExistingPdfElementsDialog from '../../../shared/pdf-tools/components/ExistingPdfElementsDialog.vue'
 import DocletSprite from '../../../shared/components/DocletSprite.vue'
@@ -1236,8 +1288,11 @@ import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.
 import { useWorkspacePreferences } from '../../../core/composables/useWorkspacePreferences.js'
 import {
   buildEvidencePdfRulePayload,
+  buildHeaderFooterItems,
   buildFileContentRows,
-  buildHeaderTextForGroup,
+  resolveHeaderFooterItems,
+  contentRowDisplayText,
+  contentRowNumberRange,
   buildMergeOutputPath,
   buildOutputDir,
   clearStaleKeepInsertFlags,
@@ -1247,11 +1302,11 @@ import {
   createDefaultPageNumberGroup,
   createEvidenceFile,
   detectKeepInsertConflicts,
-  effectiveHeaderNumbering,
   effectivePageNumbering,
+  existingContentRange,
+  filenameHeaderErrors,
   fileName,
   groupsFor,
-  pageRangeText,
   parentDir,
   selectedGroupFor,
   setSelectedGroup,
@@ -1521,7 +1576,7 @@ const pageNumberGroupsModel = computed({
 const pageNumberTemplate = computed({
   get: () => selectedPageNumberGroup.value.template || '{page}/{total}',
   set: (v) => {
-    selectedPageNumberGroup.value.template = v
+    void setOtherTextRulePatch('pageNumber', { template: v })
   },
 })
 const selectedHeaderGroup = computed(() =>
@@ -1530,6 +1585,207 @@ const selectedHeaderGroup = computed(() =>
       globalHeaderGroups.value[0]
     : selectedGroupFor(selectedOverlayFile.value, 'header') || createDefaultHeaderGroup(),
 )
+const headerRuleRenderKey = ref(0)
+const globalToggleKey = ref(0)
+const evidenceStartKey = ref(0)
+let headerRuleChangePending = false
+
+const evidenceStartModel = computed({
+  get: () => numberingDefaults.value.evidenceStart,
+  set: value => { void setEvidenceStart(value) },
+})
+
+async function setEvidenceStart(value) {
+  if (value === null || value === undefined || value === '') return
+  const next = Number(value), before = Number(numberingDefaults.value.evidenceStart)
+  if (!Number.isFinite(next) || next === before) return
+  if (headerRuleChangePending) { evidenceStartKey.value++; return }
+  const groups = new Map(), affected = new Map()
+  for (const [index, entry] of resolvedHeaderFooter.value.entries()) {
+    const file = overlayRows.value[index]
+    for (const record of entry.records) {
+      const group = record.group
+      if (record.kind !== 'header' || group.mode !== 'per_file' || group.numbering?.source === 'custom' || Number(group.perFileSeqStart || 1) > 1) continue
+      const key = filenameHeaderKey(file)
+      const hasOverride = Object.hasOwn(group.fileHeaderOverrides || {}, key)
+      if (!hasOverride && file.header == null) continue
+      affected.set(key, { file, text: hasOverride ? group.fileHeaderOverrides[key] : file.header })
+      if (!groups.has(group)) groups.set(group, { filePath: file.path, global: globalApplyEnabled.value, kind: 'header', groupId: group.id, oldGroup: cloneData(group), ids: [] })
+      if (hasOverride) groups.get(group).ids.push(key)
+    }
+  }
+  if (affected.size) {
+    const beforeFiles = JSON.stringify(overlayRows.value.map(file => [filenameHeaderKey(file), file.header]))
+    const wasGlobal = globalApplyEnabled.value
+    headerRuleChangePending = true
+    try {
+      await ElMessageBox.confirm(h('div', [
+        h('p', `以下 ${affected.size} 个文件有单独设置的页眉。更改全局起始编号将覆盖它们，可以撤销。`),
+        h('div', { style: 'max-height: 320px; overflow: auto;' }, [...affected.values()].map(({ file, text }) =>
+          h('div', { style: 'padding: 6px 0; overflow-wrap: anywhere;' }, `${file.name}：${text}`))),
+      ]), '应用全局编号', { confirmButtonText: '应用全局编号', cancelButtonText: '保留原设置', type: 'warning' })
+    } catch { evidenceStartKey.value++; return }
+    finally { headerRuleChangePending = false }
+    if (Number(numberingDefaults.value.evidenceStart) !== before || globalApplyEnabled.value !== wasGlobal ||
+        JSON.stringify(overlayRows.value.map(file => [filenameHeaderKey(file), file.header])) !== beforeFiles ||
+        [...groups].some(([group, item]) => JSON.stringify(group) !== JSON.stringify(item.oldGroup))) {
+      ElMessage.warning('页眉设置已变化，请重新操作')
+      evidenceStartKey.value++
+      return
+    }
+  }
+  const changes = [...groups].map(([group, item]) => {
+    const overrides = { ...(group.fileHeaderOverrides || {}) }
+    item.ids.forEach(id => delete overrides[id])
+    const newGroup = { ...item.oldGroup, fileHeaderOverrides: overrides }
+    Object.assign(group, newGroup)
+    return { ...item, newGroup }
+  })
+  const headerChanges = [...affected.values()].filter(({ file }) => file.header != null).map(({ file }) => ({ path: file.path, before: file.header, after: undefined }))
+  headerChanges.forEach(change => { const file = overlayFiles.value.find(item => item.path === change.path); if (file) file.header = undefined })
+  pushEditUndo({ type: 'evidence-start', oldValue: before, newValue: next, changes, headerChanges })
+  numberingDefaults.value.evidenceStart = next
+}
+
+const globalApplyModel = computed({
+  get: () => globalApplyEnabled.value,
+  set: value => { void changeGlobalApply(value) },
+})
+
+async function changeGlobalApply(value) {
+  const next = Boolean(value), before = globalApplyEnabled.value
+  if (next === before) return
+  if (headerRuleChangePending) { globalToggleKey.value++; return }
+  if (next && overlayRows.value.length) {
+    const files = overlayRows.value
+    const existing = buildHeaderFooterItems(files, currentRules.value)
+    const proposedRules = { ...currentRules.value, _globalApply: true,
+      headerGroups: globalHeaderGroups.value, footerTextGroups: globalFooterTextGroups.value,
+      pageNumberGroups: globalPageNumberGroups.value,
+      _globalHeaderGroup: globalHeaderGroups.value.find(group => group.id === globalSelectedHeaderGroupId.value) || globalHeaderGroups.value[0],
+      _globalFooterTextGroup: globalFooterTextGroups.value.find(group => group.id === globalSelectedFooterTextGroupId.value) || globalFooterTextGroups.value[0],
+      _globalPageNumberGroup: globalPageNumberGroups.value.find(group => group.id === globalSelectedPageNumberGroupId.value) || globalPageNumberGroups.value[0] }
+    const nextJobs = buildHeaderFooterItems(files, proposedRules)
+    const content = job => JSON.stringify([job.header, job.footer, job.extraOverlays])
+    const changed = files.map((file, index) => ({ file, before: existing[index], after: nextJobs[index] }))
+      .filter(item => content(item.before) !== content(item.after))
+    if (changed.length) {
+      headerRuleChangePending = true
+      try {
+        await ElMessageBox.confirm(h('div', [
+          h('p', `以下 ${changed.length} 个文件的页眉、页脚或页码将改为全局设置；原单文件设置会保留，可以撤销。`),
+          h('div', { style: 'max-height: 320px; overflow: auto;' }, changed.map(({ file, before: oldJob, after: newJob }) => {
+            const summary = job => [job.header, job.footer, ...job.extraOverlays].filter(Boolean).map(item => item.text).filter(Boolean).join('；') || '无'
+            return h('div', { style: 'padding: 6px 0; overflow-wrap: anywhere;' }, [
+              h('strong', file.name), h('div', `当前：${summary(oldJob)}`), h('div', `全局：${summary(newJob)}`),
+            ])
+          })),
+        ]), '应用全局设置', { confirmButtonText: '应用全局设置', cancelButtonText: '保留当前设置', type: 'warning' })
+      } catch {
+        globalToggleKey.value++
+        return
+      } finally { headerRuleChangePending = false }
+      if (globalApplyEnabled.value !== before || JSON.stringify(buildHeaderFooterItems(overlayRows.value, currentRules.value)) !== JSON.stringify(existing) ||
+          JSON.stringify(buildHeaderFooterItems(overlayRows.value, proposedRules)) !== JSON.stringify(nextJobs)) {
+        ElMessage.warning('文件或设置已变化，请重新操作')
+        globalToggleKey.value++
+        return
+      }
+    }
+  }
+  pushEditUndo({ type: 'global-apply', oldValue: before, newValue: next })
+  globalApplyEnabled.value = next
+}
+
+async function setHeaderRulePatch(patch) {
+  const group = selectedHeaderGroup.value
+  if (!group || Object.entries(patch).every(([key, value]) => JSON.stringify(group[key]) === JSON.stringify(value))) return
+  if (headerRuleChangePending) { headerRuleRenderKey.value++; return }
+  const original = cloneData(group)
+  const scopedFiles = globalApplyEnabled.value ? overlayRows.value : selectedOverlayFile.value ? [selectedOverlayFile.value] : []
+  const nextMode = patch.mode ?? group.mode
+  const affected = scopedFiles.filter(file => (!group.fileIds?.length || group.fileIds.includes(filenameHeaderKey(file))) &&
+    (Object.hasOwn(group.fileHeaderOverrides || {}, filenameHeaderKey(file)) || (nextMode === 'per_file' && file.header != null)))
+  const beforeFiles = JSON.stringify(scopedFiles.map(file => [filenameHeaderKey(file), file.header]))
+  if (globalApplyEnabled.value && affected.length) {
+    headerRuleChangePending = true
+    try {
+      await ElMessageBox.confirm(
+        h('div', [
+          h('p', `以下 ${affected.length} 个文件有单独设置的页眉。应用全局设置将覆盖这些页眉，可以撤销。`),
+          h('div', { style: 'max-height: 320px; overflow: auto; padding: 4px 0;' }, affected.map(file =>
+            h('div', { style: 'padding: 6px 0; overflow-wrap: anywhere;' }, `${file.name}：${group.fileHeaderOverrides[filenameHeaderKey(file)] ?? file.header}`))),
+        ]),
+        '应用全局页眉设置',
+        { confirmButtonText: '应用全局设置', cancelButtonText: '保留原设置', type: 'warning' },
+      )
+    } catch {
+      headerRuleRenderKey.value++
+      return
+    } finally {
+      headerRuleChangePending = false
+    }
+    const currentFiles = globalApplyEnabled.value ? overlayRows.value : selectedOverlayFile.value ? [selectedOverlayFile.value] : []
+    if (selectedHeaderGroup.value !== group || JSON.stringify(group) !== JSON.stringify(original) ||
+        JSON.stringify(currentFiles.map(file => [filenameHeaderKey(file), file.header])) !== beforeFiles) {
+      ElMessage.warning('页眉设置已变化，请重新操作')
+      headerRuleRenderKey.value++
+      return
+    }
+  }
+  if (affected.length) {
+    const remaining = { ...(group.fileHeaderOverrides || {}) }
+    affected.forEach(file => delete remaining[filenameHeaderKey(file)])
+    const after = { ...original, ...patch, fileHeaderOverrides: remaining }
+    const headerChanges = affected.filter(file => nextMode === 'per_file' && file.header != null).map(file => ({ path: file.path, before: file.header, after: undefined }))
+    recordHeaderGroupEdit({ before: original, after, headerChanges })
+    headerChanges.forEach(change => { const file = overlayFiles.value.find(item => item.path === change.path); if (file) file.header = undefined })
+    Object.assign(group, after)
+  } else Object.assign(group, patch)
+}
+
+function setHeaderNumbering(patch) {
+  const group = selectedHeaderGroup.value
+  return setHeaderRulePatch({ numbering: { source: 'default', ...(group.numbering || {}), ...patch } })
+}
+
+async function setOtherTextRulePatch(kind, patch) {
+  const group = kind === 'footerText' ? selectedFooterTextGroup.value : selectedPageNumberGroup.value
+  const mapKey = kind === 'footerText' ? 'fileFooterOverrides' : 'filePageNumberOverrides'
+  const label = kind === 'footerText' ? '页脚' : '页码格式'
+  if (!group || Object.entries(patch).every(([key, value]) => JSON.stringify(group[key]) === JSON.stringify(value))) return
+  if (headerRuleChangePending) { headerRuleRenderKey.value++; return }
+  const before = cloneData(group)
+  const files = globalApplyEnabled.value ? overlayRows.value : selectedOverlayFile.value ? [selectedOverlayFile.value] : []
+  const affected = files.filter(file => (!group.fileIds?.length || group.fileIds.includes(filenameHeaderKey(file))) && Object.hasOwn(group[mapKey] || {}, filenameHeaderKey(file)))
+  const beforeFiles = JSON.stringify(files.map(file => filenameHeaderKey(file)))
+  if (globalApplyEnabled.value && affected.length) {
+    headerRuleChangePending = true
+    try {
+      await ElMessageBox.confirm(h('div', [
+        h('p', `以下 ${affected.length} 个文件有单独设置的${label}。应用全局设置将覆盖它们，可以撤销。`),
+        h('div', { style: 'max-height: 320px; overflow: auto;' }, affected.map(file =>
+          h('div', { style: 'padding: 6px 0; overflow-wrap: anywhere;' }, `${file.name}：${group[mapKey][filenameHeaderKey(file)]}`))),
+      ]), `应用全局${label}设置`, { confirmButtonText: '应用全局设置', cancelButtonText: '保留原设置', type: 'warning' })
+    } catch { headerRuleRenderKey.value++; return }
+    finally { headerRuleChangePending = false }
+    const current = kind === 'footerText' ? selectedFooterTextGroup.value : selectedPageNumberGroup.value
+    const currentFiles = globalApplyEnabled.value ? overlayRows.value : selectedOverlayFile.value ? [selectedOverlayFile.value] : []
+    if (current !== group || JSON.stringify(group) !== JSON.stringify(before) || JSON.stringify(currentFiles.map(file => filenameHeaderKey(file))) !== beforeFiles) {
+      ElMessage.warning('规则已变化，请重新操作')
+      headerRuleRenderKey.value++
+      return
+    }
+  }
+  if (affected.length) {
+    const remaining = { ...(group[mapKey] || {}) }
+    affected.forEach(file => delete remaining[filenameHeaderKey(file)])
+    const after = { ...before, ...patch, [mapKey]: remaining }
+    const file = selectedOverlayFile.value || overlayFiles.value[0]
+    if (file) pushEditUndo({ type: 'group', filePath: file.path, kind, groupId: group.id, global: globalApplyEnabled.value, oldGroup: before, newGroup: cloneData(after) })
+    Object.assign(group, after)
+  } else Object.assign(group, patch)
+}
 const selectedFooterTextGroup = computed(() =>
   globalApplyEnabled.value
     ? globalFooterTextGroups.value.find((group) => group.id === globalSelectedFooterTextGroupId.value) ||
@@ -1577,25 +1833,25 @@ const selectedPageNumberGroupId = computed({
 const headerMode = computed({
   get: () => selectedHeaderGroup.value.mode,
   set: (v) => {
-    selectedHeaderGroup.value.mode = v
+    void setHeaderRulePatch({ mode: v })
   },
 })
 const headerText = computed({
   get: () => selectedHeaderGroup.value.text,
   set: (v) => {
-    selectedHeaderGroup.value.text = v
+    void setHeaderRulePatch({ text: v })
   },
 })
 const headerPrefix = computed({
   get: () => selectedHeaderGroup.value.prefix,
   set: (v) => {
-    selectedHeaderGroup.value.prefix = v
+    void setHeaderRulePatch({ prefix: v })
   },
 })
 const headerSuffix = computed({
   get: () => selectedHeaderGroup.value.suffix,
   set: (v) => {
-    selectedHeaderGroup.value.suffix = v
+    void setHeaderRulePatch({ suffix: v })
   },
 })
 const headerAlign = computed({
@@ -1637,19 +1893,19 @@ const headerColor = computed({
 const headerPerFilePrefix = computed({
   get: () => selectedHeaderGroup.value.perFilePrefix ?? '证据',
   set: (v) => {
-    selectedHeaderGroup.value.perFilePrefix = v
+    void setHeaderRulePatch({ perFilePrefix: v })
   },
 })
 const headerPerFileSeqType = computed({
   get: () => selectedHeaderGroup.value.perFileSeqType || 'numeric',
   set: (v) => {
-    selectedHeaderGroup.value.perFileSeqType = v
+    void setHeaderRulePatch({ perFileSeqType: v })
   },
 })
 const headerPerFileSeqStart = computed({
   get: () => selectedHeaderGroup.value.perFileSeqStart ?? 1,
   set: (v) => {
-    selectedHeaderGroup.value.perFileSeqStart = v
+    void setHeaderRulePatch({ perFileSeqStart: v })
   },
 })
 const headerPageStart = computed({
@@ -1667,7 +1923,7 @@ const headerPageEnd = computed({
 const footerTextContent = computed({
   get: () => selectedFooterTextGroup.value.text,
   set: (v) => {
-    selectedFooterTextGroup.value.text = v
+    void setOtherTextRulePatch('footerText', { text: v })
   },
 })
 const footerTextAlign = computed({
@@ -1826,7 +2082,7 @@ const pageNumberDuplexMode = computed({
 const duplexSeparate = ref(false)
 // footerTextContent..footerTextColor are computed from selectedFooterTextGroup above
 const outputMode = ref('files_and_merge')
-const mergeFileName = ref('merged_evidence.pdf')
+const mergeFileName = ref('合并证据.pdf')
 const fileSuffixEnabled = ref(true)
 const fileSuffixText = ref('processed')
 const PROCESSING_PRESET_STORAGE_KEY = 'docsy.evidencePdf.processingPresets.v1'
@@ -1920,7 +2176,7 @@ function builtInProcessingSettings(evidenceStart, pageStart) {
     bookmarkRemoveExisting: false,
     bookmarkLabelSource: 'header',
     outputMode: 'files_and_merge',
-    mergeFileName: 'merged_evidence.pdf',
+    mergeFileName: '合并证据.pdf',
     fileSuffixEnabled: true,
     fileSuffixText: 'processed',
   }
@@ -2131,16 +2387,26 @@ function pushEditUndo(snap) {
   editRedoStack.value = []
 }
 
+function recordHeaderGroupEdit({ before, after, headerChanges = [] }) {
+  const file = selectedOverlayFile.value || overlayFiles.value[0]
+  if (!file) return
+  pushEditUndo({ type: 'group', filePath: file.path, kind: 'header', groupId: before.id,
+    global: globalApplyEnabled.value, oldGroup: cloneData(before), newGroup: cloneData(after), headerChanges })
+}
+
 function undoEdit() {
   const snap = editUndoStack.value.pop()
   if (!snap) return false
   editRedoStack.value.push(snap)
+  if (snap.type === 'evidence-start') { restoreEvidenceStartEdit(snap, false); return true }
+  if (snap.type === 'global-apply') {
+    if (globalApplyEnabled.value === snap.newValue) globalApplyEnabled.value = snap.oldValue
+    return true
+  }
   const file = overlayFiles.value.find((f) => f.path === snap.filePath)
   if (!file) return true
   if (snap.type === 'group') {
-    const groups = groupsFor(file, snap.kind)
-    const group = groups.find((g) => g.id === snap.groupId)
-    if (group) group.text = snap.oldValue
+    restoreContentGroupEdit(file, snap, false)
   } else if (snap.type === 'element') {
     const el = (file.existingElements || []).find((e) => e.id === snap.elementId)
     if (el) {
@@ -2157,12 +2423,15 @@ function redoEdit() {
   const snap = editRedoStack.value.pop()
   if (!snap) return false
   editUndoStack.value.push(snap)
+  if (snap.type === 'evidence-start') { restoreEvidenceStartEdit(snap, true); return true }
+  if (snap.type === 'global-apply') {
+    if (globalApplyEnabled.value === snap.oldValue) globalApplyEnabled.value = snap.newValue
+    return true
+  }
   const file = overlayFiles.value.find((f) => f.path === snap.filePath)
   if (!file) return true
   if (snap.type === 'group') {
-    const groups = groupsFor(file, snap.kind)
-    const group = groups.find((g) => g.id === snap.groupId)
-    if (group) group.text = snap.newValue
+    restoreContentGroupEdit(file, snap, true)
   } else if (snap.type === 'element') {
     const el = (file.existingElements || []).find((e) => e.id === snap.elementId)
     if (el) {
@@ -2173,6 +2442,59 @@ function redoEdit() {
   }
   overlayFiles.value = [...overlayFiles.value]
   return true
+}
+
+function restoreEvidenceStartEdit(snapshot, redo) {
+  const expected = redo ? snapshot.oldValue : snapshot.newValue
+  if (Number(numberingDefaults.value.evidenceStart) === expected)
+    numberingDefaults.value.evidenceStart = redo ? snapshot.newValue : snapshot.oldValue
+  for (const change of snapshot.changes) {
+    const file = overlayFiles.value.find(item => item.path === change.filePath)
+    if (file) restoreContentGroupEdit(file, change, redo)
+  }
+  restoreHeaderValues(snapshot.headerChanges, redo)
+}
+
+function restoreHeaderValues(changes = [], redo) {
+  for (const change of changes) {
+    const file = overlayFiles.value.find(item => item.path === change.path)
+    const expected = redo ? change.before : change.after
+    if (file && file.header === expected) file.header = redo ? change.after : change.before
+  }
+}
+
+function restoreContentGroupEdit(file, snapshot, redo) {
+  const groups = snapshot.global
+    ? { header: globalHeaderGroups, footerText: globalFooterTextGroups, pageNumber: globalPageNumberGroups }[snapshot.kind].value
+    : groupsFor(file, snapshot.kind)
+  const group = groups.find(item => item.id === snapshot.groupId)
+  if (!group) return
+  const state = redo ? snapshot.newGroup : snapshot.oldGroup
+  const expected = redo ? snapshot.oldGroup : snapshot.newGroup
+  const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  if (state && expected) {
+    for (const key of new Set([...Object.keys(state), ...Object.keys(expected)])) {
+      if (['fileHeaderOverrides', 'fileFooterOverrides', 'filePageNumberOverrides'].includes(key)) {
+        const oldMap = expected[key] || {}, newMap = state[key] || {}, current = { ...(group[key] || {}) }
+        for (const id of new Set([...Object.keys(oldMap), ...Object.keys(newMap)])) {
+          if (equal(oldMap[id], newMap[id]) || !equal(current[id], oldMap[id])) continue
+          if (Object.hasOwn(newMap, id)) current[id] = newMap[id]
+          else delete current[id]
+        }
+        if (Object.keys(current).length || Object.hasOwn(state, key)) group[key] = current
+        else delete group[key]
+      } else if (!equal(state[key], expected[key]) && equal(group[key], expected[key])) {
+        if (Object.hasOwn(state, key)) group[key] = cloneData(state[key])
+        else delete group[key]
+      }
+    }
+  }
+  else group[snapshot.kind === 'pageNumber' ? 'template' : 'text'] = redo ? snapshot.newValue : snapshot.oldValue
+  if (snapshot.kind === 'header' && Object.hasOwn(snapshot, 'oldHeader')) {
+    const expectedHeader = redo ? snapshot.oldHeader : snapshot.newHeader
+    if (equal(file.header, expectedHeader)) file.header = redo ? snapshot.newHeader : snapshot.oldHeader
+  }
+  restoreHeaderValues(snapshot.headerChanges, redo)
 }
 
 function syncLegacyField(file, kind, el) {
@@ -2270,7 +2592,7 @@ const previewMaxPage = computed(() => {
 const previewPanelStyle = computed(() => ({
   flexBasis: `${Math.round(clampPreviewPanelRatio(previewPanelRatio.value) * 100)}%`,
 }))
-const previewHint = computed(() => (mergedImportPlan.value ? '合并 PDF 原文预览' : '实时位置；真实预览需手动生成'))
+const previewHint = computed(() => (mergedImportPlan.value ? `正在编辑：${selectedMergedImportRange.value?.name || '未选择页段'} ｜ PDF 第 ${previewPage.value} 页 / ${previewMaxPage.value}` : '实时位置；真实预览需手动生成'))
 const totalOverlayPages = computed(() => totalPages(overlayFiles.value))
 const previewSamplePage = computed(() => {
   const numbering = effectivePageNumbering(selectedPageNumberGroup.value, numberingDefaults.value)
@@ -2287,49 +2609,28 @@ const previewSampleTotal = computed(() => {
   return numbering.pageStart + Math.max(0, pages - 1)
 })
 const plannedOutputDir = computed(() => buildOutputDir(overlayRows.value, overlayOutputDir.value))
-const plannedMergeOutputPath = computed(() =>
+const mergeNameError = computed(() => {
+  try { pdfOutputFileName(mergeFileName.value, '合并证据.pdf'); return '' } catch (error) { return error.message }
+})
+const plannedMergeOutputPath = computed(() => mergeNameError.value ? '请修正合并文件名' :
   buildMergeOutputPath(overlayRows.value, overlayOutputDir.value, mergeFileName.value),
 )
 const firstHeaderPreview = computed(() => {
-  if (!insertHeaderFooterEnabled.value || !headerInsertEnabled.value) return ''
   const first = overlayRows.value[0]
   if (!first) return ''
-  if (!globalApplyEnabled.value) return rowHeaderPreview(first, 0)
-  // 全局应用时样例必须读全局页眉组和当前生效模式，
-  // 否则会显示文件自带默认组（filename 模式）的渲染结果。
-  const group = selectedHeaderGroup.value
-  if (!group || group.enabled === false) return ''
-  const mode = headerMode.value ?? group.mode
-  if (mode === 'none') return ''
-  const effective = effectiveHeaderNumbering(group, numberingDefaults.value)
-  return buildHeaderTextForGroup(
-    first,
-    0,
-    { ...group, mode, perFileSeqStart: effective.evidenceStart },
-    currentRules.value,
-  )
+  const row = contentRowsForFile(first).find(item => item.kind === 'header' && item.source === 'new' && (item.pageStart || 1) <= 1 && (!item.textSegments || item.textSegments.some(segment => segment.pageStart <= 1 && segment.pageEnd >= 1)))
+  return row?.textSegments?.find(segment => segment.pageStart <= 1 && segment.pageEnd >= 1)?.text || row?.text || ''
 })
 const firstFooterPreview = computed(() => {
-  if (!insertHeaderFooterEnabled.value) return ''
   const first = overlayRows.value[0]
-  const pnGroup = globalApplyEnabled.value ? selectedPageNumberGroup.value : selectedGroupFor(first, 'pageNumber')
-  if (!first || !footerEnabled.value || !pnGroup || !totalOverlayPages.value) return ''
-  const numbering = effectivePageNumbering(pnGroup, numberingDefaults.value)
-  let tpl = pnGroup.template || '{page}/{total}'
-  if (!pageNumberShowTotal.value)
-    tpl = tpl
-      .replace(/共\s*\{total\}\s*页/g, '')
-      .replace(/\bof\s*\{total\}/gi, '')
-      .replaceAll('{total}', '')
-      .replace(/[，,]\s*$/, '')
-      .replace(/\s+$/, '')
-      .replaceAll('//', '/')
-      .replace(/\/+$/, '')
+  if (!first) return ''
+  const overlay = contentRowsForFile(first).filter(item => item.kind === 'pageNumber' && item.source === 'new').flatMap(item => item.numberOverlays || []).find(item => item.pageStart <= 1 && item.pageEnd >= 1)
+  if (!overlay) return ''
   return renderPageNumberTemplate(
-    tpl,
-    numbering.pageStart,
-    numbering.pageStart + (numbering.totalMode === 'combined' ? totalOverlayPages.value : first.pages || 1) - 1,
-    pnGroup.style || 'arabic',
+    overlay.text,
+    Number(first.pageStart || 1) + Number(overlay.numberOffset || 0),
+    overlay.numberTotal,
+    overlay.numberStyle,
   )
 })
 const processingNotes = computed(() => {
@@ -2462,12 +2763,14 @@ const hasUnresolvedExistingOverlapRisk = computed(() => {
   )
 })
 const evidenceListBusy = computed(() => importingEvidence.value || checkingOverlayPages.value || overlaying.value || deepDetecting.value || mergedBatchBusy.value)
+const filenameExtractionErrors = computed(() => filenameHeaderErrors(overlayRows.value, currentRules.value))
 const canApplyOverlay = computed(
-  () => !failedDocumentImports.value.length && overlayFiles.value.length > 0 && overlayFiles.value.every(file => Number(file.pages) > 0) && !importingEvidence.value && !checkingOverlayPages.value && !overlaying.value && !deepDetecting.value && hasApplicableProcessingRule.value,
+  () => !filenameExtractionErrors.value.length && (outputMode.value === 'files_only' || !mergeNameError.value) && !failedDocumentImports.value.length && overlayFiles.value.length > 0 && overlayFiles.value.every(file => Number(file.pages) > 0) && !importingEvidence.value && !checkingOverlayPages.value && !overlaying.value && !deepDetecting.value && hasApplicableProcessingRule.value,
 )
 const canApplySplitReplacement = computed(
   () =>
     showSplitResultActions.value &&
+    !filenameExtractionErrors.value.length &&
     totalOverlayPages.value > 0 &&
     !overlaying.value &&
     hasApplicableProcessingRule.value,
@@ -2567,6 +2870,8 @@ const currentRules = computed(() => ({
   fileSuffixText: fileSuffixText.value,
 }))
 
+const resolvedHeaderFooter = computed(() => resolveHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value))
+
 const {
   detectAllHeaderFooter,
   candidateKey,
@@ -2611,6 +2916,7 @@ const {
   mergedImportPlan,
   overlayRows,
   currentRules,
+  resolvedHeaderFooter,
   overlayOutputDir,
   insertHeaderFooterEnabled,
   headerInsertEnabled,
@@ -2655,6 +2961,9 @@ const {
   mergedPlanStatus,
   reopenMergedImportPlan,
   mergedImportWarnings,
+  mergedImportGaps,
+  fillMergedImportGaps,
+  splitRangeRowKey,
   selectedMergedImportRange,
   canUndoMergedImport,
   canRedoMergedImport,
@@ -2668,18 +2977,18 @@ const {
   selectMergedImportRange,
   setSelectedMergedRangeStart,
   setSelectedMergedRangeEnd,
-  addMergedImportRangeFromPage,
   splitMergedImportFromCurrentPage,
-  splitMergedImportFromPreviousPage,
+  splitMergedImportAfterCurrentPage,
+  applyMergedRangeBatch,
+  insertMergedImportRangeAfter,
   mergeCurrentMergedImportRangeIntoPrevious,
   undoMergedImportEdit,
   redoMergedImportEdit,
   onMergedRangeStartChanged,
   onMergedRangeEndChanged,
-  addMergedImportRange,
-  insertMergedImportRangeAfter,
   removeMergedImportRange,
   sortMergedImportItems,
+  reorderMergedImportRanges,
   mergedImportRangePageCount,
   mergedImportSourceText,
 } = useEvidencePdfMergedImport({
@@ -2711,6 +3020,30 @@ const {
   refreshOverlayPageCounts,
 })
 
+const mergedRangeBatchVisible = ref(false)
+const mergedRangeBatchSource = ref(null)
+const mergedRangeBatchMode = ref('count')
+function openMergedRangeBatch(row = selectedMergedImportRange.value, mode = 'count') {
+  if (mergedBatchBusy.value || mergedImportPlan.value?.splitRequest || !row) return
+  if (mergedImportRangePageCount(row) < 2) {
+    ElMessage.info('这个页段只有一页，请选择较长页段再批量分段')
+    return
+  }
+  splitRangeRowKey(row)
+  mergedRangeBatchMode.value = mode
+  mergedRangeBatchSource.value = { ...row }
+  mergedRangeBatchVisible.value = true
+}
+function handleMergedRangeCommand(command, row, index) {
+  if (command === 'insert') insertMergedImportRangeAfter(row)
+  else if (command === 'batch') openMergedRangeBatch(row)
+  else if (command === 'remove') removeMergedImportRange(index)
+}
+function applyMergedRangeBatchAndClose(payload) {
+  if (applyMergedRangeBatch(payload)) mergedRangeBatchVisible.value = false
+}
+watch(() => mergedImportPlan.value?.inputPath, () => { mergedRangeBatchVisible.value = false })
+
 const mergedBatchBusy = computed(() => batchRunning.value || importingMergedPdf.value || detectingMergedImport.value || splittingMergedImport.value)
 function retryMergedPlan(plan) {
   if (mergedBatchBusy.value) return
@@ -2721,7 +3054,7 @@ watch(
   () => ({
     plan: mergedImportPlan.value,
     contents: JSON.stringify([
-      mergedImportPlan.value?.items,
+      mergedImportPlan.value?.items?.map(row => [row.name, row.pageStart, row.pageEnd, row.source]),
       mergedImportPlan.value?.outputDir,
       splitNamePrefix.value, splitNameSuffix.value, splitNameDateValue.value,
       splitNameSeparator.value, splitNameCustomSeparator.value, removeBlankPages.value,
@@ -2800,7 +3133,7 @@ function applyWorkflowDefaults() {
   footerEnabled.value = false
   footerContinuous.value = true
   outputMode.value = 'files_and_merge'
-  mergeFileName.value = 'merged_evidence.pdf'
+  mergeFileName.value = '合并证据.pdf'
 }
 
 async function selectOverlayFiles() {
@@ -2839,7 +3172,12 @@ async function loadEvidenceFiles(paths) {
   let loadingId = null
   try {
     const existing = new Set(overlayFiles.value.flatMap(file => [file.path, file.sourcePath].filter(Boolean)))
-    const candidates = await reviewImageImports([...new Set(paths)].filter(path => documentKind(path) && !existing.has(path)), group => imageImportDialog.value.open(group))
+    const imageSources = new Map()
+    const candidates = await reviewImageImports([...new Set(paths)].filter(path => documentKind(path) && !existing.has(path)), async group => {
+      const path = await imageImportDialog.value.open(group)
+      if (path) imageSources.set(path, group)
+      return path
+    })
     const converted = []
     for (const [index, path] of candidates.entries()) {
       try {
@@ -2848,7 +3186,7 @@ async function loadEvidenceFiles(paths) {
           emitOperationUpdate(loadingId, `准备 PDF (${index + 1}/${candidates.length})：${fileName(path)}`)
         }
         const resolved = await convertImportDocument(path, tauriCallQuiet)
-        converted.push({ ...createEvidenceFile(resolved), sourcePath: path })
+        converted.push({ ...createEvidenceFile(resolved), sourcePath: path, sourcePaths: imageSources.get(path) })
         failedDocumentImports.value = failedDocumentImports.value.filter(item => item.path !== path)
       } catch (error) {
         const failure = { path, error: userFacingError(error, '自动转换失败') }
@@ -3384,7 +3722,7 @@ async function applyHeaderFooter() {
   }
 }
 
-const { rowHeaderPreview, displayRowHeader, displayRowFooter } = useEvidencePdfExistingEditing({
+const { displayRowFooter } = useEvidencePdfExistingEditing({
   editingHeaderPath,
   editingFooterPath,
   editingExistingHeaderPath,
@@ -3936,7 +4274,7 @@ function sortOverlayFiles({ prop, order }) {
 }
 
 function overlaySortValue(row, prop, index) {
-  if (prop === 'header') return displayRowHeader(row, index)
+  if (prop === 'header') return contentRowsForFile(row).filter(item => item.kind === 'header' && item.source === 'new').map(item => contentRowDisplayText(item, row)).join(' ')
   if (prop === 'footer') return displayRowFooter(row, index)
   if (prop === 'pages') return Number(row?.pages || 0)
   if (prop === 'pageRange') return Number(row?.pageStart || 0)
@@ -3973,11 +4311,7 @@ function reorderOverlayFiles(from, to) {
 }
 
 function reorderMergedImportItems(from, to) {
-  const items = mergedImportPlan.value?.items
-  if (!items || from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) return
-  const [item] = items.splice(from, 1)
-  items.splice(to, 0, item)
-  selectedMergedImportIndex.value = to
+  reorderMergedImportRanges(from, to)
 }
 
 let suppressReorderClickUntil = 0
@@ -4015,7 +4349,10 @@ function overlayReorderRowClass({ rowIndex }) {
 }
 
 function mergedReorderRowClass({ rowIndex }) {
-  return reorderRowClass(rowIndex, mergedDragFrom.value, mergedDragOver.value, mergedDragPlacement.value)
+  return [
+    rowIndex === selectedMergedImportIndex.value ? 'is-selected-range' : '',
+    reorderRowClass(rowIndex, mergedDragFrom.value, mergedDragOver.value, mergedDragPlacement.value),
+  ].filter(Boolean).join(' ')
 }
 
 function removeOverlayFile(index) {
@@ -4025,10 +4362,23 @@ function removeOverlayFile(index) {
   refreshPreview()
 }
 
+function contentGroupCount(row, kind) {
+  if (!globalApplyEnabled.value) return groupsFor(row, kind).length
+  return { header: globalHeaderGroups, footerText: globalFooterTextGroups, pageNumber: globalPageNumberGroups }[kind].value.length
+}
+
 function removeGroupFromFile(row, kind, groupId) {
-  const groups = groupsFor(row, kind)
+  const globalGroups = { header: globalHeaderGroups, footerText: globalFooterTextGroups, pageNumber: globalPageNumberGroups }[kind]
+  const groups = globalApplyEnabled.value ? globalGroups.value : groupsFor(row, kind)
   if (groups.length <= 1) return
   const updated = groups.filter((g) => g.id !== groupId)
+  if (globalApplyEnabled.value) {
+    globalGroups.value = updated
+    const selectedId = { header: globalSelectedHeaderGroupId, footerText: globalSelectedFooterTextGroupId, pageNumber: globalSelectedPageNumberGroupId }[kind]
+    if (selectedId.value === groupId) selectedId.value = updated[0]?.id || ''
+    refreshPreview()
+    return
+  }
   if (kind === 'header') row.headerGroups = updated
   else if (kind === 'footerText') row.footerTextGroups = updated
   else row.pageNumberGroups = updated
@@ -4063,48 +4413,40 @@ function contentStatusTagType(status) {
   return 'info'
 }
 
+const fileContentRows = computed(() => new Map(overlayRows.value.map((file, index) => [
+  file.path, buildFileContentRows(file, index, currentRules.value, overlayRows.value, resolvedHeaderFooter.value[index]),
+])))
+
+function contentRowsForFile(file) {
+  return fileContentRows.value.get(file.path) || []
+}
+
+
 function displayContentRowText(file, index, cr) {
-  if (cr.source === 'new') {
-    if (cr.kind === 'pageNumber') {
-      // Show rendered page number. Prefer the effective sequence stored by
-      // buildFileContentRows (rules.pageNumberSequence override applied, e.g.
-      // per-file numbering under global apply) — cr.group keeps the file's own
-      // group value for editing.
-      const group = cr.group
-      const seq = cr.sequence || group.sequence || 'continuous'
-      const continuous = seq !== 'per-file'
-      const page = continuous ? file.pageStart || 1 : 1
-      const total = continuous ? totalOverlayPages.value : file.pages || 1
-      return renderPageNumberTemplate(cr.text, page, total, group.style || 'arabic')
-    }
-    return cr.text || '-'
-  }
-  // existing
-  return cr.text || '-'
+  return cr.source === 'new' ? contentRowDisplayText(cr, file) || '—' : existingContentRange(cr)
 }
 
-function mainColumnContentText(file, index) {
-  const rows = buildFileContentRows(file, index, currentRules.value)
-  if (!rows.length) return '-'
-  const text = displayContentRowText(file, index, rows[0])
-  // Show add-range info for new header rows with a custom page range
-  const cr = rows[0]
-  if (cr.source === 'new' && cr.pageStart > 1) {
-    const end = cr.pageEnd && cr.pageEnd > 0 ? cr.pageEnd : file.pages || '?'
-    return `${text}  [${cr.pageStart}-${end}页]`
-  }
-  if (cr.source === 'new' && cr.pageEnd && cr.pageEnd > 0) {
-    return `${text}  [1-${cr.pageEnd}页]`
-  }
-  return text
+function fileContentSummary(file, index) {
+  const rows = contentRowsForFile(file)
+  return ['header', 'footer'].map(region => ({
+    region, label: region === 'header' ? '页眉' : '页脚',
+    entries: rows.filter(row => row.region === region).map(row => ({
+      id: row.id, row,
+      text: displayContentRowText(file, index, row),
+      oldText: existingContentRange(row, row.originalText),
+      title: `${contentKindLabel(row.kind)} · ${contentStatusLabel(row.status)}`,
+    })),
+  }))
 }
 
-function startMainColumnContentEdit(row, index) {
-  const rows = buildFileContentRows(row, index, currentRules.value)
-  if (!rows.length) return
-  const cr = rows[0]
-  startContentRowEdit(row, cr)
+function filePageRangeText(file) {
+  if (!file.pages) return '—'
+  const physical = `${file.pageStart || 1}–${file.pageEnd || Number(file.pageStart || 1) + file.pages - 1}`
+  const ranges = [...new Set(contentRowsForFile(file).filter(row => row.source === 'new' && row.kind === 'pageNumber')
+    .map(row => contentRowNumberRange(row, file)).filter(Boolean))]
+  return ranges.length ? `${ranges.join('；')}（${physical}）` : physical
 }
+
 
 function finishMainColumnContentEdit(row) {
   // Find the currently editing content row by id prefix
@@ -4113,7 +4455,7 @@ function finishMainColumnContentEdit(row) {
   const crId = editingContentRowId.value.slice(rowPrefix.length)
   // Rebuild rows to find the matching content row
   const index = overlayRows.value.findIndex((item) => item.path === row.path)
-  const rows = buildFileContentRows(row, index, currentRules.value)
+  const rows = contentRowsForFile(row, index)
   const cr = rows.find((r) => r.id === crId)
   if (cr && cr.source === 'existing') {
     // Blur on an existing row discards the edit (恢复原文)
@@ -4139,7 +4481,7 @@ function startContentRowEdit(row, cr) {
     editingContentRowValue.value = cr.element?.editedText || cr.element?.detectedText || ''
   } else if (cr.kind === 'pageNumber') {
     // Show template in edit mode
-    editingContentRowValue.value = cr.group?.template || '{page}/{total}'
+    editingContentRowValue.value = cr.group?.filePageNumberOverrides?.[filenameHeaderKey(row)] ?? cr.group?.template ?? '{page}/{total}'
   } else {
     editingContentRowValue.value = cr.text || ''
   }
@@ -4157,9 +4499,20 @@ function finishContentRowEdit(row, cr) {
 }
 
 function finishNewContentRowEdit(row, cr, value) {
+  if (cr.kind === 'header' && !String(value || '').trim()) {
+    ElMessage.warning('页眉不能为空，请输入文字或关闭页眉')
+    return
+  }
   // Fallback: if group reference is stale (e.g. groups array was rebuilt),
   // resolve it from the file's current groups.
-  let group = cr.group || selectedGroupFor(row, cr.kind) || groupsFor(row, cr.kind)[0]
+  const currentGroups = globalApplyEnabled.value
+    ? { header: globalHeaderGroups, footerText: globalFooterTextGroups, pageNumber: globalPageNumberGroups }[cr.kind].value
+    : groupsFor(row, cr.kind)
+  if (cr.group?.id && !currentGroups.some(item => item.id === cr.group.id)) {
+    ElMessage.warning('该规则已变化，请重新选择后编辑')
+    return
+  }
+  let group = currentGroups.find(item => item.id === cr.group?.id) || selectedGroupFor(row, cr.kind) || currentGroups[0]
   if (!group) {
     // No groups exist for this kind — auto-create a default one
     if (cr.kind === 'header') {
@@ -4177,31 +4530,29 @@ function finishNewContentRowEdit(row, cr, value) {
     }
   }
   // Record old value for undo
-  const oldValue = cr.kind === 'pageNumber' ? group.template || '{page}/{total}' : group.text || ''
+  const oldValue = cr.kind === 'header' ? cr.text : cr.kind === 'pageNumber' ? group.template || '{page}/{total}' : group.text || ''
+  const oldGroup = cloneData(group)
+  const oldHeader = row.header
   if (cr.kind === 'header') {
-    group.text = value
-    if (group.mode === 'filename' || group.mode === 'seq' || group.mode === 'seq_cn') {
-      group.mode = 'per_file'
-    }
-    if (group.mode === 'per_file') {
-      row.header = value
-    }
+    group.fileHeaderOverrides = { ...(group.fileHeaderOverrides || {}), [filenameHeaderKey(row)]: value }
   } else if (cr.kind === 'footerText') {
-    group.text = value
+    group.fileFooterOverrides = { ...(group.fileFooterOverrides || {}), [filenameHeaderKey(row)]: value }
   } else if (cr.kind === 'pageNumber') {
-    if (!value.includes('{page}')) {
-      ElMessage.warning('页码模板必须包含 {page} 占位符')
+    if (!value.includes('{page}') && !value.includes('{range}')) {
+      ElMessage.warning('页码模板必须包含 {page} 或 {range} 占位符')
       return
     }
-    group.template = value
+    group.filePageNumberOverrides = { ...(group.filePageNumberOverrides || {}), [filenameHeaderKey(row)]: value }
   }
   pushEditUndo({
     type: 'group',
     filePath: row.path,
     kind: cr.kind,
     groupId: group.id,
+    global: globalApplyEnabled.value,
+    oldGroup, newGroup: cloneData(group), oldHeader, newHeader: row.header,
     oldValue,
-    newValue: cr.kind === 'pageNumber' ? group.template : group.text,
+    newValue: value,
   })
   // Force Vue reactivity: ref([]) doesn't track deep property mutations,
   // so we trigger a shallow update to make the table re-render.
@@ -4273,8 +4624,15 @@ function cancelExistingDecision(row, cr) {
   overlayFiles.value = [...overlayFiles.value]
 }
 
-function removeContentRowNew(row, cr) {
-  if (!cr.group) return
+async function removeContentRowNew(row, cr) {
+  if (!cr.group || contentGroupCount(row, cr.kind) <= 1) return
+  if (globalApplyEnabled.value) {
+    try {
+      await ElMessageBox.confirm('这是一条全局规则，删除后会影响全部证据。是否继续？', '删除全局规则', {
+        confirmButtonText: '删除规则', cancelButtonText: '取消', type: 'warning',
+      })
+    } catch { return }
+  }
   removeGroupFromFile(row, cr.kind, cr.group.id)
 }
 
@@ -4352,8 +4710,8 @@ function handleGlobalKeydown(e) {
   if (!mergedImportPlan.value || editing || e.ctrlKey || e.metaKey || e.altKey) return
   if (e.key === 'ArrowLeft') movePreviewPage(-1)
   else if (e.key === 'ArrowRight') movePreviewPage(1)
-  else if (e.key === '[') splitMergedImportFromPreviousPage()
-  else if (e.key === ']') splitMergedImportFromCurrentPage()
+  else if (e.key === '[') splitMergedImportFromCurrentPage()
+  else if (e.key === ']') splitMergedImportAfterCurrentPage()
   else return
   e.preventDefault()
 }
@@ -4715,15 +5073,19 @@ h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
+  flex: 1 1 220px;
   min-width: 0;
 }
 
 .hf-control-center {
   display: flex;
   align-items: center;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
+
+.hf-control-center :deep(.el-button + .el-button) { margin-left: 0; }
 
 .hf-control-right {
   display: flex;
@@ -4909,7 +5271,10 @@ h3 {
   gap: 6px;
   min-height: 58px;
   justify-content: center;
+  min-width: 0;
 }
+
+.rule-grid > .merge-row { grid-column: 1 / -1; }
 
 .rule-item label {
   font-size: 12px;
@@ -5125,8 +5490,19 @@ h3 {
   padding: 0 8px;
 }
 
+
+.split-plan-feedback { height: 32px; margin: 4px 0 8px; display: flex; align-items: center; padding: 0 10px; background: var(--el-fill-color-light); border-radius: var(--el-border-radius-base); font-size: 12px; color: var(--el-text-color-secondary); }
+.split-plan-feedback.has-warning { color: var(--el-color-warning-dark-2); background: var(--el-color-warning-light-9); }
+.split-plan-feedback > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.merged-range-tools { display: flex; gap: 6px; align-items: center; }
+.merged-range-tools :deep(.el-button + .el-button) { margin-left: 0; }
+
 .split-ranges-section {
   margin-top: 20px;
+}
+
+.split-ranges-section :deep(.el-table__row.is-selected-range > td.el-table__cell) {
+  background: var(--docsy-primary-soft);
 }
 
 .merged-page-range {
@@ -5135,9 +5511,16 @@ h3 {
   gap: 5px;
 }
 
-.split-ranges-section :deep(.el-button + .el-button) {
-  margin-left: 8px;
+.merged-range-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: nowrap;
 }
+.merged-range-actions :deep(.el-button) { height: 24px; margin-left: 0; padding: 0 7px; }
+.merged-range-actions :deep(.el-button-group) { display: inline-flex; flex-shrink: 0; }
+.merged-range-actions :deep(.el-dropdown) { display: inline-flex; align-items: center; }
 
 .split-summary-grid div.summary-pill {
   cursor: default;
@@ -5537,43 +5920,43 @@ h3 {
   font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
-.preview-text.with-delete-background {
-  padding: 2px 5px;
-  border-radius: var(--docsy-radius);
-  background: rgba(255, 255, 255, 0.94);
-}
+
+
+.file-content-summary { display: grid; gap: 3px; padding: 3px 0; }
+.file-content-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; line-height: 1.5; }
+.file-content-label { color: var(--docsy-text-muted); font-size: 11px; flex: 0 0 28px; }
+.file-content-entry { overflow-wrap: anywhere; cursor: text; }
+.file-content-old, .file-content-empty { color: var(--docsy-text-muted); }
+.content-deleted { text-decoration: line-through; text-decoration-color: var(--el-color-danger); }
 
 .delete-preview-marker {
   position: absolute;
   z-index: 1;
   box-sizing: border-box;
-  min-width: 56px;
-  min-height: 16px;
-  padding: 1px 4px;
   border: 1px dashed var(--docsy-danger);
-  border-radius: var(--docsy-radius);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.96);
   color: var(--el-color-danger);
-  font-size: 11px;
-  line-height: 1.2;
-  white-space: nowrap;
-  text-decoration: line-through;
   pointer-events: none;
 }
 
-.delete-preview-marker::after {
-  content: '';
+.delete-preview-marker span {
   position: absolute;
-  left: 4px;
-  right: 4px;
-  top: 50%;
-  border-top: 2px solid rgba(217, 48, 37, 0.72);
-  transform: translateY(-50%);
+  left: 0;
+  bottom: calc(100% + 3px);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--docsy-surface);
+  color: var(--el-color-danger);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
-.delete-preview-marker span {
-  position: relative;
-  z-index: 1;
+.delete-preview-marker.caption-right span { left: auto; right: 0; }
+
+.delete-preview-marker.caption-below span {
+  bottom: auto;
+  top: calc(100% + 3px);
 }
 
 .footer-candidate-marker {

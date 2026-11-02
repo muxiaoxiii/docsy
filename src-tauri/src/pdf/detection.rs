@@ -269,8 +269,10 @@ fn detect_inner(args: &DetectionArgs) -> Result<DetectionResult> {
 
     let text_started = Instant::now();
     let xml = run_pdftotext_bbox(input, args.max_pages)?;
-    let words = parse_pdftotext_bbox(&xml)?;
-    let page_sizes = parse_pdftotext_page_sizes(&xml)?;
+    let mut words = parse_pdftotext_bbox(&xml)?;
+    let mut page_sizes = parse_pdftotext_page_sizes(&xml)?;
+    let geometry = super::page_info::get_page_infos(&args.input_path)?;
+    align_bbox_geometry(&mut words, &mut page_sizes, &geometry)?;
     let pages = build_page_detections(&words, &page_sizes, args);
     log_detection_stage(
         input,
@@ -407,6 +409,25 @@ pub fn suggest_split_ranges(args: &SplitSuggestionArgs) -> Result<SplitSuggestio
 #[cfg(test)]
 mod real_split_audit {
     use super::*;
+
+    /// Read-only fixture audit. All reports go to the explicit diagnostic path;
+    /// unlike the roundtrip audit below, this never exports or edits a PDF.
+    #[test]
+    #[ignore = "requires DOCSY_ARTIFACT_FIXTURE, DOCSY_SPLIT_AUDIT_REPORT and Poppler/qpdf"]
+    fn audit_split_suggestions_read_only() {
+        let path = std::env::var("DOCSY_ARTIFACT_FIXTURE").unwrap();
+        let report = std::env::var("DOCSY_SPLIT_AUDIT_REPORT").unwrap();
+        let args = serde_json::from_value(serde_json::json!({
+            "inputPath": path, "headerZoneMm": 25, "footerZoneMm": 25,
+        })).unwrap();
+        let result = suggest_split_ranges(&args).unwrap();
+        std::fs::write(report, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+        assert_eq!(result.items.first().unwrap().page_start, 1);
+        assert_eq!(result.items.last().unwrap().page_end, result.total_pages);
+        for pair in result.items.windows(2) {
+            assert_eq!(pair[0].page_end + 1, pair[1].page_start);
+        }
+    }
 
     #[test]
     #[ignore = "requires DOCSY_ARTIFACT_FIXTURE, qpdf and pdftotext"]
@@ -611,7 +632,7 @@ fn merge_artifact_first_candidates(
 fn run_pdftotext_bbox(input: &Path, max_pages: u32) -> Result<String> {
     let pdftotext = find_pdftotext().context("未找到 pdftotext，无法检测页眉页脚")?;
     let mut command = crate::external::hidden_command(pdftotext);
-    command.arg("-bbox").arg("-f").arg("1");
+    command.arg("-cropbox").arg("-bbox").arg("-f").arg("1");
     if max_pages > 0 {
         command.arg("-l").arg(max_pages.to_string());
     }
@@ -690,6 +711,36 @@ fn parse_pdftotext_page_sizes(xml: &str) -> Result<Vec<ParsedPageSize>> {
         });
     }
     Ok(pages)
+}
+
+// Poppler rotates word coordinates, but its XML page dimensions remain unrotated.
+// -cropbox makes coordinates relative to the visible crop; UserUnit is not applied
+// by pdftotext, so scale both words and dimensions into physical display points.
+fn align_bbox_geometry(
+    words: &mut [WordBox],
+    sizes: &mut [ParsedPageSize],
+    geometry: &[super::page_info::PageSize],
+) -> Result<()> {
+    for size in sizes {
+        let page = geometry.get(size.page.saturating_sub(1) as usize)
+            .context("文字检测缺少对应页面尺寸")?;
+        size.width = page.width_pt;
+        size.height = page.height_pt;
+    }
+    for word in words {
+        let page = geometry.get(word.page.saturating_sub(1) as usize)
+            .context("文字检测缺少对应页面尺寸")?;
+        let unit = page.user_unit();
+        word.width = page.width_pt;
+        word.height = page.height_pt;
+        word.bbox.width = page.width_pt;
+        word.bbox.height = page.height_pt;
+        word.bbox.x0 *= unit;
+        word.bbox.x1 *= unit;
+        word.bbox.y0 *= unit;
+        word.bbox.y1 *= unit;
+    }
+    Ok(())
 }
 
 fn build_page_detections(
@@ -777,36 +828,80 @@ fn group_words_into_lines(words: &[&WordBox]) -> Vec<LineBox> {
 
     buckets
         .into_values()
-        .filter_map(|mut line_words| {
+        .flat_map(|mut line_words| {
             line_words.sort_by(|a, b| a.bbox.x0.total_cmp(&b.bbox.x0));
-            let first = line_words.first()?;
-            let mut text = String::new();
-            let mut bbox = first.bbox;
-            let mut last_x = first.bbox.x0;
-
-            for word in line_words {
-                if !text.is_empty() && word.bbox.x0 - last_x > 1.5 {
-                    text.push(' ');
+            let mut lines = Vec::new();
+            let mut start = 0;
+            for index in 1..line_words.len() {
+                let previous = line_words[index - 1];
+                let current = line_words[index];
+                // Same baseline does not mean same text block. A page number
+                // and an evidence stamp often sit side by side; joining them
+                // makes the entire line look like a page number and loses the
+                // split boundary. Keep ordinary word/letter spacing, but split
+                // gaps larger than one rendered glyph height (at least 12 pt).
+                let gap = current.bbox.x0 - previous.bbox.x1;
+                let block_gap = (previous.bbox.y1 - previous.bbox.y0)
+                    .min(current.bbox.y1 - current.bbox.y0)
+                    .max(12.0);
+                // Some generators place independently drawn stamps almost
+                // touching the page number. Poppler still supplies separate
+                // word boxes: retain those exact boxes instead of depending
+                // only on the gap or estimating a split by character count.
+                let upcoming = line_words[index..].iter().take(3)
+                    .map(|word| word.text.as_str()).collect::<String>();
+                let before = line_words[start..index].iter().map(|word| word.text.as_str()).collect::<String>();
+                let after_page_number = (current.text.starts_with('证') || current.text.starts_with('对'))
+                    && is_evidence_label_text(&upcoming)
+                    && labels_for(&normalize_header_footer_text(&before))
+                        .iter().any(|label| label == "page-number");
+                let explicit_number_format = current.text.contains('第') || current.text.contains('/')
+                    || current.text.contains('／') || current.text.to_ascii_lowercase().starts_with("page");
+                let before_page_number = (gap > 6.0 || explicit_number_format)
+                    && is_evidence_label_text(&line_words[start..index].iter()
+                    .map(|word| word.text.as_str()).collect::<String>())
+                    && (1..=line_words.len().saturating_sub(index).min(4)).any(|count| {
+                        let candidate = line_words[index..index + count].iter().map(|word| word.text.as_str()).collect::<String>();
+                        labels_for(&normalize_header_footer_text(&candidate)).iter().any(|label| label == "page-number")
+                    });
+                if gap > block_gap || after_page_number || before_page_number {
+                    if let Some(line) = words_to_line(&line_words[start..index]) {
+                        lines.push(line);
+                    }
+                    start = index;
                 }
-                text.push_str(&word.text);
-                bbox.x0 = bbox.x0.min(word.bbox.x0);
-                bbox.y0 = bbox.y0.min(word.bbox.y0);
-                bbox.x1 = bbox.x1.max(word.bbox.x1);
-                bbox.y1 = bbox.y1.max(word.bbox.y1);
-                last_x = word.bbox.x1;
             }
-
-            Some(LineBox {
-                text,
-                bbox,
-                // pdftotext already gives us the rendered glyph box. Its
-                // height is a reliable and cheap approximation of the visible
-                // size, without decoding every page content stream a second
-                // time (which is prohibitively expensive for scanned PDFs).
-                font_size: Some(estimate_font_size_from_bbox(bbox)),
-            })
+            if let Some(line) = words_to_line(&line_words[start..]) {
+                lines.push(line);
+            }
+            lines
         })
         .collect()
+}
+
+fn words_to_line(words: &[&WordBox]) -> Option<LineBox> {
+    let first = words.first()?;
+    let mut text = String::new();
+    let mut bbox = first.bbox;
+    let mut last_x = first.bbox.x0;
+    for word in words {
+        if !text.is_empty() && word.bbox.x0 - last_x > 1.5 {
+            text.push(' ');
+        }
+        text.push_str(&word.text);
+        bbox.x0 = bbox.x0.min(word.bbox.x0);
+        bbox.y0 = bbox.y0.min(word.bbox.y0);
+        bbox.x1 = bbox.x1.max(word.bbox.x1);
+        bbox.y1 = bbox.y1.max(word.bbox.y1);
+        last_x = word.bbox.x1;
+    }
+    Some(LineBox {
+        text,
+        bbox,
+        // pdftotext already gives the rendered glyph box; avoid decoding every
+        // content stream again merely to estimate the visible font size.
+        font_size: Some(estimate_font_size_from_bbox(bbox)),
+    })
 }
 
 fn estimate_font_size_from_bbox(bbox: BBox) -> f32 {
@@ -2374,6 +2469,127 @@ fn find_pdftotext() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn separates_adjacent_page_number_split_into_multiple_words() {
+        for (first, second) in [("证据8", "第1页"), ("第1页", "证据8")] {
+            let words = if first.starts_with('证') {
+                [(first, 400., 440.), ("第", 441., 450.), ("1", 450., 458.), ("页", 458., 468.)]
+            } else {
+                [("第", 400., 409.), ("1", 409., 417.), ("页", 417., 427.), (second, 428., 468.)]
+            };
+            let mut xml = String::from("<doc><page width=\"595\" height=\"842\">\n");
+            for (text, x0, x1) in words {
+                xml.push_str(&format!("<word xMin=\"{x0}\" yMin=\"29\" xMax=\"{x1}\" yMax=\"45\">{text}</word>\n"));
+            }
+            xml.push_str("</page></doc>");
+            let parsed = parse_pdftotext_bbox(&xml).unwrap();
+            let lines = group_words_into_lines(&parsed.iter().collect::<Vec<_>>());
+            assert_eq!(lines.iter().map(|line| line.text.replace(' ', "")).collect::<Vec<_>>(), vec![first, second]);
+        }
+    }
+
+    #[test]
+    fn separates_evidence_stamp_from_adjacent_page_number_without_losing_bbox() {
+        // The relative y position must not decide whether the evidence stamp
+        // is swallowed by the adjacent fullwidth page-number label.
+        for y in [28.0_f32, 28.5, 29.0, 30.0, 31.5, 32.0] {
+            for x in [510.4_f32, 512.0, 524.6, 540.0] {
+                let xml = format!(r#"<doc><page width="595" height="842">
+                    <word xMin="426.4" yMin="29.8" xMax="510.4" yMax="43.8">第２０８／１６２９页</word>
+                    <word xMin="{x}" yMin="{y}" xMax="{}" yMax="{}">证据</word>
+                    <word xMin="{}" yMin="{y}" xMax="{}" yMax="{}">8</word>
+                </page></doc>"#, x + 32.0, y + 16.0, x + 32.0, x + 40.0, y + 16.0);
+                let words = parse_pdftotext_bbox(&xml).unwrap();
+                let lines = group_words_into_lines(&words.iter().collect::<Vec<_>>());
+                let label = lines.iter().find(|line| line.text == "证据8")
+                    .expect("evidence stamp must remain its own spatial text block");
+                assert_eq!(label.bbox.x0, x);
+                assert_eq!(label.bbox.x1, x + 40.0);
+                assert_eq!(label.bbox.y0, y);
+                let pages = vec![PageDetection {
+                    page: 1, width: 595.0, height: 842.0,
+                    headers: lines.into_iter().map(line_to_detection).collect(), footers: vec![],
+                }];
+                let candidates = build_candidates(&pages, "header", 10);
+                assert!(candidates.iter().any(|candidate| candidate.text == "证据8"
+                    && candidate.labels.iter().any(|label| label == "evidence-label")));
+            }
+        }
+    }
+
+    #[test]
+    fn preserves_spaced_header_words_but_separates_distant_text_blocks() {
+        let xml = r#"<doc><page width="595" height="842">
+            <word xMin="6" yMin="29" xMax="46" yMax="45">证据1</word>
+            <word xMin="218" yMin="28.4" xMax="234" yMax="44.4">国</word>
+            <word xMin="243" yMin="28.4" xMax="259" yMax="44.4">家</word>
+            <word xMin="268" yMin="28.4" xMax="284" yMax="44.4">局</word>
+            <word xMin="440" yMin="29.8" xMax="510" yMax="43.8">第１／１６２９页</word>
+            <word xMin="536" yMin="29" xMax="576" yMax="45">证据1</word>
+        </page></doc>"#;
+        let words = parse_pdftotext_bbox(xml).unwrap();
+        let lines = group_words_into_lines(&words.iter().collect::<Vec<_>>());
+        assert_eq!(lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
+            vec!["证据1", "国 家 局", "第１／１６２９页", "证据1"]);
+    }
+
+    #[test]
+    fn separates_touching_page_number_in_either_order_without_splitting_evidence_digits() {
+        let xml = r#"<doc><page width="595" height="842">
+            <word xMin="400" yMin="29" xMax="432" yMax="45">证据</word>
+            <word xMin="432" yMin="29" xMax="440" yMax="45">1</word>
+            <word xMin="440" yMin="29" xMax="448" yMax="45">5</word>
+            <word xMin="450" yMin="29" xMax="525" yMax="43">第１２／２０页</word>
+        </page></doc>"#;
+        let words = parse_pdftotext_bbox(xml).unwrap();
+        let lines = group_words_into_lines(&words.iter().collect::<Vec<_>>());
+        assert_eq!(lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
+            vec!["证据15", "第１２／２０页"]);
+        assert_eq!(lines[0].bbox.x1, 448.0);
+        assert_eq!(lines[1].bbox.x0, 450.0);
+    }
+
+    #[test]
+    fn adjacent_page_numbers_keep_exact_evidence_split_boundaries() {
+        let mut xml = String::from("<doc>\n");
+        for page in 1..=12 {
+            xml.push_str(&format!(r#"<page width="595" height="842">
+                <word xMin="100" yMin="29" xMax="180" yMax="45">普通公文页眉</word>
+                <word xMin="426" yMin="29" xMax="510" yMax="43">第{page}/12页</word>
+            "#));
+            let label = match page {
+                1 => Some("证据1"),
+                5 => Some("证据8"),
+                9 => Some("证据10"),
+                _ => None,
+            };
+            if let Some(label) = label {
+                xml.push_str(&format!("<word xMin=\"535\" yMin=\"29\" xMax=\"583\" yMax=\"45\">{label}</word>\n"));
+            }
+            if page == 6 {
+                xml.push_str("<word xMin=\"55\" yMin=\"60\" xMax=\"360\" yMax=\"72\">证据2.3：正文中的引用不能成为分段边界。</word>\n");
+            }
+            xml.push_str("</page>\n");
+        }
+        xml.push_str("</doc>");
+        let words = parse_pdftotext_bbox(&xml).unwrap();
+        assert_eq!(words.len(), 28, "fixture must use Poppler's one-word-per-line format");
+        let sizes = parse_pdftotext_page_sizes(&xml).unwrap();
+        let args = serde_json::from_value(serde_json::json!({"inputPath": "fixture.pdf"})).unwrap();
+        let pages = build_page_detections(&words, &sizes, &args);
+        let detection = DetectionResult {
+            input_path: String::new(),
+            pages_analyzed: 12,
+            artifact: ArtifactSummary::default(),
+            header_candidates: build_candidates(&pages, "header", 12),
+            footer_candidates: vec![],
+            pages,
+        };
+        let items = build_split_suggestions(&detection);
+        assert_eq!(items.iter().map(|item| (item.name.as_str(), item.page_start, item.page_end)).collect::<Vec<_>>(),
+            vec![("证据1", 1, 4), ("证据8", 5, 8), ("证据10", 9, 12)]);
+    }
 
     #[test]
     fn parses_pdftotext_bbox_words() {

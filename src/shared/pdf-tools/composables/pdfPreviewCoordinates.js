@@ -68,9 +68,12 @@ function previewFontSize(fontSize, widthPt) {
   return `max(${MIN_PREVIEW_FONT_PX}px, ${cqw}cqw)`
 }
 
-export function bboxOverlayStyle(bbox = {}) {
-  const width = bbox.width || DEFAULT_PAGE_INFO.widthPt
-  const height = bbox.height || DEFAULT_PAGE_INFO.heightPt
+export function bboxOverlayStyle(bbox = {}, pageInfo = null) {
+  // Compatibility for saved detections from Poppler's unrotated XML dimensions.
+  const swapped = pageInfo?.widthPt && pageInfo?.heightPt &&
+    Math.abs(bbox.width - pageInfo.heightPt) < 1 && Math.abs(bbox.height - pageInfo.widthPt) < 1
+  const width = (swapped ? pageInfo.widthPt : bbox.width) || DEFAULT_PAGE_INFO.widthPt
+  const height = (swapped ? pageInfo.heightPt : bbox.height) || DEFAULT_PAGE_INFO.heightPt
   return {
     left: `${ptToPercent(bbox.x0 || 0, width)}%`,
     top: `${ptToPercent(bbox.y0 || 0, height)}%`,

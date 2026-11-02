@@ -5,6 +5,7 @@ import {
   buildHeaderFooterItems,
   createDefaultFooterTextGroup,
   createDefaultHeaderGroup,
+  createDefaultPageNumberGroup,
 } from './useEvidencePdfSession.js'
 
 function makeFile(name) {
@@ -31,7 +32,7 @@ function makePreview({ file, index = 0, rules, footer = {} }) {
     truePreviewLoading: ref(false),
     previewMaxPage: ref(1),
     mergedImportPlan: ref(null),
-    overlayRows: ref([file]),
+    overlayRows: ref([...Array.from({ length: index }, (_, i) => makeFile(`前序${i}`)), file]),
     currentRules: ref(rules),
     overlayOutputDir: ref(''),
     insertHeaderFooterEnabled: ref(true),
@@ -174,7 +175,7 @@ describe('previewFooterText matches the generated footer', () => {
     expect(preview.previewFooterText.value).toBe('鉴定意见 第1页')
   })
 
-  it('continuous vs per-file page numbering follows footerContinuous', () => {
+  it('footer text placeholders follow the global page coordinate used by export', () => {
     const files = [makeFile('原告证据一'), makeFile('原告证据二')]
     files[1].pageStart = 4
     const group = { ...createDefaultFooterTextGroup(), text: '{page}/{total}' }
@@ -192,7 +193,7 @@ describe('previewFooterText matches the generated footer', () => {
       rules,
       footer: { insertEnabled: true, group, page: 2, continuous: false, totalPages: 6 },
     })
-    expect(perFile.previewFooterText.value).toBe('2/3')
+    expect(perFile.previewFooterText.value).toBe('5/6')
   })
 })
 
@@ -225,5 +226,72 @@ describe('previewPageInfo 页尺寸回退链', () => {
     const preview = makePreview({ file, rules })
     expect(preview.previewPageInfo.value).toBeNull()
     expect(preview.previewHeaderStyle.value.fontSize).toBe(`max(8px, ${Number(((10 / 595.28) * 100).toFixed(4))}cqw)`)
+  })
+})
+
+
+describe('existing element deletion preview', () => {
+  it('follows element decisions and keeps rotated header and page number inside the visible page', () => {
+    const file = reactive(makeFile('旋转页'))
+    file.pages = 27
+    file.removeExistingHeader = false
+    file.removeExistingPageNumber = false
+    file.existingElements = [
+      { id: 'old-header', kind: 'header', decision: 'delete', pageStart: 1, pageEnd: 27,
+        bbox: { x0: 530, x1: 592, y0: 13, y1: 38, width: 842.4, height: 595.44 } },
+      { id: 'old-number', kind: 'pageNumber', decision: 'delete', pageStart: 1, pageEnd: 27,
+        bbox: { x0: 281, x1: 315, y0: 813, y1: 838, width: 842.4, height: 595.44 } },
+    ]
+    const preview = makePreview({ file, rules: {}, footer: { previewData: { widthPt: 595.44, heightPt: 842.4 } } })
+    const markers = preview.deletionPreviewMarkers.value
+    expect(markers).toHaveLength(2)
+    expect(parseFloat(markers[0].style.left)).toBeGreaterThan(89)
+    expect(parseFloat(markers[0].style.width)).toBeCloseTo(62 / 595.44 * 100)
+    expect(parseFloat(markers[1].style.top)).toBeGreaterThan(96)
+    expect(parseFloat(markers[1].style.top)).toBeLessThan(100)
+    expect(markers[0].captionBelow).toBe(true)
+    expect(markers[1].captionBelow).toBe(false)
+    file.existingElements[0].decision = 'keep'
+    expect(preview.deletionPreviewMarkers.value.map(marker => marker.key)).toEqual(['old-number'])
+  })
+
+  it('respects each element range and resolves an open end to the file length', () => {
+    const file = makeFile('页段')
+    file.existingElements = [
+      { id: 'a', kind: 'header', decision: 'edit', pageStart: 2, pageEnd: 0 },
+      { id: 'b', kind: 'footerText', decision: 'delete', pageStart: 1, pageEnd: 1 },
+      { id: 'c', kind: 'pageNumber', decision: 'ignore', pageStart: 1, pageEnd: 3 },
+    ]
+    const preview = makePreview({ file, rules: {}, footer: { page: 3 } })
+    expect(preview.deletionPreviewMarkers.value.map(marker => marker.key)).toEqual(['a'])
+  })
+})
+
+describe('header overrides and page exceptions in the live preview', () => {
+  it('previews per-file page numbers in the header even when header insertion is off', () => {
+    const file = makeFile('第二份')
+    const pn = { ...createDefaultPageNumberGroup(), region: 'header', template: '{page}', numbering: { pageStart: 1, sequence: 'per-file', totalMode: 'file' } }
+    const rules = { _globalApply: true, headerInsertEnabled: false, pageNumberEnabled: true, pageNumberGroups: [pn], _globalPageNumberGroup: pn }
+    const preview = makePreview({ file, index: 1, rules })
+    expect(preview.convertedExistingPreviewOverlays.value.map(item => item.text)).toContain('1')
+  })
+  it('previews an edited old header while new header insertion is off', () => {
+    const file = makeFile('原件')
+    file.convertPlainHeader = true
+    file.existingHeaderText = '修改旧页眉'
+    const preview = makePreview({ file, rules: { headerInsertEnabled: false, footerInsertEnabled: false, pageNumberEnabled: false } })
+    expect(preview.convertedExistingPreviewOverlays.value.map(item => item.text)).toContain('修改旧页眉')
+  })
+  it('shows only the applicable page segment and does not duplicate the basic header', () => {
+    const file = makeFile('证据')
+    const group = { ...createDefaultHeaderGroup(), mode: 'custom', text: '普通', fileHeaderOverrides: { [file.path]: '逐文件页眉' } }
+    const rules = { ...globalRules(group), headerGroups: [group], footerInsertEnabled: false, pageNumberEnabled: false,
+      insertExceptions: [{ kinds: ['header'], scope: { type: 'file', start: 2, end: 2 }, overrides: { headerText: '第二页例外' } }] }
+    const preview = makePreview({ file, rules, footer: { page: 2 } })
+    expect(preview.previewHeaderText.value).toBe('')
+    expect(preview.convertedExistingPreviewOverlays.value.filter(item => item.region === 'header').map(item => item.text)).toEqual(['第二页例外'])
+    const first = makePreview({ file, rules, footer: { page: 1 } })
+    expect(first.previewHeaderText.value).toBe('')
+    expect(first.convertedExistingPreviewOverlays.value.filter(item => item.region === 'header').map(item => item.text)).toEqual(['逐文件页眉'])
   })
 })

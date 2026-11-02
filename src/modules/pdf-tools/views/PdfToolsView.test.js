@@ -148,10 +148,11 @@ describe('PDF 合并支持 DOCX 与 DOC 文档', () => {
     const state = PdfToolsView.setup({}, { expose: vi.fn() })
     state.addMergeFiles(['/docs/cover.docx', '/docs/page.pdf', '/docs/appendix.doc'])
     open.mockResolvedValueOnce('/out')
+    await state.selectMergeOutputDir()
     tauriCallSafe.mockImplementation(async (command, args) => ({ ok: true, data: { output_path: command === 'merge_pdfs' ? '/out/merged.pdf' : args.input.replace(/\.(docx|doc)$/, '.pdf') } }))
     await state.doMerge()
     expect(tauriCallSafe).toHaveBeenCalledWith('merge_pdfs', {
-      inputs: ['/docs/cover.pdf', '/docs/page.pdf', '/docs/appendix.pdf'], output: '/out/merged.pdf', duplexSeparate: false,
+      inputs: ['/docs/cover.pdf', '/docs/page.pdf', '/docs/appendix.pdf'], output: '/out/合并文件.pdf', duplexSeparate: false,
     })
     expect(state.mergeOutputPath.value).toBe('/out/merged.pdf')
   })
@@ -160,6 +161,7 @@ describe('PDF 合并支持 DOCX 与 DOC 文档', () => {
     const state = PdfToolsView.setup({}, { expose: vi.fn() })
     state.addMergeFiles(['/docs/fail.docx', '/docs/page.pdf'])
     open.mockResolvedValueOnce('/out')
+    await state.selectMergeOutputDir()
     tauriCallSafe.mockResolvedValue({ ok: false, error: 'Word / WPS 转换失败' })
     await state.doMerge()
     expect(state.mergeFiles.value.map(item => item.path)).toEqual(['/docs/fail.docx', '/docs/page.pdf'])
@@ -169,7 +171,7 @@ describe('PDF 合并支持 DOCX 与 DOC 文档', () => {
     await state.selectManualMergePdf(state.mergeFiles.value[0])
     tauriCallSafe.mockResolvedValue({ ok: true, data: '/out/merged.pdf' })
     await state.doMerge()
-    expect(tauriCallSafe).toHaveBeenLastCalledWith('merge_pdfs', { inputs: ['/manual/fail.pdf', '/docs/page.pdf'], output: '/out/merged.pdf', duplexSeparate: false })
+    expect(tauriCallSafe).toHaveBeenLastCalledWith('merge_pdfs', { inputs: ['/manual/fail.pdf', '/docs/page.pdf'], output: '/out/合并文件.pdf', duplexSeparate: false })
     expect(tauriCallSafe.mock.calls.filter(([command]) => command === 'convert_word_to_pdf')).toHaveLength(1)
     expect(state.mergeOutputDir.value).toBe('/out')
     expect(open).toHaveBeenCalledTimes(2)
@@ -198,4 +200,52 @@ describe('PDF 合并支持 DOCX 与 DOC 文档', () => {
       '/test/d.pdf',
     ])
   })
+})
+
+it('uses the common input folder and a custom filename without asking for a directory', async () => {
+  vi.clearAllMocks()
+  const state = PdfToolsView.setup({}, { expose: vi.fn() })
+  await state.addMergeFiles(['/case/a.pdf','/case/b.pdf'])
+  expect(state.mergeOutputDir.value).toBe('/case')
+  state.mergeFileName.value = '提交材料'
+  tauriCallSafe.mockResolvedValue({ok:true,data:'/case/提交材料-2.pdf'})
+  await state.doMerge()
+  expect(open).not.toHaveBeenCalled()
+  expect(tauriCallSafe).toHaveBeenLastCalledWith('merge_pdfs',{inputs:['/case/a.pdf','/case/b.pdf'],output:'/case/提交材料.pdf',duplexSeparate:false})
+  expect(state.mergeOutputPath.value).toBe('/case/提交材料-2.pdf')
+})
+
+it('recalculates automatic directories but preserves an explicit choice while adding and removing files', async () => {
+  vi.clearAllMocks()
+  const state = PdfToolsView.setup({}, { expose: vi.fn() })
+  await state.addMergeFiles(['/case/a.pdf','/case/b.pdf'])
+  await state.addMergeFiles(['/other/c.pdf'])
+  expect(state.mergeOutputDir.value).toBe('')
+  state.removeMergeFile(2)
+  expect(state.mergeOutputDir.value).toBe('/case')
+  open.mockResolvedValueOnce('/chosen')
+  await state.selectMergeOutputDir()
+  await state.addMergeFiles(['/other/c.pdf'])
+  state.removeMergeFile(2)
+  expect(state.mergeOutputDir.value).toBe('/chosen')
+  state.clearMergeFiles()
+  await state.addMergeFiles(['/new/a.pdf','/new/b.pdf'])
+  expect(state.mergeOutputDir.value).toBe('/new')
+})
+
+it('retains the folder selected at execution for mixed-source files and rejects path-like names before export', async () => {
+  vi.clearAllMocks()
+  const state = PdfToolsView.setup({}, { expose: vi.fn() })
+  await state.addMergeFiles(['/one/a.pdf', '/two/b.pdf'])
+  state.mergeFileName.value = '../a.pdf'
+  await state.doMerge()
+  expect(open).not.toHaveBeenCalled()
+  expect(tauriCallSafe).not.toHaveBeenCalled()
+  state.mergeFileName.value = '汇总.pdf'
+  open.mockResolvedValueOnce('/chosen')
+  tauriCallSafe.mockResolvedValue({ ok: true, data: '/chosen/汇总.pdf' })
+  await state.doMerge()
+  state.removeMergeFile(1)
+  await state.addMergeFiles(['/one/c.pdf'])
+  expect(state.mergeOutputDir.value).toBe('/chosen')
 })

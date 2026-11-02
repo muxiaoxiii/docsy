@@ -107,3 +107,17 @@ describe('existingPdfElements', () => {
     expect(sameSequenceRowKeys(rows, rows[0])).toEqual(['0', '3'])
   })
 })
+
+
+it('keeps per-page detected text and bounds for range summaries and current-page markers', () => {
+  const box = { x0: 280, y0: 810, x1: 315, y1: 838, width: 595, height: 842 }
+  const page = (number, text) => ({ page: number, footers: [
+    { text, normalizedText: '{page}', bbox: { ...box, page: number } },
+    { text: '999', normalizedText: '{page}', bbox: { ...box, x0: 520, x1: 550, page: number } },
+  ] })
+  const element = detectedElementFromCandidate({ text: '492', normalizedText: '{page}', region: 'footer',
+    pageRange: { start: 1, end: 3 }, bbox: box, sequenceStable: true }, 'pageNumber', 0,
+  [page(1, '492'), page(2, '493'), page(3, '494'), page(4, '495')])
+  expect(element.pageSamples.map(sample => sample.text)).toEqual(['492', '493', '494'])
+  expect(element.pageSamples[2].bbox.page).toBe(3)
+})

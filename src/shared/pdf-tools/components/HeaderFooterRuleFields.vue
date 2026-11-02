@@ -9,6 +9,7 @@
           ><el-switch v-model="headerInsertEnabledModel" size="small" aria-label="启用页眉文字" />
         </div>
         <div class="section-actions">
+          <el-button size="small" type="primary" plain :disabled="!headerInsertEnabled || !files.length" @click="headerTextEditor?.open()">逐文件编辑页眉</el-button>
           <el-button
             size="small"
             aria-label="添加页眉规则"
@@ -61,11 +62,15 @@
         <div class="hf-section-grid">
           <div class="rule-item">
             <label>页眉来源</label>
-            <el-select v-model="headerModeModel">
+            <el-select v-model="headerModeModel" aria-label="页眉来源">
               <el-option label="文件名" value="filename" />
+              <el-option v-if="headerMode === 'filename_extract'" label="文件名提取（原规则）" value="filename_extract" />
               <el-option label="固定文本" value="custom" />
               <el-option label="按证据列表名称" value="per_file" />
             </el-select>
+          </div>
+          <div v-if="headerMode === 'filename_extract'" class="rule-item">
+            <label>原提取规则</label><el-button @click="filenameHeaderDialog?.open()">查看／修改原规则</el-button>
           </div>
           <div v-if="headerMode === 'per_file'" class="rule-item">
             <label>名称前缀</label>
@@ -427,17 +432,15 @@
           </div>
         </div>
         <section class="page-number-sample" aria-label="页码格式预览">
-          <div class="sample-heading">
-            <span>格式预览</span
-            ><el-button v-if="showRuleEditor" size="small" text @click="$emit('editPageNumberRules')"
-              >分段与例外{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount}）` : '' }}</el-button
-            >
-          </div>
+          <span>格式示例</span>
           <output class="page-number-preview" aria-live="polite">{{ pageNumberPreviewText }}</output>
-          <span class="sample-caption">当前编号示例，纸面位置以页面预览为准</span>
+          <HelpTooltip content="这里展示编号格式，纸面位置以页面预览为准；各文件的完整页码范围显示在下方列表。" />
+          <el-button v-if="showRuleEditor" size="small" text @click="$emit('editPageNumberRules')">分段与例外{{ pageNumberOverrideCount ? `（${pageNumberOverrideCount}）` : '' }}</el-button>
         </section>
       </template>
     </section>
+    <FilenameHeaderDialog ref="filenameHeaderDialog" :files="extractionFiles" :rule="selectedHeaderGroup?.filenameExtraction" @apply="applyFilenameExtraction" />
+    <HeaderTextEditorDialog ref="headerTextEditor" :files="files" :group="selectedHeaderGroup" :numbering-defaults="numberingDefaults" :index-offset="fileIndexOffset" :date-value="headerDateValue" :has-exceptions="hasHeaderExceptions" @apply="applyHeaderOverrides" />
   </div>
 </template>
 
@@ -450,6 +453,8 @@ import TextPlacementFields from './TextPlacementFields.vue'
 import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../composables/pdfPageNumberRules.js'
 import { useHistory } from '../../../core/composables/useHistory.js'
 import UndoRedoButtons from '../../components/UndoRedoButtons.vue'
+import FilenameHeaderDialog from './FilenameHeaderDialog.vue'
+import HeaderTextEditorDialog from './HeaderTextEditorDialog.vue'
 
 function debounce(fn, ms) {
   let timer
@@ -461,11 +466,16 @@ function debounce(fn, ms) {
 
 const MODE_LABELS = {
   filename: '文件名',
+  filename_extract: '文件名提取',
   per_file: '按列表名称',
   custom: '固定文本',
 }
 
 const props = defineProps({
+  files: { type: Array, default: () => [] },
+  fileIndexOffset: { type: Number, default: 0 },
+  headerDateValue: { type: String, default: '' },
+  hasHeaderExceptions: Boolean,
   showRuleEditor: { type: Boolean, default: true },
   headerGroups: { type: Array, required: true },
   selectedHeaderGroupId: { type: String, required: true },
@@ -523,6 +533,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'header-group-edit',
+  'request-header-numbering',
+  'request-header-rule-change',
   'editPageNumberRules',
   'update:pageNumberShowTotal',
   'update:headerGroups',
@@ -775,15 +788,25 @@ const selectedPageNumberGroup = computed(
     props.pageNumberGroups[0] ||
     null,
 )
-function updateSelectedGroup(kind, patch) {
+const filenameHeaderDialog = ref(null)
+const headerTextEditor = ref(null)
+const extractionFiles = computed(() => props.files.filter(file => !selectedHeaderGroup.value?.fileIds?.length || selectedHeaderGroup.value.fileIds.includes(String(file.id || file.path))))
+function applyHeaderOverrides(overrides) { updateSelectedGroup('header', { fileHeaderOverrides: overrides }, true) }
+function applyFilenameExtraction(rule) {
+  emit('request-header-rule-change', { mode: 'filename_extract', filenameExtraction: rule })
+}
+function updateSelectedGroup(kind, patch, record = false) {
   const groups = kind === 'header' ? props.headerGroups : props.pageNumberGroups
-  const selectedId = kind === 'header' ? props.selectedHeaderGroupId : props.selectedPageNumberGroupId
+  const selectedId = kind === 'header' ? selectedHeaderGroup.value?.id : selectedPageNumberGroup.value?.id
+  const before = groups.find((group) => group.id === selectedId)
+  if (record && before) emit('header-group-edit', { before, after: { ...before, ...patch } })
   const updated = groups.map((group) => (group.id === selectedId ? { ...group, ...patch } : group))
   emit(kind === 'header' ? 'update:headerGroups' : 'update:pageNumberGroups', updated)
 }
 function updateGroupNumbering(kind, patch) {
   const group = kind === 'header' ? selectedHeaderGroup.value : selectedPageNumberGroup.value
   if (!group) return
+  if (kind === 'header') { emit('request-header-numbering', patch); return }
   updateSelectedGroup(kind, { numbering: { source: 'default', ...(group.numbering || {}), ...patch } })
 }
 const headerNumberingSourceModel = computed({
@@ -860,10 +883,10 @@ const overlapWarnings = computed(() => {
   const footerTextGroups = props.footerTextGroups || []
   const pageNumberGroups = props.pageNumberGroups || []
   const pageHeight = Number(props.pageHeightMm || 297)
-  const enabledHeader = headerGroups.filter((g) => g.enabled)
-  const enabledFooterText = footerTextGroups.filter((g) => g.enabled)
-  const enabledPnFooter = pageNumberGroups.filter((g) => g.enabled && g.region !== 'header')
-  const enabledPnHeader = pageNumberGroups.filter((g) => g.enabled && g.region === 'header')
+  const enabledHeader = headerGroups.filter((g) => props.headerInsertEnabled && g.enabled && g.mode !== 'none')
+  const enabledFooterText = footerTextGroups.filter((g) => props.footerInsertEnabled && g.enabled && g.text)
+  const enabledPnFooter = pageNumberGroups.filter((g) => props.pageNumberEnabled && g.enabled && g.region !== 'header')
+  const enabledPnHeader = pageNumberGroups.filter((g) => props.pageNumberEnabled && g.enabled && g.region === 'header')
   const label = (g, fallback) => g.label || fallback
   // Header-to-header overlap (±2mm tolerance)
   for (let i = 0; i < enabledHeader.length; i++) {
@@ -1024,33 +1047,21 @@ function removePageNumberGroup(id) {
   grid-column: 1 / -1;
 }
 .page-number-sample {
-  display: grid;
-  gap: 4px;
-  padding: 8px 12px;
-  margin-top: 6px;
-  border: 1px solid var(--docsy-border-subtle);
-  border-radius: var(--docsy-radius);
-  background: var(--docsy-surface-muted);
-}
-.sample-heading {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
   color: var(--docsy-text-muted);
-  font-size: 11px;
-}
-.sample-caption {
-  color: var(--docsy-text-muted);
-  font-size: 11px;
-  text-align: center;
+  font-size: 12px;
 }
 .page-number-sample .page-number-preview {
-  display: block;
-  padding: 6px;
+  padding: 0;
   background: transparent;
-  font-size: 20px;
-  text-align: center;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
 }
+.page-number-sample > .el-button { margin-left: auto; }
 /* 根容器：纵向排列三个区块，区块间留固定间距 */
 .hf-rule-fields {
   display: flex;

@@ -3,6 +3,10 @@ import {
   assignPageRanges,
   buildEvidencePdfRulePayload,
   buildFileContentRows,
+  resolveHeaderFooterItems,
+  contentRowDisplayText,
+  contentRowNumberRange,
+  existingContentRange,
   buildHeaderFooterItems,
   buildHeaderText,
   buildMergeOutputPath,
@@ -619,8 +623,10 @@ describe('Evidence PDF session helpers', () => {
     const files = [{ ...createEvidenceFile('/case/合同.pdf'), pages: 2 }]
 
     expect(buildMergeOutputPath(files, '/out', '证据包')).toBe('/out/证据包.pdf')
-    expect(buildMergeOutputPath(files, '', 'final.pdf')).toBe('/case/_docsy_pdf_processed/final.pdf')
-    expect(buildOutputDir(files, '')).toBe('/case/_docsy_pdf_processed')
+    expect(buildMergeOutputPath(files, '', 'final.pdf')).toBe('/case/final.pdf')
+    expect(buildOutputDir(files, '')).toBe('/case')
+    expect(buildOutputDir([{path:'/case/a.pdf'},{path:'/other/b.pdf'}], '')).toBe('/case/_docsy_pdf_processed')
+    expect(buildHeaderFooterItems(files, baseRules, '')[0].outputPath).toMatch(/^\/case\/[^/]+\.pdf$/)
   })
 
   it('keeps common header naming modes deterministic', () => {
@@ -861,7 +867,7 @@ describe('Evidence PDF session helpers', () => {
     expect(legacyItems[0].header.text).toBe('证据1')
   })
 
-  it('uses the effective global header mode when the stored group is stale', () => {
+  it('respects a disabled global header group even when a legacy mode disagrees', () => {
     const file = createEvidenceFile('/case/合同.pdf')
     file.pages = 1
     const staleGroup = { ...createDefaultHeaderGroup(), mode: 'none' }
@@ -878,12 +884,11 @@ describe('Evidence PDF session helpers', () => {
       '/out',
     )
 
-    expect(items[0].header?.text).toBe('证据1')
+    expect(items[0].header).toBeNull()
   })
 
-  it('page number content row carries the effective sequence from rules', () => {
-    // Global apply + per-file numbering: the file's own group stays 'continuous'
-    // (default), but the generated output follows rules.pageNumberSequence.
+  it('page number content row uses the same rule-contained sequence as export', () => {
+    // The old group.sequence field is retained for saved-file compatibility.
     const file = createEvidenceFile('/case/合同.pdf')
     const rules = {
       insertHeaderFooterEnabled: true,
@@ -892,6 +897,7 @@ describe('Evidence PDF session helpers', () => {
       pageNumberEnabled: true,
       pageNumberSequence: 'per-file',
     }
+    file.pageNumberGroups[0].numbering.sequence = 'per-file'
     const rows = buildFileContentRows(file, 0, rules)
     const pn = rows.find((r) => r.kind === 'pageNumber')
     expect(pn.sequence).toBe('per-file')
@@ -1163,6 +1169,9 @@ describe('Evidence PDF session helpers', () => {
       footerTextGroups: [{ id: 'ft1', enabled: true, text: '机密文件' }],
       pageNumberEnabled: true,
       pageNumberGroups: [{ id: 'pn1', enabled: true, template: '第{page}页' }],
+      _globalApply: true,
+      _globalFooterTextGroup: { id: 'ft1', enabled: true, text: '机密文件' },
+      _globalPageNumberGroup: { id: 'pn1', enabled: true, template: '第{page}页' },
     }
     const conflicts = detectKeepInsertConflicts(files, rules)
     const regions = conflicts.map((item) => item.region).sort()
@@ -1186,5 +1195,233 @@ describe('Evidence PDF session helpers', () => {
     expect(conflicts).toHaveLength(1)
     expect(conflicts[0].existingText).toBe('原件页眉')
     expect(conflicts[0].newText).toBe('doc1')
+  })
+})
+
+
+describe('file list reflects live output numbering', () => {
+  it('derives editable list rows from the same resolved overlays sent to export', () => {
+    const files = ['/case/甲.pdf', '/case/乙.pdf'].map(path => ({ ...createEvidenceFile(path), pages: 3 }))
+    const h1 = { ...createDefaultHeaderGroup(), mode: 'custom', text: '基础页眉' }
+    const h2 = { ...createDefaultHeaderGroup(), id: 'h2', mode: 'custom', text: '仅乙', fileIds: [files[1].path] }
+    const ft = { ...createDefaultFooterTextGroup(), text: '页脚', pageStart: 2 }
+    const pn = { ...createDefaultPageNumberGroup(), region: 'header', numbering: { pageStart: 5, sequence: 'per-file', totalMode: 'file' } }
+    const rules = { _globalApply: true, _globalHeaderGroup: h1, headerGroups: [h1, h2], headerInsertEnabled: true,
+      _globalFooterTextGroup: ft, footerTextGroups: [ft], footerInsertEnabled: true,
+      _globalPageNumberGroup: pn, pageNumberGroups: [pn], pageNumberEnabled: true,
+      insertExceptions: [{ kinds: ['header'], scope: { type: 'file', start: 2, end: 2, fileIds: [files[0].path] }, overrides: { headerText: '第二页例外' } }] }
+    const resolved = resolveHeaderFooterItems(files, rules)
+    const jobs = buildHeaderFooterItems(files, rules)
+    for (const [index, entry] of resolved.entries()) {
+      expect(entry.job).toEqual(jobs[index])
+      expect(entry.job.records).toBeUndefined()
+      const rows = buildFileContentRows(files[index], index, rules, files, entry).filter(row => row.source === 'new')
+      expect(rows.map(row => row.id).sort()).toEqual(entry.records.map(record => `${record.kind}-${record.group.id}`).sort())
+      for (const record of entry.records) {
+        const row = rows.find(item => item.group === record.group)
+        expect(row).toBeTruthy()
+        if (record.kind === 'pageNumber') expect(row.numberOverlays).toEqual(record.overlays)
+        else if (record.segmented) expect(row.textSegments).toEqual(record.overlays)
+        else expect(row.text).toBe(record.overlays[0].text)
+      }
+    }
+    expect(resolved[0].records.find(record => record.group === h1).overlays.map(item => item.text)).toContain('第二页例外')
+    expect(resolved[0].records.some(record => record.group === h2)).toBe(false)
+    expect(resolved[1].records.some(record => record.group === h2)).toBe(true)
+  })
+  it('does not report a header conflict when that rule excludes the file', () => {
+    const file = { ...createEvidenceFile('/case/a.pdf'), pages: 2, keepExistingHeader: true, existingHeaderText: '旧页眉' }
+    const group = { ...createDefaultHeaderGroup(), mode: 'custom', text: '新页眉', fileIds: ['/case/other.pdf'] }
+    const rules = { _globalApply: true, _globalHeaderGroup: group, headerGroups: [group], headerInsertEnabled: true, pageNumberEnabled: false }
+    expect(buildHeaderFooterItems([file], rules)[0].header).toBeNull()
+    expect(detectKeepInsertConflicts([file], rules)).toEqual([])
+  })
+  it('does not report a conflict when new content and retained content have disjoint page ranges', () => {
+    const file = { ...createEvidenceFile('/case/a.pdf'), pages: 5,
+      existingElements: [{ kind: 'header', decision: 'keep', detectedText: '旧页眉', pageStart: 1, pageEnd: 2 }] }
+    const group = { ...createDefaultHeaderGroup(), mode: 'custom', text: '新页眉', pageStart: 3 }
+    const rules = { _globalApply: true, _globalHeaderGroup: group, headerGroups: [group], headerInsertEnabled: true, pageNumberEnabled: false }
+    expect(detectKeepInsertConflicts([file], rules)).toEqual([])
+  })
+  it('retains a non-selected enabled footer when the selected footer is empty', () => {
+    const file = { ...createEvidenceFile('/case/a.pdf'), pages: 2 }
+    const empty = { ...createDefaultFooterTextGroup(), id: 'f1', text: '' }
+    const other = { ...createDefaultFooterTextGroup(), id: 'f2', text: '页脚二' }
+    const rules = { _globalApply: true, footerInsertEnabled: true, _globalFooterTextGroup: empty, footerTextGroups: [empty, other] }
+    const job = buildHeaderFooterItems([file], rules)[0]
+    expect(job.footer).toBeNull()
+    expect(job.extraOverlays.map(item => item.text)).toContain('页脚二')
+    expect(buildFileContentRows(file, 0, rules, [file]).filter(row => row.kind === 'footerText' && row.source === 'new').map(row => row.text)).toEqual(['页脚二'])
+  })
+  it('keeps each file header when the selected file changes in non-global mode', () => {
+    const a = { ...createEvidenceFile('/case/甲.pdf'), pages: 3 }
+    const b = { ...createEvidenceFile('/case/乙.pdf'), pages: 3 }
+    a.headerGroups[0].mode = 'filename'
+    b.headerGroups[0].mode = 'custom'
+    b.headerGroups[0].text = '乙自定义'
+    for (const [mode, text] of [['filename', ''], ['custom', '乙自定义']]) {
+      const rules = { _globalApply: false, headerMode: mode, headerText: text, headerInsertEnabled: true }
+      expect(buildHeaderFooterItems([a, b], rules).map(job => job.header?.text)).toEqual(['甲', '乙自定义'])
+      expect(buildHeaderText(b, 1, rules)).toBe('乙自定义')
+      expect(buildFileContentRows(b, 1, rules, [a, b]).find(row => row.kind === 'header' && row.source === 'new').text).toBe('乙自定义')
+    }
+  })
+  it('writes a footer from its start through the last page and preserves a zero offset', () => {
+    const file = { ...createEvidenceFile('/case/甲.pdf'), pages: 8 }
+    const group = { ...createDefaultFooterTextGroup(), text: '页脚', pageStart: 3, pageEnd: 0, offsetXMm: 0 }
+    const job = buildHeaderFooterItems([file], { _globalApply: true, _globalFooterTextGroup: group, footerTextGroups: [group], footerInsertEnabled: true, footerOffsetXMm: 15 })[0]
+    expect(job.footer).toMatchObject({ pageStart: 3, pageEnd: 8, offsetXMm: 0 })
+  })
+  it('keeps a new header on its configured position and pages when editing an old header', () => {
+    const file = { ...createEvidenceFile('/case/甲.pdf'), pages: 4, convertPlainHeader: true, existingHeaderText: '修改后的旧页眉', existingHeaderPageStart: 2, existingHeaderPageEnd: 2, existingHeaderBBox: { x0: 10, x1: 70, y0: 10, y1: 20, width: 600, height: 800 } }
+    const group = { ...createDefaultHeaderGroup(), mode: 'custom', text: '新页眉', align: 'right' }
+    const job = buildHeaderFooterItems([file], { _globalApply: true, _globalHeaderGroup: group, headerGroups: [group], headerInsertEnabled: true })[0]
+    expect(job.header).toMatchObject({ text: '新页眉', align: 'right' })
+    expect(job.header.pageStart).toBeUndefined()
+    expect(job.extraOverlays[0]).toMatchObject({ text: '修改后的旧页眉', align: 'left', pageStart: 2, pageEnd: 2 })
+  })
+  it('does not report a new page-number conflict after page numbers are disabled', () => {
+    const file = { ...createEvidenceFile('/case/a.pdf'), pages: 2, keepExistingPageNumber: true, existingPageNumberText: '1' }
+    const rules = { _globalApply: true, pageNumberEnabled: false, footerEnabled: false, headerInsertEnabled: false, pageNumberGroups: [createDefaultPageNumberGroup()] }
+    expect(detectKeepInsertConflicts([file], rules)).toEqual([])
+  })
+  it('uses the global per-file header override for fallback and conflict text', () => {
+    const file = { ...createEvidenceFile('/case/a.pdf'), pages: 2, keepExistingHeader: true, existingHeaderText: '旧页眉' }
+    const group = { ...createDefaultHeaderGroup(), mode: 'per_file', fileHeaderOverrides: { '/case/a.pdf': '指定页眉' } }
+    const rules = { _globalApply: true, _globalHeaderGroup: group, headerGroups: [group], headerInsertEnabled: true, headerMode: 'per_file', numberingDefaults: { evidenceStart: 21 } }
+    expect(buildHeaderText(file, 0, rules)).toBe('指定页眉')
+    expect(detectKeepInsertConflicts([file], rules)[0].newText).toBe('指定页眉')
+  })
+  it('uses the global groups and starting numbers for every file and matches export segments', () => {
+    const files = [createEvidenceFile('/case/甲.pdf'), createEvidenceFile('/case/乙.pdf')]
+    files[0].pages = 27
+    files[1].pages = 72
+    const header = { ...createDefaultHeaderGroup(), mode: 'per_file' }
+    const pageNumber = createDefaultPageNumberGroup()
+    pageNumber.numbering.pageStart = 492
+    const rules = {
+      _globalApply: true, _globalHeaderGroup: header, _globalPageNumberGroup: pageNumber,
+      headerGroups: [header], pageNumberGroups: [pageNumber], footerTextGroups: [],
+      headerMode: 'per_file', headerInsertEnabled: true, pageNumberEnabled: true,
+      footerInsertEnabled: false, pageNumberShowTotal: false,
+      numberingDefaults: { evidenceStart: 21, pageStart: 1 },
+    }
+    for (const start of [492, 650]) {
+      pageNumber.numbering.pageStart = start
+      const jobs = buildHeaderFooterItems(files, rules)
+      files.forEach((file, index) => {
+        const rows = buildFileContentRows(file, index, rules, files)
+        expect(rows.find(row => row.kind === 'header').text).toBe(`证据${21 + index}`)
+        expect(rows.find(row => row.kind === 'header').text).toBe(jobs[index].header.text)
+        const row = rows.find(row => row.kind === 'pageNumber')
+        expect(row.numberOverlays).toEqual(jobs[index].extraOverlays.filter(o => o.artifactKind === 'PageNumber'))
+        const offset = index ? 27 : 0
+        const ranged = { ...file, pageStart: offset + 1 }
+        expect(contentRowDisplayText(row, ranged)).toBe(`${start + offset}–${start + offset + file.pages - 1}`)
+        expect(contentRowNumberRange(row, ranged)).toBe(contentRowDisplayText(row, ranged))
+      })
+    }
+    pageNumber.numbering.sequence = 'per-file'
+    const rows = buildFileContentRows(files[1], 1, rules, files)
+    expect(contentRowDisplayText(rows.find(row => row.kind === 'pageNumber'), { ...files[1], pageStart: 28 })).toBe('650–721')
+  })
+
+  it('shares exclusion and custom-format page segments with export', () => {
+    const file = createEvidenceFile('/case/甲.pdf')
+    file.pages = 5
+    file.pageNumberGroups[0].numbering.pageStart = 492
+    file.pageNumberGroups[0].template = '第{page}页'
+    const rules = { headerInsertEnabled: false, footerInsertEnabled: false, pageNumberEnabled: true,
+      pageNumberShowTotal: false,
+      insertExceptions: [{ kind: 'pageNumber', action: 'exclude', scope: 'all', pageStart: 2, pageEnd: 2, count: false }],
+    }
+    const rows = buildFileContentRows(file, 0, rules, [file])
+    const job = buildHeaderFooterItems([file], rules)[0]
+    expect(rows[0].numberOverlays).toEqual(job.extraOverlays.filter(o => o.artifactKind === 'PageNumber'))
+    expect(contentRowDisplayText(rows[0], file)).toContain('492')
+    expect(contentRowDisplayText(rows[0], file)).toContain('495')
+  })
+})
+
+
+it('shows observed existing page-number endpoints without inventing continuous values', () => {
+  const row = { kind: 'pageNumber', text: '492', element: { detectedText: '492', pageStart: 1, pageEnd: 27,
+    pageSamples: [{ page: 1, text: '492' }, { page: 27, text: '518' }] } }
+  expect(existingContentRange(row)).toBe('492–518')
+  row.element.pageSamples[1].text = '530'
+  expect(existingContentRange(row)).toBe('492–530')
+  row.element.pageSamples = []
+  expect(existingContentRange(row)).toBe('492')
+  row.element.sequenceStable = true
+  row.element.count = 27
+  expect(existingContentRange(row)).toBe('492–518')
+})
+
+it('hides fully excluded text rules in the list and reflects partial text exceptions', () => {
+  const file = createEvidenceFile('/case/甲.pdf'); file.pages = 3
+  const rules = { headerInsertEnabled: true, headerMode: 'custom', footerInsertEnabled: false, pageNumberEnabled: false,
+    insertExceptions: [{ kinds: ['header'], scope: { type: 'file', start: 1, end: 3 }, overrides: { enabled: false } }] }
+  file.headerGroups[0].text = '新页眉'
+  expect(buildFileContentRows(file, 0, rules, [file])).toEqual([])
+  rules.insertExceptions[0].scope.end = 1
+  const row = buildFileContentRows(file, 0, rules, [file])[0]
+  expect(contentRowDisplayText(row, file)).toBe('新页眉 [2–3页]')
+})
+
+
+it('does not display or export a disabled global page-number section', () => {
+  const file = createEvidenceFile('/case/甲.pdf'); file.pages = 3
+  const pn = createDefaultPageNumberGroup()
+  const rules = { _globalApply: true, _globalPageNumberGroup: pn, pageNumberGroups: [pn],
+    pageNumberEnabled: false, headerInsertEnabled: false, footerInsertEnabled: false }
+  expect(buildFileContentRows(file, 0, rules)).toEqual([])
+  expect(buildHeaderFooterItems([file], rules)[0].extraOverlays).toEqual([])
+})
+
+describe('complete per-file header overrides', () => {
+  it('keeps edited text literal without repeating prefixes and lets untouched rows follow numbering', () => {
+    const files = ['/case/甲.pdf', '/case/乙.pdf'].map(path => ({ ...createEvidenceFile(path), pages: 3 }))
+    const group = { ...createDefaultHeaderGroup(), mode: 'per_file', perFilePrefix: '证据', prefix: '【', suffix: '】', fileHeaderOverrides: { '/case/甲.pdf': '【专属页眉】' } }
+    const rules = { ...baseRules, _globalApply: true, _globalHeaderGroup: group, headerGroups: [group],
+      headerMode: 'per_file', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false,
+      numberingDefaults: { evidenceStart: 21 } }
+    let jobs = buildHeaderFooterItems(files, rules)
+    expect(jobs.map(job => job.header.text)).toEqual(['【专属页眉】', '【证据22】'])
+    expect(files.map((file, index) => buildFileContentRows(file, index, rules, files)[0].text)).toEqual(['【专属页眉】', '【证据22】'])
+    rules.numberingDefaults.evidenceStart = 41
+    jobs = buildHeaderFooterItems(files, rules)
+    expect(jobs.map(job => job.header.text)).toEqual(['【专属页眉】', '【证据42】'])
+    const reordered = buildHeaderFooterItems([...files].reverse(), rules)
+    expect(reordered.map(job => job.header.text)).toEqual(['【证据41】', '【专属页眉】'])
+  })
+  it('keeps explicit page exceptions and scopes separate from an individual header override', () => {
+    const file = { ...createEvidenceFile('/case/甲.pdf'), pages: 3 }
+    const group = { ...createDefaultHeaderGroup(), mode: 'custom', text: '普通页眉', fileHeaderOverrides: { [file.path]: '专属页眉' } }
+    const rules = { ...baseRules, _globalApply: true, _globalHeaderGroup: group, headerGroups: [group],
+      headerMode: 'custom', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false,
+      insertExceptions: [{ kinds: ['header'], scope: { type: 'file', start: 2, end: 2 }, overrides: { headerText: '第二页例外' } }] }
+    const job = buildHeaderFooterItems([file], rules)[0]
+    expect(job.header).toBeNull()
+    expect(job.extraOverlays.filter(item => item.region === 'header').map(item => [item.pageStart, item.pageEnd, item.text])).toEqual([
+      [1, 1, '专属页眉'], [2, 2, '第二页例外'], [3, 3, '专属页眉'],
+    ])
+    const row = buildFileContentRows(file, 0, rules, [file])[0]
+    expect(contentRowDisplayText(row, file)).toContain('第二页例外')
+  })
+  it('allows a complete manual header to repair a legacy filename rule without affecting other files', () => {
+    const file = { ...createEvidenceFile('/case/只有一段.pdf'), pages: 1 }
+    const group = { ...createDefaultHeaderGroup(), mode: 'filename_extract', filenameExtraction: { separator: '-', start: 2, end: 2 }, fileHeaderOverrides: { [file.path]: '手动页眉' } }
+    const rules = { ...baseRules, _globalApply: true, _globalHeaderGroup: group, headerGroups: [group],
+      headerMode: 'filename_extract', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false }
+    expect(buildEvidencePdfRulePayload([file], rules).items[0].header.text).toBe('手动页眉')
+    delete group.fileHeaderOverrides[file.path]
+    expect(() => buildEvidencePdfRulePayload([file], rules)).toThrow('只有 1 段')
+  })
+  it('rejects an empty stored per-file header rather than silently omitting it', () => {
+    const file = { ...createEvidenceFile('/case/甲.pdf'), pages: 1 }
+    const group = { ...createDefaultHeaderGroup(), mode: 'custom', text: '正常页眉', fileHeaderOverrides: { [file.path]: '' } }
+    const rules = { ...baseRules, _globalApply: true, _globalHeaderGroup: group, headerGroups: [group],
+      headerMode: 'custom', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false }
+    expect(() => buildEvidencePdfRulePayload([file], rules)).toThrow('页眉不能为空')
   })
 })

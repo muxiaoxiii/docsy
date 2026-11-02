@@ -1,12 +1,15 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fs;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::SystemTime;
 use std::path::{Path, PathBuf};
 
 use crate::external::ExternalTool;
 
-use super::page_info::get_page_infos;
+use super::page_info::{get_page_infos, PageSize};
 use super::temp_named_path;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -17,6 +20,8 @@ pub struct PreviewArgs {
     pub page: u32,
     #[serde(default = "default_preview_dpi")]
     pub dpi: u32,
+    #[serde(default)]
+    pub force_refresh: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,13 +44,60 @@ fn default_preview_dpi() -> u32 {
     120
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct PreviewFileVersion {
+    path: PathBuf,
+    length: u64,
+    modified: SystemTime,
+}
+
+impl PreviewFileVersion {
+    fn read(path: &Path) -> Option<Self> {
+        let info = fs::metadata(path).ok()?;
+        Some(Self { path: path.to_path_buf(), length: info.len(), modified: info.modified().ok()? })
+    }
+}
+
+type GeometryEntry = (PreviewFileVersion, Arc<Vec<PageSize>>);
+static PREVIEW_GEOMETRY: LazyLock<Mutex<VecDeque<GeometryEntry>>> = LazyLock::new(|| Mutex::new(VecDeque::new()));
+
+// Parse the page tree once for neighbouring pages of a large scan. Never retain
+// file bytes or trust cached geometry after an external save or explicit reload.
+fn cached_page_infos(input: &Path, version: &Option<PreviewFileVersion>, force: bool) -> Result<Arc<Vec<PageSize>>> {
+    cached_page_infos_with(&PREVIEW_GEOMETRY, input, version, force)
+}
+
+fn cached_page_infos_with(geometry_cache: &Mutex<VecDeque<GeometryEntry>>, input: &Path, version: &Option<PreviewFileVersion>, force: bool) -> Result<Arc<Vec<PageSize>>> {
+    if let Some(version) = version {
+        let mut cache = geometry_cache.lock().unwrap_or_else(|error| error.into_inner());
+        if force { cache.retain(|(key, _)| key.path != version.path); }
+        if let Some(index) = cache.iter().position(|(key, _)| key == version) {
+            let entry = cache.remove(index).unwrap();
+            let pages = Arc::clone(&entry.1);
+            cache.push_back(entry);
+            return Ok(pages);
+        }
+    }
+    let pages = Arc::new(get_page_infos(&input.to_string_lossy())?);
+    if let Some(version) = version {
+        if PreviewFileVersion::read(input).as_ref() == Some(version) {
+            let mut cache = geometry_cache.lock().unwrap_or_else(|error| error.into_inner());
+            cache.retain(|(key, _)| key.path != version.path);
+            cache.push_back((version.clone(), Arc::clone(&pages)));
+            while cache.len() > 4 { cache.pop_front(); }
+        }
+    }
+    Ok(pages)
+}
+
 pub fn render_preview(args: &PreviewArgs) -> Result<PreviewResult> {
     let input = Path::new(&args.input_path);
     if !input.exists() {
         anyhow::bail!("PDF 不存在: {}", input.display());
     }
 
-    let page_infos = get_page_infos(&args.input_path)?;
+    let version = PreviewFileVersion::read(input);
+    let page_infos = cached_page_infos(input, &version, args.force_refresh)?;
     let pages = page_infos.len() as u32;
     let page = args.page.clamp(1, pages);
     let rendered = render_pdf_page_to_png(input, page, args.dpi)?;
@@ -54,6 +106,9 @@ pub fn render_preview(args: &PreviewArgs) -> Result<PreviewResult> {
     let _ = fs::remove_file(&rendered);
     let img = img_result?;
     let bytes = bytes_result?;
+    if version.is_some() && PreviewFileVersion::read(input) != version {
+        anyhow::bail!("文件在预览期间发生变化，请重新预览");
+    }
 
     Ok(PreviewResult {
         image_data_url: format!(
@@ -152,6 +207,40 @@ mod tests {
     use lopdf::{dictionary, Dictionary, Document, Stream};
 
     #[test]
+    fn preview_geometry_cache_reuses_pages_and_invalidates_after_save_or_reload() {
+        use lopdf::{dictionary, Document, Object};
+        let input = temp_named_path("docsy_preview_geometry", "pdf");
+        let write_pdf = |width: i64, height: i64, producer: &str| {
+            let mut doc = Document::with_version("1.7");
+            let pages = doc.new_object_id();
+            let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages,
+                "MediaBox" => vec![0.into(), 0.into(), width.into(), height.into()] });
+            doc.objects.insert(pages, dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 }.into());
+            let root = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+            let info = doc.add_object(dictionary! { "Producer" => Object::string_literal(producer) });
+            doc.trailer.set("Root", root); doc.trailer.set("Info", info);
+            doc.save(&input).unwrap();
+        };
+        let cache = Mutex::new(VecDeque::new());
+        write_pdf(300, 400, "first");
+        let version = PreviewFileVersion::read(&input);
+        let a = cached_page_infos_with(&cache, &input, &version, false).unwrap();
+        let b = cached_page_infos_with(&cache, &input, &version, false).unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+        let refreshed = cached_page_infos_with(&cache, &input, &version, true).unwrap();
+        assert!(!Arc::ptr_eq(&a, &refreshed));
+        write_pdf(400, 600, "changed externally, with a different byte length");
+        let current = PreviewFileVersion::read(&input);
+        assert!(current != version);
+        let source = fs::read(&input).unwrap();
+        let changed = cached_page_infos_with(&cache, &input, &current, false).unwrap();
+        assert_eq!((changed[0].width_pt, changed[0].height_pt), (400., 600.));
+        assert_eq!(fs::read(&input).unwrap(), source);
+        assert_eq!(cache.lock().unwrap().len(), 1);
+        let _ = fs::remove_file(input);
+    }
+
+    #[test]
     fn preview_renders_the_visible_crop_box_instead_of_the_uncropped_spread() {
         if find_pdftoppm().is_none() {
             return;
@@ -186,6 +275,7 @@ mod tests {
             input_path: input.to_string_lossy().into_owned(),
             page: 1,
             dpi: 72,
+            force_refresh: false,
         })
         .unwrap();
         assert_eq!((preview.width_pt, preview.height_pt), (300.0, 400.0));

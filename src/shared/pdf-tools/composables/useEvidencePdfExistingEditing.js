@@ -1,6 +1,6 @@
 import { ElMessage } from 'element-plus'
 import { stripPdf } from '../../../core/filePath.js'
-import { buildHeaderTextForGroup, selectedGroupFor, expandPlaceholders } from './useEvidencePdfSession.js'
+import { buildHeaderTextForGroup, selectedGroupFor, expandPlaceholders, effectiveHeaderNumbering } from './useEvidencePdfSession.js'
 
 export function useEvidencePdfExistingEditing({
   _selectedOverlayFile,
@@ -210,7 +210,7 @@ export function useEvidencePdfExistingEditing({
   function rowHeaderPreview(row, index) {
     const group = selectedGroupFor(row, 'header')
     if (!group) return ''
-    return buildHeaderTextForGroup(row, index, group, currentRules.value)
+    return buildHeaderTextForGroup(row, index, { ...group, perFileSeqStart: effectiveHeaderNumbering(group, currentRules.value.numberingDefaults).evidenceStart }, currentRules.value)
   }
 
   function displayRowHeader(row, index) {

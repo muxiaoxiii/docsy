@@ -7,9 +7,6 @@ import { candidateKey } from './useEvidencePdfDetection.js'
 import {
   buildHeaderFooterItems,
   expandPlaceholders,
-  buildHeaderTextForGroup,
-  effectiveHeaderNumbering,
-  selectedGroupFor,
 } from './useEvidencePdfSession.js'
 import { renderPageNumberTemplate } from './pdfPageNumberRules.js'
 
@@ -33,24 +30,25 @@ export function useEvidencePdfPreview({
   mergedImportPlan,
   overlayRows,
   currentRules,
+  resolvedHeaderFooter,
   overlayOutputDir,
-  insertHeaderFooterEnabled,
-  headerInsertEnabled,
-  headerMode,
-  footerInsertEnabled,
-  footerEnabled,
-  footerContinuous,
-  selectedFooterTextGroup,
-  totalOverlayPages,
-  headerAlign,
-  headerMarginMm,
+  insertHeaderFooterEnabled: _insertHeaderFooterEnabled,
+  headerInsertEnabled: _headerInsertEnabled,
+  headerMode: _headerMode,
+  footerInsertEnabled: _footerInsertEnabled,
+  footerEnabled: _footerEnabled,
+  footerContinuous: _footerContinuous,
+  selectedFooterTextGroup: _selectedFooterTextGroup,
+  totalOverlayPages: _totalOverlayPages,
+  headerAlign: _headerAlign,
+  headerMarginMm: _headerMarginMm,
   headerFontSize,
-  headerFontFamily,
-  headerOffsetXMm,
-  headerColor,
+  headerFontFamily: _headerFontFamily,
+  headerOffsetXMm: _headerOffsetXMm,
+  headerColor: _headerColor,
   footerAlign: _footerAlign,
   footerMarginMm: _footerMarginMm,
-  footerFontSize,
+  footerFontSize: _footerFontSize,
   footerFontFamily: _footerFontFamily,
   footerOffsetXMm: _footerOffsetXMm,
   footerColor: _footerColor,
@@ -63,6 +61,13 @@ export function useEvidencePdfPreview({
 }) {
   let truePreviewRequestSeq = 0
   const showRulePreviewOverlays = computed(() => !mergedImportPlan.value)
+  const activePreviewJob = computed(() => {
+    const file = selectedOverlayFile.value
+    if (!file) return null
+    if (resolvedHeaderFooter) return resolvedHeaderFooter.value.find(item => item.job.inputPath === file.path)?.job || null
+    return buildHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value)
+      .find(item => item.inputPath === file.path) || null
+  })
 
   // 页眉/页脚 overlay 定位用的页面尺寸（pt），回退顺序：
   // 1. 预览组件上报的当前页真实尺寸（previewData，含异形页/逐页尺寸）；
@@ -80,61 +85,28 @@ export function useEvidencePdfPreview({
   })
 
   const previewHeaderText = computed(() => {
-    if (
-      !insertHeaderFooterEnabled.value ||
-      !headerInsertEnabled.value ||
-      !selectedOverlayFile.value ||
-      headerMode.value === 'none'
-    )
-      return ''
-    if (!shouldShowLiveHeader(selectedOverlayFile.value)) return ''
+    const job = activePreviewJob.value
+    if (!job?.header || !isPageInDetectedRange(previewPage.value, job.header.pageStart, job.header.pageEnd)) return ''
     const file = selectedOverlayFile.value
-    // Mirror buildHeaderFooterItems: global group wins when global apply is on,
-    // and rules.headerMode overrides the group's own mode. The detected
-    // existing header must not short-circuit here — processing writes the new
-    // rule text regardless of file.existingHeaderText.
-    const rules = currentRules.value
-    const group = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
-    if (!group || group.enabled === false) return ''
-    const mode = rules.headerMode !== undefined ? rules.headerMode : group.mode
-    if (mode === 'none') return ''
-    const perFileSeqStart = effectiveHeaderNumbering(group, rules.numberingDefaults).evidenceStart
-    return buildHeaderTextForGroup(file, selectedOverlayIndex.value, { ...group, mode, perFileSeqStart }, rules)
+    return expandPlaceholders(job.header.text, job.pageStart + previewPage.value - 1, job.totalPages, file, selectedOverlayIndex.value, currentRules.value)
   })
 
   const previewFooterText = computed(() => {
-    if (!insertHeaderFooterEnabled.value || !selectedOverlayFile.value || !footerInsertEnabled.value) return ''
-    if (!shouldShowLiveFooter(selectedOverlayFile.value)) return ''
+    const job = activePreviewJob.value
+    if (!job?.footer || !isPageInDetectedRange(previewPage.value, job.footer.pageStart, job.footer.pageEnd)) return ''
     const file = selectedOverlayFile.value
-    // Mirror buildHeaderFooterItems' footer branch: global group wins when
-    // global apply is on, and the detected existing footer must not
-    // short-circuit here — processing writes the new rule text regardless of
-    // file.existingFooterText. The legacy branch (file.footer ??
-    // rules.footerText) is not mirrored: the workbench always defines
-    // footerInsertEnabled/pageNumberEnabled in currentRules, so
-    // legacyFooterMode is never true in this UI.
-    const rules = currentRules.value
-    const group = rules._globalFooterTextGroup || selectedGroupFor(file, 'footerText')
-    const template = group && group.enabled !== false ? group.text || rules.footerTextContent : ''
-    if (!template) return ''
-    const page = footerContinuous.value ? file.pageStart + previewPage.value - 1 : previewPage.value
-    const total = footerContinuous.value ? totalOverlayPages.value : file.pages || 1
-    return expandPlaceholders(template, page, total, file, selectedOverlayIndex.value, rules)
+    return expandPlaceholders(job.footer.text, job.pageStart + previewPage.value - 1, job.totalPages, file, selectedOverlayIndex.value, currentRules.value)
   })
 
   const previewHeaderStyle = computed(() =>
     textOverlayStyle('header', previewPageInfo.value, {
-      align: headerAlign.value,
-      marginMm: headerMarginMm.value,
-      fontSize: headerFontSize.value,
-      fontFamily: headerFontFamily.value,
-      offsetXMm: headerOffsetXMm.value,
-      color: headerColor.value,
+      ...(activePreviewJob.value?.header || {}),
+      fontSize: activePreviewJob.value?.header?.fontSize ?? headerFontSize.value,
     }),
   )
 
   const previewFooterStyle = computed(() => {
-    const g = selectedFooterTextGroup.value || {}
+    const g = activePreviewJob.value?.footer || {}
     return textOverlayStyle('footer', previewPageInfo.value, {
       align: g.align || 'left',
       marginMm: g.marginMm || 10,
@@ -183,6 +155,17 @@ export function useEvidencePdfPreview({
   const deletionPreviewMarkers = computed(() => {
     if (!showRulePreviewOverlays.value || !selectedOverlayFile.value || truePreview.value) return []
     const file = selectedOverlayFile.value
+    if (file.existingElements?.length) {
+      const labels = { header: '页眉', footerText: '页脚', pageNumber: '页码' }
+      return file.existingElements
+        .filter(element => labels[element.kind] && ['delete', 'edit'].includes(element.decision) &&
+          isPageInDetectedRange(previewPage.value, element.pageStart, element.pageEnd || file.pages))
+        .map(element => ({
+          ...buildDeletionPreviewMarker(element.pageSamples?.find(sample => sample.page === previewPage.value)?.bbox || element.bbox, element.kind === 'header' ? 'header' : 'footer',
+            `${element.decision === 'delete' ? '删除' : '替换'}旧${labels[element.kind]}`),
+          key: element.id,
+        }))
+    }
     const markers = []
     // Deletion happens regardless of the insert toggles, so markers must not be
     // gated by headerInsertEnabled/footerInsertEnabled/footerEnabled.
@@ -229,38 +212,19 @@ export function useEvidencePdfPreview({
     if (
       !showRulePreviewOverlays.value ||
       !selectedOverlayFile.value ||
-      truePreview.value ||
-      !insertHeaderFooterEnabled.value
+      truePreview.value
     )
       return []
-    const items = buildHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value)
-    const item = items.find((candidate) => candidate.inputPath === selectedOverlayFile.value.path)
+    const item = activePreviewJob.value
     return (item?.extraOverlays || [])
-      .filter((overlay) => {
-        if (overlay.region === 'header') return headerInsertEnabled.value
-        if (overlay.artifactKind === 'PageNumber') return footerEnabled.value
-        return footerInsertEnabled.value
-      })
-      .filter((overlay) => {
-        // Page number overlays carry their own local page range
-        if (overlay.artifactKind !== 'PageNumber') return true
-        return isPageInDetectedRange(previewPage.value, overlay.pageStart, overlay.pageEnd)
-      })
+      .filter((overlay) => isPageInDetectedRange(previewPage.value, overlay.pageStart, overlay.pageEnd))
       .map((overlay, index) => {
         const region = overlay.region === 'header' ? 'header' : 'footer'
         const pageNumberOverlay = overlay.artifactKind === 'PageNumber'
-        const page = pageNumberOverlay
-          ? (overlay.sequence === 'per-file'
-              ? previewPage.value
-              : selectedOverlayFile.value.pageStart + previewPage.value - 1) + Number(overlay.numberOffset || 0)
-          : footerContinuous.value
-            ? selectedOverlayFile.value.pageStart + previewPage.value - 1
-            : previewPage.value
+        const page = item.pageStart + previewPage.value - 1 + (pageNumberOverlay ? Number(overlay.numberOffset || 0) : 0)
         const total = pageNumberOverlay
           ? Number(overlay.numberTotal || selectedOverlayFile.value.pages || 1)
-          : footerContinuous.value
-            ? totalOverlayPages.value || selectedOverlayFile.value.pages || 1
-            : selectedOverlayFile.value.pages || 1
+          : item.totalPages || selectedOverlayFile.value.pages || 1
         return {
           key: `${selectedOverlayFile.value.path}-converted-${index}`,
           region,
@@ -291,13 +255,13 @@ export function useEvidencePdfPreview({
     const widthPt = previewPageInfo.value?.widthPt || 595.28
     if (
       previewHeaderText.value &&
-      estimateTextWidthPt(previewHeaderText.value, headerFontSize.value) > widthPt * 0.92
+      estimateTextWidthPt(previewHeaderText.value, activePreviewJob.value?.header?.fontSize ?? headerFontSize.value) > widthPt * 0.92
     ) {
       warnings.push('当前页眉可能超出页面宽度，请缩短文本、调整位置或减小字号')
     }
     if (
       previewFooterText.value &&
-      estimateTextWidthPt(previewFooterText.value, footerFontSize.value) > widthPt * 0.92
+      estimateTextWidthPt(previewFooterText.value, activePreviewJob.value?.footer?.fontSize || 9) > widthPt * 0.92
     ) {
       warnings.push('当前页脚可能超出页面宽度，请缩短文本、调整位置或减小字号')
     }
@@ -321,7 +285,6 @@ export function useEvidencePdfPreview({
     truePreviewRequestSeq += 1
     previewPage.value = Math.min(previewMaxPage.value, Math.max(1, Number(previewPage.value || 1) + delta))
     truePreview.value = null
-    refreshPreview()
   }
 
   function selectPreviewRow(row) {
@@ -390,7 +353,7 @@ export function useEvidencePdfPreview({
   function buildCandidatePreviewMarker(candidate) {
     return {
       label: candidate.text || candidate.normalizedText || '候选',
-      style: candidate.bbox ? bboxOverlayStyle(candidate.bbox) : fallbackDeletionMarkerStyle('footer'),
+      style: candidate.bbox ? bboxOverlayStyle(candidate.bbox, previewPageInfo.value) : fallbackDeletionMarkerStyle('footer'),
     }
   }
 
@@ -403,19 +366,19 @@ export function useEvidencePdfPreview({
   function isPageInDetectedRange(page, start, end) {
     const current = Number(page || 1)
     const rangeStart = Number(start || 1)
-    const rangeEnd = Number(end || rangeStart)
+    const rangeEnd = Number(end || selectedOverlayFile.value?.pages || rangeStart)
     return current >= rangeStart && current <= rangeEnd
   }
 
   function buildDeletionPreviewMarker(bbox, kind, label) {
-    const style = bbox ? bboxOverlayStyle(bbox) : fallbackDeletionMarkerStyle(kind)
-    // 标签文字（如“删除旧页眉”）比多数检测 bbox 宽：去掉 bbox 的固定宽度，
-    // 配合 CSS 的 nowrap 让标记按文字展开，避免折行。
-    delete style.width
+    const style = bbox ? bboxOverlayStyle(bbox, previewPageInfo.value) : fallbackDeletionMarkerStyle(kind)
     return {
       key: `${kind}-${label}`,
       label,
       style,
+      // Place captions toward the page interior, outside the actual deletion area.
+      captionBelow: Number.parseFloat(style.top) < 50,
+      captionRight: Number.parseFloat(style.left) > 50,
     }
   }
 

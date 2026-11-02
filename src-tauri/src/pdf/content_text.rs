@@ -71,7 +71,7 @@ type Matrix = [f64; 6];
 /// 单位矩阵：页面内容流入口处的初始 CTM。
 const IDENTITY_MATRIX: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
-/// 矩阵复合：先应用 m2，再应用 m1（PDF 的 cm / Form Matrix 均为左乘）。
+/// 矩阵复合：先应用 m2，再应用 m1；新 cm / Form Matrix 接在当前 CTM 右侧。
 fn mat_mul(m1: Matrix, m2: Matrix) -> Matrix {
     [
         m1[0] * m2[0] + m1[2] * m2[1],
@@ -191,7 +191,8 @@ fn delete_plain_header_footer_file(
     for page in index.pages() {
         let has_targets = !active_targets(&plan.header_targets, page.number).is_empty()
             || !active_targets(&plan.footer_targets, page.number).is_empty();
-        let page_box = page.page_box.map(qpdf_box_to_page_box);
+        let geometry = page.page_box.map(|bounds| visible_page_geometry(bounds, page.rotation, page.user_unit));
+        let page_box = geometry.map(|(bounds, _)| bounds);
         if has_targets && page_box.is_none() {
             anyhow::bail!("第 {} 页缺少可解析的页面尺寸，未修改原文件", page.number);
         }
@@ -202,7 +203,7 @@ fn delete_plain_header_footer_file(
                 page_box,
                 fonts: page.fonts.clone(),
                 xobjects: page.xobjects.clone(),
-                ctm: IDENTITY_MATRIX,
+                ctm: geometry.map(|(_, matrix)| matrix).unwrap_or(IDENTITY_MATRIX),
                 depth: 0,
             });
         }
@@ -257,7 +258,7 @@ fn delete_plain_header_footer_file(
                 "Q" => ctm = ctm_stack.pop().unwrap_or(seed.ctm),
                 "cm" => {
                     if let Some(m) = operands_to_matrix(&operation.operands) {
-                        ctm = mat_mul(m, ctm);
+                        ctm = mat_mul(ctm, m);
                     }
                 }
                 "Do" => {
@@ -285,7 +286,7 @@ fn delete_plain_header_footer_file(
                         page_box: seed.page_box,
                         fonts: index.form_fonts(form_ref),
                         xobjects: index.form_xobjects(form_ref),
-                        ctm: mat_mul(form_matrix, ctm),
+                        ctm: mat_mul(ctm, form_matrix),
                         depth: seed.depth + 1,
                     });
                 }
@@ -396,12 +397,33 @@ fn local_font_cmaps(
         .collect()
 }
 
-fn qpdf_box_to_page_box(value: super::qpdf_stream::QpdfBox) -> PageBox {
-    PageBox {
-        width: (value.x1 - value.x0).abs(),
-        min_y: value.y0.min(value.y1),
-        max_y: value.y0.max(value.y1),
-    }
+// Page text and detection bboxes must share visible, rotated CropBox space.
+fn visible_page_geometry(
+    value: super::qpdf_stream::QpdfBox,
+    rotation: i64,
+    unit: f32,
+) -> (PageBox, Matrix) {
+    let (x0, y0, x1, y1) = (
+        f64::from(value.x0),
+        f64::from(value.y0),
+        f64::from(value.x1),
+        f64::from(value.y1),
+    );
+    let (width, height) = ((x1 - x0).abs() as f32, (y1 - y0).abs() as f32);
+    let (w, h, matrix) = match rotation.rem_euclid(360) {
+        90 => (height, width, [0., -1., 1., 0., -y0, x1]),
+        180 => (width, height, [-1., 0., 0., -1., x1, y1]),
+        270 => (height, width, [0., 1., -1., 0., y1, -x0]),
+        _ => (width, height, [1., 0., 0., 1., -x0, -y0]),
+    };
+    (
+        PageBox {
+            width: w * unit,
+            min_y: 0.,
+            max_y: h * unit,
+        },
+        matrix.map(|v| v * f64::from(unit)),
+    )
 }
 
 fn encoded_operations(operations: &[Operation]) -> Result<Vec<u8>> {
@@ -496,13 +518,24 @@ fn filter_page_operations_with_cmaps(
     let mut output = Vec::with_capacity(operations.len());
     let mut result = PlainTextCleanupResult::default();
     let mut state = TextState::default();
+    let mut current_ctm = *ctm;
+    let mut ctm_stack = Vec::new();
 
     for operation in operations {
+        match operation.operator.as_str() {
+            "q" => ctm_stack.push(current_ctm),
+            "Q" => current_ctm = ctm_stack.pop().unwrap_or(*ctm),
+            "cm" => if let Some(matrix) = operands_to_matrix(&operation.operands) {
+                current_ctm = mat_mul(current_ctm, matrix);
+            },
+            _ => {}
+        }
+
         update_text_state_before_show(&mut state, operation);
         let shown_text = shown_text_with_cmaps(operation, &state, font_cmaps);
         // 文本位置先经 CTM 换算到页面坐标，再做 zone / bbox 比较；嵌套 Form
         // （含 cm 变换）内的文本坐标是 Form 局部坐标，不换算永远匹配不上。
-        let (page_x, page_y) = transform_point(ctm, state.x, state.y);
+        let (page_x, page_y) = transform_point(&current_ctm, state.x, state.y);
         let page_state = TextState {
             x: page_x,
             y: page_y,
@@ -1198,6 +1231,165 @@ mod tests {
         }));
         let _ = std::fs::remove_file(input);
         let _ = std::fs::remove_file(output);
+    }
+
+    #[test]
+    fn detects_and_deletes_visible_header_footer_on_rotated_cropped_pages() {
+        for rotation in [0_i64, 90, 180, 270] {
+            for nested in [false, true] {
+                let input = temp_named_path("docsy_rotated_hf_input", "pdf");
+                let output = temp_named_path("docsy_rotated_hf_output", "pdf");
+                create_plain_text_test_pdf(&input);
+                let mut doc = Document::load(&input).unwrap();
+                let page_id = *doc.get_pages().values().next().unwrap();
+                let resources = doc
+                    .get_dictionary(page_id)
+                    .unwrap()
+                    .get(b"Resources")
+                    .unwrap()
+                    .clone();
+                let mut ops = Content::decode(&doc.get_page_content(page_id).unwrap())
+                    .unwrap()
+                    .operations;
+                ops.extend(
+                    Content::decode(b"BT /F1 12 Tf 1 0 0 1 280 20 Tm (492) Tj ET")
+                        .unwrap()
+                        .operations,
+                );
+                let (raw_w, raw_h) = if matches!(rotation, 90 | 270) {
+                    (842., 595.)
+                } else {
+                    (595., 842.)
+                };
+                let (x0, y0, x1, y1) = (10., 20., 10. + raw_w, 20. + raw_h);
+                let inverse: Matrix = match rotation {
+                    90 => [0., 1., -1., 0., x1, y0],
+                    180 => [-1., 0., 0., -1., x1, y1],
+                    270 => [0., -1., 1., 0., x0, y1],
+                    _ => [1., 0., 0., 1., x0, y0],
+                };
+                let cm = |m: Matrix| {
+                    Operation::new(
+                        "cm",
+                        m.into_iter().map(|v| Object::Real(v as f32)).collect(),
+                    )
+                };
+                let page_content = if nested {
+                    // Form scale/translation must be composed after the page transform.
+                    let form = doc.add_object(Stream::new(dictionary! {
+                        "Type" => "XObject", "Subtype" => "Form",
+                        "BBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+                        "Matrix" => vec![0.5.into(), 0.into(), 0.into(), 0.5.into(), 7.into(), 11.into()],
+                        "Resources" => resources.clone(),
+                    }, Content { operations: ops }.encode().unwrap()));
+                    doc.get_dictionary_mut(page_id).unwrap().set(
+                        "Resources",
+                        dictionary! { "XObject" => dictionary! { "Fx" => form } },
+                    );
+                    vec![
+                        cm(inverse),
+                        cm([2., 0., 0., 2., -14., -22.]),
+                        Operation::new("Do", vec![Object::Name(b"Fx".to_vec())]),
+                    ]
+                } else {
+                    let mut root = vec![cm(inverse)];
+                    root.extend(ops);
+                    root
+                };
+                let content = doc.add_object(Stream::new(
+                    dictionary! {},
+                    Content {
+                        operations: page_content,
+                    }
+                    .encode()
+                    .unwrap(),
+                ));
+                let unit = if rotation == 180 { 2.0_f32 } else { 1.0_f32 };
+                let page = doc.get_dictionary_mut(page_id).unwrap();
+                page.set(
+                    "MediaBox",
+                    vec![
+                        0.into(),
+                        0.into(),
+                        (x1 as f32 + 10.).into(),
+                        (y1 as f32 + 20.).into(),
+                    ],
+                );
+                page.set(
+                    "CropBox",
+                    vec![
+                        (x0 as f32).into(),
+                        (y0 as f32).into(),
+                        (x1 as f32).into(),
+                        (y1 as f32).into(),
+                    ],
+                );
+                page.set("Rotate", rotation);
+                page.set("UserUnit", Object::Real(unit));
+                page.set("Contents", content);
+                doc.save(&input).unwrap();
+                let args = serde_json::from_value(serde_json::json!({ "inputPath": input, "headerZoneMm": 40, "footerZoneMm": 40, "scanArtifacts": false })).unwrap();
+                let detection =
+                    serde_json::to_value(super::super::detection::detect(&args).unwrap()).unwrap();
+                let page = &detection["pages"][0];
+                assert_eq!(page["width"].as_f64().unwrap(), f64::from(595. * unit));
+                assert_eq!(page["height"].as_f64().unwrap(), f64::from(842. * unit));
+                assert!(
+                    page["headers"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|line| line["text"].as_str().unwrap().contains("Existing Header")),
+                    "{detection}"
+                );
+                assert!(
+                    page["footers"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|line| line["text"] == "492"),
+                    "{detection}"
+                );
+                let target = |text: &str| PlainTextTarget {
+                    text: text.into(),
+                    normalized_text: text.into(),
+                    page_start: 1,
+                    page_end: 1,
+                    bbox: None,
+                };
+                let plan = PlainTextCleanupPlan {
+                    header_targets: vec![target("Existing Header")],
+                    footer_targets: vec![target("492")],
+                    header_zone_mm: 40.,
+                    footer_zone_mm: 40.,
+                };
+                let removed =
+                    delete_plain_header_footer_file(&input.to_string_lossy(), &output, &plan)
+                        .unwrap();
+                assert_eq!(
+                    removed.removed_header, 1,
+                    "rotation={rotation}, nested={nested}"
+                );
+                assert_eq!(
+                    removed.removed_footer, 1,
+                    "rotation={rotation}, nested={nested}"
+                );
+                let text = crate::external::hidden_command(
+                    crate::external::PopplerTool::binary_path_for("pdftotext").unwrap(),
+                )
+                .arg("-cropbox")
+                .arg(&output)
+                .arg("-")
+                .output()
+                .unwrap();
+                let text = String::from_utf8_lossy(&text.stdout);
+                assert!(text.contains("Body Existing Header"), "{text}");
+                assert_eq!(text.matches("Existing Header").count(), 1, "{text}");
+                assert!(!text.contains("492"), "{text}");
+                let _ = std::fs::remove_file(input);
+                let _ = std::fs::remove_file(output);
+            }
+        }
     }
 
     fn create_nested_form_cm_test_pdf(path: &Path) {

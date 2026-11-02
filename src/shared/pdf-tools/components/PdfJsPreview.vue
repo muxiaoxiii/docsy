@@ -3,13 +3,13 @@
     <div v-if="errorText" class="preview-error">{{ errorText }}</div>
     <div v-else-if="!filePath" class="preview-empty">请选择 PDF 文件后生成预览</div>
     <div v-else class="preview-stage">
-      <div class="page-preview" :style="frameStyle">
+      <div class="page-preview" :style="frameStyle" :aria-busy="loading">
         <img v-if="imageDataUrl" :src="imageDataUrl" class="pdf-image" alt="PDF 页面预览" />
         <canvas v-else ref="canvasRef" class="pdf-canvas" />
-        <div class="docsy-overlay">
+        <div v-show="!loading" class="docsy-overlay">
           <slot :page-info="pageInfo" />
         </div>
-        <div v-if="loading" class="preview-loading">正在渲染</div>
+        <div v-if="loading" class="preview-loading" role="status">正在加载 PDF 第 {{ page }} 页…</div>
       </div>
     </div>
   </div>
@@ -19,7 +19,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { readFile } from '@tauri-apps/plugin-fs'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { pdfPreviewCache } from '../pdfPreviewCache.js'
 import { DESKTOP_ONLY_MESSAGE, hasDesktopRuntime } from '../../../core/desktopRuntime.js'
 
 const props = defineProps({
@@ -41,6 +41,7 @@ const pdfDoc = shallowRef(null)
 const renderTask = shallowRef(null)
 let pdfjsLibPromise = null
 let renderSeq = 0
+let renderTimer = null
 const pageInfo = ref({
   page: 1,
   pages: 0,
@@ -59,12 +60,25 @@ const frameStyle = computed(() => ({
 
 watch(
   () => [props.filePath, props.page, props.scale, props.reloadKey, props.engine],
-  () => renderCurrentPage(),
+  (current, previous) => {
+    renderSeq += 1
+    cancelRender()
+    if (renderTimer) clearTimeout(renderTimer)
+    const force = Boolean(previous && current[0] === previous[0] && current[3] !== previous[3])
+    // Keep rapid keyboard/input navigation from launching many native processes.
+    // A loaded image stays covered until the requested page is actually ready.
+    if (!previous || force || current[0] !== previous[0]) void renderCurrentPage(force)
+    else {
+      loading.value = true
+      renderTimer = setTimeout(() => { renderTimer = null; void renderCurrentPage(false) }, 80)
+    }
+  },
   { immediate: true },
 )
 
 onBeforeUnmount(() => {
   renderSeq += 1
+  if (renderTimer) clearTimeout(renderTimer)
   cancelRender()
   if (pdfDoc.value) {
     void pdfDoc.value.loadingTask.destroy()
@@ -72,12 +86,11 @@ onBeforeUnmount(() => {
   }
 })
 
-async function renderCurrentPage() {
+async function renderCurrentPage(force = false) {
   const requestId = ++renderSeq
   cancelRender()
   errorText.value = ''
-  imageDataUrl.value = ''
-  if (!props.filePath) return
+  if (!props.filePath) { imageDataUrl.value = ''; loading.value = false; return }
   if (!hasDesktopRuntime()) {
     errorText.value = DESKTOP_ONLY_MESSAGE
     emit('error', errorText.value)
@@ -87,11 +100,11 @@ async function renderCurrentPage() {
   loading.value = true
   try {
     if (props.engine === 'backend') {
-      await renderWithBackend(requestId)
+      await renderWithBackend(requestId, force)
       return
     }
     if (props.engine === 'auto') {
-      const rendered = await tryRenderWithBackend(requestId)
+      const rendered = await tryRenderWithBackend(requestId, force)
       if (rendered) return
     }
     await renderWithPdfJs(requestId)
@@ -107,35 +120,27 @@ async function renderCurrentPage() {
   }
 }
 
-async function renderWithBackend(requestId) {
-  const result = await tauriCallSafe('render_pdf_preview', {
-    args: {
-      inputPath: props.filePath,
-      page: props.page,
-      dpi: previewDpi(),
-    },
-  })
-  if (!result.ok) {
-    throw new Error(result.error || '后端预览失败')
-  }
+async function renderWithBackend(requestId, force = false) {
+  const data = await pdfPreviewCache.load({ inputPath: props.filePath, page: props.page, dpi: previewDpi(), forceRefresh: force })
   if (!isCurrent(requestId)) return
-  imageDataUrl.value = result.data.imageDataUrl
+  imageDataUrl.value = data.imageDataUrl
   pageInfo.value = {
-    page: result.data.page,
-    pages: result.data.pages,
-    widthPt: result.data.widthPt,
-    heightPt: result.data.heightPt,
-    widthPx: result.data.widthPx,
-    heightPx: result.data.heightPx,
+    page: data.page,
+    pages: data.pages,
+    widthPt: data.widthPt,
+    heightPt: data.heightPt,
+    widthPx: data.widthPx,
+    heightPx: data.heightPx,
   }
   emit('loaded', { ...pageInfo.value })
 }
 
-async function tryRenderWithBackend(requestId) {
+async function tryRenderWithBackend(requestId, force = false) {
   try {
-    await renderWithBackend(requestId)
+    await renderWithBackend(requestId, force)
     return true
   } catch {
+    if (!isCurrent(requestId)) return true
     imageDataUrl.value = ''
     return false
   }
@@ -185,7 +190,8 @@ function previewDpi() {
 }
 
 async function loadDocument(path, reloadKey) {
-  const cacheKey = `${path}:${reloadKey}`
+  const version = await pdfPreviewCache.fingerprint(path)
+  const cacheKey = `${path}:${reloadKey}:${version ?? renderSeq}`
   if (pdfDoc.value && pdfDoc.value.__docsyKey === cacheKey) {
     return pdfDoc.value
   }
@@ -194,6 +200,7 @@ async function loadDocument(path, reloadKey) {
     pdfDoc.value = null
   }
   const data = await readFile(path)
+  if (version !== null && await pdfPreviewCache.fingerprint(path) !== version) throw new Error('文件在预览期间发生变化，请重新预览')
   const pdfjsLib = await loadPdfJs()
   const loadingTask = pdfjsLib.getDocument({
     data,
@@ -279,7 +286,7 @@ function cancelRender() {
   align-items: center;
   justify-content: center;
   color: var(--docsy-text);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.94);
   font-size: 13px;
 }
 

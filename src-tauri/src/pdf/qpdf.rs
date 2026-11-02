@@ -201,14 +201,14 @@ pub fn merge_with_state(
 
     let qpdf = crate::external::QpdfTool;
     let bin = qpdf.binary_path()?;
-    let output_path = unique_available_path(Path::new(output));
+    let output_path = Path::new(output);
     if let Some(parent) = output_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("创建合并输出目录失败: {}", parent.display()))?;
         }
     }
-    let sibling_temp = crate::util::fs::sibling_temp_path(&output_path, "docsy-qpdf-merge");
+    let sibling_temp = crate::util::fs::sibling_temp_path(output_path, "docsy-qpdf-merge");
     let sibling_guard = crate::util::fs::TempPathGuard::new(sibling_temp);
 
     // Convert Word files to temp PDF guards if present
@@ -274,10 +274,14 @@ pub fn merge_with_state(
         );
     }
 
-    crate::util::fs::replace_file(sibling_guard.path(), &output_path)
-        .with_context(|| format!("发布合并文件失败: {}", output_path.display()))?;
+    let published = crate::util::fs::copy_unique_with_stem(
+        sibling_guard.path(),
+        output_path.parent().unwrap_or_else(|| Path::new(".")),
+        output_path.file_stem().and_then(|name| name.to_str()).unwrap_or("合并文件"),
+        output_path.extension().and_then(|ext| ext.to_str()).unwrap_or("pdf"),
+    ).with_context(|| format!("发布合并文件失败: {}", output_path.display()))?;
 
-    Ok(output_path.display().to_string())
+    Ok(published.display().to_string())
 }
 
 
@@ -661,41 +665,6 @@ pub(crate) fn add_print_preservation_args(command: &mut std::process::Command) {
 pub(crate) fn add_merge_args(command: &mut std::process::Command) {
     add_print_preservation_args(command);
     add_optimization_args(command);
-}
-
-fn unique_available_path(path: &Path) -> PathBuf {
-    if !path.exists() {
-        return path.to_path_buf();
-    }
-    let parent = path.parent().unwrap_or_else(|| Path::new(""));
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("output");
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("");
-    for index in 1..10_000 {
-        let name = if extension.is_empty() {
-            format!("{stem}-{index}")
-        } else {
-            format!("{stem}-{index}.{extension}")
-        };
-        let candidate = parent.join(name);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    // Never fall back to overwriting the requested path.
-    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let name = if extension.is_empty() {
-        format!("{stem}-{stamp}")
-    } else {
-        format!("{stem}-{stamp}.{extension}")
-    };
-    parent.join(name)
 }
 
 pub fn page_count(input: &str) -> Result<u32> {

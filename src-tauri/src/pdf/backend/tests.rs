@@ -1439,3 +1439,32 @@ fn test_bookmarks_native_rejects_v1_anticopy_backup() {
     assert!(err_msg.contains("旧版防复制恢复备份"));
     assert_eq!(std::fs::read(&input_pdf).unwrap(), before, "原文件不得被修改");
 }
+
+#[test]
+fn merge_named_after_source_preserves_inputs_and_numbers_existing_outputs() {
+    for backend in [BackendType::PdfCraft, BackendType::Qpdf] {
+        let (_guard, dir) = test_temp_dir("docsy_merge_output_names");
+        let first = dir.join("合同.pdf");
+        let second = dir.join("附件.pdf");
+        create_test_pdf(&first, 1, 595.0, 842.0);
+        create_test_pdf(&second, 2, 595.0, 842.0);
+        let original_first = std::fs::read(&first).unwrap();
+        let original_second = std::fs::read(&second).unwrap();
+        let request = MergeRequest {
+            inputs: vec![first.to_string_lossy().into_owned(), second.to_string_lossy().into_owned()],
+            output_path: first.clone(),
+            policy: OutputPolicy::for_policy(MergePolicy::Print, false),
+            preferred_backend: Some(backend),
+            conversion_state: None,
+        };
+        let a = dispatch_merge(&request).unwrap();
+        assert_eq!(a.output_path, dir.join("合同-2.pdf"));
+        let saved_a = std::fs::read(&a.output_path).unwrap();
+        let b = dispatch_merge(&request).unwrap();
+        assert_eq!(b.output_path, dir.join("合同-3.pdf"));
+        assert_eq!(std::fs::read(&first).unwrap(), original_first);
+        assert_eq!(std::fs::read(&second).unwrap(), original_second);
+        assert_eq!(std::fs::read(&a.output_path).unwrap(), saved_a);
+        assert_eq!(Document::load(&b.output_path).unwrap().get_pages().len(), 3);
+    }
+}

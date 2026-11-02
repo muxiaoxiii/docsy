@@ -32,6 +32,7 @@ pub(crate) struct QpdfIndexedPage {
     pub properties: Dictionary,
     pub page_box: Option<QpdfBox>,
     pub rotation: i64,
+    pub user_unit: f32,
     pub safe_for_blank_removal: bool,
 }
 
@@ -114,6 +115,15 @@ impl QpdfObjectIndex {
                     fonts: index.fonts_from_resources(resources),
                     xobjects: index.xobjects_from_resources(resources),
                     properties: index.properties_from_resources(resources),
+                    user_unit: index.object_dictionary(page_ref)
+                        .and_then(|dict| dict.get("/UserUnit"))
+                        .and_then(|value| match value {
+                            Value::String(reference) if reference.ends_with(" R") => index.objects.get(reference),
+                            _ => Some(value),
+                        })
+                        .and_then(Value::as_f64)
+                        .filter(|unit| unit.is_finite() && *unit > 0.0)
+                        .unwrap_or(1.0) as f32,
                     rotation: index
                         .inherited_value(page_ref, "/Rotate")
                         .and_then(Value::as_i64)
@@ -126,6 +136,10 @@ impl QpdfObjectIndex {
                             index
                                 .inherited_value(page_ref, "/MediaBox")
                                 .and_then(|value| index.parse_box_value(value))
+                        })
+                        .map(|bounds| QpdfBox {
+                            x0: bounds.x0.min(bounds.x1), y0: bounds.y0.min(bounds.y1),
+                            x1: bounds.x0.max(bounds.x1), y1: bounds.y0.max(bounds.y1),
                         }),
                 })
             })

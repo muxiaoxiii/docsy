@@ -1,9 +1,12 @@
+import { commonSourceDirectory, pdfOutputFileName, joinOutputPath } from '../../../core/outputFiles.js'
 import { expandSplitNameTokens } from './splitFileName.js'
+import { extractFilenameHeader, filenameHeaderKey, filenameHeaderSource } from './filenameHeader.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
 import { toChineseNumber } from '../../../core/numberFormat.js'
 import { ptToMm } from '../../../core/unitConversion.js'
 import {
   pageNumberOverlaysForFile,
+  renderPageNumberTemplate,
   exceptionMatches,
   exceptionsForKind,
   normalizeInsertException,
@@ -291,114 +294,38 @@ export function pageRangeText(file, sequence) {
  * @param {object} [rules={}]  Current rules object
  * @returns {Array<{kind:string, source:string, status:string, id:string, text:string, group?:object, element?:object}>}
  */
-export function buildFileContentRows(file, index = 0, rules = {}) {
+export function buildFileContentRows(file, index = 0, rules = {}, allFiles = [], resolved = null) {
   if (!file) return []
-
+  const files = allFiles.length ? allFiles : [file]
+  const entry = resolved || resolveHeaderFooterItems(files, rules, '', allFiles.length ? 0 : index)
+    .find(item => item.job.inputPath === file.path)
   const rows = []
-  const kinds = [
-    { kind: 'header', enabled: rules.headerInsertEnabled !== false },
-    { kind: 'footerText', enabled: rules.footerInsertEnabled !== false },
-    {
-      kind: 'pageNumber',
-      enabled: rules._globalApply ? true : (rules.pageNumberEnabled ?? rules.footerEnabled) !== false,
-    },
-  ]
-
-  const newEnabled = rules.insertHeaderFooterEnabled !== false
-
-  for (const { kind, enabled } of kinds) {
-    const selectedGroup = selectedGroupFor(file, kind)
-    const allGroups = groupsFor(file, kind)
-    const selectedId = selectedGroup?.id
-
-    // 1. New selected group (only when insert toggle is on)
-    if (newEnabled && enabled && selectedGroup && selectedGroup.enabled !== false) {
-      let effectiveGroup = selectedGroup
-      if (kind === 'header' && rules.headerMode !== undefined) {
-        effectiveGroup = { ...selectedGroup, mode: rules.headerMode }
-      } else if (kind === 'pageNumber' && rules.pageNumberSequence) {
-        effectiveGroup = { ...selectedGroup, sequence: rules.pageNumberSequence }
-      }
-      const text = contentRowText(file, index, kind, effectiveGroup, rules)
-      // header with mode==='none' → skip; footerText with empty text → skip
-      if (kind === 'header' && selectedGroup.mode === 'none') {
-        // skip
-      } else if (kind === 'footerText' && !text) {
-        // skip
-      } else {
-        rows.push({
-          kind,
-          source: 'new',
-          status: 'pending-write',
-          id: `${kind}-${selectedGroup.id}`,
-          text,
-          group: selectedGroup,
-          // Effective sequence after the rules.pageNumberSequence override, so the
-          // list display matches the generated output; `group` keeps the file's
-          // own group object for in-place editing.
-          sequence: kind === 'pageNumber' ? effectiveGroup.sequence : undefined,
-          pageStart: selectedGroup.pageStart || 1,
-          pageEnd: selectedGroup.pageEnd || 0,
-        })
-      }
-    }
-
-    // 2. New extra enabled groups (not the selected one) — only when insert enabled
-    if (newEnabled && enabled)
-      for (const g of allGroups) {
-        if (g.id === selectedId || g.enabled === false) continue
-        if (kind === 'header' && g.mode === 'none') continue
-        let effectiveExtraGroup = g
-        if (kind === 'header' && rules.headerMode !== undefined) {
-          effectiveExtraGroup = { ...g, mode: rules.headerMode }
-        } else if (kind === 'pageNumber' && rules.pageNumberSequence) {
-          effectiveExtraGroup = { ...g, sequence: rules.pageNumberSequence }
-        }
-        const text = contentRowText(file, index, kind, effectiveExtraGroup, rules)
-        if (kind === 'footerText' && !text) continue
-        rows.push({
-          kind,
-          source: 'new',
-          status: 'pending-add',
-          id: `${kind}-${g.id}`,
-          text,
-          group: g,
-          // Same effective-sequence override as the selected group above
-          sequence: kind === 'pageNumber' ? effectiveExtraGroup.sequence : undefined,
-          pageStart: g.pageStart || 1,
-          pageEnd: g.pageEnd || 0,
-        })
-      }
-
-    // 3. Existing detected elements (skip ignored — user says "not a header/footer")
-    const existingKind = kind === 'footerText' ? 'footerText' : kind
-    for (const element of file.existingElements || []) {
-      if (element.kind !== existingKind) continue
-      if (element.decision === 'ignore') continue
-      const decision = element.decision
-      let status = 'existing'
-      if (decision === 'keep') status = 'confirmed'
-      else if (decision === 'edit') status = 'pending-edit'
-      else if (decision === 'delete') status = 'pending-delete'
+  for (const kind of ['header', 'footerText', 'pageNumber']) {
+    const records = (entry?.records || []).filter(item => item.kind === kind).sort((a, b) => Number(b.primary) - Number(a.primary))
+    for (const item of records) {
+      const group = item.group
       rows.push({
-        kind,
-        source: 'existing',
-        status,
+        kind, source: 'new', status: item.primary ? 'pending-write' : 'pending-add',
+        id: `${kind}-${group.id}`, text: item.text, group,
+        region: kind === 'header' ? 'header' : group.region || 'footer',
+        numberOverlays: kind === 'pageNumber' ? item.overlays : undefined,
+        sequence: kind === 'pageNumber' ? effectivePageNumbering(group).sequence : undefined,
+        pageStart: group.pageStart || 1, pageEnd: group.pageEnd || 0,
+        textSegments: item.segmented ? item.overlays : null,
+      })
+    }
+    for (const element of file.existingElements || []) {
+      if (element.kind !== kind || element.decision === 'ignore') continue
+      const statuses = { keep: 'confirmed', edit: 'pending-edit', delete: 'pending-delete' }
+      rows.push({
+        kind, source: 'existing', status: statuses[element.decision] || 'existing',
         id: `existing-${element.id || element.detectedText}`,
-        text: element.editedText || element.detectedText || '',
-        element,
+        text: element.editedText || element.detectedText || '', originalText: element.detectedText || '',
+        region: element.bbox && element.bbox.y0 < element.bbox.height / 2 ? 'header' : kind === 'header' ? 'header' : 'footer', element,
       })
     }
   }
-
   return rows
-}
-
-function contentRowText(file, index, kind, group, rules) {
-  if (kind === 'header') return buildHeaderTextForGroup(file, index, group, rules)
-  if (kind === 'footerText') return resolveTextTemplate(group.text, file, index, rules)
-  // pageNumber
-  return pageNumberTemplateWithShowTotal(group.template || '{page}/{total}', rules.pageNumberShowTotal)
 }
 
 /**
@@ -406,21 +333,29 @@ function contentRowText(file, index, kind, group, rules) {
  * Kept for backward compatibility only.
  */
 export function buildHeaderText(file, index, rules) {
-  const group = selectedGroupFor(file, 'header')
+  const group = (rules._globalApply && rules._globalHeaderGroup) || selectedGroupFor(file, 'header')
   if (!group) {
     // No groups configured — fall back to rules-based resolution (legacy mode)
     const mode = rules.headerMode
     if (!mode || mode === 'none') return ''
     return buildHeaderTextForGroup(file, index, { mode, text: rules.headerText, prefix: rules.headerPrefix }, rules)
   }
-  const mode = rules.headerMode !== undefined ? rules.headerMode : group.mode
-  const prefix = rules.headerPrefix ?? group.prefix
-  const text = rules.headerText ?? group.text
-  return buildHeaderTextForGroup(file, index, { ...group, mode, prefix, text }, rules)
+  const resolved = rules._globalApply !== undefined ? group : {
+    ...group,
+    mode: rules.headerMode ?? group.mode,
+    prefix: rules.headerPrefix ?? group.prefix,
+    text: rules.headerText ?? group.text,
+  }
+  return buildHeaderTextForGroup(file, index, { ...resolved, perFileSeqStart: effectiveHeaderNumbering(resolved, rules.numberingDefaults).evidenceStart }, rules)
 }
 
 export function buildHeaderTextForGroup(file, index, group, rules) {
   if (group.mode === 'none') return ''
+  const overrides = group.fileHeaderOverrides || {}
+  const key = filenameHeaderKey(file)
+  const override = overrides[key]
+  // Overrides contain the complete, already-resolved text, including prefix and suffix.
+  if (Object.hasOwn(overrides, key)) return String(override ?? '')
   const base = headerBaseTextForGroup(file, index, group, rules)
   return decorateHeaderTextForGroup(base, file, index, group, rules)
 }
@@ -440,6 +375,7 @@ export function resolveTextTemplate(text, file, index, rules = {}) {
 }
 
 function headerBaseTextForGroup(file, index, group, _rules) {
+  if (group.mode === 'filename_extract') return extractFilenameHeader(file, group.filenameExtraction).text
   if (group.mode === 'per_file') {
     if (file.header !== undefined && file.header !== null) return file.header
     const prefix = group.perFilePrefix || '证据'
@@ -450,7 +386,7 @@ function headerBaseTextForGroup(file, index, group, _rules) {
     const seq = group.perFileSeqType === 'chinese' ? toChineseNumber(index + start) : String(index + start)
     return `${prefix}${seq}`
   }
-  if (group.mode === 'custom' || group.mode === 'template') return (group.text || _rules.headerText) ?? ''
+  if (group.mode === 'custom' || group.mode === 'template') return group.text ?? (_rules._globalApply === undefined ? _rules.headerText : '') ?? ''
   if (group.mode === 'seq') return `证据${index + 1}`
   if (group.mode === 'seq_cn') return `证据${toChineseNumber(index + 1)}`
   if (group.mode === 'prefix_seq') return `${group.text || ''}证据${index + 1}`
@@ -604,6 +540,13 @@ export function expandPlaceholders(template, page, total, file, index, rules) {
 }
 
 export function buildHeaderFooterItems(files, rules, outputDir = '') {
+  return resolveHeaderFooterItems(files, rules, outputDir).map(entry => entry.job)
+}
+
+// Keep edit metadata beside the exact overlays, never inside the backend payload.
+// The UI can identify the originating rule without rebuilding its output.
+export function resolveHeaderFooterItems(files, rules, outputDir = '', indexOffset = 0) {
+  outputDir = buildOutputDir(files, outputDir)
   const rangedFiles = assignPageRanges(files)
   const total = totalPages(rangedFiles)
   const numberingDefaults = { ...createDefaultNumberingDefaults(), ...(rules.numberingDefaults || {}) }
@@ -611,8 +554,13 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
   const sharedExceptions = Array.isArray(rules.insertExceptions) ? rules.insertExceptions : []
   const headerExceptions = exceptionsForKind(sharedExceptions, 'header')
   const footerTextExceptions = exceptionsForKind(sharedExceptions, 'footerText')
-  const pageNumberSharedExceptions = exceptionsForKind(sharedExceptions, 'pageNumber')
-  return rangedFiles.map((file, index) => {
+  return rangedFiles.map((file, fileIndex) => {
+    const index = fileIndex + indexOffset
+    const records = []
+    const record = (kind, group, overlays, text, primary, segmented = false) => {
+      if (!group || (!overlays.length && Number(file.pages) > 0)) return
+      records.push({ kind, group, overlays, text, primary, segmented })
+    }
     const legacyFooterMode = rules.footerInsertEnabled === undefined && rules.pageNumberEnabled === undefined
     // When global apply is ON, infer enabled state from group content
     // Global mode: all files share the same group instance.
@@ -648,30 +596,16 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       footerTextGroup = inheritIfDefault(footerTextGroup, ['fontFamily'])
       pageNumberGroup = inheritIfDefault(pageNumberGroup, ['fontFamily'])
     }
-    // `headerMode` is the current effective mode edited by the UI. The stored
-    // group can still contain a stale `mode: none` after switching the global
-    // rule to per-file/custom, so checking group.mode here would suppress the
-    // header while page-number overlays continue to render.
-    const headerModeValue = rules.headerMode !== undefined ? rules.headerMode : headerGroup?.mode
-    const headerInsertEnabled = rules._globalApply
-      ? rules.headerInsertEnabled !== false &&
-        headerGroup &&
-        headerGroup.enabled !== false &&
-        headerModeValue !== 'none'
-      : rules.headerInsertEnabled !== false
-    const footerInsertEnabled = rules._globalApply
-      ? rules.footerInsertEnabled !== false &&
-        footerTextGroup &&
-        footerTextGroup.enabled !== false &&
-        Boolean(footerTextGroup.text || rules.footerTextContent)
-      : rules.footerInsertEnabled !== false
+    // Legacy callers may still pass a mode outside the group; current UI uses groups.
+    const headerModeValue = rules._globalApply === undefined ? (rules.headerMode ?? headerGroup?.mode) : headerGroup?.mode
+    const headerInsertEnabled = rules.insertHeaderFooterEnabled !== false && rules.headerInsertEnabled !== false
+    const footerInsertEnabled = rules.insertHeaderFooterEnabled !== false && rules.footerInsertEnabled !== false
     const stillKeepsHeader = fileStillKeepsRegion(file, 'header')
     const stillKeepsFooter = fileStillKeepsRegion(file, 'footer')
     const stillKeepsPageNumber = fileStillKeepsRegion(file, 'pageNumber')
     const suppressHeader = file.suppressNewHeader === true && stillKeepsHeader
     const suppressFooter = file.suppressNewFooter === true && stillKeepsFooter
     const suppressPageNumber = file.suppressNewPageNumber === true && stillKeepsPageNumber
-    // rules.headerMode is the UI's current selected group mode; explicit legacy rules win for compat
     const effectiveHeaderGroup = headerGroup
       ? { ...headerGroup, perFileSeqStart: effectiveHeaderNumbering(headerGroup, numberingDefaults).evidenceStart }
       : headerGroup
@@ -683,13 +617,11 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       suffixEnabled: rules.fileSuffixEnabled !== false,
       suffixText: rules.fileSuffixText || 'processed',
     })
-    const pageNumberEnabled = rules._globalApply
-      ? pageNumberGroup && pageNumberGroup.enabled !== false
+    const pageNumberEnabled = rules.insertHeaderFooterEnabled !== false && (rules._globalApply
+      ? (rules.pageNumberEnabled ?? rules.footerEnabled ?? true)
       : legacyFooterMode
         ? false
-        : (rules.pageNumberEnabled ?? rules.footerEnabled ?? true)
-    const mainNumbering = effectivePageNumbering(pageNumberGroup, numberingDefaults)
-    const pageNumberSequence = mainNumbering.sequence
+        : (rules.pageNumberEnabled ?? rules.footerEnabled ?? true))
     // The backend receives the document's real global page coordinate for every
     // overlay. Each page-number rule carries its own numberOffset/numberTotal,
     // so continuous and per-file rules can coexist without changing this base.
@@ -699,32 +631,10 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     const existingFooterReplacement = standardArtifactReplacementConfig(file, 'footer', rules)
     const mainPageNumberOverlays =
       !suppressPageNumber && pageNumberEnabled && pageNumberGroup && pageNumberGroup.enabled !== false
-        ? pageNumberOverlaysForFile(file, {
-            enabled: true,
-            totalPages: jobTotalPages,
-            allFiles: rangedFiles,
-            pageNumberStart: mainNumbering.pageStart,
-            totalMode: mainNumbering.totalMode,
-            sequence: pageNumberSequence,
-            template: pageNumberTemplateWithShowTotal(
-              pageNumberGroup.template || '{page}/{total}',
-              rules.pageNumberShowTotal,
-            ),
-            style: pageNumberGroup.style || 'arabic',
-            region: pageNumberGroup.region || 'footer',
-            align: pageNumberGroup.align || rules.footerAlign || 'center',
-            fontSize: pageNumberGroup.fontSize || rules.footerFontSize || 9,
-            fontFamily: pageNumberGroup.fontFamily || rules.footerFontFamily || 'auto',
-            marginMm: pageNumberGroup.marginMm ?? rules.footerMarginMm ?? 10,
-            offsetXMm: pageNumberGroup.offsetXMm ?? rules.footerOffsetXMm ?? 0,
-            color: pageNumberGroup.color || rules.footerColor || '#000000',
-            duplexMode: pageNumberGroup.duplexMode || rules.pageNumberDuplexMode || 'none',
-            exceptions: [
-              ...(pageNumberGroup.exceptions || pageNumberGroup.overrides || []),
-              ...pageNumberSharedExceptions,
-            ],
-          })
+        ? pageNumberConfigsForGroup(file, rangedFiles, pageNumberGroup, rules)
         : []
+    if (!suppressPageNumber && pageNumberEnabled && pageNumberGroup && pageNumberGroup.enabled !== false)
+      record('pageNumber', availablePageNumberGroups.find(group => group.id === pageNumberGroup.id) || pageNumberGroup, mainPageNumberOverlays, pageNumberTemplateWithShowTotal(pageNumberGroup.filePageNumberOverrides?.[filenameHeaderKey(file)] ?? pageNumberGroup.template ?? '{page}/{total}', rules.pageNumberShowTotal), true)
     const extraOverlays = [...convertedExistingOverlays(file, rules), ...mainPageNumberOverlays]
     // Header groups: every enabled group except the main (selected) one
     if (headerInsertEnabled && !suppressHeader) {
@@ -742,6 +652,7 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
           const segments = headerExceptions.length
             ? textOverlaySegmentsForFile(file, index, baseConfig, g, headerExceptions, rules)
             : null
+          record('header', g, segments || [baseConfig], groupText, false, Boolean(segments))
           if (segments) extraOverlays.push(...segments)
           else extraOverlays.push(baseConfig)
         }
@@ -751,13 +662,15 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
     if (footerInsertEnabled && !suppressFooter) {
       for (const g of availableFooterGroups) {
         if (g.id === footerTextGroup?.id || g.enabled === false || !groupAppliesToFile(g, file)) continue
-        if (g.text) {
-          const resolvedText = resolveTextTemplate(g.text, file, index, rules)
+        const footerText = g.fileFooterOverrides?.[filenameHeaderKey(file)] ?? g.text
+        if (footerText) {
+          const resolvedText = resolveTextTemplate(footerText, file, index, rules)
           if (resolvedText) {
-            const baseConfig = footerTextOverlayConfigForGroup(resolvedText, g, rules)
+            const baseConfig = footerTextOverlayConfigForGroup(resolvedText, g, rules, file.pages)
             const segments = footerTextExceptions.length
               ? textOverlaySegmentsForFile(file, index, baseConfig, g, footerTextExceptions, rules)
               : null
+            record('footerText', g, segments || [baseConfig], resolvedText, false, Boolean(segments))
             if (segments) extraOverlays.push(...segments)
             else extraOverlays.push(baseConfig)
           }
@@ -765,41 +678,24 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
       }
     }
     // Page number groups: every enabled group except the main (selected) one
-    if (pageNumberEnabled) {
+    if (pageNumberEnabled && !suppressPageNumber) {
       for (const g of availablePageNumberGroups) {
         if (g.id === pageNumberGroup?.id || g.enabled === false || !groupAppliesToFile(g, file)) continue
-        const groupNumbering = effectivePageNumbering(g, numberingDefaults)
-        const pnSequence = groupNumbering.sequence
-        extraOverlays.push(
-          ...pageNumberOverlaysForFile(file, {
-            enabled: true,
-            totalPages: total,
-            allFiles: rangedFiles,
-            pageNumberStart: groupNumbering.pageStart,
-            totalMode: groupNumbering.totalMode,
-            sequence: pnSequence,
-            template: pageNumberTemplateWithShowTotal(g.template || '{page}/{total}', rules.pageNumberShowTotal),
-            style: g.style || 'arabic',
-            region: g.region || 'footer',
-            align: g.align || rules.footerAlign || 'center',
-            fontSize: g.fontSize || rules.footerFontSize || 9,
-            fontFamily: g.fontFamily || rules.footerFontFamily || 'auto',
-            marginMm: g.marginMm ?? rules.footerMarginMm ?? 10,
-            offsetXMm: g.offsetXMm ?? rules.footerOffsetXMm ?? 0,
-            color: g.color || rules.footerColor || '#000000',
-            duplexMode: g.duplexMode || rules.pageNumberDuplexMode || 'none',
-            exceptions: [...(g.exceptions || g.overrides || []), ...pageNumberSharedExceptions],
-          }),
-        )
+        const overlays = pageNumberConfigsForGroup(file, rangedFiles, g, rules)
+        record('pageNumber', g, overlays, pageNumberTemplateWithShowTotal(g.filePageNumberOverrides?.[filenameHeaderKey(file)] ?? g.template ?? '{page}/{total}', rules.pageNumberShowTotal), false)
+        extraOverlays.push(...overlays)
       }
     }
     // 主项页眉/页脚文字：有例外命中时拆成页段走 extraOverlays，主项字段置 null
-    const mainHeaderConfig = header ? overlayConfigForFile(file, 'header', header, rules, headerGroup) : null
+    const mainHeaderConfig = header ? overlayConfigForGroup(file, 'header', header, headerGroup) : null
     const mainHeaderSegments =
       mainHeaderConfig && headerExceptions.length
         ? textOverlaySegmentsForFile(file, index, mainHeaderConfig, headerGroup, headerExceptions, rules)
         : null
     if (mainHeaderSegments) extraOverlays.push(...mainHeaderSegments)
+    if (mainHeaderConfig) record('header', availableHeaderGroups.find(group => group.id === headerGroup.id) || headerGroup, mainHeaderSegments || [mainHeaderConfig], header, true, Boolean(mainHeaderSegments))
+    const mainFooterText = footerTextGroup?.fileFooterOverrides?.[filenameHeaderKey(file)] ??
+      (footerTextGroup?.text || (rules._globalApply === undefined ? rules.footerTextContent : '') || '')
     const mainFooterConfig =
       !suppressFooter &&
       (legacyFooterMode && rules.footerEnabled && (file.footer ?? rules.footerText)
@@ -809,11 +705,12 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         : footerInsertEnabled &&
             footerTextGroup &&
             footerTextGroup.enabled !== false &&
-            (footerTextGroup.text || rules.footerTextContent)
+            mainFooterText
           ? footerTextOverlayConfigForGroup(
-              resolveTextTemplate(footerTextGroup.text || rules.footerTextContent, file, index, rules),
+              resolveTextTemplate(mainFooterText, file, index, rules),
               footerTextGroup,
               rules,
+              file.pages,
             )
           : null)
     const mainFooterSegments =
@@ -821,8 +718,9 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         ? textOverlaySegmentsForFile(file, index, mainFooterConfig, footerTextGroup, footerTextExceptions, rules)
         : null
     if (mainFooterSegments) extraOverlays.push(...mainFooterSegments)
+    if (mainFooterConfig && footerTextGroup) record('footerText', availableFooterGroups.find(group => group.id === footerTextGroup.id) || footerTextGroup, mainFooterSegments || [mainFooterConfig], mainFooterConfig.text, true, Boolean(mainFooterSegments))
     file.outputPath = outputPath
-    return {
+    const job = {
       inputPath: file.path,
       outputPath,
       pageStart,
@@ -862,10 +760,70 @@ export function buildHeaderFooterItems(files, rules, outputDir = '') {
         : [],
       bookmarkRemoveExisting: rules.bookmarkRemoveExisting || false,
     }
+    return { job, records }
   })
 }
 
-function footerTextOverlayConfigForGroup(text, group, rules = {}) {
+function pageNumberConfigsForGroup(file, files, group, rules) {
+  const numbering = effectivePageNumbering(group, { ...createDefaultNumberingDefaults(), ...rules.numberingDefaults })
+  return pageNumberOverlaysForFile(file, {
+    enabled: true,
+    totalPages: totalPages(files), allFiles: files,
+    pageNumberStart: numbering.pageStart, totalMode: numbering.totalMode, sequence: numbering.sequence,
+    template: pageNumberTemplateWithShowTotal(group.filePageNumberOverrides?.[filenameHeaderKey(file)] ?? group.template ?? '{page}/{total}', rules.pageNumberShowTotal),
+    style: group.style || 'arabic', region: group.region || 'footer',
+    align: group.align || rules.footerAlign || 'center',
+    fontSize: group.fontSize || rules.footerFontSize || 9,
+    fontFamily: group.fontFamily || rules.footerFontFamily || 'auto',
+    marginMm: group.marginMm ?? rules.footerMarginMm ?? 10,
+    offsetXMm: group.offsetXMm ?? rules.footerOffsetXMm ?? 0,
+    color: group.color || rules.footerColor || '#000000',
+    duplexMode: group.duplexMode || rules.pageNumberDuplexMode || 'none',
+    exceptions: [...(group.exceptions || group.overrides || []), ...exceptionsForKind(rules.insertExceptions || [], 'pageNumber')],
+  })
+}
+
+export function existingContentRange(row, text = row.text) {
+  const element = row.element
+  if (row.kind !== 'pageNumber' || text !== element?.detectedText) return text || '—'
+  const samples = element.pageSamples || []
+  if (samples.length > 1) {
+    const first = samples[0].text, last = samples[samples.length - 1].text
+    return first === last ? first : `${first}–${last}`
+  }
+  const count = Number(element.pageEnd || 1) - Number(element.pageStart || 1)
+  // Older saved detections without samples only support a range when the
+  // detector explicitly confirmed a continuous sequence covering every page.
+  if (element.sequenceStable && Number(element.count) === count + 1 && count > 0 && /^\d+$/.test(text)) {
+    return `${text}–${Number(text) + count}`
+  }
+  return text || '—'
+}
+
+export function contentRowDisplayText(row, file) {
+  if (row.source !== 'new') return row.text || ''
+  if (row.kind !== 'pageNumber') {
+    return row.textSegments ? row.textSegments.map(segment =>
+      `${segment.text} [${segment.pageStart}–${segment.pageEnd}页]`).join('；') :
+      (row.pageStart > 1 || row.pageEnd > 0) ? `${row.text || ''} [${row.pageStart || 1}–${row.pageEnd || file.pages || '?'}页]` : row.text || ''
+  }
+  return (row.numberOverlays || []).map(overlay => {
+    const start = Number(file.pageStart || 1) + overlay.pageStart - 1 + overlay.numberOffset
+    const end = Number(file.pageStart || 1) + overlay.pageEnd - 1 + overlay.numberOffset
+    const render = n => renderPageNumberTemplate(overlay.text, n, overlay.numberTotal, overlay.numberStyle)
+    return start === end ? render(start) : `${render(start)}–${render(end)}`
+  }).join('；')
+}
+
+export function contentRowNumberRange(row, file) {
+  return (row.numberOverlays || []).map(overlay => {
+    const start = Number(file.pageStart || 1) + overlay.pageStart - 1 + overlay.numberOffset
+    const end = Number(file.pageStart || 1) + overlay.pageEnd - 1 + overlay.numberOffset
+    return start === end ? String(start) : `${start}–${end}`
+  }).join('；')
+}
+
+function footerTextOverlayConfigForGroup(text, group, rules = {}, pages = 1) {
   const config = {
     text,
     region: 'footer',
@@ -874,13 +832,13 @@ function footerTextOverlayConfigForGroup(text, group, rules = {}) {
     fontFamily: group.fontFamily || rules.footerTextFontFamily || rules.footerFontFamily || 'auto',
     marginMm: group.marginMm || rules.footerTextMarginMm || rules.footerMarginMm || 10,
     align: group.align || rules.footerTextAlign || rules.footerAlign || 'left',
-    offsetXMm: group.offsetXMm || rules.footerTextOffsetXMm || rules.footerOffsetXMm || 0,
+    offsetXMm: group.offsetXMm ?? rules.footerTextOffsetXMm ?? 0,
     color: group.color || rules.footerTextColor || rules.footerColor || '#000000',
   }
   // Apply group-level page range scoping
   if (group.pageStart > 1 || (group.pageEnd && group.pageEnd > 0)) {
     config.pageStart = group.pageStart || 1
-    config.pageEnd = group.pageEnd || 0
+    config.pageEnd = group.pageEnd || pages || 1
   }
   return config
 }
@@ -1177,11 +1135,14 @@ function standardArtifactReplacementConfig(file, region, rules) {
 }
 
 export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
+  const filenameErrors = filenameHeaderErrors(files, rules)
+  if (filenameErrors.length) throw new Error(filenameErrors.join('；'))
+  outputDir = buildOutputDir(files, outputDir)
   const rangedFiles = assignPageRanges(files)
   const items = buildHeaderFooterItems(rangedFiles, rules, outputDir)
   const total = totalPages(rangedFiles)
-  const mergeOutputPath = buildMergeOutputPath(rangedFiles, outputDir, rules.mergeFileName)
   const outputMode = rules.outputMode || (rules.mergeAfterProcessing ? 'files_and_merge' : 'files_only')
+  const mergeOutputPath = buildMergeOutputPath(rangedFiles, outputDir, outputMode === 'files_only' ? '' : rules.mergeFileName)
   return {
     session: {
       items: rangedFiles.map((file, index) => ({
@@ -1272,6 +1233,31 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
   }
 }
 
+export function filenameHeaderErrors(files, rules) {
+  if (rules.headerInsertEnabled === false || rules.insertHeaderFooterEnabled === false) return []
+  const errors = []
+  for (const file of files) {
+    if (file.suppressNewHeader && fileStillKeepsRegion(file, 'header')) continue
+    const groups = rules._globalApply ? rules.headerGroups || [] : groupsFor(file, 'header')
+    const selected = rules._globalHeaderGroup || selectedGroupFor(file, 'header')
+    for (const group of groups) {
+      const mode = rules._globalApply === undefined && group.id === selected?.id ? rules.headerMode ?? group.mode : group.mode
+      if (mode === 'none' || group.enabled === false || !groupAppliesToFile(group, file)) continue
+      const overrides = group.fileHeaderOverrides || {}
+      const key = filenameHeaderKey(file)
+      const override = overrides[key]
+      if (Object.hasOwn(overrides, key)) {
+        if (!String(override ?? '').trim()) errors.push(`${filenameHeaderSource(file)}：单独设置的页眉不能为空`)
+        continue
+      }
+      if (mode !== 'filename_extract') continue
+      const result = extractFilenameHeader(file, group.filenameExtraction)
+      if (result.error) errors.push(`${filenameHeaderSource(file)}：${result.error}`)
+    }
+  }
+  return errors
+}
+
 export function buildOverlayOutputPath(
   inputPath,
   outputDir = '',
@@ -1288,20 +1274,18 @@ export function buildOverlayOutputPath(
 
 export function buildMergeOutputPath(files, outputDir = '', fileName = '') {
   const dir = buildOutputDir(files, outputDir)
-  const name = ensurePdfFileName(fileName || 'merged_evidence.pdf')
-  return `${dir}/${name}`
+  const name = pdfOutputFileName(fileName, '合并证据.pdf')
+  return joinOutputPath(dir, name)
 }
 
 export function buildOutputDir(files, outputDir = '') {
   if (outputDir) return outputDir
+  const common = commonSourceDirectory(files)
+  if (common) return common
   const first = files[0]
-  return `${parentDir(first?.path || '.')}/_docsy_pdf_processed`
+  return `${parentDir(first?.sourcePath || first?.path || '.')}/_docsy_pdf_processed`
 }
 
-function ensurePdfFileName(name) {
-  const value = String(name || '').trim() || 'merged_evidence.pdf'
-  return /\.pdf$/i.test(value) ? value : `${value}.pdf`
-}
 
 const KEEP_REGION_LEGACY = {
   header: { legacy: 'Header', elementKind: 'header' },
@@ -1338,69 +1322,32 @@ function preferredConflictAction(file, region) {
   return 'suppress'
 }
 
-function plannedHeaderText(file, index, rules) {
-  if (rules.headerInsertEnabled === false) return ''
-  const headerMode = rules.headerMode !== undefined ? rules.headerMode : 'filename'
-  if (headerMode === 'none') {
-    const groups = rules.headerGroups?.length ? rules.headerGroups : file.headerGroups || []
-    for (const group of groups) {
-      if (group?.enabled === false || group?.mode === 'none') continue
-      const text = buildHeaderTextForGroup(file, index, group, rules)
-      if (text) return text
-    }
-    return ''
-  }
-  const main = buildHeaderText(file, index, rules)
-  if (main) return main
-  const groups = rules.headerGroups?.length ? rules.headerGroups : file.headerGroups || []
-  for (const group of groups) {
-    if (group?.enabled === false || group?.mode === 'none') continue
-    const text = buildHeaderTextForGroup(file, index, group, rules)
-    if (text) return text
-  }
-  return ''
-}
-
-function plannedFooterText(file, index, rules) {
-  if (!rules.footerInsertEnabled) return ''
-  if (rules.footerTextContent) {
-    return resolveTextTemplate(rules.footerTextContent, file, index, rules)
-  }
-  const groups = rules.footerTextGroups?.length ? rules.footerTextGroups : file.footerTextGroups || []
-  for (const group of groups) {
-    if (group?.enabled === false || !group?.text) continue
-    const text = resolveTextTemplate(group.text, file, index, rules)
-    if (text) return text
-  }
-  if (rules.footerText) return resolveTextTemplate(rules.footerText, file, index, rules)
-  return ''
-}
-
-function pageNumberInsertWillHappen(rules) {
-  if (rules._globalApply) {
-    return Boolean(rules.pageNumberGroups?.length || rules.pageNumberEnabled || rules.footerEnabled)
-  }
-  return Boolean(rules.pageNumberEnabled ?? rules.footerEnabled ?? false)
-}
-
-function plannedPageNumberText(rules) {
-  const groups = rules.pageNumberGroups || []
-  const group = groups.find((item) => item?.enabled !== false)
-  return group?.template || rules.pageNumberTemplate || '{page}/{total}'
-}
-
 export function detectKeepInsertConflicts(files, rules) {
   if (!Array.isArray(files) || !files.length) return []
   const conflicts = []
   const rangedFiles = assignPageRanges(files)
+  const resolved = resolveHeaderFooterItems(rangedFiles, rules)
 
   rangedFiles.forEach((file, index) => {
+    const records = resolved[index].records
+    const keptRanges = (region) => {
+      const kind = region === 'footer' ? 'footerText' : region
+      const matches = (file.existingElements || []).filter(element => element.kind === kind && element.decision === 'keep')
+      return matches.length ? matches : [{ pageStart: existingPageStart(file, region), pageEnd: existingPageEnd(file, region) }]
+    }
+    const overlapsKept = (overlay, region) => keptRanges(region).some(range =>
+      Math.max(Number(overlay.pageStart || 1), Number(range.pageStart || 1)) <=
+      Math.min(Number(overlay.pageEnd || file.pages || 1), Number(range.pageEnd || file.pages || 1)))
+    const overlaysFor = kind => records.filter(item => item.kind === kind).flatMap(item => item.overlays)
+    const headerOverlay = overlaysFor('header').find(item => overlapsKept(item, 'header'))
+    const footerOverlay = overlaysFor('footerText').find(item => overlapsKept(item, 'footer'))
+    const pageOverlay = overlaysFor('pageNumber').find(item => overlapsKept(item, 'pageNumber'))
     if (fileStillKeepsRegion(file, 'header')) {
       const existingText =
         file.existingHeaderText ||
         (file.existingElements || []).find((e) => e.kind === 'header' && e.decision === 'keep')?.detectedText ||
         '（原件保留页眉）'
-      const newText = plannedHeaderText(file, index, rules)
+      const newText = headerOverlay?.text || ''
       if (newText) {
         conflicts.push({
           id: `${file.path}-header`,
@@ -1420,7 +1367,7 @@ export function detectKeepInsertConflicts(files, rules) {
         file.existingFooterText ||
         (file.existingElements || []).find((e) => e.kind === 'footerText' && e.decision === 'keep')?.detectedText ||
         '（原件保留页脚）'
-      const newText = plannedFooterText(file, index, rules)
+      const newText = footerOverlay?.text || ''
       if (newText) {
         conflicts.push({
           id: `${file.path}-footer`,
@@ -1435,7 +1382,7 @@ export function detectKeepInsertConflicts(files, rules) {
       }
     }
 
-    if (fileStillKeepsRegion(file, 'pageNumber') && pageNumberInsertWillHappen(rules)) {
+    if (fileStillKeepsRegion(file, 'pageNumber') && pageOverlay) {
       const existingText =
         file.existingPageNumberText ||
         (file.existingElements || []).find((e) => e.kind === 'pageNumber' && e.decision === 'keep')?.detectedText ||
@@ -1447,7 +1394,7 @@ export function detectKeepInsertConflicts(files, rules) {
         region: 'pageNumber',
         regionLabel: '页码',
         existingText,
-        newText: plannedPageNumberText(rules),
+        newText: pageOverlay.text,
         action: preferredConflictAction(file, 'pageNumber'),
       })
     }

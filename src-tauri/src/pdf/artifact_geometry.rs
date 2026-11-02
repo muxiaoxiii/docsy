@@ -262,6 +262,7 @@ mod tests {
                 y1: 820.,
             }),
             rotation: 0,
+            user_unit: 1.0,
         };
         assert_eq!(
             band(bounds, [1., 0., 0., 1., 270., 54.], &page),
