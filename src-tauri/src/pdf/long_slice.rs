@@ -437,7 +437,114 @@ fn render_base_slices_pdf(
     Ok(doc.save(&PdfSaveOptions::default(), &mut Vec::new()))
 }
 
-/// 将页眉页脚覆盖层合并到基础 PDF 上（使用 Docsy 成熟的 allsorts 子集化字体）
+fn deref_dict<'a>(doc: &'a lopdf::Document, obj: &'a lopdf::Object) -> Option<&'a lopdf::Dictionary> {
+    match obj {
+        lopdf::Object::Reference(id) => doc.get_object(*id).ok()?.as_dict().ok(),
+        lopdf::Object::Dictionary(d) => Some(d),
+        _ => None,
+    }
+}
+
+/// 纯 Rust 内存中将 overlay 页面叠加到 base 页面上（无需依赖外部 qpdf 进程）
+fn apply_overlay_in_memory(base_pdf_bytes: &[u8], overlay_bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut base_doc = lopdf::Document::load_mem(base_pdf_bytes)?;
+    let mut overlay_doc = lopdf::Document::load_mem(overlay_bytes)?;
+
+    let max_base_id = base_doc.max_id + 1;
+    overlay_doc.renumber_objects_with(max_base_id);
+
+    let overlay_pages: Vec<lopdf::ObjectId> = overlay_doc.get_pages().into_values().collect();
+
+    // 复制非 Page/Catalog/Pages 的对象（字体、流、编码字典等）
+    for (&id, obj) in &overlay_doc.objects {
+        if !overlay_pages.contains(&id) {
+            base_doc.objects.insert(id, obj.clone());
+        }
+    }
+
+    let base_pages: Vec<lopdf::ObjectId> = base_doc.get_pages().into_values().collect();
+    for (i, base_pid) in base_pages.iter().enumerate() {
+        if let Some(&overlay_pid) = overlay_pages.get(i) {
+            let overlay_page_obj = overlay_doc.get_object(overlay_pid)?;
+            let overlay_dict = overlay_page_obj.as_dict()?;
+
+            // 1. 获取 overlay 页面的字体
+            let overlay_fonts = overlay_dict
+                .get(b"Resources")
+                .ok()
+                .and_then(|r| deref_dict(&overlay_doc, r))
+                .and_then(|rd| rd.get(b"Font").ok())
+                .and_then(|f| deref_dict(&overlay_doc, f))
+                .cloned();
+
+            // 2. 获取 overlay 页面的 Contents
+            let overlay_contents = overlay_dict.get(b"Contents").cloned().ok();
+
+            // 3. 将字体合并到 base 页面的 /Resources /Font
+            if let Some(fonts) = overlay_fonts {
+                let base_page_dict = base_doc.get_object_mut(*base_pid)?.as_dict_mut()?;
+                if !base_page_dict.has(b"Resources") {
+                    base_page_dict.set("Resources", lopdf::Dictionary::new());
+                }
+                let resources_obj = base_page_dict.get_mut(b"Resources")?;
+                let res_dict = match resources_obj {
+                    lopdf::Object::Reference(r) => {
+                        let r_id = *r;
+                        base_doc.get_object_mut(r_id)?.as_dict_mut()?
+                    }
+                    lopdf::Object::Dictionary(ref mut d) => d,
+                    _ => continue,
+                };
+                if !res_dict.has(b"Font") {
+                    res_dict.set("Font", lopdf::Dictionary::new());
+                }
+                let font_obj = res_dict.get_mut(b"Font")?;
+                let font_dict = match font_obj {
+                    lopdf::Object::Reference(r) => {
+                        let r_id = *r;
+                        base_doc.get_object_mut(r_id)?.as_dict_mut()?
+                    }
+                    lopdf::Object::Dictionary(ref mut d) => d,
+                    _ => continue,
+                };
+                for (k, v) in fonts.iter() {
+                    font_dict.set(k.clone(), v.clone());
+                }
+            }
+
+            // 4. 将 overlay Contents 流追加到 base 页面的 /Contents
+            if let Some(overlay_c) = overlay_contents {
+                let base_page_dict = base_doc.get_object_mut(*base_pid)?.as_dict_mut()?;
+                let existing_c = base_page_dict.get(b"Contents").cloned().ok();
+                let new_c = match existing_c {
+                    Some(lopdf::Object::Array(mut arr)) => {
+                        match overlay_c {
+                            lopdf::Object::Array(o_arr) => arr.extend(o_arr),
+                            other => arr.push(other),
+                        }
+                        lopdf::Object::Array(arr)
+                    }
+                    Some(single) => {
+                        let mut arr = vec![single];
+                        match overlay_c {
+                            lopdf::Object::Array(o_arr) => arr.extend(o_arr),
+                            other => arr.push(other),
+                        }
+                        lopdf::Object::Array(arr)
+                    }
+                    None => overlay_c,
+                };
+                base_page_dict.set("Contents", new_c);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    base_doc.save_to(&mut out)?;
+    Ok(out)
+}
+
+/// 将页眉页脚覆盖层合并到基础 PDF 上（纯 Rust 内核优先，不依赖外部 qpdf 进程）
 fn apply_overlay_if_needed(
     base_pdf_bytes: &[u8],
     page_count: usize,
@@ -477,7 +584,12 @@ fn apply_overlay_if_needed(
         total_pages,
     )?;
 
-    // 使用 qpdf --overlay 进行高精度合并
+    // 优先采用纯 Rust 内存合并（零子进程、零外部依赖）
+    if let Ok(merged) = apply_overlay_in_memory(base_pdf_bytes, &overlay_bytes) {
+        return Ok(merged);
+    }
+
+    // 若纯 Rust 遇到异常，安全回退到外部 qpdf（若已安装）
     let qpdf_tool = crate::external::QpdfTool;
     if let Ok(bin) = qpdf_tool.binary_path() {
         let base_temp = temp_named_path("docsy_base_slice", "pdf");
@@ -507,8 +619,64 @@ fn apply_overlay_if_needed(
         }
     }
 
-    // 若未安装 qpdf，回退为基础 PDF
     Ok(base_pdf_bytes.to_vec())
+}
+
+/// 采用纯 Rust 图像管线合成 A4 预览图（零外部 Poppler / pdftoppm 依赖）
+fn render_preview_image(
+    source: &DynamicImage,
+    slice: &SliceInfo,
+    paper_w_mm: f64,
+    paper_h_mm: f64,
+    content_w_mm: f64,
+    args: &LongSliceArgs,
+) -> Result<String> {
+    let dpi = 100.0;
+    let canvas_w = ((paper_w_mm * dpi) / 25.4).round() as u32;
+    let canvas_h = ((paper_h_mm * dpi) / 25.4).round() as u32;
+
+    let mut canvas = image::RgbaImage::from_pixel(
+        canvas_w,
+        canvas_h,
+        image::Rgba([255, 255, 255, 255]),
+    );
+
+    let img_w = source.width();
+    let cropped = source.crop_imm(0, slice.y_start_px, img_w, slice.height_px);
+
+    let content_w_px = ((content_w_mm * dpi) / 25.4).round().max(1.0) as u32;
+    let content_h_px = ((slice.height_mm * dpi) / 25.4).round().max(1.0) as u32;
+
+    let resized = cropped.resize_exact(
+        content_w_px,
+        content_h_px,
+        image::imageops::FilterType::Triangle,
+    );
+
+    let margin_px = ((args.margin_mm.max(0.0) * dpi) / 25.4).round() as i64;
+    let header_reserve_px = if args.header_enabled {
+        ((8.0 * dpi) / 25.4).round() as i64
+    } else {
+        0
+    };
+
+    let content_x = match args.alignment.as_str() {
+        "left" => margin_px,
+        "right" => canvas_w as i64 - margin_px - content_w_px as i64,
+        _ => (canvas_w as i64 - content_w_px as i64) / 2,
+    };
+
+    let content_y = margin_px + header_reserve_px;
+
+    image::imageops::overlay(&mut canvas, &resized, content_x, content_y);
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    canvas.write_to(&mut buf, image::ImageFormat::Png)?;
+    let b64 = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        buf.into_inner(),
+    );
+    Ok(format!("data:image/png;base64,{}", b64))
 }
 
 /// 生成与最终导出 100% 一致的高精度 A4 预览
@@ -543,52 +711,62 @@ pub fn preview_long_slice(
     let target_page_idx = preview_page.clamp(1, total_pages.max(1));
 
     let preview_data_url = if let Some(slice) = slices.get(target_page_idx - 1) {
-        // 构建当前单页的基础切片 PDF
-        let single_slice = vec![SliceInfo {
-            page_index: target_page_idx,
-            y_start_px: slice.y_start_px,
-            y_end_px: slice.y_end_px,
-            height_px: slice.height_px,
-            height_mm: slice.height_mm,
-        }];
-
-        let base_bytes = render_base_slices_pdf(
+        // 优先使用纯 Rust 原生合成 A4 预览图（零外部 Poppler / pdftoppm 依赖）
+        if let Ok(data_url) = render_preview_image(
             &source,
-            &single_slice,
+            slice,
             paper_w_mm,
             paper_h_mm,
             content_w_mm,
             args,
-        )?;
-
-        // 注入包含真实页眉页脚（带当前实际页码与总页数）的覆盖层
-        let final_bytes = apply_overlay_if_needed(
-            &base_bytes,
-            1,
-            paper_w_mm,
-            paper_h_mm,
-            args,
-            target_page_idx as u32,
-            total_pages as u32,
-        )?;
-
-        // 写入临时文件并通过 Poppler / pdftoppm 渲染真实预览
-        let temp_pdf = temp_named_path("docsy_preview_page", "pdf");
-        fs::write(&temp_pdf, final_bytes)?;
-
-        let png_path = super::preview::render_pdf_page_to_png(&temp_pdf, 1, 100);
-        let _ = fs::remove_file(&temp_pdf);
-
-        if let Ok(path) = png_path {
-            let png_bytes = fs::read(&path)?;
-            let _ = fs::remove_file(path);
-            let b64 = base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                png_bytes,
-            );
-            Some(format!("data:image/png;base64,{}", b64))
+        ) {
+            Some(data_url)
         } else {
-            None
+            // 若纯 Rust 遇到异常，安全回退到 Poppler 渲染
+            let single_slice = vec![SliceInfo {
+                page_index: target_page_idx,
+                y_start_px: slice.y_start_px,
+                y_end_px: slice.y_end_px,
+                height_px: slice.height_px,
+                height_mm: slice.height_mm,
+            }];
+
+            let base_bytes = render_base_slices_pdf(
+                &source,
+                &single_slice,
+                paper_w_mm,
+                paper_h_mm,
+                content_w_mm,
+                args,
+            )?;
+
+            let final_bytes = apply_overlay_if_needed(
+                &base_bytes,
+                1,
+                paper_w_mm,
+                paper_h_mm,
+                args,
+                target_page_idx as u32,
+                total_pages as u32,
+            )?;
+
+            let temp_pdf = temp_named_path("docsy_preview_page", "pdf");
+            fs::write(&temp_pdf, final_bytes)?;
+
+            let png_path = super::preview::render_pdf_page_to_png(&temp_pdf, 1, 100);
+            let _ = fs::remove_file(&temp_pdf);
+
+            if let Ok(path) = png_path {
+                let png_bytes = fs::read(&path)?;
+                let _ = fs::remove_file(path);
+                let b64 = base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    png_bytes,
+                );
+                Some(format!("data:image/png;base64,{}", b64))
+            } else {
+                None
+            }
         }
     } else {
         None
@@ -778,6 +956,15 @@ mod tests {
         assert!(meta.len() > 1000);
         // 验证没有字体未子集化膨胀（应远小于 1MB，而不是 23MB）
         assert!(meta.len() < 1_000_000);
+
+        // 验证纯 Rust 内存合并成功将字体与文字流注入到了输出 PDF
+        let out_doc = lopdf::Document::load(&result.output_path).unwrap();
+        let pages: Vec<lopdf::ObjectId> = out_doc.get_pages().into_values().collect();
+        assert_eq!(pages.len(), result.total_pages);
+        let p1 = out_doc.get_object(pages[0]).unwrap().as_dict().unwrap();
+        assert!(p1.has(b"Resources"));
+        let p1_res = deref_dict(&out_doc, p1.get(b"Resources").unwrap()).unwrap();
+        assert!(p1_res.has(b"Font")); // 包含纯 Rust 注入的页眉页脚字体
 
         let preview = preview_long_slice(&args, 1).expect("预览生成失败");
         assert_eq!(preview.total_pages, result.total_pages);
