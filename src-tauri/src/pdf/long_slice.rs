@@ -11,8 +11,11 @@ use printpdf::{
     Mm, Op, PdfDocument, PdfPage, PdfSaveOptions, Pt, RawImage, XObjectTransform,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::UNIX_EPOCH;
 
 use super::header_footer::OverlayTextConfig;
 use super::overlay_pdf::build_overlay_pdf;
@@ -68,9 +71,12 @@ pub struct LongSliceArgs {
     /// 页脚设置
     #[serde(default = "default_true")]
     pub footer_enabled: bool,
-    /// 页码样式: "page_of_total" (第 1 页 / 共 5 页), "simple" (1 / 5), "dash" (- 1 -)
+    /// 页码模板，支持 {page}、{total} 和 {range} 占位符
     #[serde(default = "default_page_number_style")]
     pub footer_page_number_style: String,
+    /// 数字形式：arabic、chinese、roman-upper、roman-lower、circled、dingbat
+    #[serde(default = "default_footer_digit_style")]
+    pub footer_digit_style: String,
 }
 
 fn default_orientation() -> String {
@@ -93,6 +99,9 @@ fn default_true() -> bool {
 }
 fn default_page_number_style() -> String {
     "page_of_total".to_string()
+}
+fn default_footer_digit_style() -> String {
+    "arabic".to_string()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,12 +167,31 @@ fn is_pdf_path(input_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn load_source_page_as_image(input_path: &Path, source_page_index: usize) -> Result<DynamicImage> {
+#[derive(Clone)]
+struct LongSliceSourceCacheEntry {
+    key: String,
+    size: u64,
+    modified_millis: u128,
+    image: Arc<DynamicImage>,
+}
+
+static LONG_SLICE_SOURCE_CACHE: LazyLock<Mutex<VecDeque<LongSliceSourceCacheEntry>>> =
+    LazyLock::new(|| Mutex::new(VecDeque::new()));
+const LONG_SLICE_SOURCE_CACHE_ENTRIES: usize = 2;
+const LONG_SLICE_PREVIEW_DPI: u32 = 140;
+const LONG_SLICE_PREVIEW_SOURCE_DPI: u32 = 150;
+const LONG_SLICE_EXPORT_SOURCE_DPI: u32 = 300;
+
+fn load_source_page_uncached(
+    input_path: &Path,
+    source_page_index: usize,
+    dpi: u32,
+) -> Result<DynamicImage> {
     if is_pdf_path(input_path) {
         let preview_png = super::preview::render_pdf_page_to_png(
             input_path,
             source_page_index as u32,
-            150,
+            dpi,
         )
         .with_context(|| format!("长图 PDF 第 {source_page_index} 页解析与渲染失败"))?;
         let image = image::open(&preview_png).context("读取渲染后的 PDF 图像失败");
@@ -174,7 +202,56 @@ fn load_source_page_as_image(input_path: &Path, source_page_index: usize) -> Res
     }
 }
 
-fn build_slice_plan(input_path: &Path, args: &LongSliceArgs) -> Result<LongSlicePlan> {
+fn load_source_page_as_image(
+    input_path: &Path,
+    source_page_index: usize,
+    dpi: u32,
+) -> Result<Arc<DynamicImage>> {
+    let metadata = fs::metadata(input_path)?;
+    let size = metadata.len();
+    let modified_millis = metadata
+        .modified()
+        .unwrap_or(UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let key = format!("{}:{source_page_index}:{dpi}", input_path.display());
+    {
+        let mut cache = LONG_SLICE_SOURCE_CACHE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(index) = cache.iter().position(|entry| {
+            entry.key == key && entry.size == size && entry.modified_millis == modified_millis
+        }) {
+            let entry = cache.remove(index).expect("cache entry exists");
+            let image = entry.image.clone();
+            cache.push_back(entry);
+            return Ok(image);
+        }
+    }
+
+    let image = Arc::new(load_source_page_uncached(input_path, source_page_index, dpi)?);
+    let mut cache = LONG_SLICE_SOURCE_CACHE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    cache.retain(|entry| entry.key != key);
+    cache.push_back(LongSliceSourceCacheEntry {
+        key,
+        size,
+        modified_millis,
+        image: image.clone(),
+    });
+    while cache.len() > LONG_SLICE_SOURCE_CACHE_ENTRIES {
+        cache.pop_front();
+    }
+    Ok(image)
+}
+
+fn build_slice_plan(
+    input_path: &Path,
+    args: &LongSliceArgs,
+    source_dpi: u32,
+) -> Result<LongSlicePlan> {
     let source_page_count = if is_pdf_path(input_path) {
         super::page_info::get_page_infos(&input_path.to_string_lossy())?.len()
     } else {
@@ -187,7 +264,7 @@ fn build_slice_plan(input_path: &Path, args: &LongSliceArgs) -> Result<LongSlice
 
     for source_page_index in 1..=source_page_count {
         crate::operations::check_current_cancelled()?;
-        let source = load_source_page_as_image(input_path, source_page_index)?;
+        let source = load_source_page_as_image(input_path, source_page_index, source_dpi)?;
         let (width, height) = source.dimensions();
         let gray = args.smart_cut.then(|| source.to_luma8());
         let (paper_w_mm, paper_h_mm, content_w_mm, slices) = calculate_slices(
@@ -428,9 +505,10 @@ fn build_overlay_configs(
 
     let footer_config = if args.footer_enabled {
         let style = match args.footer_page_number_style.as_str() {
+            "page_of_total" => "第 {page} 页 / 共 {total} 页",
             "simple" => "{page} / {total}",
             "dash" => "- {page} -",
-            _ => "第 {page} 页 / 共 {total} 页",
+            template => template,
         };
         Some(OverlayTextConfig {
             text: style.into(),
@@ -440,6 +518,7 @@ fn build_overlay_configs(
             margin_mm: margin_text_mm,
             align: "center".into(),
             color: "#555555".into(),
+            number_style: args.footer_digit_style.clone(),
             ..Default::default()
         })
     } else {
@@ -457,6 +536,7 @@ fn render_base_slices_pdf(
     paper_h_mm: f64,
     content_w_mm: f64,
     args: &LongSliceArgs,
+    source_dpi: u32,
 ) -> Result<Vec<u8>> {
     let margin_mm = args.margin_mm.max(0.0);
     let header_reserve_mm = if args.header_enabled { 8.0 } else { 0.0 };
@@ -464,7 +544,7 @@ fn render_base_slices_pdf(
 
     for planned in sources {
         crate::operations::check_current_cancelled()?;
-        let source = load_source_page_as_image(input_path, planned.source_page_index)?;
+        let source = load_source_page_as_image(input_path, planned.source_page_index, source_dpi)?;
         let img_w = source.width();
         for slice in &planned.slices {
             let cropped = source.crop_imm(0, slice.y_start_px, img_w, slice.height_px);
@@ -708,7 +788,7 @@ fn render_preview_image(
     content_w_mm: f64,
     args: &LongSliceArgs,
 ) -> Result<String> {
-    let dpi = 100.0;
+    let dpi = LONG_SLICE_PREVIEW_DPI as f64;
     let canvas_w = ((paper_w_mm * dpi) / 25.4).round() as u32;
     let canvas_h = ((paper_h_mm * dpi) / 25.4).round() as u32;
 
@@ -779,6 +859,7 @@ fn render_full_preview_page(
         paper_h_mm,
         content_w_mm,
         args,
+        LONG_SLICE_PREVIEW_SOURCE_DPI,
     )?;
     let final_bytes = apply_overlay_if_needed(
         &base_bytes,
@@ -791,7 +872,7 @@ fn render_full_preview_page(
     )?;
     let temp_pdf = temp_named_path("docsy_preview_page", "pdf");
     fs::write(&temp_pdf, final_bytes)?;
-    let png_path = super::preview::render_pdf_page_to_png(&temp_pdf, 1, 100);
+    let png_path = super::preview::render_pdf_page_to_png(&temp_pdf, 1, LONG_SLICE_PREVIEW_DPI);
     let _ = fs::remove_file(&temp_pdf);
     let png_path = png_path.context("渲染完整 A4 预览失败")?;
     let png_bytes = fs::read(&png_path)?;
@@ -810,7 +891,7 @@ pub fn preview_long_slice(
         bail!("输入文件不存在: {}", args.input_path);
     }
 
-    let plan = build_slice_plan(path, args)?;
+    let plan = build_slice_plan(path, args, LONG_SLICE_PREVIEW_SOURCE_DPI)?;
     let total_pages = plan.slices.len();
     let target_page_idx = preview_page.clamp(1, total_pages.max(1));
     let slice = plan
@@ -830,7 +911,7 @@ pub fn preview_long_slice(
     let mut preview_data_url = None;
 
     if !overlay_requested {
-        let source = load_source_page_as_image(path, source_page_index)?;
+        let source = load_source_page_as_image(path, source_page_index, LONG_SLICE_PREVIEW_SOURCE_DPI)?;
         if let Ok(data_url) = render_preview_image(
             &source,
             slice,
@@ -880,7 +961,7 @@ pub fn process_long_slice(args: &LongSliceArgs) -> Result<LongSliceResult> {
         bail!("输入文件不存在: {}", args.input_path);
     }
 
-    let plan = build_slice_plan(input_path, args)?;
+    let plan = build_slice_plan(input_path, args, LONG_SLICE_EXPORT_SOURCE_DPI)?;
     if plan.slices.is_empty() {
         bail!("未能对输入文件划分出切片页面");
     }
@@ -913,6 +994,7 @@ pub fn process_long_slice(args: &LongSliceArgs) -> Result<LongSliceResult> {
         plan.paper_h_mm,
         plan.content_w_mm,
         args,
+        LONG_SLICE_EXPORT_SOURCE_DPI,
     )?;
     let final_bytes = apply_overlay_if_needed(
         &base_bytes,
@@ -971,6 +1053,7 @@ mod tests {
                 custom_date: None,
                 footer_enabled: false,
                 footer_page_number_style: "page_of_total".into(),
+            footer_digit_style: "arabic".into(),
             },
             1,
             1,
@@ -1022,6 +1105,7 @@ mod tests {
             custom_date: Some("2026-11-02".into()),
             footer_enabled: true,
             footer_page_number_style: "page_of_total".into(),
+            footer_digit_style: "arabic".into(),
         };
 
         let result = process_long_slice(&args).expect("处理长图切片失败");
@@ -1095,6 +1179,7 @@ mod tests {
             custom_date: None,
             footer_enabled: false,
             footer_page_number_style: "page_of_total".into(),
+            footer_digit_style: "arabic".into(),
         };
 
         let result = process_long_slice(&args).expect("多页 PDF 切片失败");
@@ -1116,5 +1201,64 @@ mod tests {
             .slices
             .windows(2)
             .all(|pair| pair[0].page_index + 1 == pair[1].page_index));
+    }
+
+    #[test]
+    fn footer_formats_use_shared_number_pipeline() {
+        let args = LongSliceArgs {
+            input_path: "unused.png".into(),
+            output_dir: None,
+            output_filename: None,
+            orientation: "portrait".into(),
+            margin_mm: 5.0,
+            content_width_mode: "fit".into(),
+            custom_width_percent: 100.0,
+            alignment: "center".into(),
+            smart_cut: false,
+            overlap_mm: 0.0,
+            header_enabled: false,
+            header_title: None,
+            header_date: false,
+            header_date_prefix: false,
+            custom_date: None,
+            footer_enabled: true,
+            footer_page_number_style: "第{page}页（共{total}页）".into(),
+            footer_digit_style: "chinese".into(),
+        };
+        let (_, footer, _) = build_overlay_configs(&args, args.margin_mm);
+        let footer = footer.unwrap();
+        assert_eq!(
+            crate::pdf::overlay_font::expand_config_placeholders(&footer, 2, 5),
+            "第二页（共五页）"
+        );
+        let mut roman = args.clone();
+        roman.footer_page_number_style = "Page {page} of {total}".into();
+        roman.footer_digit_style = "roman-upper".into();
+        let (_, footer, _) = build_overlay_configs(&roman, roman.margin_mm);
+        assert_eq!(
+            crate::pdf::overlay_font::expand_config_placeholders(&footer.unwrap(), 2, 5),
+            "Page II of V"
+        );
+    }
+
+    #[test]
+    fn source_cache_reuses_unchanged_images_and_invalidates_replacements() {
+        let dir = crate::util::fs::temp_named_path("docsy_test_slice_cache", "dir");
+        fs::create_dir_all(&dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
+        let input = dir.join("source.png");
+        image::RgbImage::from_pixel(8, 16, image::Rgb([255, 255, 255]))
+            .save(&input)
+            .unwrap();
+        let first = load_source_page_as_image(&input, 1, LONG_SLICE_PREVIEW_SOURCE_DPI).unwrap();
+        let second = load_source_page_as_image(&input, 1, LONG_SLICE_PREVIEW_SOURCE_DPI).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+
+        image::RgbImage::from_pixel(16, 16, image::Rgb([0, 0, 0]))
+            .save(&input)
+            .unwrap();
+        let replaced = load_source_page_as_image(&input, 1, LONG_SLICE_PREVIEW_SOURCE_DPI).unwrap();
+        assert!(!Arc::ptr_eq(&first, &replaced));
+        assert_eq!(replaced.width(), 16);
     }
 }

@@ -349,4 +349,74 @@ describe('长图处理界面链路', () => {
     expect(state.longSliceFiles.value[1].dimText).toBe('200 × 600')
     expect(state.previewLoading.value).toBe(false)
   })
+
+  it('默认显示当前源文件目录，并保留可修改的自定义输出目录', () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    state.longSliceFiles.value = [
+      { path: '/case/first.png', name: 'first.png' },
+      { path: '/other/second.png', name: 'second.png' },
+    ]
+    expect(state.longSliceEffectiveOutputDir.value).toBe('/case')
+    state.selectedLongSliceIndex.value = 1
+    expect(state.longSliceEffectiveOutputDir.value).toBe('/other')
+
+    state.longSliceOutputDir.value = '/chosen'
+    expect(state.longSliceEffectiveOutputDir.value).toBe('/chosen')
+    expect(state.getLongSliceArgs('/other/second.png').outputDir).toBe('/chosen')
+    state.longSliceOutputDir.value = ''
+    expect(state.longSliceEffectiveOutputDir.value).toBe('/other')
+    expect(state.getLongSliceArgs('/other/second.png').outputDir).toBe(null)
+  })
+
+  it('页脚复用完整模板、实际示例与总页数开关', () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    expect(state.longSliceFooterPresets.value.length).toBeGreaterThanOrEqual(10)
+    state.longSliceFooterNumberStyle.value = 'Page {page} of {total}'
+    state.longSliceFooterDigitStyle.value = 'roman-upper'
+    expect(state.longSliceFooterPresetOptions.value[0].label).toContain('I/V')
+    expect(state.longSliceFooterPreview.value).toBe('Page I of V')
+    const args = state.getLongSliceArgs('/case/long.png')
+    expect(args.footerPageNumberStyle).toBe('Page {page} of {total}')
+    expect(args.footerDigitStyle).toBe('roman-upper')
+
+    state.longSliceFooterShowTotal.value = false
+    state.onLongSliceFooterShowTotalChange()
+    expect(state.longSliceFooterNumberStyle.value).toBe('Page {page}')
+    expect(state.longSliceFooterPreview.value).toBe('Page I')
+    state.longSliceFooterShowTotal.value = true
+    state.onLongSliceFooterShowTotalChange()
+    expect(state.longSliceFooterNumberStyle.value).toBe('Page {page} of {total}')
+    expect(state.longSliceFooterPreview.value).toBe('Page I of V')
+  })
+
+  it('连续调整设置只触发一次延迟预览', async () => {
+    vi.useFakeTimers()
+    try {
+      const state = PdfToolsView.setup({}, { expose: vi.fn() })
+      state.longSliceFiles.value = [{ path: '/case/long.png', name: 'long.png' }]
+      tauriCallSafe.mockResolvedValue({
+        ok: true,
+        data: {
+          sourceWidth: 100,
+          sourceHeight: 1000,
+          totalPages: 2,
+          previewPage: 1,
+          previewDataUrl: 'latest-preview',
+        },
+      })
+      state.schedulePreviewRefresh()
+      state.schedulePreviewRefresh()
+      state.schedulePreviewRefresh()
+      expect(tauriCallSafe).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(249)
+      expect(tauriCallSafe).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(tauriCallSafe).toHaveBeenCalledTimes(1)
+      expect(tauriCallSafe).toHaveBeenCalledWith('preview_long_slice', expect.objectContaining({ previewPage: 1 }))
+      expect(state.previewLoading.value).toBe(false)
+      expect(state.currentLongSlicePreview.value.previewDataUrl).toBe('latest-preview')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

@@ -466,16 +466,21 @@
             <el-button v-if="longSliceFiles.length" :disabled="longSliceProcessing" @click="selectLongSliceOutputDir">
               {{ longSliceOutputDir ? '更改输出目录' : '选择输出目录' }}
             </el-button>
+            <el-button
+              v-if="longSliceEffectiveOutputDir"
+              text
+              class="merge-directory"
+              :title="longSliceEffectiveOutputDir"
+              :disabled="longSliceProcessing"
+              @click="selectLongSliceOutputDir"
+            >{{ longSliceEffectiveOutputDir }}</el-button>
           </template>
-
-          <div v-if="longSliceOutputDir && longSliceFiles.length" class="path-line">
-            <span class="path-badge">输出目录</span>
-            <span>{{ longSliceOutputDir }}</span>
-          </div>
 
           <div class="long-slice-container" :class="{ 'has-files': longSliceFiles.length }">
             <FileQueuePanel
-              fill
+              class="long-slice-queue"
+              :fill="!longSliceFiles.length"
+              max-height="min(28vh, 260px)"
               scene="pdf-long-slice"
               :celebrating="longSliceCelebrating"
               empty-action-label="选择长图或文档"
@@ -496,8 +501,7 @@
               </template>
             </FileQueuePanel>
 
-            <aside v-if="longSliceFiles.length" class="long-slice-sidebar">
-              <div class="long-slice-preview-card" v-loading="previewLoading">
+            <div v-if="longSliceFiles.length" class="long-slice-preview-card" v-loading="previewLoading">
                 <div class="preview-header">
                   <span class="preview-title">A4 打印预览</span>
                   <div class="preview-pagination" v-if="currentLongSlicePreview && currentLongSlicePreview.totalPages > 1">
@@ -544,11 +548,11 @@
                 <el-form label-position="top" size="small">
                   <el-form-item label="纸张方向与留白">
                     <div class="opt-row">
-                      <el-radio-group v-model="longSliceOrientation" @change="refreshPreview">
+                      <el-radio-group v-model="longSliceOrientation" @change="schedulePreviewRefresh">
                         <el-radio-button label="portrait">纵向 (A4)</el-radio-button>
                         <el-radio-button label="landscape">横向 (A4)</el-radio-button>
                       </el-radio-group>
-                      <el-select v-model="longSliceMarginMm" style="width: 130px" @change="refreshPreview">
+                      <el-select v-model="longSliceMarginMm" style="width: 130px" @change="schedulePreviewRefresh">
                         <el-option label="无留白 (0mm)" :value="0" />
                         <el-option label="窄边距 (5mm)" :value="5" />
                         <el-option label="标准边距 (10mm)" :value="10" />
@@ -559,41 +563,41 @@
 
                   <el-form-item label="内容宽度与对齐">
                     <div class="opt-row">
-                      <el-radio-group v-model="longSliceWidthMode" @change="refreshPreview">
+                      <el-radio-group v-model="longSliceWidthMode" @change="schedulePreviewRefresh">
                         <el-radio-button label="fit">满版宽度</el-radio-button>
                         <el-radio-button label="phone">手机适中 (55%)</el-radio-button>
                         <el-radio-button label="custom">自定义</el-radio-button>
                       </el-radio-group>
-                      <el-radio-group v-model="longSliceAlignment" @change="refreshPreview">
+                      <el-radio-group v-model="longSliceAlignment" @change="schedulePreviewRefresh">
                         <el-radio-button label="left">靠左</el-radio-button>
                         <el-radio-button label="center">居中</el-radio-button>
                         <el-radio-button label="right">靠右</el-radio-button>
                       </el-radio-group>
                     </div>
                     <div v-if="longSliceWidthMode === 'custom'" class="slider-row">
-                      <el-slider v-model="longSliceCustomWidth" :min="40" :max="100" @change="refreshPreview" />
+                      <el-slider v-model="longSliceCustomWidth" :min="40" :max="100" @change="schedulePreviewRefresh" />
                       <span class="slider-val">{{ longSliceCustomWidth }}%</span>
                     </div>
                   </el-form-item>
 
                   <el-form-item label="切片防腰斩与重叠">
                     <div class="opt-row align-center">
-                      <el-checkbox v-model="longSliceSmartCut" @change="refreshPreview">
+                      <el-checkbox v-model="longSliceSmartCut" @change="schedulePreviewRefresh">
                         智能防腰斩 (自动寻找空白缝隙)
                       </el-checkbox>
                       <div class="overlap-box">
                         <span>相邻重叠:</span>
-                        <el-input-number v-model="longSliceOverlapMm" :min="0" :max="15" :step="1" style="width: 80px" @change="refreshPreview" />
+                        <el-input-number v-model="longSliceOverlapMm" :min="0" :max="15" :step="1" style="width: 80px" @change="schedulePreviewRefresh" />
                         <span>mm</span>
                       </div>
                     </div>
                   </el-form-item>
 
-                  <el-collapse class="header-footer-collapse">
-                    <el-collapse-item title="页眉与页脚设置">
+                  <div class="header-footer-settings">
+                    <div class="settings-group-title">页眉与页脚设置</div>
                       <div class="collapse-block">
                         <div class="sub-heading">
-                          <el-checkbox v-model="longSliceHeaderEnabled" @change="refreshPreview">开启页眉</el-checkbox>
+                          <el-checkbox v-model="longSliceHeaderEnabled" @change="schedulePreviewRefresh">开启页眉</el-checkbox>
                         </div>
                         <div v-if="longSliceHeaderEnabled" class="sub-fields">
                           <el-input
@@ -601,11 +605,11 @@
                             placeholder="网页标题或来源网址（可选）"
                             clearable
                             size="small"
-                            @change="refreshPreview"
+                            @change="schedulePreviewRefresh"
                           />
                           <div class="opt-row mt-2">
-                            <el-checkbox v-model="longSliceHeaderDate" @change="refreshPreview">打印日期</el-checkbox>
-                            <el-checkbox v-model="longSliceHeaderDatePrefix" :disabled="!longSliceHeaderDate" @change="refreshPreview">
+                            <el-checkbox v-model="longSliceHeaderDate" @change="schedulePreviewRefresh">打印日期</el-checkbox>
+                            <el-checkbox v-model="longSliceHeaderDatePrefix" :disabled="!longSliceHeaderDate" @change="schedulePreviewRefresh">
                               带“打印日期：”前缀
                             </el-checkbox>
                           </div>
@@ -614,21 +618,24 @@
 
                       <div class="collapse-block mt-3">
                         <div class="sub-heading">
-                          <el-checkbox v-model="longSliceFooterEnabled" @change="refreshPreview">开启页脚页码</el-checkbox>
+                          <el-checkbox v-model="longSliceFooterEnabled" @change="schedulePreviewRefresh">开启页脚页码</el-checkbox>
                         </div>
                         <div v-if="longSliceFooterEnabled" class="sub-fields">
-                          <el-select v-model="longSliceFooterNumberStyle" style="width: 100%" @change="refreshPreview">
-                            <el-option label="第 1 页 / 共 5 页" value="page_of_total" />
-                            <el-option label="1 / 5" value="simple" />
-                            <el-option label="- 1 -" value="dash" />
+                          <label class="field-label" for="long-slice-footer-template">页码模板</label>
+                          <el-select id="long-slice-footer-template" v-model="longSliceFooterNumberStyle" style="width: 100%" @change="schedulePreviewRefresh">
+                            <el-option v-for="preset in longSliceFooterPresetOptions" :key="preset.value" :label="preset.label" :value="preset.value" />
                           </el-select>
+                          <label class="field-label" for="long-slice-footer-digits">数字形式</label>
+                          <el-select id="long-slice-footer-digits" v-model="longSliceFooterDigitStyle" style="width: 100%" @change="schedulePreviewRefresh">
+                            <el-option v-for="style in PAGE_NUMBER_STYLES" :key="style.value" :label="`${style.label}（${style.sample}）`" :value="style.value" />
+                          </el-select>
+                          <el-checkbox v-model="longSliceFooterShowTotal" class="footer-total-toggle" @change="onLongSliceFooterShowTotalChange">显示总页数</el-checkbox>
+                          <div class="footer-format-preview">示例：{{ longSliceFooterPreview }}</div>
                         </div>
                       </div>
-                    </el-collapse-item>
-                  </el-collapse>
+                  </div>
                 </el-form>
               </div>
-            </aside>
           </div>
 
           <template #actions>
@@ -669,6 +676,8 @@ import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vu
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { withMinimumDuration, createCelebrationTrigger } from '../../../shared/animation.js'
 import { splitRangeWarnings } from '../../../shared/pdf-tools/composables/usePdfSplitRanges.js'
+import { pageNumberPresets, templateForTotal, usesPageTotal } from '../../../shared/pdf-tools/pageNumberFormats.js'
+import { PAGE_NUMBER_STYLES, renderPageNumberTemplate } from '../../../shared/pdf-tools/composables/pdfPageNumberRules.js'
 import { sizeSavingText, batchSummaryText } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
 import { getPdfPageCount, openPath, tauriCallSafe, userFacingError } from '../../../core/tauriBridge.js'
 import { fileName, parentDir, stripPdf } from '../../../core/filePath.js'
@@ -1069,6 +1078,12 @@ const currentLongSlicePreview = ref(null)
 const currentPreviewPage = ref(1)
 const previewLoading = ref(false)
 let longSlicePreviewRequestId = 0
+let longSlicePreviewTimer = null
+const longSliceEffectiveOutputDir = computed(() => {
+  if (longSliceOutputDir.value) return longSliceOutputDir.value
+  const current = longSliceFiles.value[selectedLongSliceIndex.value] || longSliceFiles.value[0]
+  return parentDir(current?.path || '')
+})
 
 const longSliceOrientation = ref('portrait')
 const longSliceMarginMm = ref(5)
@@ -1082,7 +1097,36 @@ const longSliceHeaderTitle = ref('')
 const longSliceHeaderDate = ref(true)
 const longSliceHeaderDatePrefix = ref(true)
 const longSliceFooterEnabled = ref(true)
-const longSliceFooterNumberStyle = ref('page_of_total')
+const longSliceFooterShowTotal = ref(true)
+const longSliceLastTemplateWithTotal = ref('')
+const longSliceFooterPresets = computed(() => pageNumberPresets(longSliceFooterShowTotal.value))
+const longSliceFooterNumberStyle = ref('第{page}页 / 共{total}页')
+const longSliceFooterDigitStyle = ref('arabic')
+const longSliceFooterPresetOptions = computed(() =>
+  longSliceFooterPresets.value.map((preset) => ({
+    ...preset,
+    label: `${preset.label}：${renderPageNumberTemplate(preset.value, 1, 5, longSliceFooterDigitStyle.value)}`,
+  })),
+)
+const longSliceFooterPreview = computed(() =>
+  renderPageNumberTemplate(longSliceFooterNumberStyle.value, 1, 5, longSliceFooterDigitStyle.value),
+)
+
+function onLongSliceFooterShowTotalChange() {
+  const current = longSliceFooterNumberStyle.value
+  if (!longSliceFooterShowTotal.value && usesPageTotal(current)) {
+    longSliceLastTemplateWithTotal.value = current
+  }
+  longSliceFooterNumberStyle.value = templateForTotal(
+    current,
+    longSliceFooterShowTotal.value,
+    longSliceLastTemplateWithTotal.value,
+  )
+  if (longSliceFooterShowTotal.value && usesPageTotal(longSliceFooterNumberStyle.value)) {
+    longSliceLastTemplateWithTotal.value = longSliceFooterNumberStyle.value
+  }
+  schedulePreviewRefresh()
+}
 
 function getLongSliceArgs(path, outputDir = null) {
   return {
@@ -1102,10 +1146,13 @@ function getLongSliceArgs(path, outputDir = null) {
     headerDatePrefix: Boolean(longSliceHeaderDatePrefix.value),
     footerEnabled: Boolean(longSliceFooterEnabled.value),
     footerPageNumberStyle: longSliceFooterNumberStyle.value,
+    footerDigitStyle: longSliceFooterDigitStyle.value,
   }
 }
 
 async function refreshPreview() {
+  clearTimeout(longSlicePreviewTimer)
+  longSlicePreviewTimer = null
   const requestId = ++longSlicePreviewRequestId
   const current = longSliceFiles.value[selectedLongSliceIndex.value]
   if (!current) {
@@ -1139,6 +1186,22 @@ async function refreshPreview() {
   } finally {
     if (requestId === longSlicePreviewRequestId) previewLoading.value = false
   }
+}
+
+function schedulePreviewRefresh() {
+  longSlicePreviewRequestId++
+  previewLoading.value = true
+  clearTimeout(longSlicePreviewTimer)
+  longSlicePreviewTimer = setTimeout(() => {
+    longSlicePreviewTimer = null
+    void refreshPreview()
+  }, 250)
+}
+
+function cancelScheduledPreview() {
+  clearTimeout(longSlicePreviewTimer)
+  longSlicePreviewTimer = null
+  longSlicePreviewRequestId++
 }
 
 function onSelectLongSliceItem(index) {
@@ -1204,7 +1267,7 @@ async function selectLongSliceOutputDir() {
 
 function clearLongSliceFiles() {
   if (longSliceProcessing.value) return
-  longSlicePreviewRequestId++
+  cancelScheduledPreview()
   longSliceFiles.value = []
   currentLongSlicePreview.value = null
   selectedLongSliceIndex.value = 0
@@ -1221,7 +1284,7 @@ function removeLongSliceFile(index) {
   if (longSliceFiles.value.length) {
     void refreshPreview()
   } else {
-    longSlicePreviewRequestId++
+    cancelScheduledPreview()
     currentLongSlicePreview.value = null
     previewLoading.value = false
   }
@@ -2356,16 +2419,21 @@ h3 {
 /* ── Long Slice Styles ── */
 .long-slice-container.has-files {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) 420px;
+  grid-template-columns: minmax(340px, 1fr) minmax(360px, 1fr);
   gap: 16px;
   align-items: start;
 }
-.long-slice-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.long-slice-queue {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
 }
 .long-slice-preview-card {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
   padding: 12px 14px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
@@ -2393,35 +2461,42 @@ h3 {
 }
 .a4-sheet-viewport {
   display: flex;
+  flex: 1;
   justify-content: center;
-  align-items: center;
-  background: var(--docsy-bg-muted, #f1f5f9);
+  align-items: flex-start;
+  width: 100%;
+  height: clamp(320px, calc(100vh - 340px), 720px);
+  background: var(--docsy-surface-muted);
   padding: 12px;
-  border-radius: 6px;
-  min-height: 240px;
-  max-height: 320px;
-  overflow: hidden;
+  border: 1px solid var(--docsy-border-subtle);
+  border-radius: var(--docsy-radius);
+  min-height: 320px;
+  overflow: auto;
 }
 .a4-sheet-canvas {
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  flex: 0 0 auto;
+  max-width: 100%;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.16);
   background: #fff;
-  border: 1px solid #cbd5e1;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
 .a4-sheet-canvas.portrait {
-  width: 170px;
-  height: 240px;
+  width: min(100%, calc((100vh - 380px) * 210 / 297));
+  max-width: calc(720px * 210 / 297);
+  aspect-ratio: 210 / 297;
 }
 .a4-sheet-canvas.landscape {
-  width: 240px;
-  height: 170px;
+  width: min(100%, calc((100vh - 380px) * 297 / 210));
+  max-width: 720px;
+  aspect-ratio: 297 / 210;
 }
 .preview-image {
+  display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
   object-fit: contain;
 }
 .preview-placeholder {
@@ -2430,18 +2505,46 @@ h3 {
 }
 .preview-footer-info {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: center;
   align-items: center;
-  margin-top: 8px;
+  margin-top: 10px;
   font-size: 11px;
   color: var(--docsy-text-muted);
 }
 .long-slice-options-panel {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
   padding: 14px;
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
+}
+.field-hint {
+  margin-top: 6px;
+  color: var(--docsy-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.field-label {
+  display: block;
+  margin: 8px 0 4px;
+  color: var(--docsy-text);
+  font-size: 12px;
+}
+.footer-total-toggle {
+  margin-top: 8px;
+}
+.footer-format-preview {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--docsy-surface-muted);
+  color: var(--docsy-text-muted);
+  font-size: 12px;
+  text-align: center;
 }
 .opt-row {
   display: flex;
@@ -2472,9 +2575,15 @@ h3 {
   font-size: 12px;
   color: var(--docsy-text);
 }
-.header-footer-collapse {
+.header-footer-settings {
   border-top: 1px solid var(--docsy-border-subtle);
   margin-top: 8px;
+}
+.settings-group-title {
+  margin: 10px 0 8px;
+  color: var(--docsy-text-strong);
+  font-size: 12px;
+  font-weight: 600;
 }
 .sub-fields {
   margin-top: 8px;
@@ -2487,5 +2596,14 @@ h3 {
   .long-slice-container.has-files {
     grid-template-columns: 1fr;
   }
+  .long-slice-queue,
+  .long-slice-options-panel,
+  .long-slice-preview-card {
+    grid-column: 1;
+    position: static;
+  }
+  .long-slice-options-panel { grid-row: 1; }
+  .long-slice-preview-card { grid-row: 2; }
+  .long-slice-queue { grid-row: 3; }
 }
 </style>
