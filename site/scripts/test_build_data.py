@@ -25,6 +25,32 @@ class ReleaseDataTests(unittest.TestCase):
         self.assertIn("/v1.0.5/", releases[0]["assets"][0]["url"])
         download.assert_not_called()
 
+    def test_static_download_tracks_latest_published_release(self):
+        html = '''<strong id="dl-version-static">v1.0.0</strong>
+<code id="dl-mac-name">Docsy_1.0.0_aarch64.dmg</code>
+<code id="dl-win-name">Docsy_1.0.0_x64-setup.exe</code>
+<a id="dl-win-x86" href="https://example.com/old"></a>
+<a id="dl-release-page" href="https://example.com/old"></a>'''
+        releases = [{
+            "version": "1.1.4",
+            "tag": "v1.1.4",
+            "assets": [
+                {"platform": "macos", "name": "Docsy_1.1.4_aarch64.dmg"},
+                {"platform": "windows", "name": "Docsy_1.1.4_x64-setup.exe"},
+                {"platform": "windows-x86", "name": "Docsy_1.1.4_x86-setup.exe"},
+            ],
+        }]
+        with tempfile.TemporaryDirectory() as directory:
+            index = Path(directory) / "index.html"
+            index.write_text(html, encoding="utf-8")
+            build_data.sync_static_download(index, releases)
+            synced = index.read_text(encoding="utf-8")
+        self.assertIn('id="dl-version-static">v1.1.4<', synced)
+        self.assertIn('id="dl-mac-name">Docsy_1.1.4_aarch64.dmg<', synced)
+        self.assertIn('id="dl-win-name">Docsy_1.1.4_x64-setup.exe<', synced)
+        self.assertNotIn("example.com/old", synced)
+        self.assertEqual(synced.count("/tag/v1.1.4"), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

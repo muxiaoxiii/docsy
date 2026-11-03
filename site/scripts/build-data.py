@@ -286,6 +286,26 @@ def build_tools() -> dict:
     return tools
 
 
+def sync_static_download(index_path: Path, releases: list) -> None:
+    latest = releases[0]
+    assets = {asset["platform"]: asset for asset in latest["assets"]}
+    version = latest["version"]
+    release_url = f"{GITHUB_RELEASES_URL}/tag/{latest['tag']}"
+    replacements = [
+        (r'id="dl-version-static">v[^<]+<', f'id="dl-version-static">v{version}<'),
+        (r'id="dl-mac-name">[^<]+<', f'id="dl-mac-name">{assets["macos"]["name"]}<'),
+        (r'id="dl-win-name">[^<]+<', f'id="dl-win-name">{assets["windows"]["name"]}<'),
+        (r'id="dl-win-x86" href="[^"]+"', f'id="dl-win-x86" href="{release_url}"'),
+        (r'id="dl-release-page" href="[^"]+"', f'id="dl-release-page" href="{release_url}"'),
+    ]
+    source = index_path.read_text(encoding="utf-8")
+    for pattern, replacement in replacements:
+        source, count = re.subn(pattern, lambda _: replacement, source, count=1)
+        if count != 1:
+            raise ValueError(f"静态下载块同步失败: {pattern}")
+    index_path.write_text(source, encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="生成 Docsy 下载站数据")
     parser.add_argument("--api-json", required=True, help="GitHub Releases API JSON 文件")
@@ -295,6 +315,7 @@ def main() -> int:
     parser.add_argument("--proxy", default="", help="GitHub 下载代理前缀（可选）")
     parser.add_argument("--remote-only", action="store_true", help="用于 GitHub Pages：只生成真实发布下载链接，不镜像安装包")
     parser.add_argument("--sync-fallback", help="同步站点 main.js 的回退下载数据")
+    parser.add_argument("--sync-static", help="同步 index.html 的静态下载版本与文件名")
     args = parser.parse_args()
 
     assets_dir = Path(args.assets_dir)
@@ -323,6 +344,8 @@ def main() -> int:
     (out_dir / "releases.json").write_text(
         json.dumps(releases_data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    if args.sync_static:
+        sync_static_download(Path(args.sync_static), releases)
     if args.sync_fallback:
         fallback_path = Path(args.sync_fallback)
         fallback = {"latest": releases[0]["version"], "githubUrl": GITHUB_RELEASES_URL, "releases": releases}

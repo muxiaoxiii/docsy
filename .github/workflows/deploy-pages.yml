@@ -41,7 +41,8 @@ jobs:
             --changelog CHANGELOG.md \
             --out site/public/data \
             --remote-only \
-            --sync-fallback site/public/js/main.js
+            --sync-fallback site/public/js/main.js \
+            --sync-static site/public/index.html
 
       - name: Validate site data
         run: |
