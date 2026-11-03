@@ -1,7 +1,7 @@
 //! 长图与长文档智能切片分页 (Long Image & Long Document A4 Slicer)
 //!
-//! 支持将网页长截图、手机长截屏图片（PNG/JPG/WebP/BMP）以及单页超长 PDF，
-//! 智能避让文字与段落缝隙，按 A4 纸张规范切片分页，并支持页面方向、内容宽度、
+//! 支持将网页长截图、手机长截屏图片（PNG/JPG/WebP/BMP）以及单页或多页 PDF，
+//! 逐页智能避让文字与段落缝隙，按 A4 纸张规范切片分页，并支持页面方向、内容宽度、
 //! 页眉（标题/网址、打印日期）、页脚（页码）等丰富选项。
 
 use anyhow::{bail, Context, Result};
@@ -99,6 +99,7 @@ fn default_page_number_style() -> String {
 #[serde(rename_all = "camelCase")]
 pub struct SliceInfo {
     pub page_index: usize,
+    pub source_page_index: usize,
     pub y_start_px: u32,
     pub y_end_px: u32,
     pub height_px: u32,
@@ -110,6 +111,8 @@ pub struct SliceInfo {
 pub struct LongSlicePreviewResult {
     pub source_width: u32,
     pub source_height: u32,
+    pub source_page_index: usize,
+    pub source_page_count: usize,
     pub is_pdf: bool,
     pub total_pages: usize,
     pub page_width_mm: f64,
@@ -127,25 +130,92 @@ pub struct LongSliceResult {
     pub total_pages: usize,
     pub source_width: u32,
     pub source_height: u32,
+    pub source_page_count: usize,
 }
 
-/// 打开输入文件为图像（支持图像文件及长图 PDF）
-fn load_source_as_image(input_path: &Path) -> Result<DynamicImage> {
-    let ext = input_path
+#[derive(Debug, Clone)]
+struct SourceSlicePlan {
+    source_page_index: usize,
+    width: u32,
+    height: u32,
+    slices: Vec<SliceInfo>,
+}
+
+#[derive(Debug, Clone)]
+struct LongSlicePlan {
+    paper_w_mm: f64,
+    paper_h_mm: f64,
+    content_w_mm: f64,
+    sources: Vec<SourceSlicePlan>,
+    slices: Vec<SliceInfo>,
+}
+
+fn is_pdf_path(input_path: &Path) -> bool {
+    input_path
         .extension()
         .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+        .map(|s| s.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false)
+}
 
-    if ext == "pdf" {
-        let preview_png = super::preview::render_pdf_page_to_png(input_path, 1, 150)
-            .context("长图 PDF 页面解析与渲染失败")?;
-        let img = image::open(&preview_png).context("读取渲染后的 PDF 图像失败")?;
+fn load_source_page_as_image(input_path: &Path, source_page_index: usize) -> Result<DynamicImage> {
+    if is_pdf_path(input_path) {
+        let preview_png = super::preview::render_pdf_page_to_png(
+            input_path,
+            source_page_index as u32,
+            150,
+        )
+        .with_context(|| format!("长图 PDF 第 {source_page_index} 页解析与渲染失败"))?;
+        let image = image::open(&preview_png).context("读取渲染后的 PDF 图像失败");
         let _ = fs::remove_file(preview_png);
-        Ok(img)
+        image.context("读取渲染后的 PDF 图像失败")
     } else {
         crate::util::images::open_oriented(input_path).context("读取输入图片失败")
     }
+}
+
+fn build_slice_plan(input_path: &Path, args: &LongSliceArgs) -> Result<LongSlicePlan> {
+    let source_page_count = if is_pdf_path(input_path) {
+        super::page_info::get_page_infos(&input_path.to_string_lossy())?.len()
+    } else {
+        1
+    };
+    let mut sources = Vec::with_capacity(source_page_count);
+    let mut all_slices = Vec::new();
+    let mut next_page_index = 1;
+    let mut paper = (0.0, 0.0, 0.0);
+
+    for source_page_index in 1..=source_page_count {
+        crate::operations::check_current_cancelled()?;
+        let source = load_source_page_as_image(input_path, source_page_index)?;
+        let (width, height) = source.dimensions();
+        let gray = args.smart_cut.then(|| source.to_luma8());
+        let (paper_w_mm, paper_h_mm, content_w_mm, slices) = calculate_slices(
+            width,
+            height,
+            gray.as_ref(),
+            args,
+            next_page_index,
+            source_page_index,
+        );
+        next_page_index += slices.len();
+        all_slices.extend(slices.iter().cloned());
+        sources.push(SourceSlicePlan {
+            source_page_index,
+            width,
+            height,
+            slices,
+        });
+        paper = (paper_w_mm, paper_h_mm, content_w_mm);
+    }
+
+    Ok(LongSlicePlan {
+        paper_w_mm: paper.0,
+        paper_h_mm: paper.1,
+        content_w_mm: paper.2,
+        sources,
+        slices: all_slices,
+    })
 }
 
 /// 获取纸张尺寸 (宽 mm, 高 mm)
@@ -224,6 +294,8 @@ pub fn calculate_slices(
     img_h: u32,
     gray: Option<&GrayImage>,
     args: &LongSliceArgs,
+    first_page_index: usize,
+    source_page_index: usize,
 ) -> (f64, f64, f64, Vec<SliceInfo>) {
     let (paper_w_mm, paper_h_mm) = get_paper_size_mm(&args.orientation);
     let margin = args.margin_mm.max(0.0);
@@ -251,7 +323,7 @@ pub fn calculate_slices(
 
     let mut slices = Vec::new();
     let mut curr_y: u32 = 0;
-    let mut page_idx = 1;
+    let mut page_idx = first_page_index;
 
     while curr_y < img_h {
         let target_bottom = (curr_y as f64 + ideal_slice_h_px) as u32;
@@ -273,6 +345,7 @@ pub fn calculate_slices(
 
         slices.push(SliceInfo {
             page_index: page_idx,
+            source_page_index,
             y_start_px: curr_y,
             y_end_px: actual_bottom,
             height_px: slice_h_px,
@@ -378,60 +451,59 @@ fn build_overlay_configs(
 
 /// 为一组切片构建纯图片基础 PDF
 fn render_base_slices_pdf(
-    source: &DynamicImage,
-    slices: &[SliceInfo],
+    input_path: &Path,
+    sources: &[SourceSlicePlan],
     paper_w_mm: f64,
     paper_h_mm: f64,
     content_w_mm: f64,
     args: &LongSliceArgs,
 ) -> Result<Vec<u8>> {
-    let img_w = source.width();
     let margin_mm = args.margin_mm.max(0.0);
     let header_reserve_mm = if args.header_enabled { 8.0 } else { 0.0 };
-
     let mut doc = PdfDocument::new("Docsy Long Document Slice");
 
-    for slice in slices {
-        let cropped = source.crop_imm(0, slice.y_start_px, img_w, slice.height_px);
-        let raw = RawImage::from_dynamic_image(cropped).map_err(|e| anyhow::anyhow!(e))?;
-        let image_id = doc.add_image(&raw);
+    for planned in sources {
+        crate::operations::check_current_cancelled()?;
+        let source = load_source_page_as_image(input_path, planned.source_page_index)?;
+        let img_w = source.width();
+        for slice in &planned.slices {
+            let cropped = source.crop_imm(0, slice.y_start_px, img_w, slice.height_px);
+            let raw = RawImage::from_dynamic_image(cropped).map_err(|e| anyhow::anyhow!(e))?;
+            let image_id = doc.add_image(&raw);
 
-        let content_x_mm = match args.alignment.as_str() {
-            "left" => margin_mm,
-            "right" => paper_w_mm - margin_mm - content_w_mm,
-            _ => (paper_w_mm - content_w_mm) / 2.0,
-        };
+            let content_x_mm = match args.alignment.as_str() {
+                "left" => margin_mm,
+                "right" => paper_w_mm - margin_mm - content_w_mm,
+                _ => (paper_w_mm - content_w_mm) / 2.0,
+            };
 
-        let content_y_bottom_mm = paper_h_mm - margin_mm - header_reserve_mm - slice.height_mm;
+            let content_y_bottom_mm =
+                paper_h_mm - margin_mm - header_reserve_mm - slice.height_mm;
+            let target_w_pt = content_w_mm * 72.0 / 25.4;
+            let native_w_pt = img_w as f64 * 72.0 / 300.0;
+            let scale = (target_w_pt / native_w_pt) as f32;
 
-        // 核心数学修正：
-        // printpdf 在 300 DPI 下，图片的默认点宽为 img_w * 72.0 / 300.0。
-        // 目标纸面点宽为 content_w_mm * 72.0 / 25.4。
-        // scale 即为两者的比值。
-        let target_w_pt = content_w_mm * 72.0 / 25.4;
-        let native_w_pt = img_w as f64 * 72.0 / 300.0;
-        let scale = (target_w_pt / native_w_pt) as f32;
-
-        let mut ops = Vec::new();
-        ops.push(Op::SaveGraphicsState);
-        ops.push(Op::UseXobject {
-            id: image_id,
-            transform: XObjectTransform {
-                translate_x: Some(Pt((content_x_mm * 72.0 / 25.4) as f32)),
-                translate_y: Some(Pt((content_y_bottom_mm * 72.0 / 25.4) as f32)),
-                scale_x: Some(scale),
-                scale_y: Some(scale),
-                dpi: Some(300.0),
-                ..Default::default()
-            },
-        });
-        ops.push(Op::RestoreGraphicsState);
-
-        doc.pages.push(PdfPage::new(
-            Mm(paper_w_mm as f32),
-            Mm(paper_h_mm as f32),
-            ops,
-        ));
+            let ops = vec![
+                Op::SaveGraphicsState,
+                Op::UseXobject {
+                    id: image_id,
+                    transform: XObjectTransform {
+                        translate_x: Some(Pt((content_x_mm * 72.0 / 25.4) as f32)),
+                        translate_y: Some(Pt((content_y_bottom_mm * 72.0 / 25.4) as f32)),
+                        scale_x: Some(scale),
+                        scale_y: Some(scale),
+                        dpi: Some(300.0),
+                        ..Default::default()
+                    },
+                },
+                Op::RestoreGraphicsState,
+            ];
+            doc.pages.push(PdfPage::new(
+                Mm(paper_w_mm as f32),
+                Mm(paper_h_mm as f32),
+                ops,
+            ));
+        }
     }
 
     Ok(doc.save(&PdfSaveOptions::default(), &mut Vec::new()))
@@ -584,12 +656,11 @@ fn apply_overlay_if_needed(
         total_pages,
     )?;
 
-    // 优先采用纯 Rust 内存合并（零子进程、零外部依赖）
-    if let Ok(merged) = apply_overlay_in_memory(base_pdf_bytes, &overlay_bytes) {
-        return Ok(merged);
-    }
+    let native_error = match apply_overlay_in_memory(base_pdf_bytes, &overlay_bytes) {
+        Ok(merged) => return Ok(merged),
+        Err(error) => error,
+    };
 
-    // 若纯 Rust 遇到异常，安全回退到外部 qpdf（若已安装）
     let qpdf_tool = crate::external::QpdfTool;
     if let Ok(bin) = qpdf_tool.binary_path() {
         let base_temp = temp_named_path("docsy_base_slice", "pdf");
@@ -608,18 +679,24 @@ fn apply_overlay_if_needed(
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
 
-        let status = cmd.status()?;
+        let status = cmd.status();
         let _ = fs::remove_file(&base_temp);
         let _ = fs::remove_file(&overlay_temp);
 
-        if status.success() && output_temp.exists() {
-            let res = fs::read(&output_temp);
-            let _ = fs::remove_file(&output_temp);
-            return Ok(res?);
+        match status {
+            Ok(status) if status.success() && output_temp.exists() => {
+                let res = fs::read(&output_temp);
+                let _ = fs::remove_file(&output_temp);
+                return Ok(res?);
+            }
+            Ok(_) => {
+                let _ = fs::remove_file(&output_temp);
+            }
+            Err(error) => return Err(error).context("调用 qpdf 合并页眉页脚失败"),
         }
     }
 
-    Ok(base_pdf_bytes.to_vec())
+    Err(native_error).context("页眉页脚覆盖层合并失败，qpdf 回退也不可用")
 }
 
 /// 采用纯 Rust 图像管线合成 A4 预览图（零外部 Poppler / pdftoppm 依赖）
@@ -679,7 +756,51 @@ fn render_preview_image(
     Ok(format!("data:image/png;base64,{}", b64))
 }
 
-/// 生成与最终导出 100% 一致的高精度 A4 预览
+fn render_full_preview_page(
+    input_path: &Path,
+    planned: &SourceSlicePlan,
+    slice: &SliceInfo,
+    paper_w_mm: f64,
+    paper_h_mm: f64,
+    content_w_mm: f64,
+    args: &LongSliceArgs,
+    total_pages: usize,
+) -> Result<String> {
+    let single_source = SourceSlicePlan {
+        source_page_index: planned.source_page_index,
+        width: planned.width,
+        height: planned.height,
+        slices: vec![slice.clone()],
+    };
+    let base_bytes = render_base_slices_pdf(
+        input_path,
+        &[single_source],
+        paper_w_mm,
+        paper_h_mm,
+        content_w_mm,
+        args,
+    )?;
+    let final_bytes = apply_overlay_if_needed(
+        &base_bytes,
+        1,
+        paper_w_mm,
+        paper_h_mm,
+        args,
+        slice.page_index as u32,
+        total_pages as u32,
+    )?;
+    let temp_pdf = temp_named_path("docsy_preview_page", "pdf");
+    fs::write(&temp_pdf, final_bytes)?;
+    let png_path = super::preview::render_pdf_page_to_png(&temp_pdf, 1, 100);
+    let _ = fs::remove_file(&temp_pdf);
+    let png_path = png_path.context("渲染完整 A4 预览失败")?;
+    let png_bytes = fs::read(&png_path)?;
+    let _ = fs::remove_file(png_path);
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png_bytes);
+    Ok(format!("data:image/png;base64,{}", b64))
+}
+
+/// 生成与最终导出一致的 A4 预览
 pub fn preview_long_slice(
     args: &LongSliceArgs,
     preview_page: usize,
@@ -689,98 +810,62 @@ pub fn preview_long_slice(
         bail!("输入文件不存在: {}", args.input_path);
     }
 
-    let is_pdf = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.eq_ignore_ascii_case("pdf"))
-        .unwrap_or(false);
-
-    let source = load_source_as_image(path)?;
-    let (img_w, img_h) = source.dimensions();
-
-    let gray = if args.smart_cut {
-        Some(source.to_luma8())
-    } else {
-        None
-    };
-
-    let (paper_w_mm, paper_h_mm, content_w_mm, slices) =
-        calculate_slices(img_w, img_h, gray.as_ref(), args);
-
-    let total_pages = slices.len();
+    let plan = build_slice_plan(path, args)?;
+    let total_pages = plan.slices.len();
     let target_page_idx = preview_page.clamp(1, total_pages.max(1));
+    let slice = plan
+        .slices
+        .get(target_page_idx - 1)
+        .context("未能生成当前页面的切片预览")?;
+    let planned = plan
+        .sources
+        .iter()
+        .find(|source| source.source_page_index == slice.source_page_index)
+        .context("切片预览缺少来源页面")?;
+    let source_page_index = planned.source_page_index;
+    let source_width = planned.width;
+    let source_height = planned.height;
+    let (header, footer, extra) = build_overlay_configs(args, args.margin_mm);
+    let overlay_requested = header.is_some() || footer.is_some() || !extra.is_empty();
+    let mut preview_data_url = None;
 
-    let preview_data_url = if let Some(slice) = slices.get(target_page_idx - 1) {
-        // 优先使用纯 Rust 原生合成 A4 预览图（零外部 Poppler / pdftoppm 依赖）
+    if !overlay_requested {
+        let source = load_source_page_as_image(path, source_page_index)?;
         if let Ok(data_url) = render_preview_image(
             &source,
             slice,
-            paper_w_mm,
-            paper_h_mm,
-            content_w_mm,
+            plan.paper_w_mm,
+            plan.paper_h_mm,
+            plan.content_w_mm,
             args,
         ) {
-            Some(data_url)
-        } else {
-            // 若纯 Rust 遇到异常，安全回退到 Poppler 渲染
-            let single_slice = vec![SliceInfo {
-                page_index: target_page_idx,
-                y_start_px: slice.y_start_px,
-                y_end_px: slice.y_end_px,
-                height_px: slice.height_px,
-                height_mm: slice.height_mm,
-            }];
-
-            let base_bytes = render_base_slices_pdf(
-                &source,
-                &single_slice,
-                paper_w_mm,
-                paper_h_mm,
-                content_w_mm,
-                args,
-            )?;
-
-            let final_bytes = apply_overlay_if_needed(
-                &base_bytes,
-                1,
-                paper_w_mm,
-                paper_h_mm,
-                args,
-                target_page_idx as u32,
-                total_pages as u32,
-            )?;
-
-            let temp_pdf = temp_named_path("docsy_preview_page", "pdf");
-            fs::write(&temp_pdf, final_bytes)?;
-
-            let png_path = super::preview::render_pdf_page_to_png(&temp_pdf, 1, 100);
-            let _ = fs::remove_file(&temp_pdf);
-
-            if let Ok(path) = png_path {
-                let png_bytes = fs::read(&path)?;
-                let _ = fs::remove_file(path);
-                let b64 = base64::Engine::encode(
-                    &base64::engine::general_purpose::STANDARD,
-                    png_bytes,
-                );
-                Some(format!("data:image/png;base64,{}", b64))
-            } else {
-                None
-            }
+            preview_data_url = Some(data_url);
         }
-    } else {
-        None
-    };
+    }
+    if preview_data_url.is_none() {
+        preview_data_url = Some(render_full_preview_page(
+            path,
+            planned,
+            slice,
+            plan.paper_w_mm,
+            plan.paper_h_mm,
+            plan.content_w_mm,
+            args,
+            total_pages,
+        )?);
+    }
 
     Ok(LongSlicePreviewResult {
-        source_width: img_w,
-        source_height: img_h,
-        is_pdf,
+        source_width,
+        source_height,
+        source_page_index,
+        source_page_count: plan.sources.len(),
+        is_pdf: is_pdf_path(path),
         total_pages,
-        page_width_mm: paper_w_mm,
-        page_height_mm: paper_h_mm,
-        content_width_mm: content_w_mm,
-        slices,
+        page_width_mm: plan.paper_w_mm,
+        page_height_mm: plan.paper_h_mm,
+        content_width_mm: plan.content_w_mm,
+        slices: plan.slices,
         preview_data_url,
         preview_page: target_page_idx,
     })
@@ -795,23 +880,15 @@ pub fn process_long_slice(args: &LongSliceArgs) -> Result<LongSliceResult> {
         bail!("输入文件不存在: {}", args.input_path);
     }
 
-    let source = load_source_as_image(input_path)?;
-    let (img_w, img_h) = source.dimensions();
-
-    let gray = if args.smart_cut {
-        Some(source.to_luma8())
-    } else {
-        None
-    };
-
-    let (paper_w_mm, paper_h_mm, content_w_mm, slices) =
-        calculate_slices(img_w, img_h, gray.as_ref(), args);
-
-    if slices.is_empty() {
+    let plan = build_slice_plan(input_path, args)?;
+    if plan.slices.is_empty() {
         bail!("未能对输入文件划分出切片页面");
     }
-
-    let total_pages = slices.len();
+    let total_pages = plan.slices.len();
+    let first_source = plan.sources.first().context("输入文件没有可处理页面")?;
+    let source_width = first_source.width;
+    let source_height = first_source.height;
+    let source_page_count = plan.sources.len();
 
     let parent = match &args.output_dir {
         Some(dir) if !dir.trim().is_empty() => PathBuf::from(dir),
@@ -829,29 +906,24 @@ pub fn process_long_slice(args: &LongSliceArgs) -> Result<LongSliceResult> {
     });
 
     let target_stem = format!("{}_A4", safe_file_stem(base_name));
-
-    // 1. 生成所有页面的基础切片图像 PDF
     let base_bytes = render_base_slices_pdf(
-        &source,
-        &slices,
-        paper_w_mm,
-        paper_h_mm,
-        content_w_mm,
+        input_path,
+        &plan.sources,
+        plan.paper_w_mm,
+        plan.paper_h_mm,
+        plan.content_w_mm,
         args,
     )?;
-
-    // 2. 注入页眉页脚（子集化字体，文件体积小且保真）
     let final_bytes = apply_overlay_if_needed(
         &base_bytes,
         total_pages,
-        paper_w_mm,
-        paper_h_mm,
+        plan.paper_w_mm,
+        plan.paper_h_mm,
         args,
         1,
         total_pages as u32,
     )?;
 
-    // 3. 安全保存至输出目录
     let temp_output = temp_named_path("docsy_long_slice", "pdf");
     fs::write(&temp_output, final_bytes).context("写入临时 PDF 失败")?;
 
@@ -865,8 +937,9 @@ pub fn process_long_slice(args: &LongSliceArgs) -> Result<LongSliceResult> {
     Ok(LongSliceResult {
         output_path: final_output.to_string_lossy().to_string(),
         total_pages,
-        source_width: img_w,
-        source_height: img_h,
+        source_width,
+        source_height,
+        source_page_count,
     })
 }
 
@@ -899,6 +972,8 @@ mod tests {
                 footer_enabled: false,
                 footer_page_number_style: "page_of_total".into(),
             },
+            1,
+            1,
         );
 
         assert_eq!(paper_w, 210.0);
@@ -968,11 +1043,78 @@ mod tests {
 
         let preview = preview_long_slice(&args, 1).expect("预览生成失败");
         assert_eq!(preview.total_pages, result.total_pages);
-        assert!(preview.preview_data_url.is_some());
+        assert_eq!(preview.source_page_count, 1);
+        let data_url = preview.preview_data_url.as_ref().unwrap();
+        let encoded = data_url.strip_prefix("data:image/png;base64,").unwrap();
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+            .unwrap();
+        let preview_image = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        let (width, height) = preview_image.dimensions();
+        let ink_in_region = |start_y, end_y| {
+            (start_y..end_y)
+                .flat_map(|y| (0..width).map(move |x| (x, y)))
+                .filter(|(x, y)| {
+                    let pixel = preview_image.get_pixel(*x, *y).0;
+                    pixel[0] < 200 || pixel[1] < 200 || pixel[2] < 200
+                })
+                .count()
+        };
+        assert!(ink_in_region(0, 35) > 0, "预览缺少页眉文字");
+        assert!(
+            ink_in_region(height.saturating_sub(35), height) > 0,
+            "预览缺少页脚页码"
+        );
+    }
+
+    #[test]
+    fn test_multi_page_pdf_processes_every_source_page() {
+        let dir = crate::util::fs::temp_named_path("docsy_test_multipage_slice", "dir");
+        fs::create_dir_all(&dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
+        let input = dir.join("two_pages.pdf");
+        let mut pdf = PdfDocument::new("Two long pages");
+        for _ in 0..2 {
+            pdf.pages.push(PdfPage::new(Mm(80.0), Mm(400.0), Vec::new()));
+        }
+        fs::write(&input, pdf.save(&PdfSaveOptions::default(), &mut Vec::new())).unwrap();
+        let args = LongSliceArgs {
+            input_path: input.to_string_lossy().to_string(),
+            output_dir: Some(dir.to_string_lossy().to_string()),
+            output_filename: Some("two_pages_sliced".to_string()),
+            orientation: "portrait".into(),
+            margin_mm: 5.0,
+            content_width_mode: "fit".into(),
+            custom_width_percent: 100.0,
+            alignment: "center".into(),
+            smart_cut: false,
+            overlap_mm: 0.0,
+            header_enabled: false,
+            header_title: None,
+            header_date: false,
+            header_date_prefix: false,
+            custom_date: None,
+            footer_enabled: false,
+            footer_page_number_style: "page_of_total".into(),
+        };
+
+        let result = process_long_slice(&args).expect("多页 PDF 切片失败");
+        assert_eq!(result.source_page_count, 2);
+        assert!(result.total_pages >= 2);
+        let output = lopdf::Document::load(&result.output_path).unwrap();
+        assert_eq!(output.get_pages().len(), result.total_pages);
+
+        let preview = preview_long_slice(&args, result.total_pages).unwrap();
+        assert_eq!(preview.source_page_count, 2);
+        assert_eq!(preview.source_page_index, 2);
+        let source_pages = preview
+            .slices
+            .iter()
+            .map(|slice| slice.source_page_index)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(source_pages, [1, 2].into_iter().collect());
         assert!(preview
-            .preview_data_url
-            .as_ref()
-            .unwrap()
-            .starts_with("data:image/png;base64,"));
+            .slices
+            .windows(2)
+            .all(|pair| pair[0].page_index + 1 == pair[1].page_index));
     }
 }

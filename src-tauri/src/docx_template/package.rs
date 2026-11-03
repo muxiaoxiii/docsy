@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Write};
 use std::path::Path;
 
-use zip::write::FileOptions;
+use zip::write::SimpleFileOptions;
 use zip::ZipArchive;
 
 use super::TemplateManifest;
@@ -62,7 +62,7 @@ pub fn write_docsytpl_package(
     let temp_path = atomic_temp_path(path);
     let file = std::fs::File::create(&temp_path)?;
     let mut writer = zip::ZipWriter::new(file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     writer.start_file(MANIFEST_PATH, options)?;
     writer.write_all(serde_json::to_vec_pretty(manifest)?.as_slice())?;
@@ -89,7 +89,7 @@ fn read_zip_package(bytes: &[u8], filter_xml_only: bool, label: &str) -> Result<
     let mut total_xml_size = 0_u64;
     for idx in 0..archive.len() {
         let mut file = archive.by_index(idx)?;
-        let name = file.name().to_string();
+        let name = file.name()?.into_owned();
         if file.is_dir() {
             continue;
         }
@@ -135,7 +135,7 @@ fn write_zip_package(path: &Path, pkg: &Package) -> Result<()> {
     let temp_path = atomic_temp_path(path);
     let file = std::fs::File::create(&temp_path)?;
     let mut writer = zip::ZipWriter::new(file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for (name, data) in pkg {
         writer.start_file(name, options)?;
         writer.write_all(data)?;

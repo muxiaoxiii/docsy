@@ -455,7 +455,7 @@ mod tests {
         assert_eq!(pdf.get_pages().len(), 1);
         let page_id = *pdf.get_pages().values().next().unwrap();
         let content =
-            lopdf::content::Content::decode(&pdf.get_page_content(page_id).unwrap()).unwrap();
+            lopdf::content::Content::decode(&pdf.get_page_content(page_id)).unwrap();
         assert_eq!(
             content
                 .operations
@@ -555,7 +555,7 @@ mod tests {
                 (bounds[2].as_float().unwrap() as f64 * 25.4 / 72.0 - preview.width).abs() < 0.001
             );
             let content =
-                lopdf::content::Content::decode(&pdf.get_page_content(page_id).unwrap()).unwrap();
+                lopdf::content::Content::decode(&pdf.get_page_content(page_id)).unwrap();
             let matrices: Vec<_> = content
                 .operations
                 .iter()
@@ -656,7 +656,7 @@ mod tests {
             assert!((width * 25.4 / 72.0 - expected_page.0).abs() < 0.1);
             assert!((height * 25.4 / 72.0 - expected_page.1).abs() < 0.1);
             let content =
-                lopdf::content::Content::decode(&pdf.get_page_content(page).unwrap()).unwrap();
+                lopdf::content::Content::decode(&pdf.get_page_content(page)).unwrap();
             let m = content
                 .operations
                 .iter()

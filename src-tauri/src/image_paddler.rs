@@ -2242,14 +2242,14 @@ fn post_process_docx(raw_bytes: &[u8], output_path: &Path) -> Result<()> {
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
-        let name = file.name().to_string();
+        let name = file.name()?.into_owned();
 
         if name == "word/numbering.xml" {
             // Drop unreferenced numbering.xml component
             continue;
         }
 
-        let options = zip::write::FileOptions::default()
+        let options = zip::write::SimpleFileOptions::default()
             .compression_method(file.compression())
             .unix_permissions(file.unix_mode().unwrap_or(0o644));
 
@@ -2689,7 +2689,7 @@ mod tests {
         // docx-rs 的图片 rid 来自进程级全局计数器，并行测试下序号不固定，
         // 只断言存在一张 rIdImage*.png
         assert!(archive
-            .file_names()
+            .file_names().map(Result::unwrap)
             .any(|n| n.starts_with("word/media/rIdImage") && n.ends_with(".png")));
 
         let mut document_xml = String::new();
@@ -3351,7 +3351,7 @@ mod caption_and_destination_tests {
         let doc = lopdf::Document::load(path).unwrap();
         let page = *doc.get_pages().values().next().unwrap();
         let content =
-            lopdf::content::Content::decode(&doc.get_page_content(page).unwrap()).unwrap();
+            lopdf::content::Content::decode(&doc.get_page_content(page)).unwrap();
         let mut images = Vec::new();
         let mut text = Vec::new();
         for op in content.operations {
@@ -3398,7 +3398,7 @@ mod caption_and_destination_tests {
                     let extent = re.captures(&xml).unwrap();
                     let ratio = extent[2].parse::<f64>().unwrap() / extent[1].parse::<f64>().unwrap();
                     assert!((ratio - expected.1 as f64 / expected.0 as f64).abs() < 0.001);
-                    let media = zip.file_names().find(|name| name.starts_with("word/media/") && !name.ends_with('/')).unwrap().to_string();
+                    let media = zip.file_names().map(Result::unwrap).find(|name| name.starts_with("word/media/") && !name.ends_with('/')).unwrap().to_string();
                     let mut bytes = Vec::new();
                     zip.by_name(&media).unwrap().read_to_end(&mut bytes).unwrap();
                     let decoded = image::load_from_memory(&bytes).unwrap().to_rgb8();

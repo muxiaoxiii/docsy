@@ -245,9 +245,7 @@ pub fn collect_effective_dpi(
             page_index + 1,
             page_total,
         ));
-        let Ok(content_bytes) = doc.get_page_content(page_id) else {
-            continue;
-        };
+        let content_bytes = doc.get_page_content(page_id);
         let Ok(content) = Content::decode(&content_bytes) else {
             continue;
         };

@@ -32,4 +32,9 @@ This directory contains vendored crates from `storytold/pdfcraft`.
 4. **CCITT Encoder Line Width Conversion (`crates/filters/src/ccitt.rs`)**:
    - Cast line width to `u32` for `encoder.encode_line`.
 
+5. **Standalone Crate Manifests and Minimal Distribution**:
+   - Replaced upstream workspace inheritance with explicit crate versions and path dependencies.
+   - Kept the minimal Docsy README and prior NOTICE attributions; excluded unrelated applications, assets and other vendored crates.
+   - Added `crates/organize/examples/docsy_probe.rs` for local backend verification.
+
 *(Note: Upstream v0.18.0 has officially incorporated the previous patches for tolerant stream delimiter spacing and strict ISO 32000-1 `/UserUnit` non-inheritance).*

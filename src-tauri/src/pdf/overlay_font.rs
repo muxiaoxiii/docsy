@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use lopdf::content::Operation;
 use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, Stream, StringFormat};
 use printpdf::{
-    generate_cmap_string, generate_gid_to_cid_map, get_normalized_widths_cff,
+    cff_charset_gid_to_cid_map, generate_cmap_string, get_normalized_widths_codes,
     get_normalized_widths_ttf, FontId, FontType, ParsedFont,
 };
 use std::collections::BTreeMap;
@@ -198,7 +198,7 @@ fn try_create_embedded_overlay_font(
     let mut parsed_warnings = Vec::new();
     let parsed_subset = ParsedFont::from_bytes(&subset_bytes, 0, &mut parsed_warnings)
         .ok_or_else(|| anyhow::anyhow!("解析字体子集失败: {}", path.display()))?;
-    let char_to_subset_gid = char_to_original_gid
+    let mut char_to_subset_gid = char_to_original_gid
         .into_iter()
         .filter_map(|(ch, original_gid)| {
             glyph_ids
@@ -207,19 +207,43 @@ fn try_create_embedded_overlay_font(
                 .map(|position| (ch, position as u16))
         })
         .collect::<BTreeMap<_, _>>();
-    let new_glyph_ids = char_to_subset_gid
+    let glyph_ids = char_to_subset_gid
         .iter()
-        .map(|(ch, gid)| (*gid, *ch))
+        .map(|(ch, gid)| (*gid, ch.to_string()))
         .collect::<Vec<_>>();
-    let font_id = FontId(resource_name.to_string());
-    let to_unicode = generate_cmap_string(&parsed_subset, &font_id, &new_glyph_ids);
     let widths = match parsed_subset.font_type {
-        FontType::TrueType => get_normalized_widths_ttf(&parsed_subset, &new_glyph_ids),
+        FontType::TrueType => get_normalized_widths_ttf(&parsed_subset, &glyph_ids),
         _ => {
-            let gid_to_cid_map = generate_gid_to_cid_map(&parsed_subset, &new_glyph_ids);
-            get_normalized_widths_cff(&parsed_subset, &gid_to_cid_map)
+            let gid_to_cid = cff_charset_gid_to_cid_map(&subset_bytes, 0);
+            let mut entries = glyph_ids
+                .iter()
+                .map(|(gid, _)| {
+                    let cid = gid_to_cid
+                        .as_ref()
+                        .and_then(|mapping| mapping.get(gid).copied())
+                        .unwrap_or(*gid);
+                    (cid, *gid)
+                })
+                .collect::<Vec<_>>();
+            entries.sort_unstable_by_key(|(cid, _)| *cid);
+            if let Some(mapping) = gid_to_cid {
+                char_to_subset_gid = char_to_subset_gid
+                    .into_iter()
+                    .map(|(ch, gid)| {
+                        let cid = mapping.get(&gid).copied().unwrap_or(gid);
+                        (ch, cid)
+                    })
+                    .collect();
+            }
+            get_normalized_widths_codes(&parsed_subset, &entries)
         }
     };
+    let glyph_ids = char_to_subset_gid
+        .iter()
+        .map(|(ch, gid)| (*gid, ch.to_string()))
+        .collect::<Vec<_>>();
+    let font_id = FontId(resource_name.to_string());
+    let to_unicode = generate_cmap_string(&parsed_subset, &font_id, &glyph_ids);
     let object_id = add_subset_font_to_doc(
         doc,
         resource_name,

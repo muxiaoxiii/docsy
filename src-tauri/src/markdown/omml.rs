@@ -176,7 +176,10 @@ pub fn from_mathml(xml: &str) -> Option<String> {
                     let a = a.ok()?;
                     attrs.push((
                         String::from_utf8(a.key.as_ref().to_vec()).ok()?,
-                        a.decode_and_unescape_value(reader.decoder())
+                        a.decoded_and_normalized_value(
+                            quick_xml::XmlVersion::Implicit1_0,
+                            reader.decoder(),
+                        )
                             .ok()?
                             .into_owned(),
                     ));
@@ -191,7 +194,14 @@ pub fn from_mathml(xml: &str) -> Option<String> {
                 }
             }
             Event::Text(e) => {
-                stack.last_mut()?.text.push_str(&e.unescape().ok()?);
+                let decoded = e.decode().ok()?;
+                let unescaped = quick_xml::escape::unescape(&decoded).ok()?;
+                stack.last_mut()?.text.push_str(&unescaped);
+            }
+            Event::GeneralRef(e) => {
+                let reference = format!("&{};", e.decode().ok()?);
+                let unescaped = quick_xml::escape::unescape(&reference).ok()?;
+                stack.last_mut()?.text.push_str(&unescaped);
             }
             Event::End(_) => {
                 let node = stack.pop()?;
@@ -232,11 +242,11 @@ mod tests {
         ] {
             assert!(result.contains(tag), "{tag}");
         }
-        assert!(from_mathml(
+        let escaped = from_mathml(
             "<math><mi>x</mi><mspace width=\"0.2em\"/><mo>&lt;</mo><mn>2</mn></math>"
         )
-        .unwrap()
-        .contains("&lt;"));
+        .unwrap();
+        assert!(escaped.contains("&lt;"), "{escaped}");
     }
     #[test]
     fn unsupported_or_untrusted_math_uses_image_fallback() {

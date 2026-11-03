@@ -125,10 +125,21 @@ fn parse_children<R: std::io::BufRead>(
                 });
             }
             Ok(Event::Text(e)) => {
-                let text = e.unescape().context("XML 文本节点转义失败")?.to_string();
+                let text = quick_xml::escape::unescape(
+                    &e.decode().context("XML 文本节点解码失败")?,
+                )
+                .context("XML 文本节点转义失败")?
+                .to_string();
                 if !text.is_empty() {
                     children.push(XmlNode::Text(text));
                 }
+            }
+            Ok(Event::GeneralRef(e)) => {
+                let reference = format!("&{};", e.decode().context("XML 实体引用解码失败")?);
+                let text = quick_xml::escape::unescape(&reference)
+                    .context("XML 实体引用转义失败")?
+                    .to_string();
+                children.push(XmlNode::Text(text));
             }
             Ok(Event::CData(e)) => {
                 // CDATA 内容不再静默丢弃：按文本节点保留（写出时重新转义，
@@ -180,7 +191,7 @@ fn parse_attributes(
                     return None;
                 }
             };
-            match attr.decode_and_unescape_value(decoder) {
+            match attr.decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, decoder) {
                 Ok(value) => Some((key, value.to_string())),
                 Err(err) => {
                     log::warn!("XML 属性 {key} 的值反转义失败，按空值处理: {err}");

@@ -1,0 +1,13 @@
+[advisories]
+ignore = [
+    # Docsy calls decompress_with_extract_fn with entry-name traversal checks and
+    # decompression limits, not the vulnerable default decompress_impl extraction.
+    "RUSTSEC-2026-0245",
+    # zip 8.6 remains only through docx-rs 0.4.22. Its source contains no
+    # ZipArchive/ZipStreamReader extract calls; Docsy also uses bounded manual IO.
+    # Re-evaluate these exceptions if docx-rs or archive extraction code changes.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+    "RUSTSEC-2026-0429",
+]

@@ -11,7 +11,7 @@ fn count_yellow(docx: &PathBuf) -> usize {
     let mut count = 0usize;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).unwrap();
-        let name = file.name().to_string();
+        let name = file.name().unwrap().into_owned();
         if !(name.ends_with(".xml") && (name.contains("word/") || name.contains("header") || name.contains("footer") || name.contains("document"))) {
             continue;
         }

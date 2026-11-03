@@ -193,7 +193,7 @@ SOFTWARE.
       License.
 ```
 
-## PdfCraft（基于 upstream commit `4db6ac4ae2448df6389d8bb0bc54db6ba175721c` 的修改版）
+## PdfCraft（v0.18.0，基于 upstream commit `3936f93a1479366a951206fc6d3094680fe2d3dc` 的修改版）
 
 - 来源：vendored 于 `src-tauri/vendor/pdfcraft`
 - 上游项目：https://github.com/storytold/pdfcraft
@@ -202,9 +202,12 @@ SOFTWARE.
 - 详细说明与补丁记录：见 `src-tauri/vendor/pdfcraft/VENDOR.md`
 
 用于 PDF 原生合并、单页与多页提取、元数据解析以及表单/批注外观压平。Docsy 包含以下本地安全及兼容性补丁：
-1. `pdfcraft_cos`: 宽松解析兼容，损坏 xref/trailer 及缺少 startxref 标记容错恢复。
-2. `pdfcraft_organize`: 修正 ISO 32000-1 规范下 UserUnit 属性非继承行为，防止页面尺寸与正文坐标错位。
-3. `pdfcraft_organize`: 页面提取与合并时保留 NeedAppearances 字段，防止旧版表单外观固化。
+1. `pdfcraft_organize`: 公开页面树遍历接口，供 Docsy 提取页面几何信息。
+2. `pdfcraft_organize`: 页面提取与合并时保留 NeedAppearances 字段，防止旧版表单外观固化。
+3. `pdfcraft_organize`: 清理未使用 XObject 时保护 Pattern、ExtGState、Shading、Annots 及空内容流。
+4. `pdfcraft_filters`: 修正 CCITT 编码器行宽类型转换。
+
+同时 vendored 上游 `hayro-syntax 0.7.2` 与 `hayro-jbig2 0.3`，均为 MIT OR Apache-2.0；许可证原文保留在各自目录。
 
 许可证全文见上文 Apache License 2.0 及下述 MIT License 原文：
 

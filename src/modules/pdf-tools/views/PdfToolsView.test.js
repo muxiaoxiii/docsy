@@ -305,4 +305,48 @@ describe('长图处理界面链路', () => {
     expect(state.longSliceFiles.value[0].statusText).toBe('已生成 4 页')
     expect(state.longSliceFiles.value[0].statusType).toBe('success')
   })
+
+  it('快速切换文件时忽略过期的预览响应', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    let resolveFirst
+    let resolveSecond
+    tauriCallSafe
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveSecond = resolve }))
+    state.addLongSliceFiles(['/first.png', '/second.png'])
+    state.onSelectLongSliceItem(1)
+
+    resolveSecond({
+      ok: true,
+      data: {
+        sourceWidth: 200,
+        sourceHeight: 600,
+        sourcePageIndex: 2,
+        sourcePageCount: 3,
+        totalPages: 2,
+        previewPage: 1,
+        previewDataUrl: 'second-preview',
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(state.currentLongSlicePreview.value.previewDataUrl).toBe('second-preview')
+
+    resolveFirst({
+      ok: true,
+      data: {
+        sourceWidth: 100,
+        sourceHeight: 1000,
+        totalPages: 9,
+        previewPage: 1,
+        previewDataUrl: 'stale-preview',
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(state.currentLongSlicePreview.value.previewDataUrl).toBe('second-preview')
+    expect(state.currentLongSlicePreview.value.sourcePageIndex).toBe(2)
+    expect(state.longSliceFiles.value[1].dimText).toBe('200 × 600')
+    expect(state.previewLoading.value).toBe(false)
+  })
 })

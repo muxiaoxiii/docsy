@@ -22,7 +22,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 thiserror = "2"
-zip = "0.6"
+zip = { version = "9.2", default-features = false, features = ["deflate"] }
 sevenz-rust = "0.6"
 regex = "1"
 include_dir = "0.7"
@@ -32,23 +32,23 @@ reqwest = { version = "0.12", features = ["blocking"] }
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 image = { version = "=0.25.5", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff"] }
-printpdf = { version = "0.9.1", features = ["images"] }
+printpdf = { version = "0.12.8", features = ["images"] }
 docx-rs = { version = "0.4.20", default-features = false }
-pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
-lopdf = { version = "0.39.0", default-features = false }
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
+lopdf = { version = "0.44.0", default-features = false }
 ttf-parser = "0.25.1"
 base64 = "0.22"
 encoding_rs = "0.8"
 open = "5"
 log = "0.4"
-allsorts = { version = "0.16.1", default-features = false }
+allsorts = { version = "0.16.1", default-features = false, features = ["flate2_rust"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 office_oxide = "0.1.12"
 docsy-anydoc = { path = "vendor/docsy-anydoc" }
-quick-xml = { version = "0.37", features = ["serialize", "encoding"] }
-calamine = { version = "0.26", features = ["dates"] }
-rust_xlsxwriter = "0.80"
+quick-xml = { version = "0.41", features = ["serialize", "encoding"] }
+calamine = { version = "0.38", features = ["dates"] }
+rust_xlsxwriter = "0.102"
 htmd = "0.5"
 pdfcraft-cos = { path = "vendor/pdfcraft/crates/cos" }
 pdfcraft-organize = { path = "vendor/pdfcraft/crates/organize" }

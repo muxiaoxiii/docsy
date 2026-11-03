@@ -863,7 +863,7 @@ fn extract_zip_file(
     let mut total_uncompressed = 0_u64;
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).context("读取 zip 条目失败")?;
-        let Some(enclosed) = file.enclosed_name().map(Path::to_path_buf) else {
+        let Some(enclosed) = file.enclosed_name() else {
             continue;
         };
         let output_path = output_dir.join(enclosed);

@@ -292,8 +292,8 @@ pub fn inject_equations(bytes: Vec<u8>, assets: &HashMap<String, Asset>) -> Resu
     let run = regex::Regex::new(r"(?s)<w:r(?:\s[^>]*)?>.*?</w:r>")?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
-        let name = entry.name().to_string();
-        let options = zip::write::FileOptions::default().compression_method(entry.compression());
+        let name = entry.name()?.into_owned();
+        let options = zip::write::SimpleFileOptions::default().compression_method(entry.compression());
         let mut data = Vec::new();
         entry.read_to_end(&mut data)?;
         if name == "word/document.xml" {
@@ -593,7 +593,7 @@ mod tests {
                 let mut content = String::new();
                 for i in 0..zip.len() {
                     let mut entry = zip.by_index(i).unwrap();
-                    if entry.name().ends_with(".xml") {
+                    if entry.name().unwrap().ends_with(".xml") {
                         entry.read_to_string(&mut content).unwrap();
                     }
                 }
@@ -605,7 +605,7 @@ mod tests {
             if format == "docx" {
                 assert_eq!(content.matches("<m:oMath>").count(), 1);
                 assert_eq!(content.matches("<w:drawing>").count(), 1);
-                assert!(content.contains("café cœur 日本語 한국어"));
+                assert!(content.contains("café cœur 日本語 한국어"), "{content}");
             }
             println!("{}", result.output_path);
         }
@@ -735,7 +735,7 @@ mod tests {
             } else {
                 let zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
                 assert_eq!(
-                    zip.file_names()
+                    zip.file_names().map(Result::unwrap)
                         .filter(|name| name.contains("/media/") && name.ends_with(".png"))
                         .count(),
                     5,

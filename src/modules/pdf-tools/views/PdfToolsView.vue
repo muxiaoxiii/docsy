@@ -530,6 +530,10 @@
                 </div>
 
                 <div class="preview-footer-info" v-if="currentLongSlicePreview">
+                  <span v-if="currentLongSlicePreview.isPdf && currentLongSlicePreview.sourcePageCount > 1">
+                    PDF 来源第 {{ currentLongSlicePreview.sourcePageIndex }} / {{ currentLongSlicePreview.sourcePageCount }} 页
+                  </span>
+                  <span v-if="currentLongSlicePreview.isPdf && currentLongSlicePreview.sourcePageCount > 1">·</span>
                   <span>{{ currentLongSlicePreview.sourceWidth }} × {{ currentLongSlicePreview.sourceHeight }} px</span>
                   <span>·</span>
                   <span>预计 {{ currentLongSlicePreview.totalPages }} 页</span>
@@ -1064,6 +1068,7 @@ const selectedLongSliceIndex = ref(0)
 const currentLongSlicePreview = ref(null)
 const currentPreviewPage = ref(1)
 const previewLoading = ref(false)
+let longSlicePreviewRequestId = 0
 
 const longSliceOrientation = ref('portrait')
 const longSliceMarginMm = ref(5)
@@ -1101,9 +1106,11 @@ function getLongSliceArgs(path, outputDir = null) {
 }
 
 async function refreshPreview() {
+  const requestId = ++longSlicePreviewRequestId
   const current = longSliceFiles.value[selectedLongSliceIndex.value]
   if (!current) {
     currentLongSlicePreview.value = null
+    previewLoading.value = false
     return
   }
   previewLoading.value = true
@@ -1113,6 +1120,7 @@ async function refreshPreview() {
       args,
       previewPage: currentPreviewPage.value,
     })
+    if (requestId !== longSlicePreviewRequestId) return
     if (res.ok && res.data) {
       currentLongSlicePreview.value = res.data
       currentPreviewPage.value = res.data.previewPage || res.data.preview_page || 1
@@ -1127,9 +1135,9 @@ async function refreshPreview() {
       current.statusType = 'danger'
     }
   } catch (err) {
-    console.error('preview error', err)
+    if (requestId === longSlicePreviewRequestId) console.error('preview error', err)
   } finally {
-    previewLoading.value = false
+    if (requestId === longSlicePreviewRequestId) previewLoading.value = false
   }
 }
 
@@ -1196,9 +1204,12 @@ async function selectLongSliceOutputDir() {
 
 function clearLongSliceFiles() {
   if (longSliceProcessing.value) return
+  longSlicePreviewRequestId++
   longSliceFiles.value = []
   currentLongSlicePreview.value = null
   selectedLongSliceIndex.value = 0
+  currentPreviewPage.value = 1
+  previewLoading.value = false
 }
 
 function removeLongSliceFile(index) {
@@ -1210,7 +1221,9 @@ function removeLongSliceFile(index) {
   if (longSliceFiles.value.length) {
     void refreshPreview()
   } else {
+    longSlicePreviewRequestId++
     currentLongSlicePreview.value = null
+    previewLoading.value = false
   }
 }
 

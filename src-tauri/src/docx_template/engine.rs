@@ -614,7 +614,7 @@ mod tests {
         let file = std::fs::File::create(&docx_path)?;
         let mut writer = zip::ZipWriter::new(file);
         let opts =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
         writer.start_file("[Content_Types].xml", opts)?;
         writer.write_all(content_types.as_bytes())?;
@@ -998,7 +998,7 @@ mod tests {
         let file = std::fs::File::create(&docx_path)?;
         let mut writer = zip::ZipWriter::new(file);
         let opts =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
         writer.start_file("[Content_Types].xml", opts)?;
         writer.write_all(content_types.as_bytes())?;

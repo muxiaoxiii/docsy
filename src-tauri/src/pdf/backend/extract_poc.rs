@@ -45,9 +45,7 @@ fn extract_page_spans(
     doc: &lopdf::Document,
     page_id: lopdf::ObjectId,
 ) -> Vec<TextSpan> {
-    let Ok(bytes) = doc.get_page_content(page_id) else {
-        return Vec::new();
-    };
+    let bytes = doc.get_page_content(page_id);
     let Ok(content) = lopdf::content::Content::decode(&bytes) else {
         return Vec::new();
     };

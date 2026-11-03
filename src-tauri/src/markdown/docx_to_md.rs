@@ -673,7 +673,10 @@ fn parse_image_rels(xml: &str) -> HashMap<String, String> {
                     let mut is_image = false;
                     for attr in e.attributes().flatten() {
                         let value = attr
-                            .decode_and_unescape_value(reader.decoder())
+                            .decoded_and_normalized_value(
+                                quick_xml::XmlVersion::Implicit1_0,
+                                reader.decoder(),
+                            )
                             .unwrap_or_default();
                         match attr.key.as_ref() {
                             b"Id" => id = Some(value.to_string()),

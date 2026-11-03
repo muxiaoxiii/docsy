@@ -1248,7 +1248,7 @@ mod tests {
                     .get(b"Resources")
                     .unwrap()
                     .clone();
-                let mut ops = Content::decode(&doc.get_page_content(page_id).unwrap())
+                let mut ops = Content::decode(&doc.get_page_content(page_id))
                     .unwrap()
                     .operations;
                 ops.extend(
