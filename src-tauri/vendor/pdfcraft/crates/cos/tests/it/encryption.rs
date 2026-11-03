@@ -2,6 +2,7 @@
 //! with our reader and with an independent one (hayro-syntax's decryption). Also editing
 //! encrypted documents incrementally, changing and removing passwords, and permissions.
 
+use std::io::Write;
 use std::sync::Arc;
 
 use pdfcraft_cos::{Algorithm, Auth, CosError, Document, NewEncryption, ObjRef, Object, PdfString, SaveOptions, write_full, write_incremental};
@@ -9,11 +10,16 @@ use pdfcraft_cos::{Algorithm, Auth, CosError, Document, NewEncryption, ObjRef, O
 const SECRET: &str = "BT /F1 18 Tf 20 100 Td (Secret page) Tj ET";
 
 fn fixture() -> Vec<u8> {
+    fixture_with("")
+}
+
+/// The fixture with `extra` added to the content stream's dictionary.
+fn fixture_with(extra: &str) -> Vec<u8> {
     let objs = [
         "<< /Type /Catalog /Pages 2 0 R /Metadata 6 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 200] >>".to_string(),
         "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
-        format!("<< /Length {} >>\nstream\n{SECRET}\nendstream", SECRET.len()),
+        format!("<< /Length {}{extra} >>\nstream\n{SECRET}\nendstream", SECRET.len()),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
         "<< /Type /Metadata /Subtype /XML /Length 22 >>\nstream\n<x:xmpmeta>meta</x:xmpmeta>\nendstream".replace("22", "26"),
         "<< /Title (Quarterly numbers) >>".to_string(),
@@ -209,11 +215,10 @@ fn unencrypted_metadata_is_left_readable() {
 #[test]
 fn qpdf_agrees() {
     let qpdf = pdfcraft_oracle::or_skip!(pdfcraft_oracle::qpdf());
-    let dir = std::env::temp_dir().join(format!("pdfcraft-enc-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = private_temp_dir("pdfcraft-enc");
     for alg in ALL {
         let path = dir.join(format!("{alg:?}.pdf"));
-        std::fs::write(&path, protect(alg, "user", "owner", -1)).unwrap();
+        std::fs::File::create_new(&path).and_then(|mut f| f.write_all(&protect(alg, "user", "owner", -1))).unwrap();
         for (pw, expect) in [("user", "user password"), ("owner", "owner password")] {
             let out = qpdf.command().arg(format!("--password={pw}")).arg("--show-encryption").arg(&path).output().unwrap();
             let text = String::from_utf8_lossy(&out.stdout);
@@ -223,6 +228,35 @@ fn qpdf_agrees() {
         }
     }
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A new directory for oracle files, private to this user: an unpredictable name (`RandomState`
+/// is seeded by the operating system), created by this call or not at all.
+fn private_temp_dir(prefix: &str) -> std::path::PathBuf {
+    use std::hash::{BuildHasher, Hasher};
+    let mut name = std::collections::hash_map::RandomState::new().build_hasher();
+    name.write_u32(std::process::id());
+    let dir = std::env::temp_dir().join(format!("{prefix}-{:016x}", name.finish()));
+    #[cfg(unix)]
+    let builder = {
+        let mut builder = std::fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+    };
+    #[cfg(not(unix))]
+    let builder = std::fs::DirBuilder::new();
+    builder.create(&dir).unwrap();
+    dir
+}
+
+/// Oracle files go in a directory this test created: another local account cannot have
+/// prepared it (or symlinks inside it) in advance.
+#[test]
+fn oracle_files_go_in_a_fresh_directory() {
+    let (a, b) = (private_temp_dir("pdfcraft-enc-probe"), private_temp_dir("pdfcraft-enc-probe"));
+    assert_ne!(a, b);
+    assert_eq!(std::fs::read_dir(&a).unwrap().count(), 0);
+    let _ = (std::fs::remove_dir(a), std::fs::remove_dir(b));
 }
 
 /// A signature dictionary's `/Contents` is never encrypted (§7.6.2): signers patch it in place
@@ -277,6 +311,75 @@ fn signature_contents_stay_unencrypted() {
         assert_eq!(string(1, b"Contents"), [0x30, 0x82, 0xBE, 0xEF], "{alg:?}");
         assert_eq!(string(2, b"Contents"), b"Private note", "{alg:?}");
     }
+}
+
+/// Only a signature dictionary keeps its `/Contents` in clear. An annotation that carries a
+/// `/ByteRange` (or even `/Type /Sig`) is still an annotation, and its comment is encrypted.
+#[test]
+fn a_byte_range_does_not_exempt_an_annotation() {
+    for (ty, subtype) in [(Some("Annot"), "Text"), (None, "FreeText"), (Some("Sig"), "Text")] {
+        let mut doc = Document::open(Arc::new(fixture())).unwrap();
+        let mut note = pdfcraft_cos::Dict::new();
+        if let Some(ty) = ty {
+            note.set(b"Type".to_vec(), Object::name(ty));
+        }
+        note.set(b"Subtype".to_vec(), Object::name(subtype));
+        note.set(b"Contents".to_vec(), PdfString::literal(b"Private note".to_vec()));
+        note.set(b"ByteRange".to_vec(), Object::Array(Vec::new()));
+        let note = doc.add(Object::Dict(note));
+        doc.update_dict(doc.root().unwrap(), |c| c.set(b"Test".to_vec(), Object::Ref(note))).unwrap();
+        doc.set_encryption(&NewEncryption {
+            algorithm: Algorithm::Aes256,
+            user_password: "",
+            owner_password: "owner",
+            permissions: -1,
+            encrypt_metadata: true,
+            seed: [3; 32],
+        })
+        .unwrap();
+        let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("Private note"), "{ty:?} {subtype}: comment encrypted");
+        let back = Document::open(Arc::new(bytes)).unwrap();
+        let note = back.get(back.root().unwrap()).as_dict().unwrap().reference(b"Test").unwrap();
+        assert_eq!(back.get(note).as_dict().unwrap().get(b"Contents").unwrap().as_string().unwrap().bytes, b"Private note");
+    }
+}
+
+/// Protecting a document puts every stream under the new handler. A stream that selects a
+/// crypt filter of its own loses the selector: the new `/Encrypt` defines only `/StdCF`, so an
+/// inherited name (or `/Identity`) would leave the stream in clear.
+#[test]
+fn protecting_drops_inherited_crypt_filter_selectors() {
+    for selector in [" /Filter /Crypt /DecodeParms << /Name /MyCF >>", " /Filter [/Crypt] /DecodeParms [<< /Name /Identity >>]", " /Filter /Crypt"] {
+        let mut doc = Document::open(Arc::new(fixture_with(selector))).unwrap();
+        assert_eq!(content(&doc), SECRET, "{selector}");
+        doc.set_encryption(&NewEncryption {
+            algorithm: Algorithm::Aes256,
+            user_password: "",
+            owner_password: "owner",
+            permissions: -1,
+            encrypt_metadata: true,
+            seed: [7; 32],
+        })
+        .unwrap();
+        let bytes = write_full(&doc, &SaveOptions::default()).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("Secret page"), "{selector}: stream encrypted");
+        assert_eq!(content(&Document::open(Arc::new(bytes.clone())).unwrap()), SECRET, "{selector}");
+        assert!(hayro_syntax::Pdf::new(bytes).is_ok(), "{selector}");
+    }
+    // Under the handler the document was opened with, `/Identity` is the author's choice (a
+    // stream meant to stay readable) and is kept.
+    let mut doc = Document::open(Arc::new(protect(Algorithm::Aes128, "", "owner", -1))).unwrap();
+    let catalog = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    let pages = doc.get(catalog.reference(b"Pages").unwrap()).as_dict().cloned().unwrap();
+    let page = doc.resolve(&pages.get(b"Kids").unwrap().as_array().unwrap()[0]).as_dict().cloned().unwrap();
+    let contents = page.reference(b"Contents").unwrap();
+    let Object::Stream(mut s) = doc.get(contents).as_ref().clone() else { panic!("no content stream") };
+    s.dict.set(b"Filter".to_vec(), Object::name("Crypt"));
+    doc.set(contents, Object::Stream(s));
+    let saved = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    assert!(String::from_utf8_lossy(&saved).contains("Secret page"), "written as the stream asks");
+    assert_eq!(content(&Document::open(Arc::new(saved)).unwrap()), SECRET);
 }
 
 #[test]
@@ -373,4 +476,21 @@ fn removing_an_inline_encrypt_dictionary_leaves_an_unencrypted_file() {
         assert_eq!(content(&again), SECRET, "{alg:?}");
         assert!(hayro_syntax::Pdf::new(plain).is_ok(), "{alg:?}");
     }
+}
+
+/// A content stream that calls itself `/Type /XRef` is still encrypted: only reading trusts the label.
+#[test]
+fn a_stream_labelled_xref_is_encrypted_when_saved() {
+    let mut doc = Document::open(Arc::new(fixture_with(" /Type /XRef"))).unwrap();
+    doc.set_encryption(&NewEncryption {
+        algorithm: Algorithm::Aes256,
+        user_password: "u",
+        owner_password: "o",
+        permissions: -4,
+        encrypt_metadata: true,
+        seed: [9; 32],
+    })
+    .unwrap();
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    assert!(!bytes.windows(SECRET.len()).any(|w| w == SECRET.as_bytes()), "the labelled stream was written in the clear");
 }

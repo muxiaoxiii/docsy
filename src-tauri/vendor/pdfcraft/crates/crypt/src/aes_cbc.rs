@@ -3,8 +3,7 @@
 //! Decryption is tolerant, as viewers are: a trailing partial block is ignored, and invalid
 //! padding leaves the data unpadded rather than failing.
 
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
+use aes::cipher::{Array, BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 use aes::{Aes128, Aes256};
 
 enum Cipher {
@@ -15,31 +14,31 @@ enum Cipher {
 impl Cipher {
     fn new(key: &[u8]) -> Self {
         if let Some(k) = key.first_chunk::<32>() {
-            Cipher::A256(Box::new(Aes256::new(GenericArray::from_slice(k))))
+            Cipher::A256(Box::new(Aes256::new(&Array::from(*k))))
         } else {
             let mut k = [0u8; 16];
             let n = key.len().min(16);
             k[..n].copy_from_slice(&key[..n]);
-            Cipher::A128(Box::new(Aes128::new(GenericArray::from_slice(&k))))
+            Cipher::A128(Box::new(Aes128::new(&Array::from(k))))
         }
     }
 
     fn encrypt(&self, block: &mut [u8; 16]) {
-        let mut b = *GenericArray::from_slice(block);
+        let mut b = Array::from(*block);
         match self {
             Cipher::A128(c) => c.encrypt_block(&mut b),
             Cipher::A256(c) => c.encrypt_block(&mut b),
         }
-        block.copy_from_slice(&b);
+        *block = b.into();
     }
 
     fn decrypt(&self, block: &mut [u8; 16]) {
-        let mut b = *GenericArray::from_slice(block);
+        let mut b = Array::from(*block);
         match self {
             Cipher::A128(c) => c.decrypt_block(&mut b),
             Cipher::A256(c) => c.decrypt_block(&mut b),
         }
-        block.copy_from_slice(&b);
+        *block = b.into();
     }
 }
 
