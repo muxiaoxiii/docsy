@@ -330,7 +330,7 @@ def main() -> int:
         source, count = re.subn(r"  var FALLBACK = \{.*?\n  \};", lambda match: "  var FALLBACK = " + json.dumps(fallback, ensure_ascii=False, indent=2).replace("\n", "\n  ") + ";", source, count=1, flags=re.S)
         if count != 1:
             raise ValueError("未找到站点回退数据块")
-        source, count = re.subn(r"  var FALLBACK_CHANGELOG = \[.*?\n  \];", lambda match: "  var FALLBACK_CHANGELOG = " + json.dumps(changelog_entries[:1], ensure_ascii=False, indent=2).replace("\n", "\n  ") + ";", source, count=1, flags=re.S)
+        source, count = re.subn(r"  var FALLBACK_CHANGELOG = \[.*?\n  \];", lambda match: "  var FALLBACK_CHANGELOG = " + json.dumps(changelog_entries[:5], ensure_ascii=False, indent=2).replace("\n", "\n  ") + ";", source, count=1, flags=re.S)
         if count != 1:
             raise ValueError("未找到站点更新日志回退块")
         fallback_path.write_text(source, encoding="utf-8")

@@ -931,6 +931,10 @@ a:hover {
 .changelog-more {
   margin-top: 10px;
   text-align: center;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 /* ============ 页脚 ============ */
