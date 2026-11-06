@@ -32,10 +32,11 @@ fn configure_embedded_opencv() {
     let root = manifest_dir.join("vendor/opencv-mobile");
     let include_dir = root.join("include");
     if target_os == "macos" {
-        if target_arch != "aarch64" {
-            panic!("Docsy embedded OpenCV currently supports the macOS ARM64 release target");
-        }
-        let library_dir = root.join("macos-arm64/lib");
+        let library_dir = match target_arch.as_str() {
+            "aarch64" => root.join("macos-arm64/lib"),
+            "x86_64" => root.join("macos-x64/lib"),
+            _ => panic!("Docsy embedded OpenCV does not support macOS {target_arch}"),
+        };
         if !library_dir.join("libopencv2.a").is_file() {
             panic!("embedded OpenCV static library is missing");
         }
