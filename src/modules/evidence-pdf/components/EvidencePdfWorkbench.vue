@@ -14,6 +14,7 @@
           <p class="hint">{{ workflowHint }}</p>
         </div>
         <div class="section-actions">
+          <ClearFileListButton v-if="overlayFiles.length || mergedImportPlans.length || mergedImportPlan || failedDocumentImports.length" :disabled="evidenceListBusy || truePreviewLoading || quickCleanupRunning" @clear="clearEvidenceFiles" />
           <el-button v-if="workflowMode !== 'split'" type="primary" plain :loading="importingEvidence" :disabled="overlaying || batchRunning || importingEvidence" @click="selectOverlayFiles">{{
             splitImportButtonText
           }}</el-button>
@@ -1275,6 +1276,7 @@ import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { DOCUMENT_FILTERS, appendUniqueDocuments, convertImportDocument, documentKind, reviewImageImports } from '../../../shared/pdf-tools/documentImport.js'
 import { computed, h, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
+import ClearFileListButton from '../../../shared/components/ClearFileListButton.vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
@@ -4362,6 +4364,34 @@ function mergedReorderRowClass({ rowIndex }) {
     rowIndex === selectedMergedImportIndex.value ? 'is-selected-range' : '',
     reorderRowClass(rowIndex, mergedDragFrom.value, mergedDragOver.value, mergedDragPlacement.value),
   ].filter(Boolean).join(' ')
+}
+
+function clearEvidenceFiles() {
+  if (evidenceListBusy.value || truePreviewLoading.value || quickCleanupRunning.value) return
+  overlayFiles.value = []
+  failedDocumentImports.value = []
+  mergedImportPlan.value = null
+  mergedImportPlans.value = []
+  completedMergePath.value = ''
+  completedEvidencePaths.value = []
+  selectedOverlayIndex.value = 0
+  selectedMergedImportIndex.value = 0
+  previewPage.value = 1
+  previewData.value = {}
+  overlayOutputDir.value = ''
+  splitReplacementOutputDir.value = ''
+  existingBookmarkCount.value = 0
+  existingBookmarkAlertVisible.value = true
+  editUndoStack.value = []
+  editRedoStack.value = []
+  headerFooterSettingsVisible.value = false
+  existingElementsVisible.value = false
+  splitCleanupVisible.value = false
+  splitOptionsVisible.value = false
+  clearContentRowEdit()
+  resetOverlayReorder()
+  resetMergedReorder()
+  refreshPreview()
 }
 
 function removeOverlayFile(index) {

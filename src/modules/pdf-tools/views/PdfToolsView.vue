@@ -221,6 +221,7 @@
             <el-button type="primary" plain :disabled="splittingMerged" @click="selectSplitFile">选择 PDF 文件</el-button>
             <el-button :disabled="!splitFile || splittingMerged" @click="selectSplitOutputDir">选择输出文件夹</el-button>
             <el-button :disabled="!splitFile || splittingMerged" @click="addSplitRange">添加页段</el-button>
+            <ClearFileListButton v-if="splitFile" :disabled="splittingMerged" @clear="clearSplitFile" />
           </template>
           <div v-if="splitFile" class="path-line"><span class="path-badge">源文件</span><span>{{ splitFile }}</span></div>
           <div v-if="splitOutputDir" class="path-line"><span class="path-badge">输出目录</span><span>{{ splitOutputDir }}</span></div>
@@ -677,6 +678,7 @@
 import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfImportDialog.vue'
 import PdfCropWorkspace from '../components/PdfCropWorkspace.vue'
 import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
+import ClearFileListButton from '../../../shared/components/ClearFileListButton.vue'
 import IncomingFilesNotice from '../../../shared/components/IncomingFilesNotice.vue'
 import { useIncomingFiles } from '../../../core/composables/useIncomingFiles.js'
 import { FILE_TRANSFER_TARGETS } from '../../../core/fileTransfers.js'
@@ -1316,6 +1318,7 @@ function clearLongSliceFiles() {
   cancelScheduledPreview()
   longSliceFiles.value = []
   currentLongSlicePreview.value = null
+  nextLongSlicePreview.value = null
   selectedLongSliceIndex.value = 0
   currentPreviewPage.value = 1
   previewLoading.value = false
@@ -1643,7 +1646,7 @@ function loadCompressFiles(paths) {
 
 function clearCompressFiles() {
   if (compressing.value) return
-  compressFiles.value = compressFiles.value.filter((f) => f.status === 'processing')
+  compressFiles.value = []
   compressSummary.value = ''
 }
 
@@ -1738,6 +1741,19 @@ async function selectSplitFile() {
 }
 
 let splitLoadRequest = 0
+function clearSplitFile() {
+  if (splittingMerged.value) return
+  splitLoadRequest += 1
+  splitFile.value = ''
+  splitRanges.value = []
+  splitTotalPages.value = 0
+  splitPreviewPage.value = 1
+  selectedSplitRangeIndex.value = 0
+  splitOutputDir.value = ''
+  splitResultDir.value = ''
+  splitResultPaths.value = []
+  splitRunWarnings.value = []
+}
 async function loadSplitFile(path) {
   if (splittingMerged.value) return false
   const request = ++splitLoadRequest

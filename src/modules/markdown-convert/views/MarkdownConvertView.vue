@@ -546,7 +546,7 @@ async function loadFiles(paths) {
 
 function clearFiles() {
   if (converting.value) return
-  files.value = files.value.filter((item) => item.status === 'processing')
+  files.value = []
   summary.value = ''
 }
 

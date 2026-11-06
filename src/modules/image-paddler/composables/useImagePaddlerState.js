@@ -792,6 +792,7 @@ export function useImagePaddlerState(options = {}) {
   }
 
   function clearAllSources() {
+    if (generating.value) return
     analysisRequestId += 1
     if (analyzeTimer) clearTimeout(analyzeTimer)
     analyzing.value = false
@@ -800,6 +801,9 @@ export function useImagePaddlerState(options = {}) {
     explicitPaths.value = []
     analysis.value = null
     generatedResult.value = null
+    inputContext.value = { sourceKind: 'folder', sourceLabel: '', sourceStem: '' }
+    sourceDecisions.value = {}
+    imageAnnotations.value = {}
   }
 
   function loadImagePaths(paths, context = {}) {

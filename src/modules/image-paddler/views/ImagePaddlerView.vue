@@ -9,7 +9,7 @@
             <div class="source-actions">
               <el-button size="small" @click="addFolders">文件夹</el-button>
               <el-button size="small" @click="addImages">图片</el-button>
-              <el-button v-if="folders.length" size="small" text type="danger" @click="clearAllSources">清空</el-button>
+              <ClearFileListButton v-if="folders.length" :disabled="generating || analyzing" @clear="clearAllSources" />
             </div>
             <div v-if="isFrameSequence" class="folder-path">
               {{ inputContext.sourceLabel || '抽帧结果' }}
@@ -647,6 +647,7 @@
   </ToolWorkspaceShell>
 </template>
 <script setup>
+import ClearFileListButton from '../../../shared/components/ClearFileListButton.vue'
 import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { computed, ref } from 'vue'

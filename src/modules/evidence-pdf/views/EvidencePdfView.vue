@@ -16,6 +16,7 @@
           <template #toolbar>
             <el-button type="primary" plain :disabled="scanning || building" @click="selectEvidenceFolder">选择证据文件夹</el-button>
             <el-button v-if="evidenceFolder" :loading="scanning" :disabled="building" @click="scanEvidence">重新扫描</el-button>
+            <ClearFileListButton v-if="evidenceGroups.length || evidenceFolder" :disabled="scanning || building" @clear="clearEvidenceFiles" />
           </template>
           <div class="scan-options compact-form">
             <el-radio-group v-model="outputMode" v-motion-selection="outputMode" size="small" :disabled="scanning || building"><el-radio-button value="per_folder">各文件夹分别合并</el-radio-button><el-radio-button value="all">全部合成一份</el-radio-button></el-radio-group>
@@ -34,11 +35,12 @@
               </div>
               <FileQueuePanel
                 :items="group.files"
-                :clearable="false"
+                :busy="scanning || building"
                 :removable="false"
                 :sortable="!scanning && !building"
                 max-height="240px"
                 @reorder="(payload) => reorderGroupFiles(group, payload)"
+                @clear="clearEvidenceGroup(group)"
               >
                 <template #meta="{ item }">
                   <el-tag :type="documentKind(item.path) === 'word' ? 'warning' : 'info'" size="small">
@@ -98,6 +100,7 @@
 <script setup>
 import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfImportDialog.vue'
 import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
+import ClearFileListButton from '../../../shared/components/ClearFileListButton.vue'
 import IncomingFilesNotice from '../../../shared/components/IncomingFilesNotice.vue'
 import { useIncomingFiles } from '../../../core/composables/useIncomingFiles.js'
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
@@ -124,7 +127,7 @@ const incoming = useIncomingFiles('evidence-pdf', async batch => {
   await nextTick()
   return (await mergeWorkbench.value?.receiveFiles(batch.paths)) === true
 }, { ready: () => incomingReady.value, busy: () => Boolean(mergeWorkbench.value?.isBusy()) })
-const { outputMode, duplexFiles, duplexGroups, evidenceFolder, evidenceGroups, scanning, building, conversionFailures, groupFailures, evidenceOutputDir, outputPaths, selectEvidenceFolder, scanEvidence, buildEvidence, replaceFailedConversion } = useEvidenceFolder({ reviewImages: (paths, options) => imageImportDialog.value.open(paths, options) })
+const { outputMode, duplexFiles, duplexGroups, evidenceFolder, evidenceGroups, scanning, building, conversionFailures, groupFailures, evidenceOutputDir, outputPaths, selectEvidenceFolder, scanEvidence, buildEvidence, replaceFailedConversion, clearEvidenceFiles, clearEvidenceGroup } = useEvidenceFolder({ reviewImages: (paths, options) => imageImportDialog.value.open(paths, options) })
 const preference = useWorkspacePreferences('evidence-pdf.workspace', { activeTab, outputMode, duplexFiles, duplexGroups })
 
 function reorderGroupFiles(group, { from, to }) {

@@ -21,6 +21,41 @@ describe('evidence mixed import recovery', () => {
       : { ok: true, data: command === 'get_pdf_page_count' ? 3 : false })
   })
   afterEach(() => vi.unstubAllGlobals())
+  it.each(['merge', 'split'])('clears %s task files, review plans and previews together while retaining processing settings', workflow => {
+    const state = EvidencePdfWorkbench.setup({ workflow }, { expose: vi.fn() })
+    state.overlayFiles.value = [createEvidenceFile('/a.pdf')]
+    state.failedDocumentImports.value = [{ path: '/bad.docx' }]
+    state.mergedImportPlan.value = { inputPath: '/source.pdf', items: [], totalPages: 10 }
+    state.mergedImportPlans.value = [state.mergedImportPlan.value]
+    state.truePreview.value = { imageDataUrl: 'old' }
+    state.previewData.value = { page: 7 }
+    state.previewPage.value = 7
+    state.completedMergePath.value = '/old-output.pdf'
+    state.editUndoStack.value = [{ filePath: '/a.pdf' }]
+    state.headerPerFilePrefix.value = '对比文件'
+    state.clearEvidenceFiles()
+    expect(state.overlayFiles.value).toEqual([])
+    expect(state.failedDocumentImports.value).toEqual([])
+    expect(state.mergedImportPlans.value).toEqual([])
+    expect(state.mergedImportPlan.value).toBeNull()
+    expect(state.truePreview.value).toBeNull()
+    expect(state.previewPage.value).toBe(1)
+    expect(state.previewData.value).toEqual({})
+    expect(state.completedMergePath.value).toBe('')
+    expect(state.editUndoStack.value).toEqual([])
+    expect(state.headerPerFilePrefix.value).toBe('对比文件')
+    expect(tauriCallQuiet).not.toHaveBeenCalled()
+  })
+  it('does not clear a working evidence queue during import, detection, export or preview', () => {
+    const state = EvidencePdfWorkbench.setup({ workflow: 'merge' }, { expose: vi.fn() })
+    state.overlayFiles.value = [createEvidenceFile('/a.pdf')]
+    for (const busy of [state.importingEvidence, state.importingMergedPdf, state.overlaying, state.deepDetecting, state.truePreviewLoading]) {
+      busy.value = true
+      state.clearEvidenceFiles()
+      expect(state.overlayFiles.value).toHaveLength(1)
+      busy.value = false
+    }
+  })
   it('preserves files and rules, blocks partial execution, and accepts a manual PDF after failure', async () => {
     const state = EvidencePdfWorkbench.setup({ workflow: 'merge' }, { expose: vi.fn() })
     const original = { ...createEvidenceFile('/a.pdf'), pages: 3, removeExistingHeader: true, customNote: 'keep' }

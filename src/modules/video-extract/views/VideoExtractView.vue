@@ -251,6 +251,7 @@
             {{ settingsCollapsed ? '显示抽帧设置' : '收起抽帧设置' }}
           </el-button>
           <el-button class="import-results-action" size="small" type="primary" plain :disabled="extracting || analyzingSelection" @click="selectExistingResultDirectory">导入已有图片文件夹</el-button>
+          <ClearFileListButton v-if="resultImages.length" :disabled="extracting || analyzingSelection" @clear="clearFrameResults" />
         </div>
 
         <WorkspaceEmptyState
@@ -305,6 +306,7 @@
 </template>
 
 <script setup>
+import ClearFileListButton from '../../../shared/components/ClearFileListButton.vue'
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { ref, reactive, computed, onBeforeUnmount, onDeactivated, onActivated, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -514,6 +516,27 @@ async function loadVideo(path) {
   } else {
     ElMessage.error(userFacingError(res.error, '无法读取视频信息，请确认文件是有效的视频格式'))
   }
+}
+
+function clearFrameResults() {
+  if (extracting.value || analyzingSelection.value) return
+  mediaSourceRevision += 1
+  analysisRequestSequence += 1
+  if (mediaSaveTimer) window.clearTimeout(mediaSaveTimer)
+  if (dynamicAnalysisTimer) window.clearTimeout(dynamicAnalysisTimer)
+  mediaSaveTimer = null
+  dynamicAnalysisTimer = null
+  analysisRerunRequested = false
+  mediaReadyToSave = false
+  mediaSaveQueued = false
+  clearFrameDraftSafely()
+  resultImages.value = []
+  extractResult.value = null
+  algorithmVersion.value = ''
+  analysisProgressText.value = ''
+  decisionHistory.value = []
+  sourceDirectory.value = ''
+  mediaSessionId.value = null
 }
 
 function clearVideo() {

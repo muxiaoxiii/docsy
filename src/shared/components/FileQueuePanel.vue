@@ -2,9 +2,7 @@
   <section class="file-queue-panel" :class="{ 'is-fill': fill, 'is-empty': !items.length }">
     <div v-if="items.length" class="queue-summary">
       <span>{{ items.length }} 个文件</span>
-      <el-button v-if="items.length && clearable" :disabled="busy" link size="small" type="danger" @click="$emit('clear')">
-        清空列表
-      </el-button>
+      <ClearFileListButton v-if="clearable" :disabled="busy" @clear="$emit('clear')" />
     </div>
 
     <el-scrollbar v-if="items.length" class="queue-scrollbar" :max-height="fill ? undefined : maxHeight">
@@ -80,6 +78,7 @@ import { ref } from 'vue'
 import { Rank } from '@element-plus/icons-vue'
 import { usePointerReorder } from '../../core/composables/usePointerReorder.js'
 import WorkspaceEmptyState from './WorkspaceEmptyState.vue'
+import ClearFileListButton from './ClearFileListButton.vue'
 
 const props = defineProps({
   groupDropAttribute: { type: String, default: '' },

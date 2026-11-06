@@ -93,7 +93,7 @@ describe('image paddler state integration', () => {
     expect(state.previewNameStyle.value.color).toBe('#4B5563')
   })
 
-  it('清空素材后不会把旧导出结果显示为当前结果', async () => {
+  it('生成期间禁止清空，生成结束后清空素材与结果', async () => {
     let finishExport
     tauriCallSafe.mockImplementationOnce(() => new Promise(resolve => { finishExport = resolve }))
     const state = useImagePaddlerState()
@@ -101,10 +101,14 @@ describe('image paddler state integration', () => {
     state.analysis.value = { images }
     const pending = state.run()
     state.clearAllSources()
+    expect(state.folders.value).toEqual(['/images'])
     finishExport({ ok: true, data: { images: 6, pages: 1, output_path: '/old.pdf' } })
     await pending
     expect(state.generating.value).toBe(false)
+    state.clearAllSources()
     expect(state.generatedResult.value).toBeNull()
+    expect(state.analysis.value).toBeNull()
+    expect(state.folders.value).toEqual([])
   })
 
   it('supports multi-page pagination navigation', () => {

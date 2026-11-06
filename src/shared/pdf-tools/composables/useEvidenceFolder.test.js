@@ -10,6 +10,28 @@ vi.mock('element-plus', () => ({ ElMessage: { success: vi.fn(), warning: vi.fn()
 
 describe('证据扫描工作流', () => {
   beforeEach(() => vi.clearAllMocks())
+  it('can clear one folder list or all scan lists without deleting files', () => {
+    const state = useEvidenceFolder()
+    const a = { id: 'a', name: 'A', files: [{ path: '/a.pdf' }] }
+    const b = { id: 'b', name: 'B', files: [{ path: '/b.pdf' }] }
+    state.evidenceFolder.value = '/source'
+    state.evidenceGroups.value = [a, b]
+    state.conversionFailures.value = [{ groupId: 'a' }, { groupId: 'b' }]
+    state.outputPaths.value = ['/previous.pdf']
+    state.clearEvidenceGroup(state.evidenceGroups.value[0])
+    expect(state.evidenceGroups.value.map(group => group.id)).toEqual(['b'])
+    expect(state.conversionFailures.value).toEqual([{ groupId: 'b' }])
+    expect(state.outputPaths.value).toEqual([])
+    state.building.value = true
+    state.clearEvidenceFiles()
+    expect(state.evidenceGroups.value).toHaveLength(1)
+    state.building.value = false
+    state.clearEvidenceFiles()
+    expect(state.evidenceFolder.value).toBe('')
+    expect(state.evidenceGroups.value).toEqual([])
+    expect(state.conversionFailures.value).toEqual([])
+    expect(tauriCallSafe).not.toHaveBeenCalled()
+  })
   it('换目录立即清除旧分组，扫描失败不能用旧分组生成', async () => {
     const state = useEvidenceFolder()
     state.evidenceGroups.value = [{ name: '旧组', files: [] }]

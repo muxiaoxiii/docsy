@@ -8,6 +8,16 @@ vi.mock('../../../core/tauriBridge.js', () => ({ tauriCallQuiet: vi.fn(), tauriC
 import ImagePdfImportDialog from './ImagePdfImportDialog.vue'
 import { tauriCallSafe } from '../../../core/tauriBridge.js'
 describe('reviewed image import dialog page organization', () => {
+  it('clears the image batch and closes as cancelled without exporting or deleting images', async () => {
+    vi.useFakeTimers()
+    const state = ImagePdfImportDialog.setup({}, { expose: vi.fn() })
+    const pending = state.open(['/a.png', '/b.png'])
+    state.clearImages()
+    expect(state.images.value).toEqual([])
+    expect(state.visible.value).toBe(false)
+    state.handleClosed()
+    expect(await pending).toBeNull()
+  })
   it('keeps images and manual scale when grid controls change, and fits only on request', () => {
     vi.useFakeTimers()
     const state = ImagePdfImportDialog.setup({}, { expose: vi.fn() })

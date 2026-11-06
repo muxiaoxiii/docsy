@@ -15,6 +15,26 @@ const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() 
 describe('视频历史恢复时序', () => {
   beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers(); vi.stubGlobal('window', globalThis) })
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+  it('clears extracted image rows and their draft while preserving video input and settings', async () => {
+    tauriCallSafe.mockResolvedValue({ ok: true, data: { found: false } })
+    const state = View.setup({}, { expose: vi.fn() })
+    state.analysisSettings.autoAnalyze = false
+    await state.initializeResultImages(['/A/1.png'], '/A')
+    state.videoPath.value = '/video.mp4'
+    state.extractResult.value = { output_dir: '/A' }
+    state.decisionHistory.value = [{ type: 'order' }]
+    state.analyzingSelection.value = true
+    state.clearFrameResults()
+    expect(state.resultImages.value).toHaveLength(1)
+    state.analyzingSelection.value = false
+    state.clearFrameResults()
+    expect(state.resultImages.value).toEqual([])
+    expect(state.extractResult.value).toBeNull()
+    expect(state.sourceDirectory.value).toBe('')
+    expect(state.mediaSessionId.value).toBeNull()
+    expect(state.decisionHistory.value).toEqual([])
+    expect(state.videoPath.value).toBe('/video.mp4')
+  })
   it('rechecking detects newly installed drawtext instead of keeping stale status', async () => {
     tauriCallSafe.mockResolvedValueOnce({ ok: true, data: { available: true, has_drawtext: false, path: '/opt/homebrew/bin/ffmpeg' } })
       .mockResolvedValueOnce({ ok: true, data: { available: true, has_drawtext: true, path: '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg' } })

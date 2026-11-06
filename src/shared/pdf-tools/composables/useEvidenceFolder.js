@@ -17,6 +17,25 @@ export function useEvidenceFolder({ reviewImages } = {}) {
   const evidenceOutputDir = ref('')
   const outputPaths = ref([])
 
+  function clearEvidenceFiles() {
+    if (scanning.value || building.value) return
+    evidenceFolder.value = ''
+    evidenceGroups.value = []
+    conversionFailures.value = []
+    groupFailures.value = []
+    evidenceOutputDir.value = ''
+    outputPaths.value = []
+  }
+
+  function clearEvidenceGroup(group) {
+    if (scanning.value || building.value) return
+    evidenceGroups.value = evidenceGroups.value.filter(item => item !== group)
+    conversionFailures.value = conversionFailures.value.filter(item => group.id ? item.groupId !== group.id : item.groupName !== group.name)
+    groupFailures.value = groupFailures.value.filter(item => group.id ? item.groupId !== group.id : item.name !== group.name)
+    evidenceOutputDir.value = ''
+    outputPaths.value = []
+  }
+
   async function selectEvidenceFolder() {
     if (scanning.value || building.value) return
     const selected = await open({ directory: true })
@@ -110,5 +129,5 @@ export function useEvidenceFolder({ reviewImages } = {}) {
     ElMessage.success('已替换该位置的文件，无需重新扫描；再次生成即可')
   }
 
-  return { outputMode, duplexFiles, duplexGroups, evidenceFolder, evidenceGroups, scanning, building, conversionFailures, groupFailures, evidenceOutputDir, outputPaths, selectEvidenceFolder, scanEvidence, buildEvidence, replaceFailedConversion }
+  return { outputMode, duplexFiles, duplexGroups, evidenceFolder, evidenceGroups, scanning, building, conversionFailures, groupFailures, evidenceOutputDir, outputPaths, selectEvidenceFolder, scanEvidence, buildEvidence, replaceFailedConversion, clearEvidenceFiles, clearEvidenceGroup }
 }

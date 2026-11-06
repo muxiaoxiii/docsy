@@ -17,6 +17,19 @@ import PdfToolsView from './PdfToolsView.vue'
 
 describe('接收新文件保留已有工作', () => {
   beforeEach(() => vi.clearAllMocks())
+  it('clearing the split list invalidates a pending file read and resets its results', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    let finish
+    getPdfPageCount.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = state.loadSplitFile('/slow.pdf')
+    state.splitRanges.value = [{ name: 'old', pageStart: 1, pageEnd: 5 }]
+    state.splitResultPaths.value = ['/old-output.pdf']
+    state.clearSplitFile()
+    finish({ ok: true, data: 10 }); await pending
+    expect(state.splitFile.value).toBe('')
+    expect(state.splitRanges.value).toEqual([])
+    expect(state.splitResultPaths.value).toEqual([])
+  })
   it('读取失败时保留当前拆分页段和提取设置', async () => {
     const state = PdfToolsView.setup({}, { expose: vi.fn() })
     getPdfPageCount.mockResolvedValue({ ok: true, data: 12 })

@@ -15,7 +15,6 @@
         <div class="list-heading">{{ images.length }} 张 · {{ pages.length }} 页</div>
         <FileQueuePanel
           :items="namedImages"
-          :clearable="false"
           :removable="false"
           :busy="exporting"
           sortable
@@ -24,6 +23,7 @@
           :selected-index="selected"
           max-height="440px"
           @select="select"
+          @clear="clearImages"
           @reorder="reorder"
           @group-drop="joinPage"
           @group-hover="pageDropTarget = $event"
@@ -491,6 +491,15 @@ function remove(index = selected.value) {
   }
   const kept = images.value.findIndex((image) => image.path === path)
   select(kept < 0 ? Math.min(index, images.value.length - 1) : kept)
+}
+function clearImages() {
+  if (exporting.value) return
+  revision++
+  drawing++
+  clearTimeout(timer)
+  images.value = []
+  plan.value = null
+  visible.value = false
 }
 function fitActive() {
   if (selectedPlacement.value) active.value.percent = fittingPercent(selectedPlacement.value)
