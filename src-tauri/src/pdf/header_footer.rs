@@ -193,6 +193,10 @@ pub struct HeaderFooterResult {
     pub normalized: bool,
     pub cleaned: bool,
     pub semantic_removed: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations_removed: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotation_pages_touched: Option<usize>,
     pub warnings: Vec<String>,
 }
 
@@ -363,7 +367,7 @@ pub fn preview_overlay(
     job.output_path = preview_output.to_string_lossy().to_string();
     let annotation_temp = if annotation_rule.is_some_and(|r| r.remove_annotations) {
         let rule = annotation_rule.unwrap();
-        let temp = annotations::delete_annotations_to_temp(&job.input_path, &rule.kinds)
+        let (temp, _) = annotations::delete_annotations_to_temp(&job.input_path, &rule.kinds)
             .context("预览前删除批注失败")?;
         job.input_path = temp.to_string_lossy().to_string();
         Some(temp)
@@ -537,6 +541,8 @@ fn process_job(
             normalized: args.normalize_a4,
             cleaned,
             semantic_removed,
+            annotations_removed: None,
+            annotation_pages_touched: None,
             warnings,
         });
     }
@@ -632,6 +638,8 @@ fn process_job(
         normalized: args.normalize_a4,
         cleaned,
         semantic_removed,
+        annotations_removed: None,
+        annotation_pages_touched: None,
         warnings: std::mem::take(&mut warnings),
     })
 }

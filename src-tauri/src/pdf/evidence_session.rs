@@ -132,6 +132,7 @@ pub fn apply_rules_cancellable(
     let mut temp_paths = Vec::new();
     let mut original_input_by_temp = BTreeMap::new();
     let mut annotation_failed: Vec<header_footer::HeaderFooterFailure> = Vec::new();
+    let mut annotation_stats = BTreeMap::new();
 
     let prepared_items = prepare_items_for_processing(
         items,
@@ -139,6 +140,7 @@ pub fn apply_rules_cancellable(
         &mut temp_paths,
         &mut original_input_by_temp,
         &mut annotation_failed,
+        &mut annotation_stats,
         progress,
     );
 
@@ -166,7 +168,14 @@ pub fn apply_rules_cancellable(
         }
     };
 
-    let mut results = restore_original_inputs(batch_result.results, &original_input_by_temp);
+    let mut results = batch_result.results;
+    for result in &mut results {
+        if let Some((removed, pages)) = annotation_stats.get(&result.input_path) {
+            result.annotations_removed = Some(*removed);
+            result.annotation_pages_touched = Some(*pages);
+        }
+    }
+    let mut results = restore_original_inputs(results, &original_input_by_temp);
     let mut failed = batch_result.failed;
     failed.extend(annotation_failed);
 
@@ -306,6 +315,7 @@ fn prepare_items_for_processing(
     temp_paths: &mut Vec<PathBuf>,
     original_input_by_temp: &mut BTreeMap<String, String>,
     failed: &mut Vec<header_footer::HeaderFooterFailure>,
+    annotation_stats: &mut BTreeMap<String, (usize, usize)>,
     progress: &dyn Fn(String),
 ) -> Vec<header_footer::HeaderFooterJob> {
     if !rule.remove {
@@ -329,8 +339,12 @@ fn prepare_items_for_processing(
             file_name_of(&job.input_path)
         ));
         match annotations::delete_annotations_to_temp(&job.input_path, &rule.kinds) {
-            Ok(temp_path) => {
+            Ok((temp_path, stats)) => {
                 let temp_path_string = temp_path.to_string_lossy().to_string();
+                annotation_stats.insert(
+                    temp_path_string.clone(),
+                    (stats.removed, stats.pages_touched),
+                );
                 original_input_by_temp.insert(temp_path_string.clone(), job.input_path.clone());
                 job.input_path = temp_path_string;
                 temp_paths.push(temp_path);

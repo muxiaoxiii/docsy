@@ -232,7 +232,7 @@
             />
           </div>
           <div class="rule-item">
-            <label>删除批注对象</label>
+            <label>删除批注对象<HelpTooltip content="删除高亮、划线、手绘、图形、文字评论及关联弹窗；保留印章和签名控件，合并时压平其外观。已压平进正文的标记无法按批注对象删除。" /></label>
             <el-switch v-model="removeAnnotations" active-text="启用" inactive-text="关闭" />
           </div>
           <div class="rule-item">
@@ -1332,7 +1332,7 @@ import {
   optimizeImportsLossless,
   summarizeOptimizedImports,
 } from '../../../shared/pdf-tools/composables/pdfLosslessOptimize.js'
-import { formatProcessingWarningSummary } from '../../../shared/pdf-tools/processingWarnings.js'
+import { annotationRemovalSummary, formatProcessingWarningSummary } from '../../../shared/pdf-tools/processingWarnings.js'
 import { elementIdentity } from '../../../shared/pdf-tools/composables/existingPdfElements.js'
 import { usePointerReorder } from '../../../core/composables/usePointerReorder.js'
 import {
@@ -2643,7 +2643,7 @@ const firstFooterPreview = computed(() => {
 const processingNotes = computed(() => {
   const notes = []
   if (removeAnnotations.value) {
-    notes.push('删除批注只处理评论、高亮等批注对象，已扁平化到正文的标记不会被对象删除')
+    notes.push('删除普通批注及关联弹窗；印章和签名保留，合并时压平外观；已压平到正文的标记不在删除范围内')
   }
   if (outputMode.value === 'merge_only') {
     notes.push('只生成合并 PDF 时，中间单文件副本会在合并成功后清理')
@@ -3539,7 +3539,7 @@ async function applySplitHeaderFooterReplacement() {
         file.outputPath = success.outputPath
         file.name = fileName(success.outputPath)
         const warnings = success.warnings || []
-        file.statusDetail = formatProcessingWarningSummary([{ inputPath: file.path, warnings }]).join('；')
+        file.statusDetail = [annotationRemovalSummary([success]), ...formatProcessingWarningSummary([{ inputPath: file.path, warnings }])].filter(Boolean).join('；')
         file.statusText = warnings.length ? '已替换，需注意' : '已替换'
         file.statusType = warnings.length ? 'warning' : 'success'
       } else if (failed) {
@@ -3637,7 +3637,7 @@ async function applyHeaderFooter() {
       if (success) {
         file.outputPath = success.outputPath
         const warnings = success.warnings || []
-        file.statusDetail = formatProcessingWarningSummary([{ inputPath: file.path, warnings }]).join('；')
+        file.statusDetail = [annotationRemovalSummary([success]), ...formatProcessingWarningSummary([{ inputPath: file.path, warnings }])].filter(Boolean).join('；')
         file.statusText = warnings.length ? '完成，需注意' : '完成'
         file.statusType = warnings.length ? 'warning' : 'success'
       } else if (failed) {
@@ -3681,6 +3681,8 @@ async function applyHeaderFooter() {
     )
     // 收集所有有 warning 的文件的具体提示
     const warningDetails = formatProcessingWarningSummary(result.data.results || [])
+    const annotationSummary = annotationRemovalSummary(result.data.results || [])
+    if (annotationSummary) ElNotification({ title: '批注清理结果', message: annotationSummary, type: 'info', duration: 0 })
 
     if (result.data.cancelled) {
       ElNotification({

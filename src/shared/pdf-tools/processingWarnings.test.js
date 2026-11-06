@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { formatProcessingWarningSummary } from './processingWarnings.js'
+import { annotationRemovalSummary, formatProcessingWarningSummary } from './processingWarnings.js'
+
+describe('annotationRemovalSummary', () => {
+  it('distinguishes disabled cleanup from a completed cleanup that found no objects', () => {
+    expect(annotationRemovalSummary([{ warnings: [] }])).toBe('')
+    expect(annotationRemovalSummary([{ annotationsRemoved: 0 }])).toContain('未发现可删除')
+  })
+  it('shows actual counts and files without targets without treating them as failures', () => {
+    expect(annotationRemovalSummary([
+      { annotationsRemoved: 6, annotationPagesTouched: 2 },
+      { annotationsRemoved: 0, annotationPagesTouched: 0 },
+      { annotationsRemoved: 3, annotationPagesTouched: 1 },
+    ])).toBe('已删除批注及关联对象 9 个，涉及 3 页；1 个文件未发现可删除的批注对象')
+  })
+})
 
 describe('formatProcessingWarningSummary', () => {
   it('groups per-page overlay collisions by text instead of listing every page', () => {

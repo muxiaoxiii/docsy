@@ -1,5 +1,15 @@
 const OVERLAY_COLLISION_RE = /^第\s*(\d+)\s*页的“(.+?)”与其他页眉页脚位置重叠，将按实际位置叠加渲染$/
 
+export function annotationRemovalSummary(results) {
+  const checked = (results || []).filter((item) => Number.isFinite(item?.annotationsRemoved))
+  if (!checked.length) return ''
+  const removed = checked.reduce((sum, item) => sum + item.annotationsRemoved, 0)
+  const pages = checked.reduce((sum, item) => sum + (item.annotationPagesTouched || 0), 0)
+  const empty = checked.filter((item) => item.annotationsRemoved === 0).length
+  if (!removed) return '未发现可删除的批注对象；已压平到正文的标记不属于批注对象'
+  return `已删除批注及关联对象 ${removed} 个，涉及 ${pages} 页${empty ? `；${empty} 个文件未发现可删除的批注对象` : ''}`
+}
+
 /**
  * Summarize processing warnings by type for completion notifications.
  * File rows still retain their full per-page diagnostics; this keeps a large
