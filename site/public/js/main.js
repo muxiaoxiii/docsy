@@ -4,9 +4,48 @@
 
   /* 无 JS 或数据加载失败时的回退数据（与发布产物保持一致） */
   var FALLBACK = {
-    "latest": "1.1.4",
+    "latest": "1.1.5",
     "githubUrl": "https://github.com/muxiaoxiii/docsy/releases",
     "releases": [
+      {
+        "version": "1.1.5",
+        "tag": "v1.1.5",
+        "published_at": "2026-11-06T09:20:57Z",
+        "assets": [
+          {
+            "platform": "macos",
+            "name": "Docsy_1.1.5_aarch64.dmg",
+            "size": 57833491,
+            "sha256": "1369b7a4d578bf5c4788d1d0e7edbad6937397593dce7a397484db7b18e9f0fb",
+            "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.5/Docsy_1.1.5_aarch64.dmg",
+            "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.5/Docsy_1.1.5_aarch64.dmg"
+          },
+          {
+            "platform": "windows",
+            "name": "Docsy_1.1.5_x64-setup.exe",
+            "size": 53634658,
+            "sha256": "4d87fa0216bef136e6eb03169de7b8b2739e402f2faeddf08dc3b28b4bc7b691",
+            "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.5/Docsy_1.1.5_x64-setup.exe",
+            "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.5/Docsy_1.1.5_x64-setup.exe"
+          },
+          {
+            "platform": "macos-intel",
+            "name": "Docsy_1.1.5_x64.dmg",
+            "size": 60496228,
+            "sha256": "00886c94e2646dd41f63d3d4c1411ab41156fc5ee5d64bfb99cc76a0b403fbc1",
+            "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.5/Docsy_1.1.5_x64.dmg",
+            "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.5/Docsy_1.1.5_x64.dmg"
+          },
+          {
+            "platform": "windows-x86",
+            "name": "Docsy_1.1.5_x86-setup.exe",
+            "size": 52396351,
+            "sha256": "545f83783ce4f87118e8d59fffe75d38c331e250e6d1abab780d6dd3e001710a",
+            "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.5/Docsy_1.1.5_x86-setup.exe",
+            "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.5/Docsy_1.1.5_x86-setup.exe"
+          }
+        ]
+      },
       {
         "version": "1.1.4",
         "tag": "v1.1.4",
@@ -15,24 +54,32 @@
           {
             "platform": "macos",
             "name": "Docsy_1.1.4_aarch64.dmg",
-            "size": 57722039,
-            "sha256": "60b8f1712c3e7573b5b9f7d1d4b63c3f89929ec4553661f4d657f1c3fe362d71",
+            "size": 57722034,
+            "sha256": "31b640b9dbafcc99b0f17449e987e6b665464cc7ccd6bb74e7172b9808e80330",
             "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.4/Docsy_1.1.4_aarch64.dmg",
             "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.4/Docsy_1.1.4_aarch64.dmg"
           },
           {
             "platform": "windows",
             "name": "Docsy_1.1.4_x64-setup.exe",
-            "size": 53551533,
-            "sha256": "509342cbc37c7f3827ea1961457450485a213e52b6d85ce27b61a76189bab6e8",
+            "size": 53601299,
+            "sha256": "83e3ae4cb970b8173210a42050af0ff299a0c68a73fba6a0e41b990259183334",
             "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.4/Docsy_1.1.4_x64-setup.exe",
             "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.4/Docsy_1.1.4_x64-setup.exe"
           },
           {
+            "platform": "macos-intel",
+            "name": "Docsy_1.1.4_x64.dmg",
+            "size": 60397189,
+            "sha256": "44bc9913cdabfdafaebaae844f2c53c398c393fa706295f4b919c32e2bca1105",
+            "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.4/Docsy_1.1.4_x64.dmg",
+            "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.4/Docsy_1.1.4_x64.dmg"
+          },
+          {
             "platform": "windows-x86",
             "name": "Docsy_1.1.4_x86-setup.exe",
-            "size": 52365157,
-            "sha256": "f83cbaaef39984576702d1275d657b7632d92de24a56509314caa36e706a41d9",
+            "size": 52369918,
+            "sha256": "00c2372c24de95f9448ef1f343266cf75da011383e94f61390dfa36e7e6d210e",
             "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.4/Docsy_1.1.4_x86-setup.exe",
             "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.4/Docsy_1.1.4_x86-setup.exe"
           }
@@ -104,6 +151,22 @@
   };
 
   var FALLBACK_CHANGELOG = [
+    {
+      "version": "1.1.5",
+      "date": "2026-11-06",
+      "sections": [
+        {
+          "title": "改进与修复",
+          "items": [
+            "补齐证据合并、证据拆分、证据扫描和图片等工作列表的“清空列表”入口，同步重置预览与结果，处理时禁用且不删除磁盘文件。",
+            "新增 PDF 页面裁剪，支持按页面范围应用，并可将结果送往 PDF 合并或页面提取。",
+            "修复长图输出图片被过度降采样，统一 PDF 预览和导出的切分位置，增加相邻页对照与扫描图切线判断。",
+            "统一文档处理结果的“继续处理”入口，按格式提供兼容工具；保留跨模块工作状态，导入失败可重试。",
+            "收敛 SVG 场景动效，修正短窗口下 MD 操作栏显示；证据合并先导入文件再展示处理选项。"
+          ]
+        }
+      ]
+    },
     {
       "version": "1.1.4",
       "date": "2026-11-02",
@@ -233,45 +296,6 @@
           ]
         }
       ]
-    },
-    {
-      "version": "1.0.10",
-      "date": "2026-10-19",
-      "sections": [
-        {
-          "title": "新增",
-          "items": [
-            "PDF 合并支持 PDF 与 Word（.docx/.doc/.docm）混排、排序与拖入；单份 Word 可直接转为 PDF。",
-            "分项证据合并可导入 Word，转换后使用 PDF 预览和原有处理流程。",
-            "共用 Word→PDF 转换模块，优先调用本机 Microsoft Word、Windows WPS，再尝试 LibreOffice；旧版 .doc 直接转换失败后可通过 doc2x 转为临时 .docx 再重试。"
-          ]
-        },
-        {
-          "title": "修复",
-          "items": [
-            "默认转换输出通过排他创建避开已有或并发生成的同名文件，保留原有 PDF。",
-            "指定目标的保存采用同目录临时文件与安全替换，复制或替换失败时清理临时文件。",
-            "转换使用独立临时目录，结束或失败后释放中间文件。",
-            "证据导入期间锁定重复导入和执行入口，避免异步转换覆盖后续导入结果。",
-            "修复 Windows 首次写入不存在目标文件时的替换处理。",
-            "保存目标若为目录则拒绝替换，避免误将目录当作文件。"
-          ]
-        },
-        {
-          "title": "使用说明",
-          "items": [
-            "Word 转 PDF 依赖本机可用办公引擎；WPS 自动转换当前仅在 Windows 支持。不承诺不同引擎的分页完全一致。",
-            "PDF 结构处理继续使用现有 qpdf 路径，本版不包含 PdfCraft 新后端。"
-          ]
-        },
-        {
-          "title": "本机验证",
-          "items": [
-            "前端 330 项通过；Rust 单元测试 410 项通过、15 项忽略，doc2x 探针另 1 项通过；规范、生产构建和版本一致性检查通过。",
-            "Microsoft Word 实际导出样例 PDF 并完成渲染检查；输出有 qpdf 可兼容处理的交叉引用警告。Windows Office 自动转换及安装验收仍需实机核对。"
-          ]
-        }
-      ]
     }
   ];
 
@@ -359,6 +383,8 @@
     if (win) setAttr('cta-windows', 'href', winDownload || '#');
     var x86 = assetFor(latest, 'windows-x86');
     if (x86) setAttr('dl-win-x86', 'href', x86.github_url || x86.url);
+    var intel = assetFor(latest, 'macos-intel');
+    if (intel) setAttr('dl-mac-intel', 'href', intel.github_url || intel.url);
 
     /* 标记当前系统 */
     if (current) {

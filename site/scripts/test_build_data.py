@@ -15,12 +15,13 @@ class ReleaseDataTests(unittest.TestCase):
             {"name": "Docsy_1.0.5_x86-setup.exe", "size": 20, "digest": "sha256:" + "a" * 64},
             {"name": "Docsy_1.0.5_x64-setup.exe", "size": 30},
             {"name": "Docsy_1.0.5_aarch64.dmg", "size": 40},
+            {"name": "Docsy_1.0.5_x64.dmg", "size": 45},
             {"name": "Docsy_1.0.5_x64-setup.exe.sig", "size": 5},
         ]}
         with tempfile.TemporaryDirectory() as directory, patch.object(build_data, "download_file") as download:
             releases = build_data.build_releases([dict(release, draft=True), dict(release, prerelease=True), release], Path(directory), "", True)
         self.assertEqual(len(releases), 1)
-        self.assertEqual([asset["platform"] for asset in releases[0]["assets"]], ["windows-x86", "windows", "macos"])
+        self.assertEqual([asset["platform"] for asset in releases[0]["assets"]], ["windows-x86", "windows", "macos", "macos-intel"])
         self.assertEqual(releases[0]["assets"][0]["sha256"], "a" * 64)
         self.assertIn("/v1.0.5/", releases[0]["assets"][0]["url"])
         download.assert_not_called()

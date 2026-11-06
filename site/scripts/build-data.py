@@ -65,7 +65,7 @@ def platform_of(name: str) -> str:
     """根据文件名判断平台与架构。"""
     lower = name.lower()
     if lower.endswith(".dmg"):
-        if "intel" in lower or "x86_64" in lower:
+        if "intel" in lower or "x86_64" in lower or lower.endswith("_x64.dmg"):
             return "macos-intel"
         return "macos"
     if lower.endswith(".exe"):
