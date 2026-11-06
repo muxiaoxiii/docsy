@@ -1,7 +1,13 @@
 <template>
-  <div class="scene-illustration" :class="[`type--${type}`, `scene--${scene}`]">
+  <div class="scene-illustration" :class="[`type--${type}`, `scene--${scene}`, { 'is-active': active }]">
+    <svg v-if="scene === 'pdf-crop'" viewBox="0 0 100 120" class="illus-svg" fill="none" aria-hidden="true">
+      <rect x="14" y="10" width="72" height="100" rx="6" fill="var(--docsy-surface-elevated)" stroke="#94a3b8" stroke-width="2" />
+      <path d="M 25 40 H 75 M 25 52 H 67 M 25 64 H 72 M 25 76 H 62" stroke="#94a3b8" stroke-width="3" stroke-linecap="round" />
+      <rect x="23" y="31" width="54" height="55" rx="2" stroke="var(--docsy-primary)" stroke-width="2" :stroke-dasharray="type === 'source' ? '3 3' : undefined" />
+      <path v-if="type === 'target'" d="M 36 96 L 45 103 L 63 88" stroke="var(--docsy-primary)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
     <!-- ==================== PDF UNLOCK ==================== -->
-    <template v-if="scene === 'pdf-unlock'">
+    <template v-else-if="scene === 'pdf-unlock'">
       <!-- Source: Locked PDF with heavy padlock & restriction marks -->
       <svg v-if="type === 'source'" viewBox="0 0 100 120" class="illus-svg" fill="none">
         <rect x="14" y="10" width="72" height="100" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" />
@@ -352,8 +358,9 @@ defineProps({
 .sparkle-dot {
   transform-box: fill-box;
   transform-origin: center;
-  animation: pulse-sparkle 1.8s ease-in-out infinite alternate;
 }
+.scene-illustration.is-active .sparkle-dot { animation: pulse-sparkle 1.8s ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) { .scene-illustration * { animation: none !important; transition: none !important; } }
 
 @keyframes pulse-sparkle {
   0% { transform: scale(0.8); opacity: 0.5; }

@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::Emitter;
 
+#[tauri::command]
+pub async fn crop_pdf_pages(args: crate::pdf::crop::CropArgs) -> Result<String, String> {
+    run_blocking(move || crate::pdf::crop::crop_pdf_pages(&args)).await
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildEvidenceGroupPdfsArgs {

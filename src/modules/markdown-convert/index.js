@@ -12,7 +12,7 @@ export default {
       path: '/markdown',
       name: 'markdown-convert',
       component: () => import('./views/MarkdownConvertView.vue'),
-      meta: { title: 'MD 转换', moduleId: 'markdown-convert' },
+      meta: { title: 'MD 转换', moduleId: 'markdown-convert', keepAlive: true },
     },
   ],
 

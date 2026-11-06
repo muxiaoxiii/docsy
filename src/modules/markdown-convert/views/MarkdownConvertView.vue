@@ -5,6 +5,7 @@
     </div>
 
     <ToolWorkspaceShell title="MD 转换" :description="MARKDOWN_CONVERSION_DESCRIPTION" :hide-toolbar="!files.length">
+      <IncomingFilesNotice :batch="incoming.pending.value" :error="incoming.error.value" :receiving="incoming.receiving.value" :disabled="incoming.blocked.value" @retry="incoming.retry" @discard="incoming.discard" />
       <template #toolbar>
         <el-button type="primary" plain :disabled="converting" @click="selectFiles"> 添加文件 </el-button>
         <el-button type="success" :loading="converting" :disabled="!hasPendingFiles" @click="runQueue">
@@ -110,6 +111,7 @@
             </template>
 
             <template #item-actions="{ item, index }">
+              <FileContinueMenu v-if="item.status === 'done' && item.outputPath" :paths="[item.outputPath]" source="MD 转换" exclude="markdown" size="small" :disabled="converting" />
               <el-button
                 v-if="item.status === 'done' && item.outputPath"
                 link
@@ -308,6 +310,7 @@
             <el-alert v-if="pasteWarning" :title="pasteWarning" type="warning" :closable="false" show-icon />
 
             <div v-if="pasteOutputPath" class="paste-output-card">
+              <FileContinueMenu :paths="[pasteOutputPath]" source="MD 文本转换" exclude="markdown" size="small" :disabled="pasteConverting" />
               <span class="output-path" :title="pasteOutputPath">已生成：{{ pasteOutputPath }}</span>
               <el-button link type="primary" size="small" @click="openPasteOutputDir">打开文件夹</el-button>
             </div>
@@ -320,8 +323,14 @@
 
 <script setup>
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
+import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
+import IncomingFilesNotice from '../../../shared/components/IncomingFilesNotice.vue'
+import { useIncomingFiles } from '../../../core/composables/useIncomingFiles.js'
 import {
   MARKDOWN_OUTPUT_FORMATS,
+  MARKDOWN_EXTENSIONS as markdownExtensions,
+  OFFICE_EXTENSIONS as officeExtensions,
+  HTML_EXTENSIONS as htmlExtensions,
   MARKDOWN_CONVERSION_DESCRIPTION,
   PDF_CONVERSION_LIMIT,
   OFFICE_EXTRACTION_LIMIT,
@@ -455,32 +464,6 @@ function startConvertResize(event) {
   window.addEventListener('pointercancel', finish, { once: true })
 }
 
-const markdownExtensions = ['md', 'markdown', 'mdown', 'mkdn', 'mdwn', 'mdtxt']
-const officeExtensions = [
-  'doc',
-  'docx',
-  'docm',
-  'xls',
-  'xlsx',
-  'xlsm',
-  'xlsb',
-  'ppt',
-  'pptx',
-  'pptm',
-  'pps',
-  'ppsx',
-  'ppsm',
-  'pot',
-  'potx',
-  'potm',
-  'odt',
-  'ods',
-  'odp',
-  'rtf',
-  'csv',
-  'epub',
-]
-const htmlExtensions = ['html', 'htm']
 const pdfExtensions = ['pdf']
 
 function extensionOf(path) {
@@ -777,7 +760,12 @@ useWindowFileDrop({
   onDrop: handleDroppedPaths,
 })
 
-onMounted(() => void preference.start())
+const incomingReady = ref(false)
+const incoming = useIncomingFiles('markdown-convert', async ({ paths }) => {
+  await loadFiles(paths)
+  return paths.every(path => files.value.some(file => file.path === path))
+}, { ready: () => incomingReady.value, busy: () => converting.value || pasteConverting.value })
+onMounted(() => void preference.start().finally(() => { incomingReady.value = true }))
 onBeforeUnmount(() => {
   stopConvertResize?.()
   triggerCelebration.cancel?.()
@@ -809,10 +797,11 @@ defineExpose({
   display: grid;
   grid-template-columns: minmax(320px, 1.08fr) 14px minmax(320px, 0.92fr);
   gap: 0;
-  min-height: 100%;
-  height: auto;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
 }
-.file-panel { min-height: 620px; }
+.file-panel { min-height: 0; }
 
 .convert-workspace.is-resizing {
   cursor: col-resize !important;
@@ -833,12 +822,13 @@ defineExpose({
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   padding: clamp(14px, 2.5dvh, 18px);
   border: 1px solid var(--docsy-border-subtle);
   border-radius: var(--docsy-radius);
   background: var(--docsy-surface-elevated);
   box-shadow: var(--docsy-shadow-panel);
-  overflow: hidden;
+  overflow: auto;
 }
 
 /* ── Panel Header Row ── */
@@ -1009,7 +999,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
 }
-.file-panel > :deep(.file-queue-panel:has(.md-convert-scene)) { min-height: 340px; }
+.file-panel > :deep(.file-queue-panel:has(.md-convert-scene)) { min-height: 260px; }
 
 /* ── Left Panel Bottom Footer Bar ── */
 .panel-bottom-bar {
@@ -1117,7 +1107,7 @@ defineExpose({
   position: relative;
   display: flex;
   flex: 1;
-  min-height: 220px;
+  min-height: 120px;
 }
 
 .paste-editor-wrapper :deep(.el-textarea) {
@@ -1129,7 +1119,7 @@ defineExpose({
 .paste-editor-wrapper :deep(.el-textarea__inner) {
   flex: 1;
   height: 100% !important;
-  min-height: 200px;
+  min-height: 120px;
   resize: none;
   font-family: var(--docsy-font-mono, monospace), system-ui;
   font-size: 13px;
@@ -1250,7 +1240,10 @@ defineExpose({
   .convert-workspace {
     grid-template-columns: 1fr !important;
     gap: 14px;
+    flex: 0 0 auto;
+    height: auto;
   }
+  .conversion-panel { min-height: 520px; }
 
   .convert-resizer {
     display: none;

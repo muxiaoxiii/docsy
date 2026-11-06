@@ -12,7 +12,7 @@ export default {
       path: '/evidence',
       name: 'evidence-pdf',
       component: () => import('./views/EvidencePdfView.vue'),
-      meta: { title: '证据处理', moduleId: 'evidence-pdf' },
+      meta: { title: '证据处理', moduleId: 'evidence-pdf', keepAlive: true },
     },
   ],
 

@@ -99,6 +99,8 @@ const effectiveScene = computed(() => {
   if (path.includes('/pdf/compress')) return 'pdf-compress'
   if (path.includes('/pdf/anticopy')) return 'pdf-anticopy'
   if (path.includes('/pdf/extract')) return 'pdf-extract'
+  if (path.includes('/pdf/crop')) return 'pdf-crop'
+  if (path.includes('/pdf/long-slice')) return 'pdf-long-slice'
   if (path.includes('/evidence')) return 'evidence'
   if (path.includes('/template')) return 'template'
   if (path.includes('/image-paddler')) return 'image-paddler'

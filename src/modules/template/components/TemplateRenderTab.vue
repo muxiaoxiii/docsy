@@ -69,6 +69,7 @@
           </el-dropdown>
           <el-button type="success" :loading="rendering" :disabled="batchProcessing" @click="$emit('render-template')">生成 Word</el-button>
           <el-button v-if="renderedOutputPath" :title="renderedOutputPath" @click="$emit('open-output')">打开文件</el-button>
+          <FileContinueMenu v-if="renderedOutputPath" :paths="[renderedOutputPath]" source="文书模板" :disabled="rendering || batchProcessing" />
         </div>
       </div>
       <div class="fill-progress-track" aria-hidden="true">
@@ -532,6 +533,7 @@
 </template>
 
 <script setup>
+import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
 import WorkspaceEmptyState from '../../../shared/components/WorkspaceEmptyState.vue'
 import { computed } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'

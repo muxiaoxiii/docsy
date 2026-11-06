@@ -1,5 +1,6 @@
 <template>
   <div class="pdf-tools-view" :class="{ 'is-file-dragging': pdfDragging }">
+    <IncomingFilesNotice :batch="incoming.pending.value" :error="incoming.error.value" :receiving="incoming.receiving.value" :disabled="incoming.blocked.value" @retry="incoming.retry" @discard="incoming.discard" />
     <div v-if="pdfDragging" class="pdf-drop-overlay">
       <div class="pdf-drop-message">{{ activeTab === 'merge' ? '松开以添加 PDF、Word 或图片' : '松开以添加 PDF 文件' }}</div>
     </div>
@@ -24,6 +25,7 @@
             <template #meta="{ item }">
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
               <el-button v-if="item.outputPath" link type="primary" size="small" @click="openPath(item.outputPath)">打开文件</el-button>
+              <FileContinueMenu v-if="item.outputPath" :paths="[item.outputPath]" source="文档工具" size="small" />
             </template>
           </FileQueuePanel>
           <template #actions>
@@ -75,6 +77,7 @@
               <span v-if="item.conversionError" class="merge-conversion-error" role="status">{{ item.conversionError }}</span>
               <span v-if="item.manualPdf" class="merge-item-status">使用：{{ fileName(item.outputPath) }}</span>
               <el-button v-if="item.outputPath" link type="primary" size="small" @click="openPath(item.outputPath)">打开文件</el-button>
+              <FileContinueMenu v-if="item.outputPath" :paths="[item.outputPath]" source="文档工具" size="small" />
             </template>
             <template #item-actions="{ item, index }">
               <el-button
@@ -107,8 +110,13 @@
               {{ mergeFiles.length === 1 && !isPdfPath(mergeFiles[0].path) ? '转换为 PDF' : '合并为一个 PDF' }}
             </el-button>
             <el-button v-if="mergeOutputPath" @click="openPath(mergeOutputPath)">打开文件</el-button>
+            <FileContinueMenu v-if="mergeOutputPath" :paths="[mergeOutputPath]" source="PDF 合并" exclude="pdf-merge" />
           </template>
         </ToolWorkspaceShell>
+      </el-tab-pane>
+
+      <el-tab-pane label="裁剪 PDF 页面" name="crop" lazy>
+        <PdfCropWorkspace ref="cropWorkspace" />
       </el-tab-pane>
 
       <el-tab-pane label="提取 PDF 页面" name="extract" lazy>
@@ -153,6 +161,7 @@
               导出选中页面
             </el-button>
             <el-button v-if="extractResultPath" @click="openPath(extractResultPath)">打开文件</el-button>
+            <FileContinueMenu v-if="extractResultPath" :paths="[extractResultPath]" source="页面提取" exclude="pdf-extract" />
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
@@ -181,6 +190,7 @@
             <template #meta="{ item }">
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
               <el-button v-if="item.outputPath" link type="primary" size="small" @click="openPath(item.outputPath)">打开文件</el-button>
+              <FileContinueMenu v-if="item.outputPath" :paths="[item.outputPath]" source="文档工具" size="small" />
               <span v-if="item.status === 'done' && item.inputSize > 0">{{
                 sizeSavingText(item.inputSize, item.outputSize)
               }}</span>
@@ -404,6 +414,7 @@
                 执行拆分
               </el-button>
             <el-button v-if="splitResultDir" @click="openPath(splitResultDir)">打开文件夹</el-button>
+            <FileContinueMenu :paths="splitResultPaths" source="PDF 拆分" exclude="pdf-split" :disabled="splittingMerged" />
           </template>
         </ToolWorkspaceShell>
       </el-tab-pane>
@@ -433,6 +444,7 @@
               <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
               <el-tag v-if="item.hasAntiOcr" type="warning" size="small">已防护</el-tag>
               <el-button v-if="item.outputPath" link type="primary" @click="openPath(item.outputPath)">打开文件</el-button>
+              <FileContinueMenu v-if="item.outputPath" :paths="[item.outputPath]" source="文档工具" size="small" />
             </template>
           </FileQueuePanel>
           <template #actions>
@@ -498,12 +510,14 @@
                 <el-tag v-if="item.dimText" size="small" type="info">{{ item.dimText }}</el-tag>
                 <el-tag :type="item.statusType" size="small">{{ item.statusText }}</el-tag>
                 <el-button v-if="item.outputPath" link type="primary" @click="openPath(item.outputPath)">打开文件</el-button>
+              <FileContinueMenu v-if="item.outputPath" :paths="[item.outputPath]" source="文档工具" size="small" />
               </template>
             </FileQueuePanel>
 
             <div v-if="longSliceFiles.length" class="long-slice-preview-card" v-loading="previewLoading">
                 <div class="preview-header">
                   <span class="preview-title">A4 打印预览</span>
+                  <el-checkbox v-if="currentLongSlicePreview && currentLongSlicePreview.totalPages > 1" v-model="compareNextSlice" @change="refreshPreview">对照下一页</el-checkbox>
                   <div class="preview-pagination" v-if="currentLongSlicePreview && currentLongSlicePreview.totalPages > 1">
                     <el-button
                       size="small"
@@ -521,7 +535,7 @@
                   </div>
                 </div>
 
-                <div class="a4-sheet-viewport">
+                <div class="a4-sheet-viewport" :class="{ 'is-comparing': compareNextSlice && nextLongSlicePreview }">
                   <div class="a4-sheet-canvas" :class="[longSliceOrientation]">
                     <img
                       v-if="currentLongSlicePreview && currentLongSlicePreview.previewDataUrl"
@@ -530,6 +544,9 @@
                       alt="A4 Preview"
                     />
                     <div v-else class="preview-placeholder">正在生成预览…</div>
+                  </div>
+                  <div v-if="compareNextSlice && nextLongSlicePreview" class="a4-sheet-canvas" :class="[longSliceOrientation]">
+                    <img :src="nextLongSlicePreview.previewDataUrl" class="preview-image" alt="下一页打印预览" />
                   </div>
                 </div>
 
@@ -591,6 +608,7 @@
                         <span>mm</span>
                       </div>
                     </div>
+                    <div class="long-slice-note">重叠内容会同时出现在上一页末尾和下一页开头；照片或无明显空白的页面仍可能被切开，请翻页核对。</div>
                   </el-form-item>
 
                   <div class="header-footer-settings">
@@ -657,16 +675,21 @@
 
 <script setup>
 import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfImportDialog.vue'
+import PdfCropWorkspace from '../components/PdfCropWorkspace.vue'
+import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
+import IncomingFilesNotice from '../../../shared/components/IncomingFilesNotice.vue'
+import { useIncomingFiles } from '../../../core/composables/useIncomingFiles.js'
+import { FILE_TRANSFER_TARGETS } from '../../../core/fileTransfers.js'
 const imageImportDialog = ref(null)
 import { useResponsiveTabs } from '../../../shared/composables/useResponsiveTabs.js'
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import MergeFileNameField from '../../../shared/pdf-tools/components/MergeFileNameField.vue'
 import { commonSourceDirectory, pdfOutputFileName, joinOutputPath } from '../../../core/outputFiles.js'
 import { DOCUMENT_FILTERS, MANUAL_PDF_HINT, convertImportDocument, documentKind, reviewImageImports } from '../../../shared/pdf-tools/documentImport.js'
-import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, getCurrentInstance, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQueueCancellation } from '../../../core/composables/useQueueCancellation.js'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
@@ -696,23 +719,37 @@ import {
 
 const tabPosition = useResponsiveTabs()
 
-const PDF_TABS = new Set(['unlock', 'merge', 'extract', 'compress', 'split', 'anti-ocr', 'long-slice'])
+const PDF_TABS = new Set(['unlock', 'merge', 'crop', 'extract', 'compress', 'split', 'anti-ocr', 'long-slice'])
+const cropWorkspace = ref(null)
 const currentInstance = getCurrentInstance()
 const route = currentInstance ? useRoute() : null
 const router = currentInstance ? useRouter() : null
 const tabFromRoute = (tab) => (PDF_TABS.has(tab) ? tab : 'unlock')
 const activeTab = ref(tabFromRoute(route?.params?.tab))
+onActivated(() => {
+  if (route?.name !== 'pdf-tools') return
+  if (PDF_TABS.has(route.params.tab)) activeTab.value = route.params.tab
+  else if (activeTab.value !== 'unlock') router.replace({ name: 'pdf-tools', params: { tab: activeTab.value } })
+})
+onDeactivated(() => { stopSplitResize?.() })
 
 watch(
-  () => route?.params?.tab,
-  (tab) => {
+  () => [route?.name, route?.params?.tab],
+  ([, tab]) => {
+    if (route?.name !== 'pdf-tools') return
+    if (!tab && activeTab.value !== 'unlock') {
+      router.replace({ name: 'pdf-tools', params: { tab: activeTab.value } })
+      return
+    }
     const next = tabFromRoute(tab)
     if (next !== activeTab.value) activeTab.value = next
   },
+  { flush: 'post' },
 )
 
 watch(activeTab, (tab) => {
   if (!route || !router) return
+  if (route.name !== 'pdf-tools') return
   const param = tab === 'unlock' ? undefined : tab
   if (route.params.tab === param) return
   router.replace({ name: 'pdf-tools', params: param ? { tab: param } : {} })
@@ -881,6 +918,7 @@ function syncMergeOutputDirectory() {
 }
 const extractResultPath = ref('')
 const splitResultDir = ref('')
+const splitResultPaths = ref([])
 const duplexSeparate = ref(false)
 const extractFile = ref('')
 const extractOutputDir = ref('')
@@ -1075,6 +1113,8 @@ const longSliceProcessing = ref(false)
 const longSliceOutputDir = ref('')
 const selectedLongSliceIndex = ref(0)
 const currentLongSlicePreview = ref(null)
+const nextLongSlicePreview = ref(null)
+const compareNextSlice = ref(false)
 const currentPreviewPage = ref(1)
 const previewLoading = ref(false)
 let longSlicePreviewRequestId = 0
@@ -1161,6 +1201,7 @@ async function refreshPreview() {
     return
   }
   previewLoading.value = true
+  nextLongSlicePreview.value = null
   try {
     const args = getLongSliceArgs(current.path)
     const res = await tauriCallSafe('preview_long_slice', {
@@ -1177,6 +1218,11 @@ async function refreshPreview() {
       current.dimText = `${w} × ${h}`
       current.statusText = `预计 ${pages} 页`
       current.statusType = 'info'
+      if (compareNextSlice.value && currentPreviewPage.value < pages) {
+        const next = await tauriCallSafe('preview_long_slice', { args, previewPage: currentPreviewPage.value + 1 })
+        if (requestId !== longSlicePreviewRequestId) return
+        if (next.ok) nextLongSlicePreview.value = next.data
+      }
     } else if (!res.ok) {
       current.statusText = '解析失败'
       current.statusType = 'danger'
@@ -1511,20 +1557,22 @@ async function selectExtractFile() {
   await loadExtractFile(normalizeSelectedPath(selected))
 }
 
+let extractLoadRequest = 0
 async function loadExtractFile(path) {
-  if (extractingPages.value) return
+  if (extractingPages.value) return false
+  const request = ++extractLoadRequest
+  const pageCount = await getPdfPageCount(path)
+  if (request !== extractLoadRequest) return false
+  if (!pageCount.ok || Number(pageCount.data) < 1) {
+    ElMessage.error(userFacingError(pageCount.error, '读取页数失败，已保留原文件和设置'))
+    return false
+  }
   extractResultPath.value = ''
   extractFile.value = path
   extractPageText.value = ''
-  extractTotalPages.value = 0
+  extractTotalPages.value = Number(pageCount.data)
   extractOutputDir.value = parentDir(path)
-  const pageCount = await getPdfPageCount(extractFile.value)
-  if (extractFile.value !== path) return
-  if (pageCount.ok) {
-    extractTotalPages.value = pageCount.data || 0
-  } else {
-    ElMessage.error(userFacingError(pageCount.error, '读取页数失败'))
-  }
+  return true
 }
 
 async function selectExtractOutputDir() {
@@ -1689,30 +1737,26 @@ async function selectSplitFile() {
   if (selected) await loadSplitFile(normalizeSelectedPath(selected))
 }
 
+let splitLoadRequest = 0
 async function loadSplitFile(path) {
-  if (splittingMerged.value) return
+  if (splittingMerged.value) return false
+  const request = ++splitLoadRequest
+  const pageCount = await getPdfPageCount(path)
+  if (request !== splitLoadRequest) return false
+  if (!pageCount.ok || Number(pageCount.data) < 1) {
+    ElMessage.error(userFacingError(pageCount.error, '读取页数失败，已保留原拆分页段'))
+    return false
+  }
   splitResultDir.value = ''
+  splitResultPaths.value = []
   splitFile.value = path
   splitPreviewPage.value = 1
-  splitTotalPages.value = 0
-  splitRanges.value = []
+  splitTotalPages.value = Number(pageCount.data)
   splitRunWarnings.value = []
   splitOutputDir.value = parentDir(path)
-  const pageCount = await getPdfPageCount(path)
-  if (splitFile.value !== path) return
-  if (!pageCount.ok || Number(pageCount.data) < 1) {
-    ElMessage.error(userFacingError(pageCount.error, '读取页数失败，无法生成拆分页段'))
-    return
-  }
-  splitTotalPages.value = Number(pageCount.data)
-  splitRanges.value = [
-    {
-      name: stripPdf(fileName(path)),
-      pageStart: 1,
-      pageEnd: splitTotalPages.value,
-    },
-  ]
+  splitRanges.value = [{ name: stripPdf(fileName(path)), pageStart: 1, pageEnd: splitTotalPages.value }]
   selectedSplitRangeIndex.value = 0
+  return true
 }
 
 async function selectSplitOutputDir() {
@@ -1777,6 +1821,7 @@ async function handleDroppedPdfPaths(paths) {
     const path = pdfPaths[0]
     if (activeTab.value === 'extract') await loadExtractFile(path)
     if (activeTab.value === 'split') await loadSplitFile(path)
+    if (activeTab.value === 'crop') await cropWorkspace.value?.loadFile(path)
   }
 }
 
@@ -1856,6 +1901,7 @@ function splitFromPreviousPage() {
 }
 
 function handleSplitShortcut(event) {
+  if (route && route.name !== 'pdf-tools') return
   if (activeTab.value !== 'split' || !splitFile.value || event.ctrlKey || event.metaKey || event.altKey) return
   const tag = String(event.target?.tagName || '').toLowerCase()
   if (tag === 'input' || tag === 'textarea' || tag === 'select' || event.target?.isContentEditable) return
@@ -1911,6 +1957,7 @@ async function doSplitMerged() {
     return
   }
   splittingMerged.value = true
+  splitResultPaths.value = []
   const result = await tauriCallSafe('split_merged_evidence_pdf', {
     args: {
       inputPath: splitFile.value,
@@ -1921,6 +1968,7 @@ async function doSplitMerged() {
   })
   if (result.ok) {
     splitTotalPages.value = result.data.totalPages || splitTotalPages.value
+    splitResultPaths.value = (result.data.outputs || []).map(item => item.outputPath).filter(Boolean)
     splitRunWarnings.value = result.data.warnings || []
     const failed = result.data.failed?.length || 0
     const outputs = result.data.outputs?.length || 0
@@ -1955,9 +2003,32 @@ function splitRangeStatus(row) {
   return { type: 'success', text: '正常' }
 }
 
+const incomingReady = ref(false)
+const incoming = useIncomingFiles('pdf-tools', async ({ paths, target }) => {
+  const tab = target === 'long-slice' ? target : target.replace('pdf-', '')
+  const previousPath = tab === 'extract' ? extractFile.value : tab === 'split' ? splitFile.value : tab === 'crop' ? cropWorkspace.value?.getPath() : ''
+  if (previousPath && previousPath !== paths[0]) {
+    const label = FILE_TRANSFER_TARGETS.find(item => item.id === target)?.label || '目标工具'
+    try { await ElMessageBox.confirm(`${label}已有文件“${fileName(previousPath)}”。是否替换这份文件及其设置？`, '切换文件', { confirmButtonText: '替换当前文件', cancelButtonText: '保留当前文件' }) } catch { return false }
+  }
+  activeTab.value = tab
+  await nextTick()
+  if (previousPath === paths[0]) return true
+  if (tab === 'merge') {
+    await addMergeFiles(paths)
+    return paths.every(path => mergeFiles.value.some(file => file.path === path || file.sourcePaths?.includes(path)))
+  }
+  if (tab === 'crop') return (await cropWorkspace.value?.loadFile(paths[0])) === true
+  if (tab === 'extract') return loadExtractFile(paths[0])
+  if (tab === 'split') return loadSplitFile(paths[0])
+  if (tab === 'compress') { loadCompressFiles(paths); return paths.every(path => compressFiles.value.some(file => file.path === path)) }
+  if (tab === 'long-slice') { addLongSliceFiles(paths); return true }
+  return false
+}, { ready: () => incomingReady.value, busy: () => merging.value || compressing.value || splittingMerged.value || extractingPages.value || longSliceProcessing.value || cropWorkspace.value?.isBusy() })
+
 onMounted(() => {
   window.addEventListener('keydown', handleSplitShortcut)
-  void preference.start()
+  void preference.start().finally(() => { incomingReady.value = true })
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleSplitShortcut)
@@ -1971,12 +2042,15 @@ onBeforeUnmount(() => {
 .merge-output-settings > label { line-height: 32px; white-space: nowrap; font-size: 13px; }
 
 .pdf-tools-view {
+  display: flex;
+  flex-direction: column;
   position: relative;
   height: 100%;
   min-height: 0;
   overflow: hidden;
   background: var(--docsy-canvas);
 }
+.pdf-tools-view > .pdf-tabs { flex: 1; min-height: 0; }
 
 .pdf-drop-overlay {
   position: absolute;
@@ -2472,7 +2546,10 @@ h3 {
   border-radius: var(--docsy-radius);
   min-height: 320px;
   overflow: auto;
+  gap: 12px;
 }
+.a4-sheet-viewport.is-comparing .a4-sheet-canvas { width: calc((100% - 12px) / 2); }
+.long-slice-note { color: var(--docsy-text-muted); font-size: 12px; line-height: 1.5; }
 .a4-sheet-canvas {
   flex: 0 0 auto;
   max-width: 100%;

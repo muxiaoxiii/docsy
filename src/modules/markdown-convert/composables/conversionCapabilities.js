@@ -35,3 +35,32 @@ export function markdownMediaHint(format, styleHint = '') {
       return markdownOutputError(format)
   }
 }
+
+export const MARKDOWN_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkdn', 'mdwn', 'mdtxt']
+export const OFFICE_EXTENSIONS = [
+  'doc',
+  'docx',
+  'docm',
+  'xls',
+  'xlsx',
+  'xlsm',
+  'xlsb',
+  'ppt',
+  'pptx',
+  'pptm',
+  'pps',
+  'ppsx',
+  'ppsm',
+  'pot',
+  'potx',
+  'potm',
+  'odt',
+  'ods',
+  'odp',
+  'rtf',
+  'csv',
+  'epub',
+]
+export const HTML_EXTENSIONS = ['html', 'htm']
+
+export const MARKDOWN_INPUT_EXTENSIONS = [...MARKDOWN_EXTENSIONS, ...OFFICE_EXTENSIONS, ...HTML_EXTENSIONS, 'pdf']

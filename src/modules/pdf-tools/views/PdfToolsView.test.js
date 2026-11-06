@@ -12,8 +12,38 @@ vi.mock('../../../core/tauriBridge.js', () => ({
 vi.mock('element-plus', () => ({ ElMessage: { error: vi.fn(), warning: vi.fn(), success: vi.fn() }, ElNotification: vi.fn() }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(), save: vi.fn() }))
 import { open } from '@tauri-apps/plugin-dialog'
-import { tauriCallSafe } from '../../../core/tauriBridge.js'
+import { getPdfPageCount, tauriCallSafe } from '../../../core/tauriBridge.js'
 import PdfToolsView from './PdfToolsView.vue'
+
+describe('接收新文件保留已有工作', () => {
+  beforeEach(() => vi.clearAllMocks())
+  it('读取失败时保留当前拆分页段和提取设置', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    getPdfPageCount.mockResolvedValue({ ok: true, data: 12 })
+    await state.loadSplitFile('/old.pdf')
+    state.splitRanges.value = [{ name: '已编辑', pageStart: 2, pageEnd: 9 }]
+    await state.loadExtractFile('/old.pdf')
+    state.extractPageText.value = '2-5'
+    getPdfPageCount.mockResolvedValue({ ok: false, error: '文件不存在' })
+    expect(await state.loadSplitFile('/missing.pdf')).toBe(false)
+    expect(await state.loadExtractFile('/missing.pdf')).toBe(false)
+    expect(state.splitFile.value).toBe('/old.pdf')
+    expect(state.splitRanges.value).toEqual([{ name: '已编辑', pageStart: 2, pageEnd: 9 }])
+    expect(state.extractFile.value).toBe('/old.pdf')
+    expect(state.extractPageText.value).toBe('2-5')
+  })
+  it('慢请求不能覆盖后来选择的文件', async () => {
+    const state = PdfToolsView.setup({}, { expose: vi.fn() })
+    let finish
+    getPdfPageCount.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockResolvedValueOnce({ ok: true, data: 8 })
+    const first = state.loadExtractFile('/slow.pdf')
+    await state.loadExtractFile('/new.pdf')
+    finish({ ok: true, data: 10 }); await first
+    expect(state.extractFile.value).toBe('/new.pdf')
+    expect(state.extractTotalPages.value).toBe(8)
+  })
+})
 
 describe('PDF 防复制界面链路', () => {
   beforeEach(() => vi.clearAllMocks())

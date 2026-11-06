@@ -49,18 +49,7 @@
 
       <!-- Center Transformation Stream & Portal -->
       <div class="stage-portal">
-        <svg class="stream-svg" viewBox="0 0 120 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M 10 20 C 40 6, 80 34, 110 20"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-dasharray="4 4"
-            class="stream-flow-line"
-          />
-          <circle v-if="busy || processing" r="3" class="stream-dot dot-1 flow-css-dot" />
-          <circle v-if="busy || processing" r="2.4" class="stream-dot dot-2 flow-css-dot" />
-          <circle v-if="busy || processing" r="2" class="stream-dot dot-3 flow-css-dot" />
-        </svg>
+        <SceneFlow class="stream-svg" :active="(busy || processing) && motionActive" />
 
         <!-- Floating glyphs when processing -->
         <div v-if="busy || processing" class="portal-glyphs">
@@ -127,6 +116,7 @@
 <script setup>
 import { computed, ref, onBeforeUnmount } from 'vue'
 import { useMotionActivity } from '../composables/useMotionActivity.js'
+import SceneFlow from './SceneFlow.vue'
 import DocletSprite from './DocletSprite.vue'
 import { useDocletClickAction } from '../composables/useDocletClickAction.js'
 import SceneIllustrations from './SceneIllustrations.vue'
@@ -143,6 +133,8 @@ const props = defineProps({
         'pdf-compress',
         'pdf-anticopy',
         'pdf-extract',
+        'pdf-crop',
+        'pdf-long-slice',
         'evidence',
         'template',
         'image-paddler',
@@ -226,7 +218,7 @@ const SCENE_CONFIGS = {
     busyTitle: 'Doclet 正在装订合并文档…',
     busyDesc: '按所选顺序合并文档，并应用已设置的合并选项',
     defaultTitle: '添加需要合并的文档',
-    defaultDesc: '按顺序合并 PDF；Word 文件需先转换为 PDF',
+    defaultDesc: '按顺序合并 PDF；Word 自动转换，图片经预览确认后加入',
     actionLabel: '添加文件',
   },
   'pdf-compress': {
@@ -236,7 +228,7 @@ const SCENE_CONFIGS = {
     targetIcon: '🍃',
     glyphs: ['⚡', '📉', '🍃', '✦'],
     busyTitle: 'Doclet 正在智能压缩文档…',
-    busyDesc: '重采样高清图片、精简冗余对象并保留文字矢量精度',
+    busyDesc: '按所选的无损优化或图片压缩设置处理文档',
     defaultTitle: '拖入大体积 PDF 文件',
     defaultDesc: '按所选参数压缩 PDF；体积变化和图片清晰度取决于原文件与压缩设置',
     actionLabel: '添加文件',
@@ -262,8 +254,14 @@ const SCENE_CONFIGS = {
     busyTitle: 'Doclet 正在智能切片分页…',
     busyDesc: '智能避让文字与缝隙，按 A4 纸张排版生成易打印文档',
     defaultTitle: '添加长截图或长图 PDF',
-    defaultDesc: '支持手机长截屏、网页长图及超长单页 PDF，按 A4 智能切片分页打印',
+    defaultDesc: '支持长截图和单页、多页 PDF，寻找空白切线并按 A4 分页打印',
     actionLabel: '选择长图文件',
+  },
+  'pdf-crop': {
+    sourceBadge: '原始页面', sourceIcon: '📄', targetBadge: '裁剪页面', targetIcon: '✂️',
+    glyphs: ['✂️', '📐', '📄', '✦'], busyTitle: '正在裁剪页面…',
+    busyDesc: '保留所选区域，生成新的 PDF 文件', defaultTitle: '选择需要裁剪的 PDF',
+    defaultDesc: '拖动边框选择保留区域，可应用到当前页或指定页面', actionLabel: '选择 PDF 文件',
   },
   'pdf-extract': {
     sourceBadge: '源 PDF',
@@ -910,17 +908,6 @@ const sceneMeta = computed(() => SCENE_CONFIGS[resolvedScene.value] || SCENE_CON
 
 <style scoped>
 .source-card, .target-card { animation-iteration-count: 1; }
-.flow-css-dot { animation: docsy-stream-dot 2.2s linear infinite; }
-.flow-css-dot:nth-of-type(2) { animation-delay: -.73s; }
-.flow-css-dot:nth-of-type(3) { animation-delay: -1.46s; }
-@keyframes docsy-stream-dot {
-  0% { transform: translate(10px, 20px); opacity: 0; }
-  15% { opacity: 1; }
-  35% { transform: translate(42px, 17px); }
-  65% { transform: translate(78px, 23px); }
-  85% { opacity: 1; }
-  100% { transform: translate(110px, 20px); opacity: 0; }
-}
 .module-scene-stage:not(.is-processing) :is(.stream-flow-line, .flow-track) { animation: none; }
 .module-scene-stage.is-dragging .source-card { animation: none; transform: translateY(-8px) rotate(-6deg) scale(1.04); }
 .module-scene-stage.is-dragging .target-card { animation: none; transform: translateY(-4px) rotate(5deg); }

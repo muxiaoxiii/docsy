@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { createFileTransfer, transferTargets } from '../core/fileTransfers.js'
 
 const TRANSFER_KEY = 'docsy.workspace.media-transfer'
 const FRAME_DRAFT_KEY = 'docsy.workspace.frame-selection-draft'
+const FILE_TRANSFER_KEY = 'docsy.workspace.file-transfer'
 
 function readSessionValue(key) {
   if (typeof window === 'undefined') return null
@@ -18,6 +20,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const draftValue = readSessionValue(FRAME_DRAFT_KEY)
   const mediaTransfer = ref(Array.isArray(transferValue?.paths) && transferValue.paths.length ? transferValue : null)
   const frameSelectionDraft = ref(Array.isArray(draftValue?.items) && draftValue.items.length ? draftValue : null)
+  const savedTransfer = readSessionValue(FILE_TRANSFER_KEY)
+  const fileTransfer = ref(typeof savedTransfer?.id === 'string' && Array.isArray(savedTransfer.paths) && savedTransfer.paths.every(p => typeof p === 'string' && p.trim() && !p.includes('\0')) && transferTargets(savedTransfer.paths).some(t => t.id === savedTransfer.target) ? savedTransfer : null)
+  function sendFiles(paths, target, source = '') {
+    const transfer = createFileTransfer(paths, target, source)
+    fileTransfer.value = transfer
+    try { window.sessionStorage.setItem(FILE_TRANSFER_KEY, JSON.stringify(transfer)) } catch { /* In-memory delivery remains available. */ }
+    return transfer
+  }
+  function clearFileTransfer(id) {
+    if (fileTransfer.value?.id !== id) return
+    fileTransfer.value = null
+    try { window.sessionStorage.removeItem(FILE_TRANSFER_KEY) } catch { /* Storage may be unavailable. */ }
+  }
 
   function sendImagesToLayout(paths, sourceSessionId = null, context = {}) {
     const normalized = [...new Set((paths || []).filter(Boolean))]
@@ -90,6 +105,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   return {
+    fileTransfer,
+    sendFiles,
+    clearFileTransfer,
     mediaTransfer,
     frameSelectionDraft,
     sendImagesToLayout,

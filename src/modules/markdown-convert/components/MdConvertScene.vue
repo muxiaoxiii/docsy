@@ -54,18 +54,7 @@
 
       <!-- Center Transformation Stream / Energy Rings -->
       <div class="transform-portal">
-        <svg class="portal-svg" viewBox="0 0 120 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M 10 20 C 40 5, 80 35, 110 20"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-dasharray="4 4"
-            class="flow-track"
-          />
-          <circle v-if="converting" r="3" class="flow-particle particle-1 flow-css-dot" />
-          <circle v-if="converting" r="2.5" class="flow-particle particle-2 flow-css-dot" />
-          <circle v-if="converting" r="2" class="flow-particle particle-3 flow-css-dot" />
-        </svg>
+        <SceneFlow class="portal-svg" :active="converting && motionActive" />
 
         <!-- Dynamic Floating Glyphs during converting -->
         <div v-if="converting" class="floating-glyphs">
@@ -131,6 +120,7 @@
 import { computed, ref, onBeforeUnmount } from 'vue'
 import { MARKDOWN_SCENE_DESCRIPTION } from '../composables/conversionCapabilities.js'
 import { useMotionActivity } from '../../../shared/composables/useMotionActivity.js'
+import SceneFlow from '../../../shared/components/SceneFlow.vue'
 import DocletSprite from '../../../shared/components/DocletSprite.vue'
 import { useDocletClickAction } from '../../../shared/composables/useDocletClickAction.js'
 
@@ -738,17 +728,6 @@ const formatGlyph = computed(() => {
 
 <style scoped>
 .doc-card-md, .doc-card-office { animation-iteration-count: 1; }
-.flow-css-dot { animation: docsy-stream-dot 2.2s linear infinite; }
-.flow-css-dot:nth-of-type(2) { animation-delay: -.73s; }
-.flow-css-dot:nth-of-type(3) { animation-delay: -1.46s; }
-@keyframes docsy-stream-dot {
-  0% { transform: translate(10px, 20px); opacity: 0; }
-  15% { opacity: 1; }
-  35% { transform: translate(42px, 17px); }
-  65% { transform: translate(78px, 23px); }
-  85% { opacity: 1; }
-  100% { transform: translate(110px, 20px); opacity: 0; }
-}
 .md-convert-scene:not(.is-converting) :is(.stream-flow-line, .flow-track) { animation: none; }
 .md-convert-scene.is-dragging .doc-card-md { animation: none; transform: translateY(-8px) rotate(-6deg) scale(1.04); }
 .md-convert-scene.is-dragging .doc-card-office { animation: none; transform: translateY(-4px) rotate(5deg); }

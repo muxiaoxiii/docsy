@@ -395,6 +395,7 @@
               <div v-for="warning in generatedResult.warnings || []" :key="warning" role="alert" class="field-hint">{{ warning }}</div>
             </div>
             <div class="generated-actions">
+              <FileContinueMenu :paths="generatedOutputPaths" source="图片排版" size="small" :disabled="generating" />
               <el-button size="small" type="primary" text @click="openGeneratedOutput">打开文件</el-button>
               <el-button v-for="(dir, index) in generatedOutputDirectories" :key="dir" size="small" type="primary" text :title="dir" @click="openGeneratedDirectory(dir)">{{ generatedOutputDirectories.length > 1 ? `打开文件夹 ${index + 1}` : '打开文件夹' }}</el-button>
             </div>
@@ -646,6 +647,7 @@
   </ToolWorkspaceShell>
 </template>
 <script setup>
+import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { computed, ref } from 'vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'

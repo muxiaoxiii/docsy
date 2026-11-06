@@ -1,8 +1,9 @@
 <template>
   <div class="evidence-pdf-view">
+    <IncomingFilesNotice :batch="incoming.pending.value" :error="incoming.error.value" :receiving="incoming.receiving.value" :disabled="incoming.blocked.value" @retry="incoming.retry" @discard="incoming.discard" />
     <el-tabs v-model="activeTab" v-motion-tabs="activeTab" :tab-position="tabPosition" class="evidence-tabs">
       <el-tab-pane label="分项证据合并" name="merge" lazy>
-        <EvidencePdfWorkbench workflow="merge" />
+        <EvidencePdfWorkbench ref="mergeWorkbench" workflow="merge" />
       </el-tab-pane>
       <el-tab-pane label="合并证据拆分" name="split" lazy>
         <EvidencePdfWorkbench workflow="split" />
@@ -82,6 +83,7 @@
           <template #actions>
             <span v-if="evidenceOutputDir" class="output-path">输出文件夹：{{ evidenceOutputDir }}</span>
             <el-button v-if="evidenceOutputDir" @click="openPath(evidenceOutputDir)">打开文件夹</el-button>
+            <FileContinueMenu :paths="outputPaths" source="证据扫描" :disabled="scanning || building" />
             <el-button type="success" :disabled="!evidenceGroups.length || scanning" :loading="building" @click="buildEvidence">
               生成合并 PDF
             </el-button>
@@ -95,12 +97,15 @@
 
 <script setup>
 import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfImportDialog.vue'
+import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
+import IncomingFilesNotice from '../../../shared/components/IncomingFilesNotice.vue'
+import { useIncomingFiles } from '../../../core/composables/useIncomingFiles.js'
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { documentKind } from '../../../shared/pdf-tools/documentImport.js'
 const imageImportDialog = ref(null)
 import { useResponsiveTabs } from '../../../shared/composables/useResponsiveTabs.js'
 import { openPath } from '../../../core/tauriBridge.js'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import EvidencePdfWorkbench from '../components/EvidencePdfWorkbench.vue'
 import ToolWorkspaceShell from '../../../shared/components/ToolWorkspaceShell.vue'
 import FileQueuePanel from '../../../shared/components/FileQueuePanel.vue'
@@ -113,14 +118,20 @@ import { useWorkspacePreferences } from '../../../core/composables/useWorkspaceP
 const tabPosition = useResponsiveTabs()
 
 const activeTab = ref('merge')
-const { outputMode, duplexFiles, duplexGroups, evidenceFolder, evidenceGroups, scanning, building, conversionFailures, groupFailures, evidenceOutputDir, selectEvidenceFolder, scanEvidence, buildEvidence, replaceFailedConversion } = useEvidenceFolder({ reviewImages: (paths, options) => imageImportDialog.value.open(paths, options) })
+const mergeWorkbench = ref(null), incomingReady = ref(false)
+const incoming = useIncomingFiles('evidence-pdf', async batch => {
+  activeTab.value = 'merge'
+  await nextTick()
+  return (await mergeWorkbench.value?.receiveFiles(batch.paths)) === true
+}, { ready: () => incomingReady.value, busy: () => Boolean(mergeWorkbench.value?.isBusy()) })
+const { outputMode, duplexFiles, duplexGroups, evidenceFolder, evidenceGroups, scanning, building, conversionFailures, groupFailures, evidenceOutputDir, outputPaths, selectEvidenceFolder, scanEvidence, buildEvidence, replaceFailedConversion } = useEvidenceFolder({ reviewImages: (paths, options) => imageImportDialog.value.open(paths, options) })
 const preference = useWorkspacePreferences('evidence-pdf.workspace', { activeTab, outputMode, duplexFiles, duplexGroups })
 
 function reorderGroupFiles(group, { from, to }) {
   if (!scanning.value && !building.value) group.files = moveItem(group.files, from, to)
 }
 
-onMounted(() => void preference.start())
+onMounted(() => void preference.start().finally(() => { incomingReady.value = true }))
 onBeforeUnmount(() => void preference.stop())
 </script>
 
@@ -135,9 +146,12 @@ onBeforeUnmount(() => void preference.stop())
 }
 
 .evidence-pdf-view {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: var(--docsy-canvas);
 }
+.evidence-pdf-view > .evidence-tabs { flex: 1; min-height: 0; }
 
 :deep(.evidence-tabs > .el-tabs__content),
 :deep(.evidence-tabs > .el-tabs__content > .el-tab-pane) {

@@ -15,6 +15,7 @@ export function useEvidenceFolder({ reviewImages } = {}) {
   const conversionFailures = ref([])
   const groupFailures = ref([])
   const evidenceOutputDir = ref('')
+  const outputPaths = ref([])
 
   async function selectEvidenceFolder() {
     if (scanning.value || building.value) return
@@ -25,12 +26,14 @@ export function useEvidenceFolder({ reviewImages } = {}) {
     conversionFailures.value = []
     groupFailures.value = []
     evidenceOutputDir.value = ''
+    outputPaths.value = []
     await scanEvidence()
   }
 
   async function scanEvidence() {
     if (!evidenceFolder.value || scanning.value || building.value) return
     scanning.value = true
+    outputPaths.value = []
     evidenceGroups.value = []
     conversionFailures.value = []
     groupFailures.value = []
@@ -47,6 +50,7 @@ export function useEvidenceFolder({ reviewImages } = {}) {
   async function buildEvidence() {
     if (scanning.value || building.value || !evidenceGroups.value.length) return
     building.value = true
+    outputPaths.value = []
     conversionFailures.value = []
     groupFailures.value = []
     evidenceOutputDir.value = ''
@@ -80,6 +84,7 @@ export function useEvidenceFolder({ reviewImages } = {}) {
         return
       }
       evidenceOutputDir.value = result.data.evidenceDir || ''
+      outputPaths.value = (result.data.results || []).map(item => item.outputPath).filter(Boolean)
       const message = `已生成 ${count} 份 PDF${groupFailures.value.length ? `，${groupFailures.value.length} 个分组未生成，请查看失败详情` : ''}${conversionFailures.value.length ? `，${conversionFailures.value.length} 个 Word 文件转换失败` : ''}`
       if (conversionFailures.value.length || groupFailures.value.length) ElMessage.warning(message)
       else ElMessage.success(message)
@@ -105,5 +110,5 @@ export function useEvidenceFolder({ reviewImages } = {}) {
     ElMessage.success('已替换该位置的文件，无需重新扫描；再次生成即可')
   }
 
-  return { outputMode, duplexFiles, duplexGroups, evidenceFolder, evidenceGroups, scanning, building, conversionFailures, groupFailures, evidenceOutputDir, selectEvidenceFolder, scanEvidence, buildEvidence, replaceFailedConversion }
+  return { outputMode, duplexFiles, duplexGroups, evidenceFolder, evidenceGroups, scanning, building, conversionFailures, groupFailures, evidenceOutputDir, outputPaths, selectEvidenceFolder, scanEvidence, buildEvidence, replaceFailedConversion }
 }

@@ -450,6 +450,8 @@
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
           {{ processButtonText }}
         </el-button>
+        <FileContinueMenu v-if="completedMergePath" :paths="[completedMergePath]" source="证据合并" exclude="evidence-merge" :disabled="overlaying" label="继续处理合并文件" />
+        <FileContinueMenu v-if="completedEvidencePaths.length" :paths="completedEvidencePaths" source="分项证据处理" exclude="evidence-merge" :disabled="overlaying" label="继续处理分项文件" />
       </div>
       <el-alert v-if="filenameExtractionErrors.length" type="warning" :closable="false" show-icon :title="`页眉有 ${filenameExtractionErrors.length} 项待修正，请打开逐文件编辑或原规则查看`" :description="filenameExtractionErrors.slice(0, 3).join('；')" />
       <div v-if="showProcessingControls && overlayOutputDir" class="path-text">{{ overlayOutputDir }}</div>
@@ -656,6 +658,7 @@
           <DocletSprite v-if="filePlan.splitStatus === 'complete'" :size="48" motion="celebrate" />
           <strong>已输出 {{ filePlan.outputs?.length || 0 }} 个文件</strong>
           <el-button size="small" @click="openPath(filePlan.outputDir)">打开文件夹</el-button>
+          <FileContinueMenu :paths="(filePlan.outputs || []).map(item => item.outputPath)" source="证据拆分" size="small" :disabled="mergedBatchBusy" />
           <el-button v-if="filePlan.splitStatus !== 'complete'" size="small" type="primary" :disabled="mergedBatchBusy" @click="retryMergedPlan(filePlan)">重试未完成页段</el-button>
           <el-button v-if="filePlan.splitStatus !== 'complete' && !filePlan.outputs?.length" size="small" :disabled="mergedBatchBusy" @click="reopenMergedImportPlan(filePlan)">重新核对</el-button>
         </div>
@@ -1270,7 +1273,8 @@ import ImagePdfImportDialog from '../../../shared/pdf-tools/components/ImagePdfI
 const imageImportDialog = ref(null)
 import HelpTooltip from '../../../shared/components/HelpTooltip.vue'
 import { DOCUMENT_FILTERS, appendUniqueDocuments, convertImportDocument, documentKind, reviewImageImports } from '../../../shared/pdf-tools/documentImport.js'
-import { computed, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import FileContinueMenu from '../../../shared/components/FileContinueMenu.vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
@@ -1426,6 +1430,7 @@ const overlayOutputDir = ref('')
 const importingEvidence = ref(false)
 const checkingOverlayPages = ref(false)
 const overlaying = ref(false)
+const completedMergePath = ref(''), completedEvidencePaths = ref([])
 const overlayProgressText = ref('')
 // 后端逐文件上报的真实进度文案（docsy-operation-progress 事件），替换旧的假进度
 const overlayProgressLabel = ref('')
@@ -2656,7 +2661,7 @@ const processingNotes = computed(() => {
   return notes
 })
 const showProcessingControls = computed(
-  () => !mergedImportPlan.value && workflowMode.value !== 'split',
+  () => overlayFiles.value.length > 0 && !mergedImportPlan.value && workflowMode.value !== 'split',
 )
 const showSessionSummary = computed(
   () =>
@@ -3568,6 +3573,8 @@ async function applySplitHeaderFooterReplacement() {
 
 async function applyHeaderFooter() {
   if (!canApplyOverlay.value) return
+  completedMergePath.value = ''
+  completedEvidencePaths.value = []
   overlaying.value = true
   try {
     // Sync existingElement decisions back to legacy file properties before building payload
@@ -3642,6 +3649,8 @@ async function applyHeaderFooter() {
     const successCount = result.data.results?.length || 0
     const warningCount = (result.data.results || []).filter((item) => item.warnings?.length).length
     const merge = result.data.merge
+    completedMergePath.value = merge?.status === 'done' ? merge.outputPath || '' : ''
+    completedEvidencePaths.value = merge?.status === 'done' && merge.outputMode === 'merge_only' ? [] : (result.data.results || []).map(item => item.outputPath).filter(Boolean)
 
     // 诊断日志：记录处理结果
     diagLog.info(
@@ -4693,6 +4702,7 @@ function startWorkbenchResize(event) {
 
 // --- Global keyboard shortcuts: undo/redo and merged-PDF review ---
 function handleGlobalKeydown(e) {
+  if (!workbenchActive || !hfPanelRef.value?.getClientRects().length) return
   const tag = (e.target?.tagName || '').toLowerCase()
   const editing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -4736,11 +4746,20 @@ function observePanelResize() {
   panelResizeObserver.observe(panelEl)
 }
 
+let workbenchActive = true
+let startup = Promise.resolve()
+onActivated(() => { workbenchActive = true })
+onDeactivated(() => { workbenchActive = false; stopWorkbenchResize?.() })
+async function receiveFiles(paths) {
+  await startup
+  await loadEvidenceFiles(paths)
+  return paths.every(path => overlayFiles.value.some(file => file.path === path || file.sourcePath === path || file.sourcePaths?.includes(path)))
+}
+defineExpose({ receiveFiles, isBusy: () => importingEvidence.value || mergedBatchBusy.value || checkingOverlayPages.value || overlaying.value || deepDetecting.value })
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
   observePanelResize()
-  void commonPreference.start()
-  void workbenchPreference.start()
+  startup = Promise.all([commonPreference.start(), workbenchPreference.start()])
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)

@@ -12,7 +12,7 @@ export default {
       path: '/template',
       name: 'template',
       component: () => import('./views/TemplateView.vue'),
-      meta: { title: '文书模板', moduleId: 'template' },
+      meta: { title: '文书模板', moduleId: 'template', keepAlive: true },
     },
   ],
 

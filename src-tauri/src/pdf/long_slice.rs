@@ -332,16 +332,22 @@ fn find_visual_cut_y(
         let mut sum_sq: u64 = 0;
         let mut white_like_count: u32 = 0;
 
-        for x in (0..img_w).step_by(3) {
-            let p = gray.get_pixel(x, y)[0] as u64;
-            sum += p;
-            sum_sq += p * p;
-            if p >= 245 {
-                white_like_count += 1;
+        // Inspect a narrow band, not a single lucky row inside a character
+        // or line. This works for scanned pages without a text layer too.
+        let y0 = y.saturating_sub(2);
+        let y1 = (y + 2).min(img_h - 1);
+        for row in y0..=y1 {
+            for x in (0..img_w).step_by(3) {
+                let p = gray.get_pixel(x, row)[0] as u64;
+                sum += p;
+                sum_sq += p * p;
+                if p >= 245 {
+                    white_like_count += 1;
+                }
             }
         }
 
-        let sampled_pixels = ((img_w + 2) / 3) as f64;
+        let sampled_pixels = (((img_w + 2) / 3) * (y1 - y0 + 1)) as f64;
         let mean = sum as f64 / sampled_pixels;
         let variance = (sum_sq as f64 / sampled_pixels) - (mean * mean);
 
@@ -541,13 +547,33 @@ fn render_base_slices_pdf(
     let margin_mm = args.margin_mm.max(0.0);
     let header_reserve_mm = if args.header_enabled { 8.0 } else { 0.0 };
     let mut doc = PdfDocument::new("Docsy Long Document Slice");
+    let pdf_sizes = if is_pdf_path(input_path) && source_dpi == LONG_SLICE_EXPORT_SOURCE_DPI {
+        Some(super::page_info::get_page_infos(&input_path.to_string_lossy())?)
+    } else { None };
 
     for planned in sources {
         crate::operations::check_current_cancelled()?;
-        let source = load_source_page_as_image(input_path, planned.source_page_index, source_dpi)?;
+        let render_dpi = if let Some(sizes) = &pdf_sizes {
+            let size = sizes.get(planned.source_page_index - 1).context("来源页面不存在")?;
+            // Choose resolution for the final printed width, not the source
+            // PDF's arbitrary physical page size.
+            let dpi = (300.0 * (content_w_mm * 72.0 / 25.4) / size.width_pt as f64).ceil().max(72.0);
+            let pixels = size.width_pt as f64 * size.height_pt as f64 * (dpi / 72.0).powi(2);
+            if dpi > 1200.0 || pixels > 100_000_000.0 {
+                bail!("来源页面过长或尺寸过小，无法在保证打印清晰度的同时安全渲染；请先拆分源文件");
+            }
+            dpi as u32
+        } else { source_dpi };
+        let source = load_source_page_as_image(input_path, planned.source_page_index, render_dpi)?;
         let img_w = source.width();
+        // PDF export can render at higher resolution than the shared plan.
+        // Map the planned boundaries to the exported bitmap so preview and
+        // output always use the same cuts and overlap.
+        let y_scale = source.height() as f64 / planned.height as f64;
         for slice in &planned.slices {
-            let cropped = source.crop_imm(0, slice.y_start_px, img_w, slice.height_px);
+            let start = ((slice.y_start_px as f64 * y_scale).round() as u32).min(source.height().saturating_sub(1));
+            let end = ((slice.y_end_px as f64 * y_scale).round() as u32).clamp(start + 1, source.height());
+            let cropped = source.crop_imm(0, start, img_w, end - start);
             let raw = RawImage::from_dynamic_image(cropped).map_err(|e| anyhow::anyhow!(e))?;
             let image_id = doc.add_image(&raw);
 
@@ -586,7 +612,15 @@ fn render_base_slices_pdf(
         }
     }
 
-    Ok(doc.save(&PdfSaveOptions::default(), &mut Vec::new()))
+    // The library default caps each decoded image at 2 MB and resizes with
+    // nearest-neighbour sampling. That destroys small text in print exports.
+    let mut options = PdfSaveOptions::default();
+    options.image_optimization = Some(printpdf::ImageOptimizationOptions {
+        max_image_size: None,
+        format: Some(printpdf::ImageCompression::Flate),
+        ..Default::default()
+    });
+    Ok(doc.save(&options, &mut Vec::new()))
 }
 
 fn deref_dict<'a>(doc: &'a lopdf::Document, obj: &'a lopdf::Object) -> Option<&'a lopdf::Dictionary> {
@@ -961,7 +995,9 @@ pub fn process_long_slice(args: &LongSliceArgs) -> Result<LongSliceResult> {
         bail!("输入文件不存在: {}", args.input_path);
     }
 
-    let plan = build_slice_plan(input_path, args, LONG_SLICE_EXPORT_SOURCE_DPI)?;
+    // Plan once at preview resolution; re-render at export resolution only
+    // after the cut boundaries have been decided.
+    let plan = build_slice_plan(input_path, args, LONG_SLICE_PREVIEW_SOURCE_DPI)?;
     if plan.slices.is_empty() {
         bail!("未能对输入文件划分出切片页面");
     }
@@ -1028,6 +1064,58 @@ pub fn process_long_slice(args: &LongSliceArgs) -> Result<LongSliceResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exported_slices_keep_source_pixels_without_default_downsampling() {
+        let dir = temp_named_path("docsy_slice_resolution", "dir");
+        fs::create_dir_all(&dir).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(dir.clone()).unwrap();
+        let input = dir.join("large.png");
+        let image = image::RgbImage::from_fn(1800, 2200, |x, y| image::Rgb([(x % 251) as u8, (y % 253) as u8, 90]));
+        image.save(&input).unwrap();
+        let args: LongSliceArgs = serde_json::from_value(serde_json::json!({"inputPath":input,"outputDir":dir,"smartCut":false,"headerEnabled":false,"footerEnabled":false})).unwrap();
+        let result = process_long_slice(&args).unwrap();
+        let doc = lopdf::Document::load(result.output_path).unwrap();
+        let image_widths: Vec<i64> = doc.objects.values().filter_map(|obj| {
+            let stream = obj.as_stream().ok()?;
+            if stream.dict.get(b"Subtype").ok()?.as_name().ok()? != b"Image" { return None; }
+            stream.dict.get(b"Width").ok()?.as_i64().ok()
+        }).collect();
+        assert!(!image_widths.is_empty());
+        assert!(image_widths.iter().all(|width| *width == 1800), "{image_widths:?}");
+    }
+
+    #[test]
+    fn adjacent_slices_overlap_by_the_requested_print_distance() {
+        let args: LongSliceArgs = serde_json::from_value(serde_json::json!({"inputPath":"example.png","smartCut":false,"overlapMm":10})).unwrap();
+        let (_, _, width, slices) = calculate_slices(1200, 5000, None, &args, 1, 1);
+        assert!(slices.len() > 1);
+        let expected = (10.0 * 1200.0 / width) as u32;
+        for pair in slices.windows(2) {
+            assert_eq!(pair[0].y_end_px - pair[1].y_start_px, expected);
+        }
+    }
+
+    #[test]
+    fn smart_cut_avoids_scanned_text_band() {
+        let mut image = GrayImage::from_pixel(300, 300, image::Luma([255]));
+        for y in 170..=200 {
+            for x in 20..280 { image.put_pixel(x, y, image::Luma([0])); }
+        }
+        let cut = find_visual_cut_y(&image, 190, 45, 120);
+        assert!(cut < 168, "cut through text band at {cut}");
+    }
+
+    #[test]
+    #[ignore = "manual comparison on a user-supplied image"]
+    fn manual_export_long_image_for_visual_check() {
+        let input = std::env::var("DOCSY_TEST_LONG_IMAGE").unwrap();
+        let output = std::env::var("DOCSY_TEST_LONG_OUTPUT").unwrap();
+        let overlap: f64 = std::env::var("DOCSY_TEST_LONG_OVERLAP").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let args: LongSliceArgs = serde_json::from_value(serde_json::json!({"inputPath":input,"outputDir":output,"smartCut":true,"overlapMm":overlap,"headerEnabled":false,"footerEnabled":true})).unwrap();
+        let result = process_long_slice(&args).unwrap();
+        println!("{}", result.output_path);
+    }
 
     #[test]
     fn test_calculate_slices_on_tall_image() {

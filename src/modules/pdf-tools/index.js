@@ -12,7 +12,7 @@ export default {
       path: '/pdf/:tab?',
       name: 'pdf-tools',
       component: () => import('./views/PdfToolsView.vue'),
-      meta: { title: '文档工具', moduleId: 'pdf-tools' },
+      meta: { title: '文档工具', moduleId: 'pdf-tools', keepAlive: true },
     },
   ],
 

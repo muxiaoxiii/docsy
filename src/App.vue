@@ -78,7 +78,7 @@
       </el-header>
       <el-main ref="mainRef" class="app-main">
         <router-view v-slot="{ Component, route: currentRoute }">
-          <keep-alive :max="2">
+          <keep-alive :max="5">
             <component :is="Component" v-if="currentRoute.meta.keepAlive" :key="currentRoute.name" />
           </keep-alive>
           <component :is="Component" v-if="!currentRoute.meta.keepAlive" :key="currentRoute.name" />

@@ -7,6 +7,7 @@ pub(crate) mod bookmarks;
 pub(crate) mod chunked;
 pub(crate) mod cmap;
 pub mod compress;
+pub mod crop;
 pub mod content_text;
 pub mod detection;
 pub mod evidence;
