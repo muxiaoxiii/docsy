@@ -371,7 +371,8 @@
           </div>
           <div v-if="outputMode !== 'files_only'" class="rule-item duplex-item">
             <el-checkbox v-model="duplexSeparate">双面打印分隔模式</el-checkbox>
-            <HelpTooltip label="双面打印分隔" content="证据页数为奇数时在末尾补一页空白，起印页始终在正面。" />
+            <el-checkbox v-if="duplexSeparate" v-model="duplexCountBlankPages">空白分隔页计入页码和目录</el-checkbox>
+            <HelpTooltip label="双面打印分隔" content="奇数页证据末尾补一页用于双面打印。不计入时补页不写页眉页脚；计入时补页也应用页面规则，并写入目录。" />
           </div>
           <div v-if="outputMode === 'files_only'" class="rule-item suffix-item">
             <el-checkbox v-model="fileSuffixEnabled">添加后缀</el-checkbox>
@@ -448,7 +449,7 @@
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages"
           >刷新页数</el-button
         >
-        <el-button v-if="workflowMode === 'merge' && completedCatalog" :disabled="evidenceListBusy" @click="exportEvidenceCatalog">导出本次合并的证据目录</el-button>
+        <el-button v-if="workflowMode === 'merge'" :disabled="evidenceListBusy || !overlayFiles.length" @click="exportEvidenceCatalog">按当前列表导出目录</el-button>
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
           {{ processButtonText }}
         </el-button>
@@ -1282,7 +1283,7 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import { catalogFromMerge, catalogRows } from '../composables/evidenceCatalog.js'
+import { catalogFromMerge, catalogRows, catalogNumberRange, separatorPageJobs } from '../composables/evidenceCatalog.js'
 import { listenDesktop as listen } from '../../../core/desktopRuntime.js'
 import { log as diagLog } from '../../../shared/diagnostics.js'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
@@ -1435,7 +1436,6 @@ const importingEvidence = ref(false)
 const checkingOverlayPages = ref(false)
 const overlaying = ref(false)
 const completedMergePath = ref(''), completedEvidencePaths = ref([])
-const completedCatalog = ref(null)
 const overlayProgressText = ref('')
 // 后端逐文件上报的真实进度文案（docsy-operation-progress 事件），替换旧的假进度
 const overlayProgressLabel = ref('')
@@ -2090,6 +2090,7 @@ const pageNumberDuplexMode = computed({
   },
 })
 const duplexSeparate = ref(false)
+const duplexCountBlankPages = ref(false)
 // footerTextContent..footerTextColor are computed from selectedFooterTextGroup above
 const outputMode = ref('files_and_merge')
 const mergeFileName = ref('合并证据.pdf')
@@ -2120,6 +2121,7 @@ const workbenchPreference = useWorkspacePreferences(`evidence-pdf.workbench.${wo
   outputMode,
   mergeFileName,
   duplexSeparate,
+  duplexCountBlankPages,
   fileSuffixEnabled,
   fileSuffixText,
 })
@@ -2235,6 +2237,8 @@ function processingPresetSnapshot() {
     bookmarkLabelSource: bookmarkLabelSource.value,
     outputMode: outputMode.value,
     mergeFileName: mergeFileName.value,
+    duplexSeparate: duplexSeparate.value,
+    duplexCountBlankPages: duplexCountBlankPages.value,
     fileSuffixEnabled: fileSuffixEnabled.value,
     fileSuffixText: fileSuffixText.value,
   })
@@ -2289,6 +2293,8 @@ function applyProcessingPresetSettings(settings) {
   if ('bookmarkRemoveExisting' in value) bookmarkRemoveExisting.value = Boolean(value.bookmarkRemoveExisting)
   if (value.bookmarkLabelSource) bookmarkLabelSource.value = value.bookmarkLabelSource
   if (value.outputMode) outputMode.value = value.outputMode
+  if ('duplexSeparate' in value) duplexSeparate.value = Boolean(value.duplexSeparate)
+  if ('duplexCountBlankPages' in value) duplexCountBlankPages.value = Boolean(value.duplexCountBlankPages)
   if (value.mergeFileName) mergeFileName.value = value.mergeFileName
   if ('fileSuffixEnabled' in value) fileSuffixEnabled.value = Boolean(value.fileSuffixEnabled)
   if (value.fileSuffixText != null) fileSuffixText.value = value.fileSuffixText
@@ -2610,13 +2616,17 @@ const previewSamplePage = computed(() => {
     numbering.sequence === 'continuous'
       ? Number(selectedOverlayFile.value?.pageStart || 1) + Number(previewPage.value || 1) - 2
       : Number(previewPage.value || 1) - 1
-  return numbering.pageStart + Math.max(0, preceding)
+  const precedingBlanks = numbering.sequence === 'continuous' && outputMode.value !== 'files_only' && duplexSeparate.value && duplexCountBlankPages.value
+    ? overlayFiles.value.slice(0, selectedOverlayIndex.value).filter(file => Number(file.pages) % 2 === 1).length : 0
+  return numbering.pageStart + Math.max(0, preceding) + precedingBlanks
 })
 const previewSampleTotal = computed(() => {
   const numbering = effectivePageNumbering(selectedPageNumberGroup.value, numberingDefaults.value)
   const pages =
     numbering.totalMode === 'combined' ? totalOverlayPages.value : Number(selectedOverlayFile.value?.pages || 1)
-  return numbering.pageStart + Math.max(0, pages - 1)
+  const blanks = numbering.sequence === 'continuous' && numbering.totalMode === 'combined' && outputMode.value !== 'files_only' && duplexSeparate.value && duplexCountBlankPages.value
+    ? overlayFiles.value.filter(file => Number(file.pages) % 2 === 1).length : 0
+  return numbering.pageStart + Math.max(0, pages + blanks - 1)
 })
 const plannedOutputDir = computed(() => buildOutputDir(overlayRows.value, overlayOutputDir.value))
 const mergeNameError = computed(() => {
@@ -2874,13 +2884,19 @@ const currentRules = computed(() => ({
   selectedPageNumberGroupId: selectedPageNumberGroupId.value,
   outputMode: outputMode.value,
   duplexSeparate: duplexSeparate.value,
+  duplexCountBlankPages: duplexCountBlankPages.value,
   mergeAfterProcessing: outputMode.value !== 'files_only',
   mergeFileName: mergeFileName.value,
   fileSuffixEnabled: fileSuffixEnabled.value,
   fileSuffixText: fileSuffixText.value,
 }))
 
-const resolvedHeaderFooter = computed(() => resolveHeaderFooterItems(overlayRows.value, currentRules.value, overlayOutputDir.value))
+const numberedSeparatorMode = computed(() => workflowMode.value === 'merge' && outputMode.value !== 'files_only' && duplexSeparate.value && duplexCountBlankPages.value)
+const numberedSeparatorFiles = computed(() => numberedSeparatorMode.value
+  ? overlayRows.value.map(file => ({ ...file, pages: Number(file.pages) + (Number(file.pages) % 2) }))
+  : overlayRows.value)
+const numberedSeparatorRules = computed(() => numberedSeparatorMode.value ? { ...currentRules.value, duplexCountBlankPages: false } : currentRules.value)
+const resolvedHeaderFooter = computed(() => resolveHeaderFooterItems(numberedSeparatorFiles.value, numberedSeparatorRules.value, overlayOutputDir.value))
 
 const {
   detectAllHeaderFooter,
@@ -3579,7 +3595,6 @@ async function applySplitHeaderFooterReplacement() {
 async function applyHeaderFooter() {
   if (!canApplyOverlay.value) return
   completedMergePath.value = ''
-  completedCatalog.value = null
   completedEvidencePaths.value = []
   overlaying.value = true
   try {
@@ -3590,7 +3605,12 @@ async function applyHeaderFooter() {
       overlaying.value = false
       return
     }
-    let payload = buildEvidencePdfRulePayload(overlayRows.value, currentRules.value, overlayOutputDir.value)
+    let payload = buildEvidencePdfRulePayload(numberedSeparatorFiles.value, numberedSeparatorRules.value, overlayOutputDir.value)
+    if (numberedSeparatorMode.value) payload.session.outputRule.duplexCountBlankPages = true
+    const catalogFileSnapshot = catalogFilesForCurrentRules()
+    if (payload.merge.enabled && payload.merge.duplexSeparate && currentRules.value.duplexCountBlankPages) {
+      payload.merge.blankPageJobs = separatorPageJobs(overlayRows.value, resolvedHeaderFooter.value)
+    }
     payload = await resolveSuffixConflicts(payload)
     if (!payload) {
       overlaying.value = false
@@ -3661,16 +3681,12 @@ async function applyHeaderFooter() {
         const duplex = Boolean(payload.merge?.duplexSeparate)
         const count = await tauriCallQuiet('get_pdf_page_count', { input: completedMergePath.value })
         if (!count.ok) throw new Error('无法读取合并 PDF 的总页数')
-        const rows = catalogFromMerge(result.data.results || [], overlayRows.value, duplex, count.data)
-        const fingerprint = await tauriCallSafe('get_evidence_catalog_fingerprint', { path: completedMergePath.value })
-        if (!fingerprint.ok) throw new Error('无法确认合并 PDF 的状态')
-        completedCatalog.value = {
-          path: completedMergePath.value, rows, fingerprint: fingerprint.data,
-          sourcePaths: [completedMergePath.value, ...overlayRows.value.flatMap(file => [file.path, file.sourcePath, ...(file.sourcePaths || [])].filter(Boolean))],
-        }
+        const rows = catalogFromMerge(result.data.results || [], catalogFileSnapshot, duplex, count.data, Boolean(payload.session?.outputRule?.duplexCountBlankPages))
+        const catalog = await tauriCallSafe('export_merged_evidence_catalog', { mergedPath: completedMergePath.value, rows })
+        if (!catalog.ok) throw new Error(userFacingError(catalog.error, '目录保存失败'))
+        ElNotification({ title: '证据目录已生成', message: `目录与合并 PDF 保存在同一文件夹：${catalog.data}`, type: 'success', duration: 0 })
       } catch (error) {
-        completedCatalog.value = null
-        ElMessage.warning(`合并完成，但不能生成证据目录：${error.message || '无法核对页码'}`)
+        ElNotification({ title: '合并完成，但目录未生成', message: error.message || '无法核对页码', type: 'warning', duration: 0 })
       }
     }
     completedEvidencePaths.value = merge?.status === 'done' && merge.outputMode === 'merge_only' ? [] : (result.data.results || []).map(item => item.outputPath).filter(Boolean)
@@ -4396,7 +4412,6 @@ function clearEvidenceFiles() {
   mergedImportPlan.value = null
   mergedImportPlans.value = []
   completedMergePath.value = ''
-  completedCatalog.value = null
   completedEvidencePaths.value = []
   selectedOverlayIndex.value = 0
   selectedMergedImportIndex.value = 0
@@ -4486,7 +4501,7 @@ function contentRowsForFile(file) {
 
 
 function displayContentRowText(file, index, cr) {
-  return cr.source === 'new' ? contentRowDisplayText(cr, file) || '—' : existingContentRange(cr)
+  return cr.source === 'new' ? contentRowDisplayText(cr, { ...file, pageStart: resolvedHeaderFooter.value[index]?.job.pageStart || file.pageStart }) || '—' : existingContentRange(cr)
 }
 
 function fileContentSummary(file, index) {
@@ -4502,23 +4517,41 @@ function fileContentSummary(file, index) {
   }))
 }
 
+function catalogFilesForCurrentRules() {
+  return overlayRows.value.map((file, index) => {
+    const records = resolvedHeaderFooter.value[index]?.records || []
+    const rangeFile = { ...file, pageStart: resolvedHeaderFooter.value[index]?.job.pageStart || file.pageStart }
+    const ranges = [...new Set(records.filter(record => record.kind === 'pageNumber')
+      .map(record => {
+        return catalogNumberRange(record.overlays, rangeFile.pageStart)
+      }).filter(Boolean))]
+    return { ...file, catalogPageRange: ranges.join('；') }
+  })
+}
+
 async function exportEvidenceCatalog() {
   try {
-    const catalog = completedCatalog.value
-    if (!catalog) throw new Error('请先成功合并证据')
-    const fingerprint = await tauriCallSafe('get_evidence_catalog_fingerprint', { path: catalog.path })
-    if (!fingerprint.ok || fingerprint.data !== catalog.fingerprint) {
-      throw new Error('合并 PDF 已发生变化，请重新合并后导出目录')
+    if (failedDocumentImports.value.length) throw new Error('有文件导入失败，请先处理或移除失败项')
+    checkingOverlayPages.value = true
+    try {
+      for (const file of overlayFiles.value) {
+        const result = await tauriCallQuiet('get_pdf_page_count', { input: file.path })
+        if (!result.ok || !Number.isInteger(Number(result.data)) || Number(result.data) <= 0) {
+          file.pages = 0
+          throw new Error(`无法读取 ${file.name} 的页数，请检查文件后重试`)
+        }
+        file.pages = Number(result.data)
+      }
+    } finally {
+      checkingOverlayPages.value = false
     }
+    const rows = catalogRows(catalogFilesForCurrentRules(), outputMode.value !== 'files_only' && duplexSeparate.value && duplexCountBlankPages.value)
+    const sourcePaths = overlayFiles.value.flatMap(file => [file.path, file.sourcePath, ...(file.sourcePaths || [])].filter(Boolean))
     const path = await save({ defaultPath: '证据目录.docx', filters: [{ name: 'Word 文档', extensions: ['docx'] }] })
     if (!path) return
-    const confirmedFingerprint = await tauriCallSafe('get_evidence_catalog_fingerprint', { path: catalog.path })
-    if (completedCatalog.value !== catalog || !confirmedFingerprint.ok || confirmedFingerprint.data !== catalog.fingerprint) {
-      throw new Error('合并结果已发生变化，请重新合并后导出目录')
-    }
-    const result = await tauriCallSafe('export_evidence_catalog', { outputPath: path, rows: catalog.rows, sourcePaths: catalog.sourcePaths })
+    const result = await tauriCallSafe('export_evidence_catalog', { outputPath: path, rows, sourcePaths })
     if (!result.ok) throw new Error(userFacingError(result.error, '导出失败'))
-    ElMessage.success('证据目录已导出')
+    ElMessage.success('已按当前列表导出目录；合并设置或列表改变后请重新导出')
   } catch (error) {
     ElMessage.error(error.message || '证据目录导出失败')
   }
@@ -4533,8 +4566,10 @@ function filePageRangeText(file) {
       ? catalogRows(overlayRows.value, duplexSeparate.value)[index]?.pageRange
       : `${file.pageStart || 1}–${file.pageEnd || Number(file.pageStart || 1) + file.pages - 1}`
   } catch { physical = '页数待确认' }
+  const index = overlayRows.value.indexOf(file)
+  const rangeFile = { ...file, pageStart: resolvedHeaderFooter.value[index]?.job.pageStart || file.pageStart }
   const ranges = [...new Set(contentRowsForFile(file).filter(row => row.source === 'new' && row.kind === 'pageNumber')
-    .map(row => contentRowNumberRange(row, file)).filter(Boolean))]
+    .map(row => contentRowNumberRange(row, rangeFile)).filter(Boolean))]
   return ranges.length ? `${ranges.join('；')}（${physical}）` : physical
 }
 

@@ -23,7 +23,14 @@ pub(crate) fn is_docsy_separator(page: &pdfcraft_cos::Dict) -> bool {
 
 pub fn write_blank_page(size: &PageSize) -> Result<TempPathGuard> {
     let path = crate::util::fs::temp_named_path("docsy-blank", "pdf");
-    write_blank_pdf(&path, size)?;
+    write_blank_pdf(&path, size, true)?;
+    Ok(TempPathGuard::new(path))
+}
+
+/// 作为实际证据页处理的分隔页，不标记为可自动删除的空白分隔页。
+pub fn write_numbered_separator_page(size: &PageSize) -> Result<TempPathGuard> {
+    let path = crate::util::fs::temp_named_path("docsy-numbered-blank", "pdf");
+    write_blank_pdf(&path, size, false)?;
     Ok(TempPathGuard::new(path))
 }
 
@@ -31,7 +38,7 @@ pub fn write_blank_page(size: &PageSize) -> Result<TempPathGuard> {
 ///
 /// 只包含 Catalog / Pages / Page 三个对象，页面无内容流，MediaBox 与
 /// Rotate 复制自源页。qpdf 可直接作为 `--pages` 输入读取。
-fn write_blank_pdf(path: &Path, size: &PageSize) -> Result<()> {
+fn write_blank_pdf(path: &Path, size: &PageSize, mark_separator: bool) -> Result<()> {
     let x0 = size.box_x0;
     let y0 = size.box_y0;
     let x1 = x0 + size.raw_width_pt;
@@ -48,8 +55,9 @@ fn write_blank_pdf(path: &Path, size: &PageSize) -> Result<()> {
         String::new()
     };
 
+    let marker = if mark_separator { " /DocsySeparator /V1" } else { "" };
     let page_dict = format!(
-        "<< /Type /Page /Parent 2 0 R /MediaBox [{x0} {y0} {x1} {y1}] /Resources << >> /DocsySeparator /V1{rotate}{user_unit} >>"
+        "<< /Type /Page /Parent 2 0 R /MediaBox [{x0} {y0} {x1} {y1}] /Resources << >>{marker}{rotate}{user_unit} >>"
     );
     let objects: [&[u8]; 3] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",

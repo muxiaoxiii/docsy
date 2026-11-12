@@ -538,15 +538,6 @@ pub async fn process_long_slice(
     .await
 }
 
-#[tauri::command]
-pub async fn get_evidence_catalog_fingerprint(path: String) -> Result<String, String> {
-    run_blocking(move || {
-        let meta = std::fs::metadata(path)?;
-        let modified = meta.modified()?.duration_since(std::time::UNIX_EPOCH)?;
-        Ok(format!("{}:{}:{}", meta.len(), modified.as_secs(), modified.subsec_nanos()))
-    }).await
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EvidenceCatalogRow {
@@ -571,12 +562,41 @@ pub async fn export_evidence_catalog(output_path: String, rows: Vec<EvidenceCata
     }).await
 }
 
+#[tauri::command]
+pub async fn export_merged_evidence_catalog(merged_path: String, rows: Vec<EvidenceCatalogRow>) -> Result<String, String> {
+    run_blocking(move || write_merged_evidence_catalog(&merged_path, &rows)).await
+}
+
+fn write_merged_evidence_catalog(merged_path: &str, rows: &[EvidenceCatalogRow]) -> anyhow::Result<String> {
+    let merged = std::path::Path::new(merged_path);
+    if !merged.is_file() { anyhow::bail!("合并 PDF 不存在"); }
+    let dir = merged.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let stem = format!("{}_证据目录", merged.file_stem().and_then(|s| s.to_str()).unwrap_or("合并证据"));
+    loop {
+        let path = crate::util::fs::unique_output_path(dir, &stem, "docx");
+        let output = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if let Err(error) = write_evidence_catalog_to_file(output, rows) {
+            let _ = std::fs::remove_file(&path);
+            return Err(error);
+        }
+        return Ok(path.to_string_lossy().into_owned());
+    }
+}
+
 fn write_evidence_catalog(output_path: &str, rows: &[EvidenceCatalogRow]) -> anyhow::Result<()> {
-    use docx_rs::{AlignmentType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph, Run, RunFonts, Shading, Table, TableCell, TableRow, VAlignType, WidthType};
-    use std::path::Path;
-    if rows.is_empty() { anyhow::bail!("证据列表为空"); }
-    let path = Path::new(output_path);
+    let path = std::path::Path::new(output_path);
     if !path.extension().is_some_and(|s| s.eq_ignore_ascii_case("docx")) { anyhow::bail!("请选择 .docx 文件"); }
+    if rows.is_empty() { anyhow::bail!("证据列表为空"); }
+    write_evidence_catalog_to_file(std::fs::File::create(path)?, rows)
+}
+
+fn write_evidence_catalog_to_file(mut output: std::fs::File, rows: &[EvidenceCatalogRow]) -> anyhow::Result<()> {
+    use docx_rs::{AlignmentType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph, Run, RunFonts, Shading, Table, TableCell, TableRow, VAlignType, WidthType};
+    if rows.is_empty() { anyhow::bail!("证据列表为空"); }
     let widths = [702, 1833, 4033, 4880, 1415, 1040];
     let text_run = |text: &str| Run::new().fonts(RunFonts::new().ascii("Times New Roman").hi_ansi("Times New Roman").east_asia("Songti SC")).add_text(text);
     let make_row = |values: &[&str], header: bool| {
@@ -600,7 +620,6 @@ fn write_evidence_catalog(output_path: &str, rows: &[EvidenceCatalogRow]) -> any
         .add_paragraph(Paragraph::new().add_run(text_run("提交人：").size(22)))
         .add_paragraph(Paragraph::new().add_run(text_run("代理人：").size(22)))
         .add_paragraph(Paragraph::new().add_run(text_run("日期：").size(22)));
-    let mut output = std::fs::File::create(path)?;
     doc.build().pack(&mut output)?;
     Ok(())
 }
@@ -608,6 +627,22 @@ fn write_evidence_catalog(output_path: &str, rows: &[EvidenceCatalogRow]) -> any
 #[cfg(test)]
 mod evidence_catalog_tests {
     use super::*;
+    #[test]
+    fn automatic_catalog_does_not_replace_existing_file() {
+        let root = crate::util::fs::temp_named_path("docsy-catalog-auto-test", "dir");
+        std::fs::create_dir_all(&root).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(root.clone()).unwrap();
+        let merged = root.join("合并.pdf");
+        std::fs::write(&merged, b"placeholder").unwrap();
+        let existing = root.join("合并_证据目录.docx");
+        std::fs::write(&existing, b"keep").unwrap();
+        let rows = vec![EvidenceCatalogRow { number: "1".into(), name: "甲".into(), page_range: "1–2".into() }];
+        let output = write_merged_evidence_catalog(merged.to_str().unwrap(), &rows).unwrap();
+        assert_ne!(std::path::Path::new(&output), existing);
+        assert_eq!(std::fs::read(existing).unwrap(), b"keep");
+        assert!(std::path::Path::new(&output).is_file());
+    }
+
     #[test]
     fn writes_editable_catalog() {
         let path = std::env::temp_dir().join("docsy-evidence-catalog-test.docx");

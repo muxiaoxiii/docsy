@@ -4,6 +4,7 @@ vi.mock('../../../core/composables/useWindowFileDrop.js', () => ({ useWindowFile
 vi.mock('../../../core/composables/useWorkspacePreferences.js', () => ({ useWorkspacePreferences: () => ({ start: vi.fn(), stop: vi.fn() }) }))
 vi.mock('../../../core/tauriBridge.js', () => ({ tauriCallSafe: vi.fn(), tauriCallQuiet: vi.fn(), openPath: vi.fn(), userFacingError: error => String(error), showLoading: () => 'test-import', hideLoading: vi.fn(), emitOperationUpdate: vi.fn() }))
 vi.mock('element-plus', () => ({ ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() }, ElNotification: vi.fn(), ElMessageBox: { confirm: vi.fn() } }))
+vi.mock('@tauri-apps/plugin-fs', async original => ({ ...(await original()), exists: vi.fn(async () => false) }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(), save: vi.fn() }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => vi.fn()) }))
 import { tauriCallQuiet, tauriCallSafe } from '../../../core/tauriBridge.js'
@@ -15,25 +16,68 @@ import { buildEvidencePdfRulePayload, createEvidenceFile } from '../../../shared
 describe('evidence mixed import recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: vi.fn() } })
+    vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: vi.fn() }, setInterval: vi.fn(() => 1), clearInterval: vi.fn() })
     tauriCallQuiet.mockImplementation(async command => command === 'convert_word_to_pdf'
       ? { ok: false, error: 'Office unavailable' }
       : { ok: true, data: command === 'get_pdf_page_count' ? 3 : false })
   })
   afterEach(() => vi.unstubAllGlobals())
-  it('只允许导出未改变的已合并文件对应的目录', async () => {
+  it('手动导出按当前列表、刷新页数并按空白页设置计算目录', async () => {
     const state = EvidencePdfWorkbench.setup({ workflow: 'merge' }, { expose: vi.fn() })
-    await state.exportEvidenceCatalog()
-    expect(save).not.toHaveBeenCalled()
-    state.completedCatalog.value = { path: '/merged.pdf', fingerprint: 'original', rows: [{ number: '1', name: '甲', pageRange: '1–3' }], sourcePaths: ['/merged.pdf'] }
-    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: 'changed' })
-    await state.exportEvidenceCatalog()
-    expect(save).not.toHaveBeenCalled()
-    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: 'original' }).mockResolvedValueOnce({ ok: true, data: 'original' }).mockResolvedValueOnce({ ok: true })
+    state.overlayFiles.value = ['/b.pdf', '/a.pdf'].map(path => ({ ...createEvidenceFile(path), pages: 99 }))
+    state.insertHeaderFooterEnabled.value = false
+    state.duplexSeparate.value = true
+    state.duplexCountBlankPages.value = false
     save.mockResolvedValueOnce('/catalog.docx')
+    tauriCallSafe.mockResolvedValueOnce({ ok: true })
     await state.exportEvidenceCatalog()
-    expect(tauriCallSafe).toHaveBeenLastCalledWith('export_evidence_catalog', { outputPath: '/catalog.docx', rows: state.completedCatalog.value.rows, sourcePaths: ['/merged.pdf'] })
+    expect(tauriCallSafe).toHaveBeenLastCalledWith('export_evidence_catalog', expect.objectContaining({ rows: [
+      { number: '1', name: 'b', pageRange: '1–3' }, { number: '2', name: 'a', pageRange: '4–6' },
+    ] }))
+    state.duplexCountBlankPages.value = true
+    save.mockResolvedValueOnce('/catalog2.docx')
+    tauriCallSafe.mockResolvedValueOnce({ ok: true })
+    await state.exportEvidenceCatalog()
+    expect(tauriCallSafe).toHaveBeenLastCalledWith('export_evidence_catalog', expect.objectContaining({ rows: [
+      { number: '1', name: 'b', pageRange: '1–4' }, { number: '2', name: 'a', pageRange: '5–8' },
+    ] }))
   })
+  it.each([[false, false, 3, '1', '2–3'], [true, false, 4, '1', '2–3'], [true, true, 4, '1–2', '3–4']])(
+    '合并后自动导出目录，双面 %s，空白页计入 %s', async (duplex, countBlank, mergedPages, firstRange, secondRange) => {
+      const state = EvidencePdfWorkbench.setup({ workflow: 'merge' }, { expose: vi.fn() })
+      state.overlayFiles.value = [{ ...createEvidenceFile('/a.pdf'), pages: 1 }, { ...createEvidenceFile('/b.pdf'), pages: 2 }]
+      state.duplexSeparate.value = duplex
+      state.duplexCountBlankPages.value = countBlank
+      state.optimizeSizeEnabled.value = false
+      state.insertHeaderFooterEnabled.value = true
+      state.globalApplyEnabled.value = true
+      state.footerEnabled.value = true
+      state.outputMode.value = 'files_and_merge'
+      tauriCallQuiet.mockImplementation(async command => ({ ok: true, data: command === 'get_pdf_page_count' ? mergedPages : false }))
+      let mergePayload
+      tauriCallSafe.mockImplementation(async (command, data) => {
+        if (command === 'apply_evidence_pdf_rules') {
+          mergePayload = data.args
+          return { ok: true, data: { results: [{ inputPath: '/a.pdf', outputPath: '/out-a.pdf', pages: 1, warnings: [] }, { inputPath: '/b.pdf', outputPath: '/out-b.pdf', pages: 2, warnings: [] }], failed: [], merge: { status: 'done', outputPath: '/merged.pdf', outputMode: 'files_and_merge' } } }
+        }
+        if (command === 'export_merged_evidence_catalog') return { ok: true, data: '/merged_证据目录.docx' }
+        return { ok: true, data: false }
+      })
+      expect(state.canApplyOverlay.value).toBe(true)
+      await state.applyHeaderFooter()
+      expect(mergePayload).toBeDefined()
+      const secondJob = mergePayload.items[1]
+      const printed = secondJob.extraOverlays.find(item => item.artifactKind === 'PageNumber')
+      expect(secondJob.pageStart + printed.numberOffset).toBe(countBlank ? 3 : 2)
+      expect(printed.numberTotal).toBe(countBlank ? 4 : 3)
+      const exportCall = tauriCallSafe.mock.calls.find(call => call[0] === 'export_merged_evidence_catalog')
+      expect(exportCall?.[1].rows.map(row => row.pageRange)).toEqual([firstRange, secondRange])
+      if (countBlank) {
+        expect(mergePayload.merge.blankPageJobs[0].extraOverlays.some(item => item.artifactKind === 'PageNumber')).toBe(true)
+        expect(mergePayload.merge.blankPageJobs[1]).toBeNull()
+      } else expect(mergePayload.merge.blankPageJobs).toBeUndefined()
+    },
+  )
   it.each(['merge', 'split'])('clears %s task files, review plans and previews together while retaining processing settings', workflow => {
     const state = EvidencePdfWorkbench.setup({ workflow }, { expose: vi.fn() })
     state.overlayFiles.value = [createEvidenceFile('/a.pdf')]

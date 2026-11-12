@@ -147,11 +147,15 @@ export function pageNumberOverlaysForFile(file, baseRule) {
   const continuous = baseRule.sequence !== 'per-file'
   const pageNumberStart = Math.max(1, Number(baseRule.pageNumberStart) || 1)
   const { allPages, counted } = pageCountsForNumbering(baseRule, file)
-  const total = pageNumberStart + Math.max(0, counted.length - 1)
+  const files = Array.isArray(baseRule.allFiles) ? baseRule.allFiles : [file]
+  const countBlanks = baseRule.countDuplexBlanks === true
+  const blanks = countBlanks ? files.filter(item => Number(item.pages) % 2 === 1).length : 0
+  const blanksBefore = countBlanks && continuous ? files.filter(item => Number(item.pageStart || 1) < Number(file.pageStart || 1) && Number(item.pages) % 2 === 1).length : 0
+  const total = pageNumberStart + Math.max(0, counted.length + (baseRule.totalMode === 'combined' ? blanks : (countBlanks && Number(file.pages) % 2 === 1 ? 1 : 0)) - 1)
   const overlays = []
   let active = null
   let countedBefore = continuous
-    ? allPages.filter((entry) => entry.globalPage < Number(file.pageStart || 1) && pageCounts(entry, baseRule)).length
+    ? allPages.filter((entry) => entry.globalPage < Number(file.pageStart || 1) && pageCounts(entry, baseRule)).length + blanksBefore
     : 0
   for (let localPage = 1; localPage <= Number(file.pages); localPage += 1) {
     const globalPage = Number(file.pageStart || 1) + localPage - 1

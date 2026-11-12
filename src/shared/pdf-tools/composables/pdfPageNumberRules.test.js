@@ -9,6 +9,17 @@ import {
 } from './pdfPageNumberRules.js'
 
 describe('PDF page number rules', () => {
+  it('双面空白页可选择计入连续页码，关闭时保持原有编号', () => {
+    const files = [{ path: '/a', pageStart: 1, pages: 3 }, { path: '/b', pageStart: 4, pages: 2 }]
+    const base = { enabled: true, allFiles: files, pageNumberStart: 1, sequence: 'continuous', totalMode: 'combined', template: '{page}/{total}' }
+    const kept = pageNumberOverlaysForFile(files[1], { ...base, countDuplexBlanks: false })[0]
+    const counted = pageNumberOverlaysForFile(files[1], { ...base, countDuplexBlanks: true })[0]
+    expect([files[1].pageStart + kept.numberOffset, kept.numberTotal]).toEqual([4, 5])
+    expect([files[1].pageStart + counted.numberOffset, counted.numberTotal]).toEqual([5, 6])
+    const perFile = pageNumberOverlaysForFile(files[1], { ...base, sequence: 'per-file', countDuplexBlanks: true })[0]
+    expect([files[1].pageStart + perFile.numberOffset, perFile.numberTotal]).toEqual([1, 6])
+  })
+
   it('formats supported number styles with safe fallback', () => {
     expect(formatPageNumber(4, 'chinese')).toBe('四')
     expect(formatPageNumber(101, 'chinese')).toBe('一百零一')

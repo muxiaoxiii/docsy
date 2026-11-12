@@ -95,6 +95,7 @@ struct MergeSpec {
     output_path: String,
     output_mode: String,
     duplex_separate: bool,
+    blank_page_jobs: Vec<Option<Value>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -302,6 +303,8 @@ fn extract_merge_from_args(args: &crate::commands::pdf::ApplyEvidencePdfRulesArg
             })
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        blank_page_jobs: merge_value.get("blankPageJobs").and_then(Value::as_array)
+            .map(|items| items.iter().map(|v| if v.is_null() { None } else { Some(v.clone()) }).collect()).unwrap_or_default(),
     }
 }
 
@@ -435,7 +438,7 @@ fn apply_merge_if_requested(
         return Ok(MergeResult::skipped("未设置合并输出路径"));
     }
 
-    let inputs: Vec<String> = results
+    let mut inputs: Vec<String> = results
         .iter()
         .map(|r| r.output_path.clone())
         .filter(|p| !p.is_empty())
@@ -449,9 +452,36 @@ fn apply_merge_if_requested(
             fs::create_dir_all(parent).context("创建合并 PDF 输出目录失败")?;
         }
     }
+    let mut separator_guards = Vec::new();
+    let numbered_separators = merge.duplex_separate && !merge.blank_page_jobs.is_empty();
+    if numbered_separators {
+        if merge.blank_page_jobs.len() != inputs.len() { anyhow::bail!("空白分隔页配置与证据数量不一致"); }
+        let mut with_separators = Vec::new();
+        for (index, input) in inputs.iter().enumerate() {
+            with_separators.push(input.clone());
+            let pages = super::qpdf::page_count(input)?;
+            if pages % 2 == 0 { continue; }
+            let config = merge.blank_page_jobs[index].as_ref().context("缺少空白分隔页的页码设置")?;
+            let sizes = super::page_info::get_page_infos(input)?;
+            let blank = super::blank::write_numbered_separator_page(sizes.last().context("无法读取证据末页尺寸")?)?;
+            let target = crate::util::fs::TempPathGuard::new(super::temp_named_path("docsy-numbered-separator", "pdf"));
+            let job: header_footer::HeaderFooterJob = serde_json::from_value(serde_json::json!({
+                "inputPath": blank.path().to_string_lossy(), "outputPath": target.path().to_string_lossy(),
+                "pageStart": config.get("pageStart"), "totalPages": config.get("totalPages"),
+                "header": config.get("header"), "footer": config.get("footer"),
+                "extraOverlays": config.get("extraOverlays")
+            }))?;
+            let result = header_footer::overlay_text(&job).context("为空白分隔页添加页码失败")?;
+            if result.output_path != target.path().to_string_lossy() { anyhow::bail!("空白页输出路径异常"); }
+            with_separators.push(result.output_path);
+            separator_guards.push(blank);
+            separator_guards.push(target);
+        }
+        inputs = with_separators;
+    }
     let policy = super::backend::policy::OutputPolicy {
         merge_policy: super::backend::policy::MergePolicy::Print,
-        duplex_separate: merge.duplex_separate,
+        duplex_separate: merge.duplex_separate && !numbered_separators,
         ..Default::default()
     };
     let req = super::backend::MergeRequest {
@@ -557,6 +587,43 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn numbered_separator_receives_header_and_page_number_only_when_enabled() {
+        use crate::external::ExternalTool;
+        if !crate::external::QpdfTool.check().available { return; }
+        let root = crate::util::fs::temp_named_path("docsy-numbered-separator-test", "dir");
+        std::fs::create_dir_all(&root).unwrap();
+        let _guard = crate::util::fs::TempDirGuard::new(root.clone()).unwrap();
+        let size = super::super::page_info::PageSize { width_pt: 595.0, height_pt: 842.0, raw_width_pt: 595.0, raw_height_pt: 842.0, box_x0: 0.0, box_y0: 0.0, rotate: 0 };
+        let input = super::super::blank::write_blank_page(&size).unwrap();
+        let result = header_footer::HeaderFooterResult { input_path: input.path().to_string_lossy().into_owned(), output_path: input.path().to_string_lossy().into_owned(), pages: 1, normalized: false, cleaned: false, semantic_removed: 0, annotations_removed: None, annotation_pages_touched: None, warnings: vec![] };
+        for mode in 0..3 {
+            let path = root.join(format!("merged-{mode}.pdf"));
+            let mut spec = MergeSpec { enabled: true, output_path: path.to_string_lossy().into_owned(), output_mode: "files_and_merge".into(), duplex_separate: mode != 0, blank_page_jobs: vec![] };
+            if mode == 2 { spec.blank_page_jobs = vec![Some(json!({ "pageStart": 2, "totalPages": 2,
+                "header": { "text": "TEST HEADER", "region": "header", "pageStart": 1, "pageEnd": 1 },
+                "extraOverlays": [{ "text": "{page}", "region": "footer", "artifactKind": "PageNumber", "pageStart": 1, "pageEnd": 1, "numberOffset": 0, "numberTotal": 2 }]
+            }))]; }
+            apply_merge_if_requested(&spec, &[], &[result.clone()], &[]).unwrap();
+            let doc = lopdf::Document::load(&path).unwrap();
+            let pages = doc.get_pages();
+            assert_eq!(pages.len(), if mode == 0 { 1 } else { 2 });
+            if mode != 0 {
+                let page = pages[&2];
+                let content = doc.get_page_content(page);
+                if mode == 1 { assert!(content.is_empty(), "unnumbered separator must remain empty"); }
+                else {
+                    assert!(!content.is_empty(), "numbered separator must contain overlays");
+                    assert!(doc.get_dictionary(page).unwrap().get(b"DocsySeparator").is_err(), "numbered page must not be marked as removable blank");
+                    if let Ok(output) = std::process::Command::new("pdftotext").args(["-f", "2", "-l", "2"]).arg(&path).arg("-").output() {
+                        let text = String::from_utf8_lossy(&output.stdout);
+                        assert!(text.contains("TEST HEADER") && text.contains('2'), "header and page number missing: {text}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn file_name_of_takes_last_path_segment() {
         assert_eq!(file_name_of("/tmp/dir/a.pdf"), "a.pdf");
         assert_eq!(file_name_of("C:\\dir\\b.pdf"), "b.pdf");
@@ -590,6 +657,7 @@ mod tests {
             output_path: "/tmp/final.pdf".to_string(),
             output_mode: "files_and_merge".to_string(),
             duplex_separate: false,
+            blank_page_jobs: vec![],
         };
         let failed = vec![header_footer::HeaderFooterFailure {
             path: "/tmp/a.pdf".to_string(),

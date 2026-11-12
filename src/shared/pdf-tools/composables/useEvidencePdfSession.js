@@ -769,6 +769,7 @@ function pageNumberConfigsForGroup(file, files, group, rules) {
   return pageNumberOverlaysForFile(file, {
     enabled: true,
     totalPages: totalPages(files), allFiles: files,
+    countDuplexBlanks: rules.outputMode !== 'files_only' && rules.duplexSeparate === true && rules.duplexCountBlankPages === true,
     pageNumberStart: numbering.pageStart, totalMode: numbering.totalMode, sequence: numbering.sequence,
     template: pageNumberTemplateWithShowTotal(group.filePageNumberOverrides?.[filenameHeaderKey(file)] ?? group.template ?? '{page}/{total}', rules.pageNumberShowTotal),
     style: group.style || 'arabic', region: group.region || 'footer',
@@ -1219,6 +1220,7 @@ export function buildEvidencePdfRulePayload(files, rules, outputDir = '') {
         outputDir,
         outputMode,
         duplexSeparate: Boolean(rules.duplexSeparate),
+        duplexCountBlankPages: Boolean(rules.duplexCountBlankPages),
         mergeAfterProcessing: outputMode !== 'files_only',
         mergeOutputPath,
       },
