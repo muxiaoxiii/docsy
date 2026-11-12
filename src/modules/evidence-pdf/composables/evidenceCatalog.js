@@ -10,3 +10,20 @@ export function catalogRows(files, duplex = false) {
     return row
   })
 }
+
+// Result order is the merge order; use processed page counts, not stale list previews.
+export function catalogFromMerge(results, listedFiles, duplex, mergedPageCount) {
+  if (!results.length || results.length !== listedFiles.length) throw new Error('合并结果与文件列表数量不一致')
+  const byPath = new Map(listedFiles.map(file => [file.path, file]))
+  const seen = new Set()
+  const files = results.map(item => {
+    const file = byPath.get(item.inputPath)
+    if (!file || seen.has(item.inputPath)) throw new Error('合并结果与文件列表不一致')
+    seen.add(item.inputPath)
+    return { name: file.name, pages: item.pages }
+  })
+  const rows = catalogRows(files, duplex)
+  const expected = files.reduce((total, file) => total + Number(file.pages) + (duplex && Number(file.pages) % 2 ? 1 : 0), 0)
+  if (Number(mergedPageCount) !== expected) throw new Error('合并 PDF 的总页数与目录不一致')
+  return rows
+}

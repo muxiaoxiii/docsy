@@ -538,6 +538,15 @@ pub async fn process_long_slice(
     .await
 }
 
+#[tauri::command]
+pub async fn get_evidence_catalog_fingerprint(path: String) -> Result<String, String> {
+    run_blocking(move || {
+        let meta = std::fs::metadata(path)?;
+        let modified = meta.modified()?.duration_since(std::time::UNIX_EPOCH)?;
+        Ok(format!("{}:{}:{}", meta.len(), modified.as_secs(), modified.subsec_nanos()))
+    }).await
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EvidenceCatalogRow {
@@ -547,8 +556,19 @@ pub struct EvidenceCatalogRow {
 }
 
 #[tauri::command]
-pub async fn export_evidence_catalog(output_path: String, rows: Vec<EvidenceCatalogRow>) -> Result<(), String> {
-    run_blocking(move || write_evidence_catalog(&output_path, &rows)).await
+pub async fn export_evidence_catalog(output_path: String, rows: Vec<EvidenceCatalogRow>, source_paths: Vec<String>) -> Result<(), String> {
+    run_blocking(move || {
+        let output = std::path::Path::new(&output_path);
+        if output.exists() {
+            let canonical_output = std::fs::canonicalize(output)?;
+            for source in source_paths {
+                if std::fs::canonicalize(source).is_ok_and(|p| p == canonical_output) {
+                    anyhow::bail!("不能覆盖已导入的源文件，请选择其他保存位置");
+                }
+            }
+        }
+        write_evidence_catalog(&output_path, &rows)
+    }).await
 }
 
 fn write_evidence_catalog(output_path: &str, rows: &[EvidenceCatalogRow]) -> anyhow::Result<()> {

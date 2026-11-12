@@ -3,7 +3,7 @@
 > 一个专为法律人、行政党、文字工作者打造的本地文档处理效率工具 ✨  
 > 文档处理在本地电脑完成，**不上传文档文件**；所需组件安装完成后可离线使用。组件下载与版本检查需要联网。🔒
 
-[![Version](https://img.shields.io/badge/version-1.1.5-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
+[![Version](https://img.shields.io/badge/version-1.1.6-blue.svg)](https://github.com/muxiaoxiii/docsy/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/muxiaoxiii/docsy/releases)
 
@@ -17,7 +17,7 @@
 
 还有一只超可爱的桌宠 **Doclet** 🐾，在遇到大批文件处理或外部工具调用时，它会在界面一角安静地陪你等待～
 
-当前源码版本为 **v1.1.5**：新增 PDF 页面裁剪，修复长图打印输出清晰度与预览切分一致性；统一结果的“继续处理”入口、跨模块工作状态和任务列表清空操作，并优化短窗口布局与场景动效。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)。
+当前源码版本为 **v1.1.6**：证据合并支持导出可编辑的 Word 证据目录，按文件顺序和双面打印设置计算页码。安装包见 [GitHub Releases](https://github.com/muxiaoxiii/docsy/releases)。
 
 ![Docsy 主页界面](site/public/assets/screenshots/home.png)
 

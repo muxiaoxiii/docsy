@@ -80,6 +80,7 @@ pub fn build_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
     tauri::generate_handler![
         // pdf
         pdf::export_evidence_catalog,
+        pdf::get_evidence_catalog_fingerprint,
         pdf::check_qpdf,
         pdf::inspect_pdf,
         pdf::unlock_pdf,

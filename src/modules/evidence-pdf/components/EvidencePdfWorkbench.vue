@@ -448,7 +448,7 @@
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages"
           >刷新页数</el-button
         >
-        <el-button v-if="workflowMode === 'merge' && outputMode !== 'files_only'" :disabled="evidenceListBusy || !overlayFiles.length" @click="exportEvidenceCatalog">导出证据目录</el-button>
+        <el-button v-if="workflowMode === 'merge' && completedCatalog" :disabled="evidenceListBusy" @click="exportEvidenceCatalog">导出本次合并的证据目录</el-button>
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
           {{ processButtonText }}
         </el-button>
@@ -1282,7 +1282,7 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import { catalogRows } from '../composables/evidenceCatalog.js'
+import { catalogFromMerge, catalogRows } from '../composables/evidenceCatalog.js'
 import { listenDesktop as listen } from '../../../core/desktopRuntime.js'
 import { log as diagLog } from '../../../shared/diagnostics.js'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
@@ -1435,6 +1435,7 @@ const importingEvidence = ref(false)
 const checkingOverlayPages = ref(false)
 const overlaying = ref(false)
 const completedMergePath = ref(''), completedEvidencePaths = ref([])
+const completedCatalog = ref(null)
 const overlayProgressText = ref('')
 // 后端逐文件上报的真实进度文案（docsy-operation-progress 事件），替换旧的假进度
 const overlayProgressLabel = ref('')
@@ -3578,6 +3579,7 @@ async function applySplitHeaderFooterReplacement() {
 async function applyHeaderFooter() {
   if (!canApplyOverlay.value) return
   completedMergePath.value = ''
+  completedCatalog.value = null
   completedEvidencePaths.value = []
   overlaying.value = true
   try {
@@ -3654,6 +3656,23 @@ async function applyHeaderFooter() {
     const warningCount = (result.data.results || []).filter((item) => item.warnings?.length).length
     const merge = result.data.merge
     completedMergePath.value = merge?.status === 'done' ? merge.outputPath || '' : ''
+    if (workflowMode.value === 'merge' && completedMergePath.value) {
+      try {
+        const duplex = Boolean(payload.merge?.duplexSeparate)
+        const count = await tauriCallQuiet('get_pdf_page_count', { input: completedMergePath.value })
+        if (!count.ok) throw new Error('无法读取合并 PDF 的总页数')
+        const rows = catalogFromMerge(result.data.results || [], overlayRows.value, duplex, count.data)
+        const fingerprint = await tauriCallSafe('get_evidence_catalog_fingerprint', { path: completedMergePath.value })
+        if (!fingerprint.ok) throw new Error('无法确认合并 PDF 的状态')
+        completedCatalog.value = {
+          path: completedMergePath.value, rows, fingerprint: fingerprint.data,
+          sourcePaths: [completedMergePath.value, ...overlayRows.value.flatMap(file => [file.path, file.sourcePath, ...(file.sourcePaths || [])].filter(Boolean))],
+        }
+      } catch (error) {
+        completedCatalog.value = null
+        ElMessage.warning(`合并完成，但不能生成证据目录：${error.message || '无法核对页码'}`)
+      }
+    }
     completedEvidencePaths.value = merge?.status === 'done' && merge.outputMode === 'merge_only' ? [] : (result.data.results || []).map(item => item.outputPath).filter(Boolean)
 
     // 诊断日志：记录处理结果
@@ -4377,6 +4396,7 @@ function clearEvidenceFiles() {
   mergedImportPlan.value = null
   mergedImportPlans.value = []
   completedMergePath.value = ''
+  completedCatalog.value = null
   completedEvidencePaths.value = []
   selectedOverlayIndex.value = 0
   selectedMergedImportIndex.value = 0
@@ -4484,12 +4504,21 @@ function fileContentSummary(file, index) {
 
 async function exportEvidenceCatalog() {
   try {
-    const rows = catalogRows(overlayRows.value, duplexSeparate.value)
+    const catalog = completedCatalog.value
+    if (!catalog) throw new Error('请先成功合并证据')
+    const fingerprint = await tauriCallSafe('get_evidence_catalog_fingerprint', { path: catalog.path })
+    if (!fingerprint.ok || fingerprint.data !== catalog.fingerprint) {
+      throw new Error('合并 PDF 已发生变化，请重新合并后导出目录')
+    }
     const path = await save({ defaultPath: '证据目录.docx', filters: [{ name: 'Word 文档', extensions: ['docx'] }] })
     if (!path) return
-    const result = await tauriCallSafe('export_evidence_catalog', { outputPath: path, rows })
+    const confirmedFingerprint = await tauriCallSafe('get_evidence_catalog_fingerprint', { path: catalog.path })
+    if (completedCatalog.value !== catalog || !confirmedFingerprint.ok || confirmedFingerprint.data !== catalog.fingerprint) {
+      throw new Error('合并结果已发生变化，请重新合并后导出目录')
+    }
+    const result = await tauriCallSafe('export_evidence_catalog', { outputPath: path, rows: catalog.rows, sourcePaths: catalog.sourcePaths })
     if (!result.ok) throw new Error(userFacingError(result.error, '导出失败'))
-    ElMessage.success('证据目录已导出，请核对合并结果及页码')
+    ElMessage.success('证据目录已导出')
   } catch (error) {
     ElMessage.error(error.message || '证据目录导出失败')
   }

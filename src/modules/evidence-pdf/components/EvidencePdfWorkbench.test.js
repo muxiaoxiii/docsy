@@ -4,10 +4,10 @@ vi.mock('../../../core/composables/useWindowFileDrop.js', () => ({ useWindowFile
 vi.mock('../../../core/composables/useWorkspacePreferences.js', () => ({ useWorkspacePreferences: () => ({ start: vi.fn(), stop: vi.fn() }) }))
 vi.mock('../../../core/tauriBridge.js', () => ({ tauriCallSafe: vi.fn(), tauriCallQuiet: vi.fn(), openPath: vi.fn(), userFacingError: error => String(error), showLoading: () => 'test-import', hideLoading: vi.fn(), emitOperationUpdate: vi.fn() }))
 vi.mock('element-plus', () => ({ ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() }, ElNotification: vi.fn(), ElMessageBox: { confirm: vi.fn() } }))
-vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(), save: vi.fn() }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => vi.fn()) }))
-import { tauriCallQuiet } from '../../../core/tauriBridge.js'
-import { open } from '@tauri-apps/plugin-dialog'
+import { tauriCallQuiet, tauriCallSafe } from '../../../core/tauriBridge.js'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { ElMessageBox } from 'element-plus'
 import EvidencePdfWorkbench from './EvidencePdfWorkbench.vue'
 import { buildEvidencePdfRulePayload, createEvidenceFile } from '../../../shared/pdf-tools/composables/useEvidencePdfSession.js'
@@ -21,6 +21,19 @@ describe('evidence mixed import recovery', () => {
       : { ok: true, data: command === 'get_pdf_page_count' ? 3 : false })
   })
   afterEach(() => vi.unstubAllGlobals())
+  it('只允许导出未改变的已合并文件对应的目录', async () => {
+    const state = EvidencePdfWorkbench.setup({ workflow: 'merge' }, { expose: vi.fn() })
+    await state.exportEvidenceCatalog()
+    expect(save).not.toHaveBeenCalled()
+    state.completedCatalog.value = { path: '/merged.pdf', fingerprint: 'original', rows: [{ number: '1', name: '甲', pageRange: '1–3' }], sourcePaths: ['/merged.pdf'] }
+    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: 'changed' })
+    await state.exportEvidenceCatalog()
+    expect(save).not.toHaveBeenCalled()
+    tauriCallSafe.mockResolvedValueOnce({ ok: true, data: 'original' }).mockResolvedValueOnce({ ok: true, data: 'original' }).mockResolvedValueOnce({ ok: true })
+    save.mockResolvedValueOnce('/catalog.docx')
+    await state.exportEvidenceCatalog()
+    expect(tauriCallSafe).toHaveBeenLastCalledWith('export_evidence_catalog', { outputPath: '/catalog.docx', rows: state.completedCatalog.value.rows, sourcePaths: ['/merged.pdf'] })
+  })
   it.each(['merge', 'split'])('clears %s task files, review plans and previews together while retaining processing settings', workflow => {
     const state = EvidencePdfWorkbench.setup({ workflow }, { expose: vi.fn() })
     state.overlayFiles.value = [createEvidenceFile('/a.pdf')]
