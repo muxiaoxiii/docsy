@@ -537,3 +537,67 @@ pub async fn process_long_slice(
     })
     .await
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceCatalogRow {
+    number: String,
+    name: String,
+    page_range: String,
+}
+
+#[tauri::command]
+pub async fn export_evidence_catalog(output_path: String, rows: Vec<EvidenceCatalogRow>) -> Result<(), String> {
+    run_blocking(move || write_evidence_catalog(&output_path, &rows)).await
+}
+
+fn write_evidence_catalog(output_path: &str, rows: &[EvidenceCatalogRow]) -> anyhow::Result<()> {
+    use docx_rs::{AlignmentType, Docx, HeightRule, PageMargin, PageOrientationType, Paragraph, Run, RunFonts, Shading, Table, TableCell, TableRow, VAlignType, WidthType};
+    use std::path::Path;
+    if rows.is_empty() { anyhow::bail!("证据列表为空"); }
+    let path = Path::new(output_path);
+    if !path.extension().is_some_and(|s| s.eq_ignore_ascii_case("docx")) { anyhow::bail!("请选择 .docx 文件"); }
+    let widths = [702, 1833, 4033, 4880, 1415, 1040];
+    let text_run = |text: &str| Run::new().fonts(RunFonts::new().ascii("Times New Roman").hi_ansi("Times New Roman").east_asia("Songti SC")).add_text(text);
+    let make_row = |values: &[&str], header: bool| {
+        let cells = values.iter().enumerate().map(|(i, text)| {
+            let run = text_run(text).size(22);
+            let run = if header { run.bold() } else { run };
+            let para = Paragraph::new().align(if header || i == 0 || i == 5 { AlignmentType::Center } else { AlignmentType::Left }).add_run(run);
+            let cell = TableCell::new().width(widths[i], WidthType::Dxa).vertical_align(VAlignType::Center).add_paragraph(para);
+            if header { cell.shading(Shading::new().fill("D9E0E9")) } else { cell }
+        }).collect();
+        TableRow::new(cells).row_height(if header { 400.0 } else { 700.0 }).height_rule(HeightRule::AtLeast)
+    };
+    let mut table_rows = vec![make_row(&["编号", "证据名称", "证据内容", "证明目的", "证据来源", "页码"], true)];
+    for row in rows { table_rows.push(make_row(&[&row.number, &row.name, "", "", "", &row.page_range], false)); }
+    let doc = Docx::new()
+        .page_size(16838, 11906).page_orient(PageOrientationType::Landscape)
+        .page_margin(PageMargin { top: 1800, right: 1440, bottom: 1800, left: 1440, header: 0, footer: 0, gutter: 0 })
+        .add_paragraph(Paragraph::new().align(AlignmentType::Center).add_run(text_run("证  据  目  录").size(36).bold()))
+        .add_paragraph(Paragraph::new().add_run(text_run("提交人：").size(22)))
+        .add_table(Table::new(table_rows).set_grid(widths.to_vec()))
+        .add_paragraph(Paragraph::new().add_run(text_run("提交人：").size(22)))
+        .add_paragraph(Paragraph::new().add_run(text_run("代理人：").size(22)))
+        .add_paragraph(Paragraph::new().add_run(text_run("日期：").size(22)));
+    let mut output = std::fs::File::create(path)?;
+    doc.build().pack(&mut output)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod evidence_catalog_tests {
+    use super::*;
+    #[test]
+    fn writes_editable_catalog() {
+        let path = std::env::temp_dir().join("docsy-evidence-catalog-test.docx");
+        let rows = vec![EvidenceCatalogRow { number: "1".into(), name: "证据文件名称示例".into(), page_range: "1–3".into() }, EvidenceCatalogRow { number: "2".into(), name: "合同和附件".into(), page_range: "5–6".into() }];
+        write_evidence_catalog(path.to_str().unwrap(), &rows).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let mut zip = zip::ZipArchive::new(file).unwrap();
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("word/document.xml").unwrap(), &mut xml).unwrap();
+        for text in ["证据文件名称示例", "5–6", "证明目的"] { assert!(xml.contains(text)); }
+        if std::env::var_os("DOCSY_KEEP_CATALOG_FIXTURE").is_none() { std::fs::remove_file(path).unwrap(); }
+    }
+}

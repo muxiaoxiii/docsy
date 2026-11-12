@@ -448,6 +448,7 @@
         <el-button :disabled="!overlayFiles.length" @click="refreshOverlayPageCounts" :loading="checkingOverlayPages"
           >刷新页数</el-button
         >
+        <el-button v-if="workflowMode === 'merge' && outputMode !== 'files_only'" :disabled="evidenceListBusy || !overlayFiles.length" @click="exportEvidenceCatalog">导出证据目录</el-button>
         <el-button type="success" @click="applyHeaderFooter" :loading="overlaying" :disabled="!canApplyOverlay">
           {{ processButtonText }}
         </el-button>
@@ -1280,7 +1281,8 @@ import ClearFileListButton from '../../../shared/components/ClearFileListButton.
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { ArrowRight, Delete, Bottom, Rank, RefreshLeft, Top, InfoFilled } from '@element-plus/icons-vue'
 import { exists } from '@tauri-apps/plugin-fs'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
+import { catalogRows } from '../composables/evidenceCatalog.js'
 import { listenDesktop as listen } from '../../../core/desktopRuntime.js'
 import { log as diagLog } from '../../../shared/diagnostics.js'
 import PdfJsPreview from '../../../shared/pdf-tools/components/PdfJsPreview.vue'
@@ -4480,9 +4482,28 @@ function fileContentSummary(file, index) {
   }))
 }
 
+async function exportEvidenceCatalog() {
+  try {
+    const rows = catalogRows(overlayRows.value, duplexSeparate.value)
+    const path = await save({ defaultPath: '证据目录.docx', filters: [{ name: 'Word 文档', extensions: ['docx'] }] })
+    if (!path) return
+    const result = await tauriCallSafe('export_evidence_catalog', { outputPath: path, rows })
+    if (!result.ok) throw new Error(userFacingError(result.error, '导出失败'))
+    ElMessage.success('证据目录已导出，请核对合并结果及页码')
+  } catch (error) {
+    ElMessage.error(error.message || '证据目录导出失败')
+  }
+}
+
 function filePageRangeText(file) {
   if (!file.pages) return '—'
-  const physical = `${file.pageStart || 1}–${file.pageEnd || Number(file.pageStart || 1) + file.pages - 1}`
+  let physical
+  try {
+    const index = overlayRows.value.indexOf(file)
+    physical = workflowMode.value === 'merge' && outputMode.value !== 'files_only'
+      ? catalogRows(overlayRows.value, duplexSeparate.value)[index]?.pageRange
+      : `${file.pageStart || 1}–${file.pageEnd || Number(file.pageStart || 1) + file.pages - 1}`
+  } catch { physical = '页数待确认' }
   const ranges = [...new Set(contentRowsForFile(file).filter(row => row.source === 'new' && row.kind === 'pageNumber')
     .map(row => contentRowNumberRange(row, file)).filter(Boolean))]
   return ranges.length ? `${ranges.join('；')}（${physical}）` : physical
