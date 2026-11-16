@@ -29,6 +29,7 @@ import {
   totalPages,
   updatePageRanges,
 } from './useEvidencePdfSession.js'
+import { detectedElementFromCandidate } from './existingPdfElements.js'
 
 const baseRules = {
   normalizeA4: false,
@@ -1423,5 +1424,47 @@ describe('complete per-file header overrides', () => {
     const rules = { ...baseRules, _globalApply: true, _globalHeaderGroup: group, headerGroups: [group],
       headerMode: 'custom', headerInsertEnabled: true, footerInsertEnabled: false, pageNumberEnabled: false }
     expect(() => buildEvidencePdfRulePayload([file], rules)).toThrow('页眉不能为空')
+  })
+})
+
+describe('header-region plain page number deletion (evidence33)', () => {
+  const headerPageNumberCandidate = {
+    text: '2',
+    normalizedText: '{page}',
+    region: 'header',
+    pageRange: { start: 2, end: 5 },
+    count: 4,
+    repeating: true,
+    positionStable: true,
+    positionSpread: 0,
+    sequenceStable: true,
+    labels: ['page-number'],
+    confidence: 1,
+    bbox: {
+      x0: 294.7101,
+      y0: 14.45225,
+      x1: 300.57593,
+      y1: 26.22605,
+      page: 2,
+      width: 595.22,
+      height: 842,
+    },
+    source: 'content-text',
+    sequenceForm: 'arabic',
+    hasTotal: false,
+  }
+
+  it('routes a confirmed header page number into the plain header cleanup targets', () => {
+    const element = { ...detectedElementFromCandidate(headerPageNumberCandidate, 'pageNumber'), decision: 'delete' }
+    const file = { ...createEvidenceFile('/case/证据33.pdf'), pages: 75, existingElements: [element] }
+    const items = buildHeaderFooterItems([file], noInsertionRules, '/out')
+
+    expect(items[0].cleanup.plainHeaderTargets).toHaveLength(1)
+    expect(items[0].cleanup.plainHeaderTargets[0]).toMatchObject({
+      text: '2',
+      normalizedText: '{page}',
+      pageStart: 2,
+      pageEnd: 5,
+    })
   })
 })

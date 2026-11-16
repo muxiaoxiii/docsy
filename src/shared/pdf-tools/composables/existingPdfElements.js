@@ -72,6 +72,10 @@ export function detectedElementFromCandidate(candidate, kind, index = 0, pages =
   return {
     id: `${kind}|${candidateIdentity(candidate)}|${index}`,
     kind,
+    // 页眉/页脚区域必须随元素一起留存：页码候选在页眉与页脚都会出现，
+    // 仅靠 kind（header/footerText/pageNumber）无法区分，删除目标分流、
+    // 区域开关与后端按 occurrence.region 选择目标列表都会因此错配。
+    region: detectedElementRegion(candidate, kind),
     detectedText: text,
     editedText: text,
     normalizedText: String(candidate?.normalizedText || text),
@@ -180,4 +184,36 @@ export function compareDetectedTextRows(a, b) {
   const byFile = naturalCompare(a.fileName || '', b.fileName || '')
   if (byFile !== 0) return byFile
   return (a.element?.pageStart || 0) - (b.element?.pageStart || 0)
+}
+
+/**
+ * 检测候选所在的页眉/页脚区域。
+ *
+ * 页码在页眉和页脚都会出现，而 `kind` 只有 header/footerText/pageNumber 三档，
+ * 单靠 kind 无法定位区域——后端删除时按内容流里 Artifact 的实际 region
+ * （或普通文本 y 坐标所在 zone）挑选目标列表，前端若按 kind 分流就会把页眉
+ * 页码塞进页脚目标里，导致永远匹配不上。
+ */
+export function detectedElementRegion(candidate, kind = '') {
+  const explicit = String(candidate?.region || '')
+  if (explicit === 'header' || explicit === 'footer') return explicit
+  if (kind === 'header') return 'header'
+  if (kind === 'footerText') return 'footer'
+  return 'footer'
+}
+
+/**
+ * 已确认元素的实际区域。新检测结果带 region；历史存档没有该字段时退回 bbox
+ * 判定（与内容行的 region 展示保持同一套规则）。
+ */
+export function elementRegion(element) {
+  const explicit = String(element?.region || '')
+  if (explicit === 'header' || explicit === 'footer') return explicit
+  if (element?.kind === 'header') return 'header'
+  if (element?.kind === 'footerText') return 'footer'
+  const bbox = element?.bbox
+  if (bbox && Number(bbox.height) > 0) {
+    return Number(bbox.y0 || 0) < Number(bbox.height) / 2 ? 'header' : 'footer'
+  }
+  return 'footer'
 }

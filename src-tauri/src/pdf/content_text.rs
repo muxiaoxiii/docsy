@@ -886,6 +886,77 @@ mod tests {
         );
     }
 
+    /// 回归：同一个 `BT ... ET` 里先用绝对/相对定位画页眉页码，紧接着用相对
+    /// `Td` 画页脚。删除页眉页码时必须保留前面的定位算子——相对 `Td` 以
+    /// 「上一行起点」为基准，删掉 `Td` 或让状态错位都会把后面的页脚/正文
+    /// 整体搬走。证据33 就是这样：`294.71 818 Td` 后 `[(2)]TJ`，
+    /// 再 `-223.79 -790.08 Td` 画页脚。
+    #[test]
+    fn removes_header_page_number_without_shifting_following_relative_text() {
+        let operations = vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec![Object::Name(b"TT0".to_vec()), 10.55.into()]),
+            Operation::new("Td", vec![294.71.into(), 818.into()]),
+            Operation::new(
+                "TJ",
+                vec![Object::Array(vec![
+                    Object::String(b"2".to_vec(), lopdf::StringFormat::Literal),
+                    Object::Real(-2.199),
+                    Object::String(b" ".to_vec(), lopdf::StringFormat::Literal),
+                ])],
+            ),
+            Operation::new("Td", vec![(-223.79).into(), (-790.08).into()]),
+            Operation::new(
+                "TJ",
+                vec![Object::Array(vec![
+                    Object::String(b"\\".to_vec(), lopdf::StringFormat::Literal),
+                    Object::Real(4.995),
+                    Object::String(b"\\".to_vec(), lopdf::StringFormat::Literal),
+                    Object::Real(5.905),
+                    Object::String(b"4161-0388-8997".to_vec(), lopdf::StringFormat::Literal),
+                ])],
+            ),
+            Operation::new("ET", vec![]),
+        ];
+        let target = PlainTextTarget {
+            text: "2".to_string(),
+            normalized_text: "{page}".to_string(),
+            page_start: 2,
+            page_end: 75,
+            bbox: None,
+        };
+        let plan = PagePlainTextPlan {
+            header_targets: vec![&target],
+            footer_targets: vec![],
+            header_zone_pt: 51.0,
+            footer_zone_pt: 51.0,
+            page_box: PageBox {
+                width: 595.22,
+                min_y: 0.0,
+                max_y: 842.0,
+            },
+        };
+        let (filtered, result) = filter_page_operations(&operations, &plan, 2);
+        assert_eq!(result.removed_header, 1);
+        // 只删 TJ，两个 Td 都保留。
+        assert_eq!(filtered.len(), operations.len() - 1);
+        assert!(
+            filtered
+                .iter()
+                .any(|operation| operation.operator == "Td" && operation.operands.len() == 2)
+        );
+        let shown = filtered.iter().filter_map(shown_text).collect::<Vec<_>>();
+        assert!(!shown.iter().any(|value| value.trim() == "2"));
+        assert!(shown.iter().any(|value| value.contains("4161-0388-8997")));
+        // 相对位移后页脚仍应落在 (70.92, 27.92)：起点与相对量都不能被动过。
+        let mut state = TextState::default();
+        for operation in &filtered {
+            update_text_state_before_show(&mut state, operation);
+        }
+        assert!((state.x - 70.92).abs() < 0.01, "x={}", state.x);
+        assert!((state.y - 27.92).abs() < 0.01, "y={}", state.y);
+    }
+
     #[test]
     fn matches_page_number_placeholder_targets() {
         let target = PlainTextTarget {

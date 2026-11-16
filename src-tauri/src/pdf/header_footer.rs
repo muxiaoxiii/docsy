@@ -1499,3 +1499,60 @@ fn bookmark_serde_camelcase() {
     assert_eq!(job.bookmarks[0].page_index, 0);
     assert!(!job.bookmark_remove_existing);
 }
+
+/// 证据33 回归（需真实 PDF + qpdf + pdftotext）：
+/// 页眉里同时存在「普通文本页码」和「/Artifact 页码」时，前端把两者都归到
+/// header 目标后，整条链路必须都删掉，且页脚与正文不能位移。
+/// 运行：DOCSY_EVIDENCE33_INPUT=/path/证据33.pdf cargo test ... -- --ignored
+#[test]
+#[ignore = "requires DOCSY_EVIDENCE33_INPUT plus qpdf and pdftotext"]
+fn evidence33_deletes_both_header_page_numbers() {
+    let Some(input) = std::env::var_os("DOCSY_EVIDENCE33_INPUT").map(PathBuf::from) else {
+        return;
+    };
+    if crate::external::QpdfTool.binary_path().is_err() {
+        return;
+    }
+    let cleanup_json = std::env::var("DOCSY_EVIDENCE33_CLEANUP").unwrap_or_default();
+    let cleanup: CleanupConfig = if cleanup_json.is_empty() {
+        CleanupConfig::default()
+    } else {
+        serde_json::from_str(&cleanup_json).unwrap()
+    };
+    let output = temp_named_path("docsy_evidence33_regression", "pdf");
+    let job: HeaderFooterJob = serde_json::from_value(serde_json::json!({
+        "inputPath": input.to_string_lossy(),
+        "outputPath": output.to_string_lossy(),
+        "pageStart": 1,
+        "normalizeA4": false,
+        "cleanup": cleanup,
+    }))
+    .unwrap();
+    let result = process_job(&job, None).unwrap();
+    assert!(
+        result.semantic_removed > 0,
+        "页眉页码应被删除，实际删除数 {}",
+        result.semantic_removed
+    );
+    if let Ok(text_output) = crate::external::hidden_command("pdftotext")
+        .arg(&result.output_path)
+        .arg("-")
+        .output()
+    {
+        if text_output.status.success() {
+            let extracted = String::from_utf8_lossy(&text_output.stdout);
+            // 页眉页码（第 2 页顶部居中的 "2"）必须消失。
+            assert!(
+                !extracted.lines().take(1).any(|line| line.trim() == "2"),
+                "页眉页码仍然保留"
+            );
+            // 页脚与正文不能丢。
+            assert!(
+                extracted.contains("Hogan Lovells Cadwalader"),
+                "页脚文字被误删"
+            );
+            assert!(extracted.contains("NIO Netherlands B.V."), "正文文字被误删");
+        }
+    }
+    let _ = std::fs::remove_file(&output);
+}

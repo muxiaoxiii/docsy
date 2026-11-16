@@ -11,6 +11,7 @@ import {
   exceptionsForKind,
   normalizeInsertException,
 } from './pdfPageNumberRules.js'
+import { elementRegion } from './existingPdfElements.js'
 
 export { fileName, parentDir, stripPdf, toChineseNumber }
 
@@ -731,18 +732,16 @@ export function resolveHeaderFooterItems(files, rules, outputDir = '', indexOffs
       a4ContentMarginMm: rules.a4ContentMarginMm ?? 10,
       rasterDpi: rules.rasterDpi,
       cleanup: {
-        headerEnabled: Boolean(hasArtifactDecision(file, ['header'], 'delete') || existingHeaderReplacement),
-        footerEnabled: Boolean(
-          hasArtifactDecision(file, ['footerText', 'pageNumber'], 'delete') || existingFooterReplacement,
-        ),
-        forceDeleteHeader: Boolean(hasArtifactDecision(file, ['header'], 'delete')),
-        forceDeleteFooter: Boolean(hasArtifactDecision(file, ['footerText', 'pageNumber'], 'delete')),
+        headerEnabled: Boolean(hasArtifactDecision(file, 'header', 'delete') || existingHeaderReplacement),
+        footerEnabled: Boolean(hasArtifactDecision(file, 'footer', 'delete') || existingFooterReplacement),
+        forceDeleteHeader: Boolean(hasArtifactDecision(file, 'header', 'delete')),
+        forceDeleteFooter: Boolean(hasArtifactDecision(file, 'footer', 'delete')),
         headerHeightMm: rules.cleanupHeaderHeightMm,
         footerHeightMm: rules.cleanupFooterHeightMm,
         plainHeaderTargets: buildPlainTextTargets(file, 'header'),
         plainFooterTargets: buildPlainTextTargets(file, 'footer'),
-        artifactHeaderTargets: buildArtifactTargets(file, ['header']),
-        artifactFooterTargets: buildArtifactTargets(file, ['footerText', 'pageNumber']),
+        artifactHeaderTargets: buildArtifactTargets(file, 'header'),
+        artifactFooterTargets: buildArtifactTargets(file, 'footer'),
         headerReplacement: existingHeaderReplacement,
         footerReplacement: existingFooterReplacement,
       },
@@ -844,13 +843,24 @@ function footerTextOverlayConfigForGroup(text, group, rules = {}, pages = 1) {
   return config
 }
 
+/**
+ * 页眉/页脚区域里，`pageNumber` 这一 kind 两种区域都有；`header`/`footerText`
+ * 则与区域一一对应。分流时必须以区域为准，否则页眉页码会被算进页脚目标，
+ * 后端按 occurrence.region 选目标列表时就永远匹配不上。
+ */
+function elementInRegion(element, region) {
+  return elementRegion(element) === region
+}
+
 function buildPlainTextTargets(file, region) {
   if (Array.isArray(file.existingElements) && file.existingElements.length) {
-    const kinds = region === 'header' ? ['header'] : ['footerText', 'pageNumber']
+    // pageNumber 两种区域都有，必须靠 elementRegion 归位，不能只按 kind 分流。
+    const kinds = ['header', 'footerText', 'pageNumber']
     return file.existingElements
       .filter(
         (element) =>
           kinds.includes(element.kind) &&
+          elementInRegion(element, region) &&
           element.source !== 'artifact' &&
           ['delete', 'edit'].includes(element.decision),
       )
@@ -863,16 +873,35 @@ function buildPlainTextTargets(file, region) {
       }))
       .filter((target) => target.text)
   }
-  if (region === 'header') return [plainTextTarget(file, 'header')].filter(Boolean)
-  return [plainTextTarget(file, 'footer'), plainTextTarget(file, 'pageNumber')].filter(Boolean)
+  // 旧会话没有 existingElements：页码可能来自页眉。按 bbox 归位，否则页眉
+  // 页码会被当成页脚目标下发，后端永远匹配不上（识别得到但删不掉）。
+  const pageNumber = plainTextTarget(file, 'pageNumber')
+  const pageNumberInHeader = Boolean(pageNumber) && bboxInHeaderHalf(pageNumber.bbox)
+  if (region === 'header') {
+    return [plainTextTarget(file, 'header'), pageNumberInHeader ? pageNumber : null].filter(Boolean)
+  }
+  return [plainTextTarget(file, 'footer'), pageNumberInHeader ? null : pageNumber].filter(Boolean)
 }
 
-function buildArtifactTargets(file, kinds) {
+/** bbox 落在页面上半部即视为页眉（与内容行 region 展示同一套规则）。 */
+function bboxInHeaderHalf(bbox) {
+  return Boolean(bbox) && Number(bbox.height) > 0 && Number(bbox.y0 || 0) < Number(bbox.height) / 2
+}
+
+/**
+ * 标准页眉页脚（/Artifact）删除目标。后端按内容流中 Artifact 的 region
+ * 选择 header_targets / footer_targets，所以这里也必须按区域分流：
+ * 页眉里的页码 Artifact（kind=pageNumber）要进 header_targets，
+ * 否则 Rust 永远查不到它，页眉页码 Artifact 就删不掉。
+ */
+function buildArtifactTargets(file, region) {
   if (!Array.isArray(file.existingElements) || !file.existingElements.length) return []
   return file.existingElements
     .filter(
       (element) =>
-        kinds.includes(element.kind) && element.source === 'artifact' && ['delete', 'edit'].includes(element.decision),
+        elementInRegion(element, region) &&
+        element.source === 'artifact' &&
+        ['delete', 'edit'].includes(element.decision),
     )
     .map((element) => ({
       artifactId: element.artifactId || null,
@@ -1011,17 +1040,22 @@ function canEditArtifactInPlace(element) {
   return isAscii(before) && isAscii(after)
 }
 
-function hasArtifactDecision(file, kinds, decision) {
+/**
+ * 某个区域里是否有达到某决策的 /Artifact 元素。按区域而非 kind 判定：
+ * 页眉页码 Artifact 的 kind 是 pageNumber，若只认 kind=header 就会漏掉，
+ * 导致 header_enabled 关闭、后端 legacy 全删路径也不触发。
+ */
+function hasArtifactDecision(file, region, decision) {
   if (!Array.isArray(file.existingElements) || !file.existingElements.length) {
     if (decision !== 'delete') return false
-    if (kinds.includes('header')) return Boolean(file.existingHeaderArtifact && file.removeExistingHeader)
+    if (region === 'header') return Boolean(file.existingHeaderArtifact && file.removeExistingHeader)
     return Boolean(
       (file.existingFooterArtifact && file.removeExistingFooter) ||
       (file.existingPageNumberArtifact && file.removeExistingPageNumber),
     )
   }
   return (file.existingElements || []).some(
-    (element) => kinds.includes(element.kind) && element.source === 'artifact' && element.decision === decision,
+    (element) => elementInRegion(element, region) && element.source === 'artifact' && element.decision === decision,
   )
 }
 
