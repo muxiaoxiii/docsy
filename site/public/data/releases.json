@@ -1,8 +1,47 @@
 {
-  "generated_at": "2026-11-06T10:19:17Z",
+  "generated_at": "2026-11-16T07:08:23Z",
   "github_url": "https://github.com/muxiaoxiii/docsy/releases",
-  "latest": "1.1.5",
+  "latest": "1.1.6",
   "releases": [
+    {
+      "version": "1.1.6",
+      "tag": "v1.1.6",
+      "published_at": "2026-11-12T05:02:29Z",
+      "assets": [
+        {
+          "platform": "macos",
+          "name": "Docsy_1.1.6_aarch64.dmg",
+          "size": 59433100,
+          "sha256": "9df42b88d32727b7a9ea86aeb17ff136d0468bab18109285b99266c2a2499639",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.6/Docsy_1.1.6_aarch64.dmg",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.6/Docsy_1.1.6_aarch64.dmg"
+        },
+        {
+          "platform": "windows",
+          "name": "Docsy_1.1.6_x64-setup.exe",
+          "size": 53645511,
+          "sha256": "0a16d5343fa73c8f5ee07791f26a4020a5153ff4884a255adf0618cf3982ddc2",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.6/Docsy_1.1.6_x64-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.6/Docsy_1.1.6_x64-setup.exe"
+        },
+        {
+          "platform": "macos-intel",
+          "name": "Docsy_1.1.6_x64.dmg",
+          "size": 60565781,
+          "sha256": "3958dc2397cbaed3d581007c158412f99c05c2beea69565c916c4fa2f34528a3",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.6/Docsy_1.1.6_x64.dmg",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.6/Docsy_1.1.6_x64.dmg"
+        },
+        {
+          "platform": "windows-x86",
+          "name": "Docsy_1.1.6_x86-setup.exe",
+          "size": 52493944,
+          "sha256": "962951cd78a7ebeff0a20c428f2de3638e5092a054c4bffa7200e73c1e296281",
+          "url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.6/Docsy_1.1.6_x86-setup.exe",
+          "github_url": "https://github.com/muxiaoxiii/docsy/releases/download/v1.1.6/Docsy_1.1.6_x86-setup.exe"
+        }
+      ]
+    },
     {
       "version": "1.1.5",
       "tag": "v1.1.5",

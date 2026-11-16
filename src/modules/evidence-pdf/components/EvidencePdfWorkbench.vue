@@ -132,6 +132,7 @@
               </span>
             </el-button>
             <el-button
+              size="small"
               type="primary"
               class="stable-action-button"
               :disabled="deepDetecting"
